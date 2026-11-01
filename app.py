@@ -318,13 +318,39 @@ class Handler(BaseHTTPRequestHandler):
             raise model.ApiError("未登录或登录已过期", 401)
         return session, token
 
-    def _body(self):
+    def _drain_body(self):
+        """Read the request body once, before any handler can bail out.
+
+        With HTTP/1.1 keep-alive, returning before consuming Content-Length
+        leaves the body in the socket, and the *next* request line is parsed out
+        of it - which is how a failed login turned into
+        "Unsupported method ('{"username":...}POST')".  So the body is consumed
+        up front and the handlers only parse it.
+        """
         length = int(self.headers.get("Content-Length") or 0)
         if length <= 0:
-            return {}
+            self._raw_body = b""
+            return
         if length > MAX_BODY:
+            # Still consume it, so the connection stays in sync, but never hold
+            # an unbounded body in memory.
+            remaining = length
+            while remaining > 0:
+                chunk = self.rfile.read(min(65536, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+            self._raw_body = b""
             raise model.ApiError("请求体过大", 413)
-        raw = self.rfile.read(length)
+        self._raw_body = self.rfile.read(length)
+
+    def _body(self):
+        raw = getattr(self, "_raw_body", None)
+        if raw is None:
+            self._drain_body()
+            raw = self._raw_body
+        if not raw:
+            return {}
         try:
             data = json.loads(raw.decode("utf-8"))
         except Exception:
@@ -357,6 +383,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if parsed.path == "/favicon.ico":
                 return self._send(204, b"", "image/x-icon")
+
+            self._drain_body()
 
             kind, route = panel.classify(parsed.path, EVENT_TOKENS)
             if kind == "panel":

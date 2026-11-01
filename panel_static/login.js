@@ -9,7 +9,7 @@
     e.preventDefault();
     err.textContent = "";
     go.disabled = true;
-    PX.api("/api/login", {
+    PX.api("/login", {
       method: "POST",
       body: {
         username: document.getElementById("username").value.trim(),

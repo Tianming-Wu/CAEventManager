@@ -10,7 +10,7 @@
     e.preventDefault();
     err.textContent = "";
     go.disabled = true;
-    PX.api("/api/register", {
+    PX.api("/register", {
       method: "POST",
       body: {
         username: document.getElementById("username").value.trim(),

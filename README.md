@@ -4,15 +4,24 @@
 （Python 3 标准库 + 原生 JS）。
 
 ```
-<id>/          公示页（扫码打开，只读，无鉴权）
+/              主面板：登录（根路径直接进登录，页脚有「没有账号？去注册」）
+/register      主面板注册（提交后等 owner 审核）
+/login         主面板登录（与根路径同一页）
+/panel         主面板控制台：活动列表、账号审核与分级
+
+<id>/          某个活动的公示页（扫码打开，只读，无鉴权）
 <id>/checkin   签到页（必须扫大屏的时效二维码才能进；签完自动跳公示）
 <id>/screen    大屏页（教室投影：二维码 + 实时统计 + 中奖名单 + 抽奖动画）
-<id>/admin     后台操作台（管理员密码登录）
-<id>/login     登录表单
+<id>/admin     该活动的后台操作台
+<id>/login     该活动的登录表单
 ```
 
-**`<id>` 是 32 位随机 base64url 串**，存在 `config.json` 的 `path_secret` 里，生成一次固定。
-所有页面都在这段 id 之下，直接访问 `/` 或 `/admin` 一律 404 —— 没人能靠猜网址进来。
+`<id>` 是活动 token（32 位 base64url），同时也是该活动后台的访问凭据。主面板在服务根路径，
+活动页在 `/<id>/` 之下 —— **加活动不改变任何路径结构**。
+
+**路由与外部前缀无关**：服务先认活动 token（出现在路径任意位置都行），剩下的路径再按主面板
+路由匹配，所以本地怎么访问都通，平台前缀换成子域名也不用改代码。`config.json` 的
+`public_base_prefix` **只用来生成链接**（二维码、短链、Cookie 路径），不参与路由判定。
 
 发布后（服务名 `xlottery`）：
 
@@ -274,14 +283,23 @@ sqlite3 data/lottery.sqlite3 ".backup data/backup-$(date +%Y%m%d-%H%M).sqlite3"
 ## 12. 开发 / 自测
 
 ```powershell
-.\tools\run_ui_test.ps1        # 清库 → 起服务 → 灌 60 人 → Playwright 全流程（55 项）
+.\tools\run_ui_test.ps1        # 清库 → 起服务 → 灌 60 人 → Playwright 全流程（94 项）
 python tools\simulate.py       # 只跑数学模型
-python tools\smoke_test.py http://127.0.0.1:8931 <密码>   # 纯接口测试（70 项）
+python tools\smoke_test.py http://127.0.0.1:8931 <密码>   # 活动接口测试（100 项）
+python tools\panel_test.py http://127.0.0.1:8931 <owner密码> # 主面板接口测试（31 项）
+python tools\panel_ui_test.py http://127.0.0.1:8931 <owner密码> --register
+                                # 主面板页面测试：登录/重试/注册/退出（浏览器，19 项）
+python tools\prod_check.py https://lab.nwuca.tech/u/laffey/xlottery <id>
+                                # 线上只读巡检：路由 + 登录页 + keep-alive（21 项）
 .\deploy.ps1                   # 归一化行尾 → 打包 → 上传 → 解包 → 校验文件+import → 重启
 ```
 
 `deploy.ps1` 会在重启前**逐个校验文件确实落地并且能 import**，缺文件会直接失败而不是
 重启进一个坏服务。工具会自动从 `config.json` 读 `<id>` 拼 URL。
+
+**接口测试和页面测试必须都跑。** `panel_test.py` 直接打 `/api/panel/*`，所以两个登录/注册
+页面曾经一直把请求发到 `/api/panel/api/login`（页面说“登录”，服务答“未登录”）它都是绿的；
+`panel_ui_test.py` 驱动真实页面，才抓得住这类错误。
 
 ## 13. 文件结构
 
@@ -295,7 +313,9 @@ localconfig.py    config.json：path_secret / host / port / 公开地址前缀
 pinyintable.py    汉字→拼音表
 tpl/              board admin screen login checkin
 static/           app.css + 各页 JS + qrcode.js + favicon.*
-tools/            smoke_test.py ui_test.py simulate.py seed_demo.py verify_deploy.sh normalize_eol.py
+tools/            smoke_test.py ui_test.py panel_test.py panel_ui_test.py prod_check.py
+                  simulate.py seed_demo.py import_roster.py exporter 相关、verify_deploy.sh
+                  normalize_eol.py archive_instance.py
 data/             sqlite 库、密码文件、日志
 config.json       访问 id 与端口
 ```

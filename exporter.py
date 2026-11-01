@@ -10,7 +10,6 @@ it answers rather than by table:
     04-抽奖记录.csv    按抽取顺序，含作废标记
     05-中奖汇总.csv    按人聚合：一个人中了哪些奖
     06-操作日志.csv    谁在什么时候做了什么
-    07-现场签到表.csv  可打印的空表，留给纸质签名做对照
 
 CSV carries a UTF-8 BOM so Excel opens Chinese without asking.
 """
@@ -176,15 +175,6 @@ def audit_log(conn, cfg, limit=5000):
     return _csv(rows)
 
 
-def signin_sheet(conn, cfg, students=None):
-    students = students if students is not None else model.snapshot(conn, cfg)
-    rows = [["序号", "姓名", "学号", "院系", "身份", "签名"]]
-    for i, s in enumerate(students, 1):
-        rows.append([i, s["name"], s["sid"], s.get("grp") or "",
-                     _role(cfg).get(s["role"], s["role"]), ""])
-    return _csv(rows)
-
-
 def build(conn, cfg=None, students=None):
     """Return (filename, zip bytes)."""
     cfg = cfg or db.all_config(conn)
@@ -196,7 +186,6 @@ def build(conn, cfg=None, students=None):
         ("04-抽奖记录.csv", draws(conn, cfg)),
         ("05-中奖汇总.csv", winners(conn, cfg)),
         ("06-操作日志.csv", audit_log(conn, cfg)),
-        ("07-现场签到表.csv", signin_sheet(conn, cfg, students)),
     ]
     stamp = time.strftime("%Y%m%d-%H%M%S")
     buf = io.BytesIO()

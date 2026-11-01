@@ -273,6 +273,28 @@ def main():
         page.wait_for_timeout(500)
         rows = page.locator("#fullTable tbody tr").count()
         check("full roster listed", rows == len(students), "%s vs %s" % (rows, len(students)))
+        check("roster no longer shows pinyin",
+              " / " not in page.locator("#fullTable tbody tr").first.inner_text())
+
+        # filter + sort are the two things the operator missed at the event
+        page.fill("#rosterFilter", students[0]["sid"][:6])
+        page.wait_for_timeout(400)
+        check("roster filter narrows the list",
+              page.locator("#fullTable tbody tr").count() < rows,
+              page.locator("#fullTable tbody tr").count())
+        page.fill("#rosterFilter", "")
+        page.wait_for_timeout(300)
+        check("clearing the filter restores the list",
+              page.locator("#fullTable tbody tr").count() == rows)
+        page.click('#fullTable th[data-sort="name"]')
+        page.wait_for_timeout(300)
+        first_asc = page.locator("#fullTable tbody tr td:nth-child(2)").first.inner_text()
+        page.click('#fullTable th[data-sort="name"]')
+        page.wait_for_timeout(300)
+        first_desc = page.locator("#fullTable tbody tr td:nth-child(2)").first.inner_text()
+        check("clicking a header sorts, clicking again reverses",
+              first_asc != first_desc, (first_asc, first_desc))
+        page.click('#fullTable th[data-sort="sid"]')
         page.fill("#addSid", "2099999")
         page.fill("#addName", "测试新增")
         page.click("#addBtn")

@@ -16,9 +16,12 @@ param(
 $ErrorActionPreference = "Stop"
 $root = $PSScriptRoot
 
+# Collected, not hand-maintained: a forgotten module used to reach the server
+# and only the import preflight caught it.
 $files = @(
-    "app.py", "db.py", "model.py", "auth.py", "localconfig.py", "checkin.py",
-    "pinyintable.py", "run.sh", "service.sh", "README.md"
+    (Get-ChildItem -File -Filter *.py | Select-Object -ExpandProperty Name)
+    (Get-ChildItem -File -Filter *.md | Select-Object -ExpandProperty Name)
+    "run.sh", "service.sh"
 )
 $dirs = @("tpl", "static", "tools")
 

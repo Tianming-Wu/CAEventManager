@@ -126,15 +126,12 @@
 
       <div class="panel">
         <h2>新增单个学生</h2>
-        <p class="panel-hint">拼音和首字母留空会自动生成。</p>
+        
         <div class="row">
           <div class="field" style="flex:1;min-width:110px"><label>学号</label><input id="addSid" type="text"></div>
           <div class="field" style="flex:1;min-width:110px"><label>姓名</label><input id="addName" type="text"></div>
         </div>
-        <div class="row">
-          <div class="field" style="flex:1;min-width:110px"><label>班级(可选)</label><input id="addGrp" type="text"></div>
-          <div class="field" style="flex:1;min-width:110px"><label>拼音(可选)</label><input id="addPy" type="text"></div>
-        </div>
+        <div class="field"><label>班级(可选)</label><input id="addGrp" type="text"></div>
         <button class="btn primary" id="addBtn">添加</button>
       </div>
     </div>
@@ -142,15 +139,22 @@
     <div class="panel">
       <div class="row" style="margin-bottom:10px">
         <h2 style="margin:0">全部名单</h2><span class="chip" id="rosterCount"></span>
+        <input id="rosterFilter" type="search" placeholder="姓名 / 拼音 / 学号" autocomplete="off"
+               style="width:min(260px,42vw);padding:5px 9px;font-size:.85rem">
         <div class="spacer"></div>
-        <a class="btn sm" id="exportZipLink" href="#" target="_blank" rel="noopener">导出全部数据</a>
-        <a class="btn sm ghost" id="exportLink" href="#" target="_blank" rel="noopener">仅名单 CSV</a>
       </div>
       <div class="tblwrap" style="max-height:60vh">
         <table class="tbl" id="fullTable">
           <thead><tr>
-            <th>学号</th><th>姓名</th><th>拼音</th><th>班级</th>
-            <th>签到</th><th>任务一</th><th>任务二</th><th>奖票</th><th class="right">操作</th>
+            <th class="sortable" data-sort="sid">学号</th>
+            <th class="sortable" data-sort="name">姓名</th>
+            <th class="sortable" data-sort="grp">班级</th>
+            <th class="sortable" data-sort="role">身份</th>
+            <th class="sortable" data-sort="checkin">签到</th>
+            <th class="sortable" data-sort="task1">任务一</th>
+            <th class="sortable" data-sort="task2">任务二</th>
+            <th class="sortable right" data-sort="tickets">奖票</th>
+            <th class="right">操作</th>
           </tr></thead>
           <tbody></tbody>
         </table>
@@ -326,6 +330,21 @@
         <p class="note" style="word-break:break-all" id="secretUrl"></p>
         <button class="btn danger sm" id="rotateSecretBtn">重新生成访问 id（需解锁）</button>
       </div>
+    </div>
+
+    <div class="panel">
+      <h2>数据</h2>
+      <p class="panel-hint">
+        活动结束后下载归档。打包内容：汇总、名单、奖票明细、抽奖记录、中奖汇总、操作日志。
+      </p>
+      <div class="row">
+        <a class="btn danger" id="exportZipLink" href="#" target="_blank" rel="noopener"
+           style="padding:10px 22px;font-size:.95rem">下载数据</a>
+        <a class="btn ghost sm" id="exportLink" href="#" target="_blank" rel="noopener">仅名单 CSV</a>
+      </div>
+      <p class="note" style="margin-top:10px">
+        归档（只读冻结、移交总管理面板）等总管理面板上线后再接。
+      </p>
     </div>
 
     <div class="panel">

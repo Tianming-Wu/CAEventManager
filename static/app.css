@@ -363,6 +363,11 @@ table.tbl th {
 table.tbl tbody tr:hover { background: var(--surface-2); }
 table.tbl td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 table.tbl td.right, table.tbl th.right { text-align: right; }
+table.tbl th.sortable { cursor: pointer; user-select: none; }
+table.tbl th.sortable:hover { color: var(--text); }
+table.tbl th.sorted { color: var(--accent-strong); }
+table.tbl th.sorted::after { content: " \25B2"; font-size: .8em; }
+table.tbl th.sorted[data-dir="desc"]::after { content: " \25BC"; }
 
 /* ---------- tickets ---------- */
 .tkt {
@@ -819,6 +824,13 @@ textarea { resize: vertical; min-height: 120px; font-family: var(--mono); font-s
 .prize-table td.right, .prize-table th.right { text-align: right; }
 .prize-table tr.done-row td { color: var(--dim); }
 .prize-table .left-n { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+/* the draw button is clicked under pressure; give it a real target */
+.prize-table .draw-btn {
+  min-width: 5.5em;
+  padding: 9px 20px;
+  font-size: .95rem;
+  font-weight: 650;
+}
 .prize-table th:nth-child(n+2), .prize-table td:nth-child(n+2) { width: 5.5em; }
 .prize-table th:nth-child(4), .prize-table td:nth-child(4) { width: 6.5em; }
 .prize-table th:last-child, .prize-table td:last-child { width: 4em; }

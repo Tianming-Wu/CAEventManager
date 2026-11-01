@@ -18,6 +18,9 @@
     q: "",
     hits: [],
     sel: 0,
+    rosterQ: "",
+    sortKey: "sid",
+    sortDir: 1,
     filter: "all",
     plan: null,
     tab: "ops"
@@ -176,7 +179,6 @@
       return '<div class="hit' + (i === S.sel ? " sel" : "") + '" data-id="' + s.id + '" data-i="' + i + '">' +
         '<div class="who"><span class="nm">' + LT.esc(s.name) + "</span>" + roleTag(s) +
         '<span class="sid">' + LT.esc(s.sid) + "</span>" +
-        '<span class="py">' + LT.esc((s.py || "") + " / " + (s.pyi || "")) + "</span>" +
         '<div class="steps">' + stepBadges(s) + "</div></div>" +
         '<div class="side">' + ticketChips(s) + nextLabel(s) + "</div></div>";
     }).join("");
@@ -232,22 +234,61 @@
     $("#rosterNote").textContent = "显示 " + rows.length + " / " + S.students.length + " 人";
   }
 
+  function rosterRows() {
+    var q = S.rosterQ.trim().toLowerCase();
+    var list = q ? LT.search(S.students, q, 999) : S.students.slice();
+    var key = S.sortKey;
+    var dir = S.sortDir;
+    var rank = { participant: 0, staff: 1, volunteer: 2 };
+    list.sort(function (a, b) {
+      var av, bv;
+      if (key === "checkin" || key === "task1" || key === "task2") {
+        av = a.marks[key] || 0;
+        bv = b.marks[key] || 0;
+      } else if (key === "tickets") {
+        av = (a.tickets || []).length;
+        bv = (b.tickets || []).length;
+      } else if (key === "name") {
+        av = a.py || a.name;
+        bv = b.py || b.name;
+      } else if (key === "role") {
+        av = rank[a.role || "participant"] || 0;
+        bv = rank[b.role || "participant"] || 0;
+      } else {
+        av = a[key] || "";
+        bv = b[key] || "";
+      }
+      if (av < bv) return -dir;
+      if (av > bv) return dir;
+      return (a.sid || "").localeCompare(b.sid || "");
+    });
+    return list;
+  }
+
   function renderFullTable() {
     var tbody = $("#fullTable tbody");
-    tbody.innerHTML = S.students.map(function (s) {
+    var rows = rosterRows();
+    $$("#fullTable th[data-sort]").forEach(function (th) {
+      th.classList.toggle("sorted", th.getAttribute("data-sort") === S.sortKey);
+      th.setAttribute("data-dir", th.getAttribute("data-sort") === S.sortKey
+        ? (S.sortDir > 0 ? "asc" : "desc") : "");
+    });
+    tbody.innerHTML = rows.map(function (s) {
       return "<tr>" +
         '<td class="num">' + LT.esc(s.sid) + "</td>" +
-        '<td><b>' + LT.esc(s.name) + "</b>" + roleTag(s) + "</td>" +
-        '<td style="color:var(--dim)">' + LT.esc((s.py || "") + " / " + (s.pyi || "")) + "</td>" +
+        '<td><b>' + LT.esc(s.name) + "</b></td>" +
         '<td style="color:var(--muted)">' + LT.esc(s.grp || "") + "</td>" +
+        '<td style="color:var(--muted)">' + (ROLE_TAG[s.role] || "参加人员") + "</td>" +
         timeCell(s.marks.checkin) + timeCell(s.marks.task1) + timeCell(s.marks.task2) +
         "<td>" + (ticketChips(s) || "—") + "</td>" +
         '<td class="right">' +
         '<button class="btn sm" data-edit="' + s.id + '">编辑</button> ' +
         '<button class="btn sm ' + (s.next ? "green" : "") + '" data-row="' + s.id + '">选中</button>' +
         "</td></tr>";
-    }).join("") || '<tr><td colspan="9" class="empty">还没有学生</td></tr>';
-    $("#rosterCount").textContent = S.students.length + " 人";
+    }).join("") || '<tr><td colspan="9" class="empty">没有匹配的学生</td></tr>';
+    $("#rosterCount").textContent = rows.length === S.students.length
+      ? S.students.length + " 人"
+      : rows.length + " / " + S.students.length + " 人";
   }
 
   function renderLog() {
@@ -288,7 +329,7 @@
         '<td style="color:var(--muted)">' + label + "</td>" +
         '<td class="right left-n">' + p.drawn + "</td>" +
         '<td class="right left-n">' + p.remaining + " / " + p.count + "</td>" +
-        '<td class="right"><button class="btn sm ' + (done ? "" : "primary") +
+        '<td class="right"><button class="btn draw-btn ' + (done ? "" : "primary") +
         '" data-draw="' + i + '"' + (done || blocked ? " disabled" : "") +
         ' title="' + why + '">抽</button></td></tr>';
     }).join("");
@@ -710,6 +751,18 @@
       }
     });
 
+    // right-click clears the box: faster than selecting the text with the mouse
+    q.addEventListener("contextmenu", function (e) {
+      if (!q.value) return;
+      e.preventDefault();
+      S.q = "";
+      S.hits = [];
+      S.sel = 0;
+      q.value = "";
+      renderHits();
+      renderTable();
+    });
+
     guardAutofill(q, function () {
       S.q = "";
       S.hits = [];
@@ -802,6 +855,19 @@
     });
 
     $("#refreshBtn").addEventListener("click", function () { load().then(function () { ok("已刷新"); }); });
+
+    $("#rosterFilter").addEventListener("input", function (e) {
+      S.rosterQ = e.target.value;
+      renderFullTable();
+    });
+    $("#fullTable").addEventListener("click", function (e) {
+      var th = e.target.closest("th[data-sort]");
+      if (!th) return;
+      var key = th.getAttribute("data-sort");
+      if (S.sortKey === key) S.sortDir = -S.sortDir;
+      else { S.sortKey = key; S.sortDir = 1; }
+      renderFullTable();
+    });
     $("#logRefreshBtn").addEventListener("click", function () { load().then(function () { ok("已刷新"); }); });
 
     document.addEventListener("keydown", function (e) {
@@ -846,7 +912,7 @@
       '<div class="field"><label>姓名</label><input id="edName" type="text" value="' + LT.esc(s.name) + '"></div>' +
       '<div class="field"><label>学号</label><input id="edSid" type="text" value="' + LT.esc(s.sid) + '" disabled></div>' +
       '<div class="field"><label>班级</label><input id="edGrp" type="text" value="' + LT.esc(s.grp || "") + '"></div>' +
-      '<div class="field"><label>拼音(留空自动)</label><input id="edPy" type="text" value="' + LT.esc(s.py || "") + '"></div>' +
+
       '<div class="field"><label>备注</label><input id="edNote" type="text" value="' + LT.esc(s.note || "") + '"></div>' +
       '<div class="field"><label>身份</label><select id="edRole">' +
       ['participant', 'staff', 'volunteer'].map(function (r) {
@@ -866,7 +932,6 @@
           id: id,
           name: $("#edName", m).value.trim(),
           grp: $("#edGrp", m).value.trim(),
-          py: $("#edPy", m).value.trim() || null,
           note: $("#edNote", m).value.trim(),
           role: $("#edRole", m).value
         }
@@ -907,9 +972,9 @@
     if (!sid || !name) { bad("学号和姓名都要填"); return; }
     LT.api("/api/admin/student", {
       method: "POST",
-      body: { sid: sid, name: name, grp: $("#addGrp").value.trim(), py: $("#addPy").value.trim() || null }
+      body: { sid: sid, name: name, grp: $("#addGrp").value.trim() }
     }).then(function () {
-      $("#addSid").value = ""; $("#addName").value = ""; $("#addPy").value = "";
+      $("#addSid").value = ""; $("#addName").value = "";
       return load();
     }).then(function () { ok("已添加 <b>" + LT.esc(name) + "</b>"); }).catch(bad);
   }

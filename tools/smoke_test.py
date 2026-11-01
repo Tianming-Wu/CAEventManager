@@ -292,8 +292,8 @@ def main():
           raw[:8] if isinstance(raw, bytes) else raw)
     book = zipfile.ZipFile(io.BytesIO(raw))
     names = book.namelist()
-    check("zip carries every sheet", len(names) == 7, names)
-    for want in ("汇总", "名单", "奖票明细", "抽奖记录", "中奖汇总", "操作日志", "现场签到表"):
+    check("zip carries every sheet", len(names) == 6, names)
+    for want in ("汇总", "名单", "奖票明细", "抽奖记录", "中奖汇总", "操作日志"):
         check("sheet present: " + want, any(want in n for n in names), names)
 
     text = book.read("05-中奖汇总.csv").decode("utf-8-sig")

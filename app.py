@@ -20,10 +20,11 @@ import argparse
 import csv
 import io
 import json
+import mimetypes
 import os
 import platform
-import mimetypes
 import secrets
+import socket
 import sys
 import time
 import traceback
@@ -278,7 +279,7 @@ def student_admin(stu):
 _HOST_CACHE = {"ts": 0.0, "value": None}
 
 
-def host_stats(sleep=0.12):
+def host_stats(root="/proc", sleep=0.12):
     """CPU and memory of this machine, for the owner's title bar.
 
     Linux only: it reads /proc/stat and /proc/meminfo.  Anywhere else it returns
@@ -287,10 +288,10 @@ def host_stats(sleep=0.12):
     own thread, and the panel asks for this once every five seconds.
     """
     try:
-        with open("/proc/stat", "r") as fh:
+        with open(os.path.join(root, "stat"), "r") as fh:
             first = fh.readline().split()
         time.sleep(sleep)
-        with open("/proc/stat", "r") as fh:
+        with open(os.path.join(root, "stat"), "r") as fh:
             second = fh.readline().split()
     except OSError:
         return None
@@ -312,7 +313,7 @@ def host_stats(sleep=0.12):
     mem_total = mem_avail = None
     try:
         info = {}
-        with open("/proc/meminfo", "r") as fh:
+        with open(os.path.join(root, "meminfo"), "r") as fh:
             for line in fh:
                 key, _, rest = line.partition(":")
                 field = rest.split()

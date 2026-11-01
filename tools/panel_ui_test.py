@@ -72,7 +72,11 @@ def ui_login(page, user, password):
     page.click("#go")
     page.wait_for_url("**/panel", timeout=20000)
     page.wait_for_selector(".shell", timeout=20000)
-    page.wait_for_timeout(350)
+    # .shell is static markup; wait for the account to land, not for a stopwatch
+    page.wait_for_function(
+        "() => document.getElementById('acctName').textContent.trim().length > 0",
+        timeout=25000)
+    page.wait_for_timeout(250)
 
 
 def visible_nav(page):

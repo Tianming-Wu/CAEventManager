@@ -306,6 +306,7 @@ sqlite3 data/lottery.sqlite3 ".backup data/backup-$(date +%Y%m%d-%H%M).sqlite3"
 
 ```powershell
 .\tools\run_ui_test.ps1        # 清库 → 起服务 → 灌 60 人 → Playwright 全流程（94 项）
+python tools\unit_test.py      # 不依赖服务的单元测试（host_stats 的 /proc 解析等，13 项）
 python tools\simulate.py       # 只跑数学模型
 python tools\smoke_test.py http://127.0.0.1:8931 <密码>   # 活动接口测试（100 项）
 python tools\panel_test.py http://127.0.0.1:8931 <owner密码> # 主面板接口测试（31 项）
@@ -321,6 +322,11 @@ python tools\prod_check.py https://lab.nwuca.tech/u/laffey/xlottery <id>
 
 `deploy.ps1` 会在重启前**逐个校验文件确实落地并且能 import**，缺文件会直接失败而不是
 重启进一个坏服务。工具会自动从 `config.json` 读 `<id>` 拼 URL。
+
+`unit_test.py` 是补一个真实的坑：`host_stats()` 里写了 `socket.gethostname()` 却没 import
+`socket`，而这行在读 `/proc/stat` 之后才执行 —— Windows 没有 `/proc`，函数提前 return，
+本地全绿、线上 500。所以 `/proc` 的根路径做成参数，测试喂一个假的 `/proc` 进去，
+Windows 上也能真正跑到那段代码。
 
 **接口测试和页面测试必须都跑。** `panel_test.py` 直接打 `/api/panel/*`，所以两个登录/注册
 页面曾经一直把请求发到 `/api/panel/api/login`（页面说“登录”，服务答“未登录”）它都是绿的；

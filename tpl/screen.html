@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{TITLE}} · 大屏</title>
+{{FAVICON}}
+<link rel="stylesheet" href="static/app.css">
+</head>
+<body>
+<div class="screen">
+  <div class="screen-top">
+    <div class="screen-title">
+      <h1 id="title">{{TITLE}}</h1>
+      <div class="sub" id="subtitle">扫码查看实时奖票公示</div>
+    </div>
+    <div class="qr-card" id="qr">
+      <div style="width:clamp(120px,15vw,260px);height:200px"></div>
+      <div class="cap">扫码看公示</div>
+    </div>
+  </div>
+
+  <div class="screen-stats" id="stats"></div>
+  <div class="winners-strip" id="winnersStrip"></div>
+  <div class="wall" id="wall"></div>
+</div>
+
+<div class="draw-overlay" id="overlay">
+  <div class="draw-prize" id="dPrize"></div>
+  <div class="draw-code rolling" id="dCode">000</div>
+  <div class="draw-winner" id="dWinner"></div>
+  <div class="draw-hint" id="dHint">抽奖中…</div>
+</div>
+
+<script src="static/qrcode.js"></script>
+<script src="static/common.js"></script>
+<script src="static/screen.js"></script>
+</body>
+</html>

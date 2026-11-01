@@ -1,0 +1,93 @@
+# -*- coding: utf-8 -*-
+"""Deployment-level config (``config.json``) and the secret URL prefix.
+
+The service is published as
+
+    https://lab.nwuca.tech/u/laffey/xlottery/<secret>/...
+
+``<secret>`` is a random 32-character base64url id generated once on first run
+and then kept stable in ``config.json``.  The platform strips
+``/u/laffey/xlottery`` before forwarding, so the server receives
+``/<secret>/...`` and refuses to answer anything that does not carry it - a
+plain ``/admin`` or ``/`` is a 404, so nobody can find the app by guessing.
+
+Everything event-related (title, pool, beta, ...) lives in SQLite instead; this
+file is only for things that must be known before the database is opened.
+"""
+
+import json
+import os
+import secrets
+import tempfile
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+CONFIG_PATH = os.environ.get("LOTTERY_CONFIG") or os.path.join(BASE_DIR, "config.json")
+
+DEFAULTS = {
+    "path_secret": "",
+    "host": "0.0.0.0",
+    "port": 8931,
+    # Everything before the secret segment of the published URL.
+    "public_base_prefix": "https://lab.nwuca.tech/u/laffey/xlottery",
+}
+
+SECRET_LEN = 32
+
+
+def new_secret():
+    """32 URL-safe base64 characters."""
+    return secrets.token_urlsafe(24)[:SECRET_LEN]
+
+
+def load():
+    cfg = dict(DEFAULTS)
+    changed = False
+    if os.path.exists(CONFIG_PATH):
+        try:
+            with open(CONFIG_PATH, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+            if isinstance(data, dict):
+                cfg.update({k: v for k, v in data.items() if v is not None})
+        except (OSError, ValueError):
+            pass
+
+    secret = str(cfg.get("path_secret") or "").strip()
+    if not secret or not all(c.isalnum() or c in "-_" for c in secret):
+        cfg["path_secret"] = new_secret()
+        changed = True
+    else:
+        cfg["path_secret"] = secret
+    if changed:
+        save(cfg)
+    return cfg
+
+
+def save(cfg):
+    payload = {
+        "path_secret": cfg.get("path_secret") or "",
+        "host": cfg.get("host") or DEFAULTS["host"],
+        "port": int(cfg.get("port") or DEFAULTS["port"]),
+        "public_base_prefix": (cfg.get("public_base_prefix") or DEFAULTS["public_base_prefix"]).rstrip("/"),
+    }
+    directory = os.path.dirname(CONFIG_PATH) or "."
+    os.makedirs(directory, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=directory, prefix=".config-", suffix=".json")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, ensure_ascii=False, indent=2)
+            fh.write("\n")
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, CONFIG_PATH)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    return payload
+
+
+def public_url(cfg):
+    """Full public base URL including the secret segment (no trailing slash)."""
+    prefix = (cfg.get("public_base_prefix") or DEFAULTS["public_base_prefix"]).rstrip("/")
+    return prefix + "/" + cfg["path_secret"]

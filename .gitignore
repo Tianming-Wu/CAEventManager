@@ -1,0 +1,15 @@
+# 运行时数据与部署状态
+data/
+config.json
+
+# 临时产物
+tmp/
+*.log
+*.sqlite3
+*.sqlite3-*
+*.tgz
+*.zip
+
+# Python
+__pycache__/
+*.py[cod]

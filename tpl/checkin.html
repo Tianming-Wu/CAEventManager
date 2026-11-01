@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>签到 · {{TITLE}}</title>
+{{FAVICON}}
+<link rel="stylesheet" href="static/app.css">
+</head>
+<body>
+<div class="ci-wrap">
+  <div class="ci-head">
+    <h1 id="ciTitle">{{TITLE}}</h1>
+    <div class="ci-sub" id="ciSub"></div>
+  </div>
+
+  <div id="ciBody" class="ci-body-slot">
+    <div class="ci-loading">正在确认签到资格…</div>
+  </div>
+
+  <p class="ci-foot">无法正确签到？请找工作人员</p>
+  <div class="site-foot" style="border:0;margin-top:4px">Powered by <span class="heart">❤</span> and lab.nwuca.tech</div>
+</div>
+<script src="static/common.js"></script>
+<script src="static/checkin.js"></script>
+</body>
+</html>

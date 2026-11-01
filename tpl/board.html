@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{TITLE}} · 奖票公示</title>
+{{FAVICON}}
+<link rel="stylesheet" href="static/app.css">
+</head>
+<body>
+<div class="board-wrap">
+  <div class="board-head">
+    <h1 id="title">{{TITLE}}</h1>
+    <div class="sub" id="subtitle"></div>
+  </div>
+
+  <div class="board-stats" id="stats"></div>
+
+  <div id="winnersBox" class="hidden">
+    <h2>中奖名单</h2>
+    <div class="winners" id="winners"></div>
+  </div>
+
+  <div
+    aria-hidden="true"
+    style="position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap"
+  >
+    <input type="text" name="username" autocomplete="username" tabindex="-1">
+    <input type="password" name="password" autocomplete="current-password" tabindex="-1">
+  </div>
+  <div class="board-search">
+    <input
+      id="find"
+      type="search"
+      name="board_participant_filter"
+      placeholder="姓名 / 拼音 / 学号"
+      autocomplete="off"
+      autocorrect="off"
+      autocapitalize="off"
+      spellcheck="false"
+      data-form-type="other"
+      aria-autocomplete="none"
+    >
+  </div>
+
+  <h2>全部奖票 <small id="countNote"></small></h2>
+  <div class="cards" id="cards"></div>
+
+  <div class="site-foot">数据以后台记录为准</div>
+  <div class="site-foot" style="border:0;margin-top:0">Powered by <span class="heart">❤</span> and lab.nwuca.tech</div>
+</div>
+<script src="static/common.js"></script>
+<script src="static/board.js"></script>
+</body>
+</html>

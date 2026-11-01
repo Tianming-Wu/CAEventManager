@@ -13,6 +13,7 @@ themselves, which is the only thing that catches that.
 exercised.  Run that against a development instance, not production.
 """
 import json
+import os
 import random
 import sys
 import urllib.request
@@ -319,6 +320,23 @@ def card_page(page):
     check("three cards fit across a page", cols == 3, cols)
     check("the token is shortened, not wrapped",
           page.locator("#myEvents .event-token code").count() == 1)
+    label = page.evaluate("""() => {
+        const box = document.querySelector('#myEvents .event-token');
+        const tag = box.querySelector('.token-label');
+        if (!tag) return null;
+        const code = box.querySelector('code');
+        const darker = (color) => color.match(/\\d+/g).slice(0, 3)
+            .reduce((sum, v) => sum + Number(v), 0);
+        return {text: tag.textContent.trim(),
+                leftOfValue: tag.getBoundingClientRect().left <
+                             code.getBoundingClientRect().left,
+                labelInk: darker(getComputedStyle(tag).color),
+                valueInk: darker(getComputedStyle(code).color)};
+    }""")
+    check("a token label sits on its left", label and label["leftOfValue"]
+          and label["text"].lower() == "token", label)
+    check("the label is darker than the value", label and
+          label["labelInk"] < label["valueInk"], label)
     check("it keeps both ends and stars the middle", page.evaluate("""() => {
         const el = document.querySelector('#myEvents .event-token code');
         const full = el.title, shown = el.textContent;
@@ -339,10 +357,13 @@ def card_page(page):
         "() => Array.from(document.querySelectorAll('.card-menu button'))"
         ".map(b => b.textContent.trim())")
     check("it holds the less-used actions",
-          "活动设置" in items and "复制活动 token" in items, items)
-    check("the unfinished one is disabled", page.evaluate(
+          "活动设置" in items and "保存为模板" in items, items)
+    check("nothing already on the card is repeated",
+          "复制活动 token" not in items and "管理面板" not in items, items)
+    check("the unfinished ones are disabled", page.evaluate(
         "() => Array.from(document.querySelectorAll('.card-menu button'))"
-        ".some(b => b.textContent.trim() === '活动设置' && b.disabled)"))
+        ".filter(b => b.disabled).map(b => b.textContent.trim())"
+        ".join(',') === '保存为模板,活动设置'"))
     check("the menu stays inside the window", page.evaluate("""() => {
         const m = document.querySelector('.card-menu').getBoundingClientRect();
         return m.left >= 0 && m.right <= window.innerWidth
@@ -358,6 +379,84 @@ def card_page(page):
     check("the copy button reports back", page.evaluate(
         "() => document.querySelector('#myEvents .copy-btn').classList"
         ".contains('copied')"))
+
+
+def profile_page(page):
+    print("== the profile editor ==")
+    page.goto(BASE + "/panel#/account")
+    page.wait_for_timeout(400)
+    check("the display name is prefilled",
+          page.locator("#pfName").input_value().strip() != "")
+    check("the login name is prefilled",
+          page.locator("#pfUser").input_value().strip() != "")
+    check("no leftover 'cannot edit' note",
+          "还不能改" not in page.content())
+
+    # a real upload, not a stubbed one
+    png = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
+                       "tmp", "avatar-probe.png")
+    png = os.path.abspath(png)
+    os.makedirs(os.path.dirname(png), exist_ok=True)
+    write_png(png)
+    page.set_input_files("#avatarFile", png)
+    page.wait_for_function(
+        "() => document.querySelectorAll('#profileAvatar img').length === 1",
+        timeout=20000)
+    check("uploading an avatar shows the picture", page.evaluate(
+        "() => document.querySelectorAll('#profileAvatar img').length === 1"))
+    check("the top corner picks it up too", page.evaluate(
+        "() => document.querySelectorAll('#acctAvatar img').length === 1"))
+    check("the remove button appears",
+          page.locator("#avatarClear").is_visible())
+
+    page.click("#avatarClear")
+    page.wait_for_function(
+        "() => document.querySelectorAll('#profileAvatar img').length === 0",
+        timeout=20000)
+    check("removing returns to the initial", page.evaluate(
+        "() => document.getElementById('profileAvatar').textContent.trim().length > 0"))
+
+    print("== saving a display name ==")
+    before = page.locator("#pfName").input_value()
+    page.fill("#pfName", "测试改动")
+    page.click("#pfSave")
+    page.wait_for_timeout(700)
+    check("the corner follows the new name",
+          page.locator("#acctName").inner_text().strip() == "测试改动",
+          page.locator("#acctName").inner_text())
+    check("the sidebar card follows too",
+          page.locator("#sideName").inner_text().strip() == "测试改动")
+    page.fill("#pfName", before)
+    page.click("#pfSave")
+    page.wait_for_timeout(700)
+
+    print("== an empty name is refused in place ==")
+    page.fill("#pfName", "")
+    page.click("#pfSave")
+    page.wait_for_timeout(500)
+    check("the reason is shown next to the button",
+          page.locator("#pfErr").inner_text().strip() != "")
+    page.fill("#pfName", before)
+    page.click("#pfSave")
+    page.wait_for_timeout(500)
+    # the refusal above is logged by the browser as a 400 on purpose
+    page._errors = []
+
+
+def write_png(path):
+    """A 4x4 amber png, written by hand so the test needs no fixtures."""
+    import struct
+    import zlib
+
+    def chunk(tag, payload):
+        return (struct.pack(">I", len(payload)) + tag + payload +
+                struct.pack(">I", zlib.crc32(tag + payload) & 0xFFFFFFFF))
+
+    head = struct.pack(">IIBBBBB", 4, 4, 8, 2, 0, 0, 0)
+    row = b"\x00" + bytes((180, 83, 9)) * 4
+    with open(path, "wb") as fh:
+        fh.write(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", head) +
+                 chunk(b"IDAT", zlib.compress(row * 4)) + chunk(b"IEND", b""))
 
 
 def dialog_page(page):
@@ -657,6 +756,7 @@ def main():
                 routes_page(page)
                 group_page(page)
                 card_page(page)
+                profile_page(page)
                 dialog_page(page)
                 theme_page(page)
                 audit_page(page)

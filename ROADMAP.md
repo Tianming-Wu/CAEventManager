@@ -228,7 +228,9 @@ zengpingjing   zpg   zengpj   zenpj   zpj
 - `new-event` —— 新建活动，还只能在服务端配置
 - `ops` —— 备份、重启服务、查看日志
 - `appearance` —— 侧栏密度、语言、快捷键说明
-- `host-stats` 以外的资料编辑 —— 头像、称呼、用户名都还不能改
+- `templates` —— 卡片菜单里的「保存为模板」是占位，模板还没有后端
+- 资料编辑已接通（`POST /api/panel/profile`、`POST /api/panel/avatar`，
+  头像存 `data/avatars/`），还剩：用户管理列表里显示各账号头像
 
 活动卡片按三列铺开，token 只留头尾、中间打星，复制按钮在旁边；进入活动只留一个
 「管理面板」，其余动作收进右上角的三点菜单（活动设置还没做，先在菜单里占位）。

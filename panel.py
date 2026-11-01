@@ -47,7 +47,9 @@ CREATE TABLE IF NOT EXISTS accounts (
     created_at  REAL    NOT NULL,
     decided_at  REAL    NOT NULL DEFAULT 0,
     decided_by  TEXT    NOT NULL DEFAULT '',
-    last_login  REAL    NOT NULL DEFAULT 0
+    last_login  REAL    NOT NULL DEFAULT 0,
+    avatar      TEXT    NOT NULL DEFAULT '',
+    avatar_at   REAL    NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS events (
@@ -120,9 +122,21 @@ class tx:
         return False
 
 
+# Columns added after the first release.  init_db() adds whatever is missing,
+# so an existing database gains them without a migration step on the operator.
+LATE_COLUMNS = (
+    ("accounts", "avatar", "TEXT NOT NULL DEFAULT ''"),
+    ("accounts", "avatar_at", "REAL NOT NULL DEFAULT 0"),
+)
+
+
 def init_db():
     conn = connect()
     conn.executescript(SCHEMA)
+    for table, column, spec in LATE_COLUMNS:
+        have = {row["name"] for row in conn.execute("PRAGMA table_info(%s)" % table)}
+        if column not in have:
+            conn.execute("ALTER TABLE %s ADD COLUMN %s %s" % (table, column, spec))
     conn.execute(
         "INSERT INTO audit (ts, actor, action, detail) VALUES (?,?,?,?)",
         (time.time(), "system", "panel_init", None),
@@ -192,6 +206,65 @@ def audit(conn, actor, action, target=None, detail=None):
     )
 
 
+AVATAR_DIR = "avatars"
+AVATAR_TYPES = {
+    b"\x89PNG\r\n\x1a\n": ("png", "image/png"),
+    b"\xff\xd8\xff": ("jpg", "image/jpeg"),
+}
+AVATAR_MAX = 512 * 1024
+
+
+def avatar_dir():
+    path = os.path.join(os.path.dirname(db_path()), AVATAR_DIR)
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def avatar_path(name):
+    """Only a file name we wrote ourselves ever reaches the filesystem."""
+    if not name or "/" in name or "\\" in name or name.startswith("."):
+        return None
+    return os.path.join(avatar_dir(), name)
+
+
+def sniff_image(data):
+    """Return (extension, mime) for a PNG, JPEG or WebP payload, else None."""
+    for magic, kind in AVATAR_TYPES.items():
+        if data.startswith(magic):
+            return kind
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return ("webp", "image/webp")
+    return None
+
+
+def save_avatar(account_id, data):
+    """Store the bytes and return the stored file name."""
+    found = sniff_image(data)
+    if found is None:
+        raise ValueError("unsupported image")
+    if len(data) > AVATAR_MAX:
+        raise ValueError("too large")
+    ext = found[0]
+    # one file per account: replacing an avatar must not leave the old one around
+    for old in (".png", ".jpg", ".webp"):
+        stale = avatar_path("%d%s" % (account_id, old))
+        if stale and os.path.exists(stale):
+            os.unlink(stale)
+    name = "%d.%s" % (account_id, ext)
+    path = avatar_path(name)
+    with open(path, "wb") as fh:
+        fh.write(data)
+    return name
+
+
+def drop_avatar(account_id):
+    """Remove every stored file for this account."""
+    for ext in (".png", ".jpg", ".webp"):
+        path = avatar_path("%d%s" % (account_id, ext))
+        if path and os.path.exists(path):
+            os.unlink(path)
+
+
 def view(row):
     if row is None:
         return None
@@ -208,6 +281,8 @@ def view(row):
         "decidedAt": row["decided_at"],
         "decidedBy": row["decided_by"],
         "lastLogin": row["last_login"],
+        "avatar": row["avatar"] or "",
+        "avatarAt": row["avatar_at"] or 0,
     }
 
 

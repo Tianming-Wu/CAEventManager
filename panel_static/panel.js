@@ -50,6 +50,7 @@
   };
 
   var RAIL_QUERY = "(max-width: 1100px)";
+  var AVATAR_HINT = "PNG / JPEG / WebP，不超过 512 KB";
 
   /* ---------------------------------------------------------------- helpers */
   function rank(role) {
@@ -73,6 +74,24 @@
   function initialOf(me) {
     var s = displayName(me) || "?";
     return s.trim().charAt(0);
+  }
+
+  // The avatar endpoint is session-guarded, so a plain <img> is enough - the
+  // cookie rides along.  ?v= busts the cache when the picture changes.
+  function avatarUrl(acc) {
+    if (!acc || !acc.avatar) return "";
+    return PX.PREFIX + "/api/panel/avatar/" + acc.id +
+      "?v=" + Math.round(acc.avatarAt || 0);
+  }
+
+  function paintAvatar(el, acc, fallbackText) {
+    if (!el) return;
+    var url = avatarUrl(acc);
+    if (url) {
+      el.innerHTML = '<img alt="" src="' + PX.esc(url) + '">';
+    } else {
+      el.textContent = fallbackText;
+    }
   }
   function roleIfDistinct(me) {
     return (me && me.name && me.name !== me.roleLabel) ? me.roleLabel : "";
@@ -117,7 +136,8 @@
       '<button class="card-menu-btn" type="button" data-menu="' + PX.esc(e.id) + '" ' +
       'aria-haspopup="menu" aria-label="更多操作">' + ICON_DOTS + "</button>" +
       "</div>" +
-      '<div class="event-token"><code title="' + PX.esc(e.id) + '">' +
+      '<div class="event-token"><span class="token-label">token</span>' +
+      '<code title="' + PX.esc(e.id) + '">' +
       PX.esc(shortToken(e.id)) + "</code>" +
       '<button class="copy-btn" type="button" data-copy="' + PX.esc(e.id) + '" ' +
       'aria-label="复制活动 token">' + ICON_COPY + "</button></div>" +
@@ -187,16 +207,20 @@
     var menu = document.createElement("div");
     menu.className = "card-menu";
     menu.setAttribute("role", "menu");
+    // Anything already on the card face - the token's copy button, the admin
+    // link - is not repeated here; this menu is for the less common actions.
     menu.innerHTML =
-      '<button type="button" role="menuitem" data-open-link="' + PX.esc(e.admin) + '">' +
-      "管理面板</button>" +
       '<button type="button" role="menuitem" data-copy="' + PX.esc(e.url) + '">' +
       "复制访问链接</button>" +
-      '<button type="button" role="menuitem" data-copy="' + PX.esc(e.id) + '">' +
-      "复制活动 token</button>" +
+      // UNWIRED(templates): saving a template has no backend yet
+      '<button type="button" role="menuitem" disabled ' +
+      'title="模板功能还没有接入">' +
+      "保存为模板</button>" +
       '<div class="menu-sep"></div>' +
-      // UNWIRED(event-settings): 活动设置还没有页面，先占位
-      '<button type="button" role="menuitem" disabled>活动设置</button>';
+      // UNWIRED(event-settings): there is no settings page yet
+      '<button type="button" role="menuitem" disabled ' +
+      'title="活动设置还没有接入">' +
+      "活动设置</button>";
     document.body.appendChild(menu);
 
     var rect = anchor.getBoundingClientRect();
@@ -265,11 +289,11 @@
     $("#acctName").textContent = name;
     $("#acctRole").textContent = sub;
     $("#acctRole").hidden = !sub;
-    $("#acctAvatar").textContent = initialOf(S.me);
+    paintAvatar($("#acctAvatar"), S.me, initialOf(S.me));
     $("#acctBtn").title = name + (sub ? " · " + sub : "");
 
     $("#sideName").textContent = name;
-    $("#sideAvatar").textContent = initialOf(S.me);
+    paintAvatar($("#sideAvatar"), S.me, initialOf(S.me));
     var tag = $("#sideRole");
     tag.textContent = S.me.roleLabel;
     tag.className = "tag " + (S.me.role === "owner" ? "owner"
@@ -655,9 +679,21 @@
   function drawAccount() {
     var me = S.me;
     if (!me) return;
+
+    paintAvatar($("#profileAvatar"), me, initialOf(me));
+    $("#avatarClear").hidden = !me.avatar;
+
+    $("#pfName").value = me.name || "";
+    var user = $("#pfUser");
+    user.value = me.username;
+    var ownerLocked = me.role === "owner";
+    user.readOnly = ownerLocked;
+    user.classList.toggle("readonly", ownerLocked);
+    $("#pfUserHint").textContent = ownerLocked
+      ? "站长的登录名由 config.json 的 owner_username 决定"
+      : "用于登录，3~24 位，只能用字母数字和 . _ -";
+
     var rows = [
-      ["用户名", me.username],
-      ["称呼", me.name || "—"],
       ["角色", me.roleLabel],
       ["状态", me.statusLabel],
       ["注册时间", PX.when(me.createdAt)],
@@ -666,6 +702,58 @@
     $("#accountInfo").innerHTML = rows.map(function (r) {
       return "<dt>" + PX.esc(r[0]) + "</dt><dd>" + PX.esc(r[1]) + "</dd>";
     }).join("");
+  }
+
+  function applyMe(me) {
+    if (!me) return;
+    S.me = me;
+    var mine = S.accounts.filter(function (a) { return a.id === me.id; })[0];
+    if (mine) {
+      for (var key in me) {
+        if (Object.prototype.hasOwnProperty.call(me, key)) mine[key] = me[key];
+      }
+    }
+    renderIdentity();
+    drawAccount();
+  }
+
+  function saveProfile() {
+    var err = $("#pfErr");
+    err.textContent = "";
+    PX.api("/profile", {
+      method: "POST",
+      body: { name: $("#pfName").value, username: $("#pfUser").value }
+    }).then(function (d) {
+      applyMe(d.me);
+      PX.toast("已保存");
+      return reloadAll();
+    }).catch(function (e) {
+      err.textContent = e.message;
+    });
+  }
+
+  function sendAvatar(dataUrl) {
+    var hint = $("#avatarHint");
+    hint.textContent = "上传中…";
+    PX.api("/avatar", { method: "POST", body: { data: dataUrl } })
+      .then(function (d) {
+        applyMe(d.me);
+        hint.textContent = AVATAR_HINT;
+        PX.toast("头像已更新");
+      })
+      .catch(function (e) {
+        hint.textContent = AVATAR_HINT;
+        PX.toast(PX.esc(e.message), true);
+      });
+  }
+
+  function clearAvatar() {
+    PX.api("/avatar", { method: "POST", body: { clear: true } })
+      .then(function (d) {
+        applyMe(d.me);
+        PX.toast("头像已移除");
+      })
+      .catch(function (e) { PX.toast(PX.esc(e.message), true); });
   }
 
   function drawAppearance() {
@@ -958,6 +1046,23 @@
   });
 
   bindUserSearch();
+
+  $("#pfSave").addEventListener("click", saveProfile);
+  $("#avatarPick").addEventListener("click", function () { $("#avatarFile").click(); });
+  $("#avatarClear").addEventListener("click", clearAvatar);
+  $("#avatarFile").addEventListener("change", function (e) {
+    var file = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    if (file.size > 512 * 1024) {
+      PX.toast("图片超过 512 KB", true);
+      return;
+    }
+    var reader = new FileReader();
+    reader.onload = function () { sendAvatar(String(reader.result)); };
+    reader.onerror = function () { PX.toast("读不了这个文件", true); };
+    reader.readAsDataURL(file);
+  });
 
   // UNWIRED(new-event): 新建活动还没有接口，先明确提示而不是装作能用。
   function newEvent() {

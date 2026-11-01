@@ -272,6 +272,74 @@ def main():
     call(plain, "/api/panel/host", expect=403)
     check("a plain admin cannot read them", True)
 
+    print("== profile: display name and login name ==")
+    me = call(member, "/api/panel/me")["me"]
+    check("a display name is set", bool(me["name"]), me)
+    post(member, "/api/panel/profile", {"name": "李同学", "username": "member"})
+    check("the display name can change",
+          call(member, "/api/panel/me")["me"]["name"] == "李同学")
+    post(member, "/api/panel/profile", {"name": "", "username": "member"}, expect=400)
+    check("an empty display name is refused", True)
+    post(member, "/api/panel/profile", {"name": "x" * 25, "username": "member"}, expect=400)
+    check("an over-long display name is refused", True)
+    post(member, "/api/panel/profile",
+         {"name": "李同学", "username": "teacher"}, expect=409)
+    check("a taken login name is refused", True)
+    post(member, "/api/panel/profile",
+         {"name": "李同学", "username": "a b"}, expect=400)
+    check("a malformed login name is refused", True)
+
+    moved = post(member, "/api/panel/profile",
+                 {"name": "李同学", "username": "member2"})
+    check("the login name can change",
+          moved and moved["me"]["username"] == "member2", moved)
+    again = session()
+    post(again, "/api/panel/login", {"username": "member2", "password": "member-pass-2"})
+    check("the new login name works", True)
+    post(session(), "/api/panel/login",
+         {"username": "member", "password": "member-pass-2"}, expect=401)
+    check("the old login name stops working", True)
+    post(owner, "/api/panel/profile", {"name": "x", "username": "owner2"}, expect=403)
+    check("the owner's login name is owned by the config file", True)
+    current = call(owner, "/api/panel/me")["me"]["name"]
+    kept = post(owner, "/api/panel/profile", {"name": current, "username": "owner"})
+    check("the owner can still change the display name",
+          kept and kept["me"]["username"] == "owner", kept)
+
+    print("== profile: avatar ==")
+    pixel = ("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8"
+             "z8AAAwAB/AL+2QAAAABJRU5ErkJggg==")
+    got = post(member, "/api/panel/avatar", {"data": "data:image/png;base64," + pixel})
+    check("a png is accepted", got and got["me"]["avatar"], got)
+    name = got["me"]["avatar"]
+    who = got["me"]["id"]
+    raw = urllib.request.Request(
+        ROOT + "/api/panel/avatar/%d" % who, headers=dict(HEADER))
+    with member.open(raw, timeout=20) as res:
+        blob = res.read()
+        check("the image is served back", res.status == 200 and blob[:4] == b"\x89PNG",
+              res.status)
+    post(member, "/api/panel/avatar",
+         {"data": "bm90IGFuIGltYWdl"}, expect=400)
+    check("a non-image is refused", True)
+    post(member, "/api/panel/avatar", {"data": "!!!!"}, expect=400)
+    check("junk base64 is refused", True)
+    post(member, "/api/panel/avatar",
+         {"data": "A" * (800 * 1024)}, expect=413)
+    check("an oversized image is refused", True)
+    cleared = post(member, "/api/panel/avatar", {"clear": True})
+    check("the avatar can be cleared", cleared and not cleared["me"]["avatar"], cleared)
+    missing = urllib.request.Request(
+        ROOT + "/api/panel/avatar/%d" % who, headers=dict(HEADER))
+    try:
+        member.open(missing, timeout=20)
+        check("a cleared avatar is a 404", False, "still served")
+    except urllib.error.HTTPError as exc:
+        check("a cleared avatar is a 404", exc.code == 404, exc.code)
+    check("the old file is gone from disk",
+          not (os.path.exists(os.path.join(HERE, "data", "avatars", name))
+               if os.path.isdir(os.path.join(HERE, "data")) else True))
+
     print("== event pages still reachable ==")
     token = events[0]["id"]
     board = call(anon, "/%s/api/board" % token)

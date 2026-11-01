@@ -17,6 +17,7 @@ Run:  python3 app.py [--host 0.0.0.0] [--port 8931]
 """
 
 import argparse
+import base64
 import csv
 import io
 import json
@@ -42,7 +43,7 @@ import panel
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TPL_DIR = os.path.join(BASE_DIR, "tpl")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
-VERSION = "1.3.0"
+VERSION = "1.4.0"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 
@@ -720,6 +721,94 @@ class Handler(BaseHTTPRequestHandler):
                 tx.execute("UPDATE accounts SET role=? WHERE id=?", (role, target["id"]))
                 panel.audit(tx, acc["username"], "role_change", target["username"], role)
             return self._json({"ok": True, "role": role})
+
+        if path == "/profile" and method == "POST":
+            data = body()
+            name = (data.get("name") or "").strip()
+            username = (data.get("username") or "").strip()
+            if not name:
+                raise model.ApiError("请填写显示名")
+            if len(name) > 24:
+                raise model.ApiError("显示名最长 24 个字")
+            if username and username != acc["username"]:
+                if acc["role"] == "owner":
+                    raise model.ApiError(
+                        "站长的登录名由 config.json 的 "
+                        "owner_username 决定", 403)
+                if not (3 <= len(username) <= 24) or not all(
+                        c.isalnum() or c in "._-" for c in username):
+                    raise model.ApiError(
+                        "登录名需 3~24 位，只能用字母数字和 . _ -")
+                taken = conn.execute(
+                    "SELECT 1 FROM accounts WHERE lower(username)=lower(?) AND id<>?",
+                    (username, acc["id"])).fetchone()
+                if taken:
+                    raise model.ApiError("登录名已被占用", 409)
+            else:
+                username = acc["username"]
+            with panel.tx() as tx:
+                tx.execute("UPDATE accounts SET name=?, username=? WHERE id=?",
+                           (name, username, acc["id"]))
+                if username != acc["username"]:
+                    panel.audit(tx, acc["username"], "rename", username,
+                                "%s -> %s" % (acc["username"], username))
+                if name != acc["name"]:
+                    panel.audit(tx, username, "profile_name", None, name)
+            row = conn.execute("SELECT * FROM accounts WHERE id=?", (acc["id"],)).fetchone()
+            return self._json({"ok": True, "me": panel.view(row)})
+
+        if path == "/avatar" and method == "POST":
+            data = body()
+            if data.get("clear"):
+                with panel.tx() as tx:
+                    tx.execute("UPDATE accounts SET avatar='', avatar_at=? WHERE id=?",
+                               (time.time(), acc["id"]))
+                    panel.audit(tx, acc["username"], "avatar_clear")
+                panel.drop_avatar(acc["id"])
+                row = conn.execute("SELECT * FROM accounts WHERE id=?",
+                                   (acc["id"],)).fetchone()
+                return self._json({"ok": True, "me": panel.view(row)})
+
+            raw = data.get("data") or ""
+            if "," in raw and raw.strip().lower().startswith("data:"):
+                raw = raw.split(",", 1)[1]
+            try:
+                blob = base64.b64decode(raw, validate=True)
+            except Exception:
+                raise model.ApiError("图片数据无法识别", 400)
+            if len(blob) > panel.AVATAR_MAX:
+                raise model.ApiError("图片超过 512 KB", 413)
+            try:
+                stored = panel.save_avatar(acc["id"], blob)
+            except ValueError as exc:
+                if "large" in str(exc):
+                    raise model.ApiError("图片超过 512 KB", 413)
+                raise model.ApiError("只支持 PNG、JPEG 或 WebP", 400)
+            stamp = time.time()
+            with panel.tx() as tx:
+                tx.execute("UPDATE accounts SET avatar=?, avatar_at=? WHERE id=?",
+                           (stored, stamp, acc["id"]))
+                panel.audit(tx, acc["username"], "avatar_set", None, stored)
+            row = conn.execute("SELECT * FROM accounts WHERE id=?",
+                               (acc["id"],)).fetchone()
+            return self._json({"ok": True, "me": panel.view(row)})
+
+        if path.startswith("/avatar/") and method == "GET":
+            try:
+                who = int(path[len("/avatar/"):])
+            except ValueError:
+                raise model.ApiError("bad id", 400)
+            row = conn.execute("SELECT avatar FROM accounts WHERE id=?", (who,)).fetchone()
+            name = row["avatar"] if row else ""
+            full = panel.avatar_path(name)
+            if not full or not os.path.exists(full):
+                return self._err("not found", 404)
+            with open(full, "rb") as fh:
+                blob = fh.read()
+            kind = panel.sniff_image(blob)
+            ctype = kind[1] if kind else "application/octet-stream"
+            return self._send(200, blob, ctype,
+                              [("Cache-Control", "private, max-age=86400")])
 
         if path == "/host" and method == "GET":
             need("owner")

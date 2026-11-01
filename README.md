@@ -35,7 +35,7 @@
 #/approval-events  活跃审批 › 活动申请            [m] 现在默认自动通过，留位
 #/server           服务器管理                    [o] CPU / 内存 / 运行时长
 #/audit            审计日志                      [o]
-#/account          账户信息（改密码）
+#/account          账户信息（显示名、登录名、头像、改密码）
 #/appearance       界面设置（主题：跟随系统 / 浅色 / 深色）
 ```
 
@@ -70,6 +70,7 @@
 | 数据库 | `data/lottery.sqlite3`（SQLite + WAL） |
 | 访问 id / 端口 | `config.json`（`path_secret`/`host`/`port`/`public_base_prefix`） |
 | 站长的登录名与显示名 | `config.json`（`owner_username`/`owner_name`） |
+| 头像 | `data/avatars/<账号 id>.<png\|jpg\|webp>`，由账号自己上传 |
 | 管理员 | `laffey`，初始密码在 `data/admin_password.txt`（0600） |
 | 日志 | `data/service.log` |
 

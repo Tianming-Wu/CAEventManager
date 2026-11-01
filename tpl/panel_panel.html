@@ -466,10 +466,35 @@
 
       <div class="card">
         <div class="card-head"><h2>资料</h2></div>
-        <dl class="kv" id="accountInfo"></dl>
-        <div class="unwired-note" style="margin-top:12px">
-          头像、称呼与用户名都还不能改，需要先加资料编辑接口
+        <div class="profile-grid">
+          <div class="profile-avatar">
+            <span class="avatar avatar-lg" id="profileAvatar" aria-hidden="true"></span>
+            <div class="profile-avatar-actions">
+              <button class="btn sm" type="button" id="avatarPick">更换头像</button>
+              <button class="btn sm ghost" type="button" id="avatarClear" hidden>移除</button>
+            </div>
+            <p class="hint" id="avatarHint">PNG / JPEG / WebP，不超过 512 KB</p>
+            <input type="file" id="avatarFile" hidden
+                   accept="image/png,image/jpeg,image/webp">
+          </div>
+          <div class="profile-fields">
+            <div class="field">
+              <label for="pfName">显示名</label>
+              <input id="pfName" type="text" maxlength="24" autocomplete="off">
+            </div>
+            <div class="field">
+              <label for="pfUser">登录名</label>
+              <input id="pfUser" type="text" maxlength="24" autocomplete="off"
+                     autocapitalize="off" spellcheck="false">
+              <p class="hint" id="pfUserHint"></p>
+            </div>
+            <div class="row">
+              <button class="btn primary" type="button" id="pfSave">保存</button>
+              <span class="err" id="pfErr"></span>
+            </div>
+          </div>
         </div>
+        <dl class="kv kv-inline" id="accountInfo"></dl>
       </div>
 
       <div class="card">

@@ -232,6 +232,44 @@ def group_page(page):
                  .classList.contains('has-current')"""))
 
 
+def search_page(page):
+    print("== the account search box ==")
+    page.goto(BASE + "/panel#/users")
+    page.wait_for_timeout(320)
+    check("a hidden login-shaped honeypot sits before it",
+          page.locator(".hp input[name=username]").count() == 1)
+    # The native cross cannot be measured, so check that the rule which hides it
+    # is actually shipped and that ours is a properly sized target.
+    check("the native clear button is disabled in css", page.evaluate("""() => {
+        for (const sheet of document.styleSheets) {
+            let rules;
+            try { rules = sheet.cssRules; } catch (e) { continue; }
+            for (const rule of rules) {
+                if (!rule.selectorText) continue;
+                if (rule.selectorText.indexOf('::-webkit-search-cancel-button') >= 0 &&
+                    /appearance:\s*none/.test(rule.cssText)) return true;
+            }
+        }
+        return false;
+    }"""))
+    page.fill("#userSearch", "zzz-no-such-user")
+    page.wait_for_timeout(200)
+    clear = page.locator("#userSearchClear")
+    check("the clear button appears once there is text", clear.is_visible())
+    box = page.evaluate("""() => {
+        const r = document.getElementById('userSearchClear').getBoundingClientRect();
+        return {w: Math.round(r.width), h: Math.round(r.height)};
+    }""")
+    check("it is a real 28px target, not a hairline cross",
+          box["w"] >= 26 and box["h"] >= 26, box)
+    clear.click()
+    page.wait_for_timeout(200)
+    check("clicking it empties the box",
+          page.evaluate("() => document.getElementById('userSearch').value") == "")
+    check("the box is not autofilled", page.evaluate(
+        "() => document.getElementById('userSearch').value") != "owner")
+
+
 def dialog_page(page):
     print("== 用户管理 opens a dialog per account ==")
     page.goto(BASE + "/panel#/users")
@@ -248,18 +286,38 @@ def dialog_page(page):
     check("escape closes it", not page.locator("#overlay").is_visible())
 
 
+def audit_page(page):
+    print("== audit timestamps ==")
+    page.goto(BASE + "/panel#/audit")
+    page.wait_for_timeout(500)
+    stamps = page.evaluate("""() => Array.from(
+        document.querySelectorAll('#auditTable tbody tr td:first-child'))
+        .map(td => td.textContent.trim()).filter(Boolean)""")
+    check("the log has rows", bool(stamps), stamps)
+    check("times are precise to the second",
+          bool(stamps) and all(t.count(":") == 2 for t in stamps), stamps[:3])
+
+
 def theme_page(page):
     print("== theme ==")
     page.goto(BASE + "/panel#/appearance")
     page.wait_for_timeout(260)
     page.click('#themeSeg button[data-theme-pref="dark"]')
-    page.wait_for_timeout(320)
+    fading = page.evaluate(
+        "() => document.documentElement.classList.contains('theming')")
+    check("the switch cross-fades instead of cutting",
+          fading and page.evaluate(
+              "() => getComputedStyle(document.body)"
+              ".transitionProperty.indexOf('background-color') >= 0"), fading)
+    page.wait_for_timeout(420)
+    check("the fade is over", not page.evaluate(
+        "() => document.documentElement.classList.contains('theming')"))
     check("dark applied",
           page.evaluate("() => document.documentElement.dataset.theme") == "dark")
     check("dark really repaints", page.evaluate(
         "() => getComputedStyle(document.body).backgroundColor") != "rgb(245, 242, 238)")
     page.click('#themeSeg button[data-theme-pref="light"]')
-    page.wait_for_timeout(260)
+    page.wait_for_timeout(420)
     check("back to light",
           page.evaluate("() => document.documentElement.dataset.theme") == "light")
 
@@ -416,12 +474,78 @@ def role_page(browser):
                 check("superadmin sees no device stats",
                       not page.locator("#hostStats").is_visible())
             page.goto(BASE + "/panel#/server")
-            page.wait_for_timeout(440)
-            check("%-10s is bounced off a forbidden route" % role,
-                  page.evaluate("() => location.hash") != "#/server",
+            page.wait_for_timeout(520)
+            check("%-10s sees the refusal" % role,
+                  page.locator("#denied").is_visible())
+            check("%-10s keeps the refused route in the url" % role,
+                  page.evaluate("() => location.hash") == "#/server",
                   page.evaluate("() => location.hash"))
+            check("%-10s gets no footer line" % role,
+                  not page.locator("#siteFoot").is_visible())
+            check("%-10s sees no normal page content" % role, page.evaluate(
+                """() => Array.from(document.querySelectorAll('.page'))
+                         .every(p => p.hidden)"""))
+            check("%-10s: only the two lines are shown" % role, page.evaluate(
+                """() => document.getElementById('denied').innerText.trim()
+                         .split('\\n').filter(l => l.trim()).length === 2"""),
+                  page.evaluate(
+                      "() => document.getElementById('denied').innerText"))
         finally:
             ctx.close()
+
+
+def denied_flow(browser):
+    """切换账号 -> login?s_return -> straight back to the page that was refused."""
+    print("== 切换账号 takes you back where you were going ==")
+    admin = "admin" + TAG
+    ctx, page = new_page(browser, 1280, 800)
+    try:
+        ui_login(page, admin, "role-pass-1")
+        page.goto(BASE + "/panel#/server")
+        page.wait_for_timeout(520)
+        check("an admin cannot open 服务器管理", page.locator("#denied").is_visible())
+
+        box = page.evaluate("""() => {
+            const c = document.getElementById('content').getBoundingClientRect();
+            const d = document.getElementById('denied').getBoundingClientRect();
+            const t = document.querySelector('.denied-title').getBoundingClientRect();
+            return {cx: c.left + c.width / 2, cy: c.top + c.height / 2,
+                    tx: t.left + t.width / 2, ty: t.top + t.height / 2,
+                    inPanel: d.left >= c.left - 1 && d.right <= c.right + 1};
+        }""")
+        check("the message is centred in the panel",
+              abs(box["tx"] - box["cx"]) < 6 and abs(box["ty"] - box["cy"]) < 80, box)
+
+        page.click("#switchAccount")
+        page.wait_for_timeout(320)
+        check("切换账号 asks first", page.locator("#overlay").is_visible())
+        page.click("#overlay [data-close-overlay]")
+        page.wait_for_timeout(260)
+        check("cancel keeps you signed in, still on the refusal",
+              page.locator("#denied").is_visible() and
+              page.locator("#overlay").is_hidden())
+
+        page.click("#switchAccount")
+        page.wait_for_timeout(300)
+        page.click("#overlay [data-logout]")
+        page.wait_for_url("**/login*", timeout=20000)
+        check("confirming lands on the login page",
+              "/login" in page.url, page.url)
+        check("and carries the way back", "s_return=server" in page.url, page.url)
+
+        page.fill("#username", "owner")
+        page.fill("#password", PASSWORD)
+        page.click("#go")
+        # the return target lives in the fragment, which a glob will not match
+        page.wait_for_function("() => location.hash === '#/server'", timeout=25000)
+        page.wait_for_timeout(600)
+        check("logging back in returns to the wanted page",
+              page.evaluate("() => location.hash") == "#/server", page.url)
+        check("which the owner is allowed to see",
+              page.locator('.page[data-page="server"]').is_visible())
+        check("the footer is back", page.locator("#siteFoot").is_visible())
+    finally:
+        ctx.close()
 
 
 # --------------------------------------------------------------------------- #
@@ -439,6 +563,8 @@ def main():
                 group_page(page)
                 dialog_page(page)
                 theme_page(page)
+                audit_page(page)
+                search_page(page)
                 check("no javascript error on the owner's session", not page._errors,
                       "; ".join(page._errors)[:200])
             finally:
@@ -448,6 +574,7 @@ def main():
             touch_page(browser)
             if WITH_ACCOUNTS:
                 role_page(browser)
+                denied_flow(browser)
         finally:
             browser.close()
 

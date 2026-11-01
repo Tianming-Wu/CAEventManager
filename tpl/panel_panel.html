@@ -109,7 +109,6 @@
           <path d="M3.9 16.6c0-3.1 2.7-4.9 6.1-4.9s6.1 1.8 6.1 4.9"/>
         </svg>
         <span class="nav-text">用户管理</span>
-        <span class="nav-lock" title="站长与超级管理员可见">m</span>
       </a>
       <a class="nav-item" href="#/all-events" data-nav="all-events" data-min-role="superadmin">
         <svg viewBox="0 0 20 20" aria-hidden="true">
@@ -117,7 +116,6 @@
           <path d="M5.8 7.6h8.4M5.8 10.4h8.4M5.8 13.2h5"/>
         </svg>
         <span class="nav-text">活动管理</span>
-        <span class="nav-lock" title="站长与超级管理员可见">m</span>
       </a>
 
       <!-- a group: the header only expands, the children lead to pages -->
@@ -129,7 +127,6 @@
             <path d="M7.4 9.9l1.9 1.9 3.4-3.7"/>
           </svg>
           <span class="nav-text">活跃审批</span>
-          <span class="nav-lock" title="站长与超级管理员可见">m</span>
           <svg class="nav-caret" viewBox="0 0 20 20" aria-hidden="true">
             <path d="M7.5 5l5 5-5 5"/>
           </svg>
@@ -141,8 +138,7 @@
           </a>
           <a class="nav-item nav-sub-item" href="#/approval-events" data-nav="approval-events">
             <span class="nav-text">活动申请</span>
-            <span class="nav-lock">自动</span>
-          </a>
+            </a>
         </div>
       </div>
 
@@ -155,7 +151,6 @@
           <path d="M6 5.9h.01M6 14.1h.01"/>
         </svg>
         <span class="nav-text">服务器管理</span>
-        <span class="nav-lock owner" title="仅站长可见">o</span>
       </a>
       <a class="nav-item" href="#/audit" data-nav="audit" data-min-role="owner">
         <svg viewBox="0 0 20 20" aria-hidden="true">
@@ -163,7 +158,6 @@
           <path d="M11.6 3.1v3.4h3.4M7.2 11h5.6M7.2 13.8h3.8"/>
         </svg>
         <span class="nav-text">审计日志</span>
-        <span class="nav-lock owner" title="仅站长可见">o</span>
       </a>
     </div>
 
@@ -239,7 +233,7 @@
     <section class="page" data-page="events" hidden>
       <header class="page-head">
         <h1>我的活动</h1>
-        <p class="page-sub">你参与和申请的活动。</p>
+        <p class="page-sub">你参与和申请的活动</p>
         <div class="page-actions">
           <button class="btn primary" id="newEventBtn">申请新活动</button>
         </div>
@@ -260,7 +254,7 @@
     <section class="page" data-page="templates" hidden>
       <header class="page-head">
         <h1>模板管理</h1>
-        <p class="page-sub">新建活动时可以直接套用一套固定设定。</p>
+        <p class="page-sub">新建活动可以套用的固定设定</p>
         <div class="page-actions">
           <button class="btn primary" disabled>新建模板</button>
         </div>
@@ -277,13 +271,29 @@
     <section class="page" data-page="users" hidden>
       <header class="page-head">
         <h1>用户管理</h1>
-        <p class="page-sub" id="usersSub">—</p>
       </header>
       <div class="card">
         <div class="card-head">
           <h2>账号</h2>
-          <input class="search" id="userSearch" type="search" placeholder="搜索用户名或称呼"
-                 autocomplete="off" aria-label="搜索账号">
+          <!-- Honeypot: Edge treats a lone search box as a login field and drops the
+               saved account name into it. It fills this one instead, and panel.js
+               scrubs anything that appears without a keystroke. -->
+          <div class="hp" aria-hidden="true">
+            <input type="text" name="username" autocomplete="username" tabindex="-1">
+            <input type="password" name="password" autocomplete="current-password" tabindex="-1">
+          </div>
+          <div class="searchbox">
+            <input class="search" id="userSearch" type="search" name="panel_user_filter"
+                   placeholder="搜索用户名或称呼" autocomplete="off" autocorrect="off"
+                   autocapitalize="off" spellcheck="false" data-form-type="other"
+                   aria-autocomplete="none" aria-label="搜索账号">
+            <button class="search-clear" id="userSearchClear" type="button"
+                    aria-label="清空搜索" hidden>
+              <svg viewBox="0 0 20 20" aria-hidden="true">
+                <path d="M6.6 6.6l6.8 6.8M13.4 6.6l-6.8 6.8"/>
+              </svg>
+            </button>
+          </div>
         </div>
         <div class="tblwrap">
           <table class="tbl" id="accountsTable">
@@ -294,9 +304,6 @@
             <tbody></tbody>
           </table>
         </div>
-        <p class="page-sub" style="margin-top:10px">
-          注册审批不在这里，统一在侧栏的「活跃审批 → 注册申请」。
-        </p>
       </div>
     </section>
 
@@ -304,7 +311,7 @@
     <section class="page" data-page="all-events" hidden>
       <header class="page-head">
         <h1>活动管理</h1>
-        <p class="page-sub">服务上所有活动。每个活动通过自己的 token 访问。</p>
+        <p class="page-sub">服务上的全部活动，每个活动用自己的 token 访问</p>
         <div class="page-actions">
           <button class="btn primary" id="createEventBtn">新建活动</button>
         </div>
@@ -362,7 +369,7 @@
     <section class="page" data-page="approval-events" hidden>
       <header class="page-head">
         <h1>活动申请</h1>
-        <p class="page-sub">管理员申请新建活动时才需要这一环。</p>
+        <p class="page-sub">新建活动的申请队列</p>
       </header>
 
       <div class="card">
@@ -377,7 +384,7 @@
         </dl>
         <div class="empty-state">
           <div class="empty-title">没有待审批的活动申请</div>
-          <div class="empty-sub">功能接通后，这里的列表会出现待处理项。</div>
+          <div class="empty-sub">功能接通后这里会出现待处理项</div>
         </div>
       </div>
     </section>
@@ -386,7 +393,7 @@
     <section class="page" data-page="server" hidden>
       <header class="page-head">
         <h1>服务器管理</h1>
-        <p class="page-sub">运行这个服务的机器。</p>
+        <p class="page-sub">运行这个服务的机器</p>
         <div class="page-actions">
           <button class="btn" id="hostRefresh">刷新</button>
         </div>
@@ -403,11 +410,11 @@
         </div>
         <div class="stat">
           <span class="stat-label">运行时长</span>
-          <span class="stat-num sm" id="srvUptime">–</span>
+          <span class="stat-num" id="srvUptime">–</span>
         </div>
         <div class="stat">
           <span class="stat-label">版本</span>
-          <span class="stat-num sm" id="srvVersion">–</span>
+          <span class="stat-num" id="srvVersion">–</span>
         </div>
       </div>
 
@@ -434,7 +441,7 @@
     <section class="page" data-page="audit" hidden>
       <header class="page-head">
         <h1>审计日志</h1>
-        <p class="page-sub">最近 200 条账号与活动操作。</p>
+        <p class="page-sub">最近 200 条账号与活动操作</p>
       </header>
       <div class="card">
         <div class="tblwrap">
@@ -452,14 +459,14 @@
     <section class="page" data-page="account" hidden>
       <header class="page-head">
         <h1>账户信息</h1>
-        <p class="page-sub">你自己的账号。</p>
+        <p class="page-sub">你自己的账号</p>
       </header>
 
       <div class="card">
         <div class="card-head"><h2>资料</h2></div>
         <dl class="kv" id="accountInfo"></dl>
         <div class="unwired-note" style="margin-top:12px">
-          头像、称呼与用户名都还不能改，需要先加资料编辑接口。
+          头像、称呼与用户名都还不能改，需要先加资料编辑接口
         </div>
       </div>
 
@@ -484,7 +491,7 @@
     <section class="page" data-page="appearance" hidden>
       <header class="page-head">
         <h1>界面设置</h1>
-        <p class="page-sub">只影响这个浏览器。</p>
+        <p class="page-sub">仅保存在本机</p>
       </header>
 
       <div class="card">
@@ -494,19 +501,23 @@
           <button type="button" role="radio" data-theme-pref="light">浅色</button>
           <button type="button" role="radio" data-theme-pref="dark">深色</button>
         </div>
-        <p class="page-sub" style="margin-top:10px">
-          默认跟随系统。深色模式下色板整体偏暖，跟活动页面保持一致。
-        </p>
       </div>
 
       <!-- UNWIRED(appearance): 侧栏密度、语言、快捷键说明 -->
       <div class="card">
         <div class="card-head"><h2>其他</h2></div>
-        <div class="unwired-note">侧栏密度、语言与快捷键说明还没有接入。</div>
+        <div class="unwired-note">侧栏密度、语言与快捷键说明还没有接入</div>
       </div>
     </section>
 
-    <div class="site-foot">{{FOOTER}}</div>
+    <div class="denied" id="denied" hidden>
+      <div class="denied-inner">
+        <p class="denied-title">您无权访问此页面</p>
+        <button class="denied-action" id="switchAccount" type="button">切换账号？</button>
+      </div>
+    </div>
+
+    <div class="site-foot" id="siteFoot">{{FOOTER}}</div>
   </main>
 </div>
 

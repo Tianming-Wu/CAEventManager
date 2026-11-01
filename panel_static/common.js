@@ -52,6 +52,36 @@
       pad(d.getHours()) + ":" + pad(d.getMinutes());
   }
 
+  // Audit rows are evidence: minutes are not precise enough to tell two actions
+  // apart, so those get seconds.
+  function whenExact(ts) {
+    if (!ts) return "—";
+    var d = new Date(ts * 1000);
+    return (d.getMonth() + 1) + "/" + d.getDate() + " " +
+      pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds());
+  }
+
+  // Browsers happily treat a lone search box as a login field and autofill the
+  // saved account name into it.  Anything that appears without a keystroke is
+  // not the operator's input, so drop it.
+  function guardAutofill(input, onClear) {
+    var touched = false;
+    var scrub = function () {
+      if (touched || !input.value) return;
+      input.value = "";
+      if (onClear) onClear();
+    };
+    input.addEventListener("keydown", function () { touched = true; });
+    input.addEventListener("focus", scrub);
+    input.addEventListener("mousedown", function () { setTimeout(scrub, 0); });
+    input.addEventListener("input", function (e) {
+      if (e.isTrusted) touched = true;
+    });
+    [300, 1200, 2600].forEach(function (ms) { setTimeout(scrub, ms); });
+    window.addEventListener("load", scrub);
+    return scrub;
+  }
+
   var toastEl = null, toastTimer = null;
   function toast(msg, bad) {
     if (!toastEl) {
@@ -72,6 +102,8 @@
     api: api,
     esc: esc,
     when: when,
+    whenExact: whenExact,
+    guardAutofill: guardAutofill,
     pad: pad,
     toast: toast
   };

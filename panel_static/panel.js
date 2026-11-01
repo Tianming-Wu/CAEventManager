@@ -45,7 +45,8 @@
     route: null,
     hostTimer: null,
     userFilter: "",
-    openGroups: {}
+    openGroups: {},
+    denied: null
   };
 
   var RAIL_QUERY = "(max-width: 1100px)";
@@ -232,14 +233,30 @@
     else location.hash = target;
   }
 
+  function showDenied(route) {
+    S.route = null;
+    S.denied = route;
+    $$(".page").forEach(function (p) { p.hidden = true; });
+    $("#denied").hidden = false;
+    $("#siteFoot").hidden = true;
+    $$("[data-nav]").forEach(function (a) { a.removeAttribute("aria-current"); });
+    $$(".nav-group").forEach(function (g) { g.classList.remove("has-current"); });
+    closePane();
+    var el = $("#content");
+    if (el) el.scrollTop = 0;
+  }
+
   function onRoute() {
     var wanted = routeFromHash() || FALLBACK_ROUTE;
     if (!allowed(wanted)) {
-      // A role that cannot see the page must not be able to sit on it.
-      go(FALLBACK_ROUTE, true);
+      // Reachable by typing the hash; say so instead of silently moving them.
+      showDenied(wanted);
       return;
     }
     S.route = wanted;
+    S.denied = null;
+    $("#denied").hidden = true;
+    $("#siteFoot").hidden = false;
 
     // a child route keeps its group expanded
     var parent = ROUTES[wanted].group;
@@ -287,7 +304,7 @@
     var pending = pendingAccounts();
 
     $("#overviewSub").textContent = "欢迎回来，" +
-      ((S.me && (S.me.name || S.me.username)) || "") + "。";
+      ((S.me && (S.me.name || S.me.username)) || "");
 
     $("#statEvents").textContent = mine.length;
     $("#statAccounts").textContent = S.accounts.length || "–";
@@ -347,11 +364,6 @@
   }
 
   function drawUsers() {
-    $("#usersSub").textContent = isOwner()
-      ? "站长可以调整角色，也能停用任何非站长账号。注册审批在「活跃审批 › 注册申请」。"
-      : (canReview()
-        ? "超级管理员可以审核与停用普通管理员。注册审批在「活跃审批 › 注册申请」。"
-        : "你可以查看自己的账号信息。");
     renderAccountsTable();
   }
 
@@ -447,8 +459,8 @@
   function drawApprovalUsers() {
     var pending = pendingAccounts();
     $("#approvalUsersSub").textContent = pending.length
-      ? "有 " + pending.length + " 个注册申请等待处理。"
-      : "没有待处理的注册申请。";
+      ? "有 " + pending.length + " 个注册申请等待处理"
+      : "没有待处理的注册申请";
 
     $("#pendingTable tbody").innerHTML = pending.length ? pending.map(function (a) {
       return "<tr>" +
@@ -519,7 +531,7 @@
 
   function drawAudit() {
     $("#auditTable tbody").innerHTML = S.audit.length ? S.audit.map(function (r) {
-      return '<tr><td class="mono">' + PX.when(r.ts) + "</td>" +
+      return '<tr><td class="mono">' + PX.whenExact(r.ts) + "</td>" +
         "<td>" + PX.esc(r.actor || "") + "</td>" +
         "<td>" + PX.esc(r.action) + "</td>" +
         "<td>" + PX.esc(r.target || "") + "</td>" +
@@ -653,9 +665,25 @@
     var dark = pref === "dark" ||
       (pref === "auto" && window.matchMedia &&
        window.matchMedia("(prefers-color-scheme: dark)").matches);
-    document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
-    document.documentElement.setAttribute("data-theme-pref", pref);
+    var root = document.documentElement;
+    var next = dark ? "dark" : "light";
+    var changed = root.getAttribute("data-theme") !== next;
+
+    if (changed && !reducedMotion()) {
+      // Colours only cross-fade while the theme is actually changing; the class
+      // is removed afterwards so hovering a nav item stays instant.
+      root.classList.add("theming");
+      void root.offsetWidth;
+      setTimeout(function () { root.classList.remove("theming"); }, 340);
+    }
+    root.setAttribute("data-theme", next);
+    root.setAttribute("data-theme-pref", pref);
     drawAppearance();
+  }
+
+  function reducedMotion() {
+    return !!(window.matchMedia &&
+              window.matchMedia("(prefers-reduced-motion: reduce)").matches);
   }
 
   /* -------------------------------------------------------------- listeners */
@@ -678,6 +706,11 @@
 
     var toggle = t.closest("[data-toggle]");
     if (toggle) return onGroupHead(toggle.getAttribute("data-toggle"));
+
+    var logoutBtn = t.closest("[data-logout]");
+    if (logoutBtn) return logout(logoutBtn.getAttribute("data-logout"));
+
+    if (t.closest("[data-close-overlay]")) return closeOverlay();
 
     var goEl = t.closest("[data-go]");
     if (goEl) return go(goEl.getAttribute("data-go"));
@@ -710,16 +743,53 @@
     $("#acctBtn").setAttribute("aria-expanded", "false");
   });
 
-  $("#logoutBtn").addEventListener("click", function () {
-    PX.api("/logout", { method: "POST" }).then(function () {
-      location.href = "login";
-    }).catch(function () { location.href = "login"; });
-  });
+  function logout(returnRoute) {
+    var back = returnRoute ? "?s_return=" + encodeURIComponent(returnRoute) : "";
+    var leave = function () { location.href = "login" + back; };
+    PX.api("/logout", { method: "POST" }).then(leave).catch(leave);
+  }
 
-  $("#userSearch").addEventListener("input", function (e) {
-    S.userFilter = e.target.value || "";
-    renderAccountsTable();
-  });
+  function confirmSwitchAccount() {
+    var route = S.denied || "";
+    openOverlay("switch", "切换账号",
+      '<p class="page-sub">退出当前账号后回到登录页，登录成功会直接来到这里</p>' +
+      '<div class="row" style="margin-top:18px;justify-content:flex-end">' +
+      '<button class="btn" data-close-overlay="1">取消</button>' +
+      '<button class="btn primary" data-logout="' + PX.esc(route) + '">' +
+      "退出并切换账号</button></div>");
+  }
+
+  $("#logoutBtn").addEventListener("click", function () { logout(""); });
+  $("#switchAccount").addEventListener("click", confirmSwitchAccount);
+
+  function syncClearButton() {
+    var box = $("#userSearch");
+    var clear = $("#userSearchClear");
+    if (box && clear) clear.hidden = !box.value;
+  }
+
+  function bindUserSearch() {
+    var box = $("#userSearch");
+    var clear = $("#userSearchClear");
+    box.addEventListener("input", function (e) {
+      S.userFilter = e.target.value || "";
+      syncClearButton();
+      renderAccountsTable();
+    });
+    clear.addEventListener("click", function () {
+      box.value = "";
+      S.userFilter = "";
+      syncClearButton();
+      renderAccountsTable();
+      box.focus();
+    });
+    PX.guardAutofill(box, function () {
+      S.userFilter = "";
+      syncClearButton();
+      renderAccountsTable();
+    });
+    syncClearButton();
+  }
 
   $("#hostRefresh").addEventListener("click", function () {
     refreshHost();
@@ -738,6 +808,8 @@
       PX.toast("密码已修改");
     }).catch(function (e) { err.textContent = e.message; });
   });
+
+  bindUserSearch();
 
   // UNWIRED(new-event): 新建活动还没有接口，先明确提示而不是装作能用。
   function newEvent() {

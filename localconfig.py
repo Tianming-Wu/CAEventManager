@@ -1,15 +1,21 @@
 # -*- coding: utf-8 -*-
-"""Deployment-level config (``config.json``) and the secret URL prefix.
+"""Deployment-level config (``config.json``) and the event-token path segment.
 
-The service is published as
+One process serves two things:
 
-    https://lab.nwuca.tech/u/laffey/xlottery/<secret>/...
+    /                       master panel (login, accounts, event list)
+    /<event-token>/...      one event (board, screen, admin, checkin)
 
-``<secret>`` is a random 32-character base64url id generated once on first run
-and then kept stable in ``config.json``.  The platform strips
-``/u/laffey/xlottery`` before forwarding, so the server receives
-``/<secret>/...`` and refuses to answer anything that does not carry it - a
-plain ``/admin`` or ``/`` is a 404, so nobody can find the app by guessing.
+``path_secret`` is that event token: a random 32-character base64url id generated
+once on first run and kept stable in ``config.json``.  It is the only guard on
+the event pages, so it must not be guessable, and it must be passed to players
+as part of the URL.
+
+Routing never looks at ``public_base_prefix``: the server answers on whatever
+path the request arrives by, so local access, the current
+``https://lab.nwuca.tech/u/laffey/xlottery`` mount and a future subdomain all
+work without a code change.  The prefix is used only to build absolute links
+(QR codes, share links, cookie paths) - set it when the deployment moves.
 
 Everything event-related (title, pool, beta, ...) lives in SQLite instead; this
 file is only for things that must be known before the database is opened.
@@ -27,7 +33,10 @@ DEFAULTS = {
     "path_secret": "",
     "host": "0.0.0.0",
     "port": 8931,
-    # Everything before the secret segment of the published URL.
+    # Where the service is published.  Used ONLY to build links (QR codes, short
+    # links, cookie paths).  Routing does not depend on it: the app answers on
+    # whatever path the request arrives by, so local access always works and a
+    # future subdomain is a config change, not a code change.
     "public_base_prefix": "https://lab.nwuca.tech/u/laffey/xlottery",
 }
 

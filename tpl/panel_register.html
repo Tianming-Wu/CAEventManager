@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>注册 · xlottery</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="panel_static/panel.css">
+</head>
+<body>
+<div class="auth-wrap">
+  <form class="auth-card" id="regForm" autocomplete="off">
+    <div class="brand">xlottery</div>
+    <h1>注册账号</h1>
+
+    <div class="field">
+      <label for="username">用户名</label>
+      <input id="username" type="text" name="reg_username" autocomplete="off"
+             autocapitalize="off" spellcheck="false" placeholder="3~24 位，字母数字和 . _ -">
+    </div>
+    <div class="field">
+      <label for="name">称呼</label>
+      <input id="name" type="text" name="reg_name" autocomplete="off" placeholder="显示用，例如 张老师">
+    </div>
+    <div class="field">
+      <label for="password">密码</label>
+      <input id="password" type="password" name="reg_password" autocomplete="new-password"
+             placeholder="至少 8 位">
+    </div>
+    <div class="field">
+      <label for="note">申请说明（可选）</label>
+      <textarea id="note" name="reg_note" placeholder="说明用途，便于审核"></textarea>
+    </div>
+
+    <div class="err" id="err"></div>
+    <button class="btn primary block" type="submit" id="go">提交注册</button>
+
+    <div id="done" class="notice" style="display:none"></div>
+    <div class="auth-foot">已有账号？<a href="login">去登录</a></div>
+  </form>
+
+  <p class="hint" style="margin-top:16px;text-align:center">
+    参加抽奖并不需要注册账户
+  </p>
+  <div class="site-foot" style="border:0;margin-top:4px;max-width:400px">{{FOOTER}}</div>
+</div>
+<script src="panel_static/common.js"></script>
+<script src="panel_static/register.js"></script>
+</body>
+</html>

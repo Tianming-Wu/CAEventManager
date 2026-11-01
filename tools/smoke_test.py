@@ -93,15 +93,19 @@ def password():
 
 
 def main():
-    print("== secret path is mandatory ==")
+    print("== routing: panel at the root, events under the token ==")
     import urllib.request as _ur
     root = BASE.rsplit("/", 1)[0]
-    for probe in ("/", "/admin", "/api/board"):
+    with _ur.urlopen(root + "/", timeout=5) as res:
+        body = res.read()
+    check("service root now serves the panel",
+          res.status == 200 and "参加抽奖并不需要注册账户".encode() in body, res.status)
+    for probe in ("/admin", "/screen", "/checkin", "/api/board", "/static/app.css"):
         try:
             _ur.urlopen(root + probe, timeout=5)
-            check("no-secret request rejected (%s)" % probe, False, "got 200")
+            check("event route needs the token (%s)" % probe, False, "got 200")
         except urllib.error.HTTPError as exc:
-            check("no-secret request rejected (%s)" % probe, exc.code == 404, exc.code)
+            check("event route needs the token (%s)" % probe, exc.code == 404, exc.code)
 
     print("== public endpoints ==")
     board = call("/api/board")
@@ -406,6 +410,25 @@ def main():
         check("wrong short code rejected", False, "accepted")
     except urllib.error.HTTPError as exc:
         check("wrong short code rejected", exc.code == 404, exc.code)
+
+    print("== accounting invariants ==")
+    # turning a ticket holder into staff must take the ticket back
+    st = call("/api/admin/state")
+    holder = [x for x in st["students"]
+              if (x.get("role") or "participant") == "participant" and x["tickets"]][0]
+    before_live = st["stats"]["live_tickets"]
+    post("/api/admin/unlock", {"on": True})
+    post("/api/admin/student", {"id": holder["id"], "role": "staff"})
+    st2 = call("/api/admin/state")
+    after = [x for x in st2["students"] if x["id"] == holder["id"]][0]
+    check("role change to staff revokes the tickets", after["tickets"] == [], after["tickets"])
+    check("the pool follows", st2["stats"]["live_tickets"] == before_live - len(holder["tickets"]),
+          (before_live, st2["stats"]["live_tickets"]))
+    post("/api/admin/settings", {"pool_mode": "auto"})
+    plan = call("/api/admin/plan")["summary"]
+    check("issued + bonus equals the pool",
+          plan["live_tickets"] + plan["bonus_pool"] == plan["pool_size"], plan)
+    post("/api/admin/student", {"id": holder["id"], "role": "participant"})
 
     print("== screen phase ==")
     res = post("/api/admin/phase", {"phase": "draw"})

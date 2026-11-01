@@ -35,6 +35,7 @@ import db
 import exporter
 import localconfig
 import model
+import panel
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TPL_DIR = os.path.join(BASE_DIR, "tpl")
@@ -45,6 +46,9 @@ MAX_BODY = 4 * 1024 * 1024
 # Filled in by main() before the server starts listening.
 SECRET = ""
 LOCAL_CFG = {}
+
+_PANEL_FAILS = {}
+EVENT_TOKENS = set()
 
 # Very small guard against somebody hammering the short-code space.
 _SHORT_MISS = {"count": 0, "since": 0.0}
@@ -345,23 +349,32 @@ class Handler(BaseHTTPRequestHandler):
         self._dispatch("POST")
 
     def _dispatch(self, method):
+        """Three route families, in order: panel (root), short link, event (token)."""
+        global EVENT_TOKENS
         parsed = urlparse(self.path)
-        if parsed.path == "/favicon.ico":
-            return self._send(204, b"", "image/x-icon")
-        redirect_to = shortlink_redirect(parsed.path)
-        if redirect_to is not None:
-            log("shortlink accepted -> %s" % redirect_to)
-            self.send_response(302)
-            self.send_header("Location", redirect_to)
-            self.send_header("Content-Length", "0")
-            self.send_header("Cache-Control", "no-store")
-            self.end_headers()
-            return
-        path = resolve_route(parsed.path)
         query = parse_qs(parsed.query)
+        EVENT_TOKENS = panel.event_tokens(extra=(SECRET,))
         try:
+            if parsed.path == "/favicon.ico":
+                return self._send(204, b"", "image/x-icon")
+
+            kind, route = panel.classify(parsed.path, EVENT_TOKENS)
+            if kind == "panel":
+                return self._panel(method, route, parsed.path, query)
+
+            redirect_to = shortlink_redirect(parsed.path)
+            if redirect_to is not None:
+                log("shortlink accepted -> %s" % redirect_to)
+                self.send_response(302)
+                self.send_header("Location", redirect_to)
+                self.send_header("Content-Length", "0")
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                return
+
+            path = route
             if path is None:
-                # No secret segment: pretend this service is not here at all.
+                # No panel route and no event token: nothing to serve.
                 self._send(
                     404,
                     b"<!doctype html><meta charset=utf-8><title>404</title>"
@@ -379,6 +392,236 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             log("ERROR %s %s\n%s" % (method, self.path, traceback.format_exc()))
             self._err("服务器内部错误,请看服务日志", 500)
+
+    # ---------------- master panel ----------------
+
+    def _panel(self, method, route, raw_path, query):
+        conn = panel.connect()
+        if method == "GET" and route.startswith("/panel_static/"):
+            rel = route[len("/panel_static/"):]
+            if ".." in rel:
+                return self._err("bad path", 400)
+            full = os.path.join(panel.PANEL_STATIC, rel)
+            if not os.path.isfile(full):
+                return self._err("not found", 404)
+            with open(full, "rb") as fh:
+                body = fh.read()
+            ctype = mimetypes.guess_type(full)[0] or "application/octet-stream"
+            if ctype.startswith("text/") or ctype == "application/javascript":
+                ctype += "; charset=utf-8"
+            return self._send(200, body, ctype, [("Cache-Control", "public, max-age=60")])
+
+        if not route.startswith("/api/panel/"):
+            if method != "GET":
+                return self._err("method not allowed", 405)
+            acc = panel.session_account(conn, self._panel_token())
+            name = panel.PANEL_PAGES.get(route)
+            if name is None:
+                return self._err("not found", 404)
+            # signed-in users go straight to the console from the auth pages
+            if acc is not None and route in ("/", "/register", "/login"):
+                prefix = panel.cookie_path_for(raw_path, route).rstrip("/")
+                self.send_response(302)
+                self.send_header("Location", (prefix + "/panel") or "panel")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            if acc is None and route == "/panel":
+                prefix = panel.cookie_path_for(raw_path, route).rstrip("/")
+                self.send_response(302)
+                self.send_header("Location", (prefix + "/login") or "login")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            return self._serve_panel_page(name)
+
+        return self._panel_api(method, route, raw_path)
+
+    def _serve_panel_page(self, name):
+        path = os.path.join(TPL_DIR, name)
+        try:
+            with open(path, "rb") as fh:
+                body = fh.read()
+        except OSError:
+            return self._err("not found", 404)
+        body = body.replace(b"{{FOOTER}}", panel.FOOTER.encode("utf-8"))
+        body = body.replace(b"{{VERSION}}", VERSION.encode("utf-8"))
+        return self._send(200, body, "text/html; charset=utf-8")
+
+    def _panel_token(self):
+        raw = self.headers.get("Cookie") or ""
+        for part in raw.split(";"):
+            part = part.strip()
+            if part.startswith(panel.COOKIE + "="):
+                return part.split("=", 1)[1]
+        return None
+
+    def _panel_api(self, method, route, raw_path):
+        conn = panel.connect()
+        ip = self.client_address[0]
+        path = route[len("/api/panel"):] or "/"
+
+        def body():
+            if self.headers.get("X-Requested-With") != "xlottery":
+                raise model.ApiError("缺少请求标记", 403)
+            return self._body()
+
+        if path == "/me" and method == "GET":
+            acc = panel.session_account(conn, self._panel_token())
+            return self._json({"ok": True, "authed": acc is not None,
+                               "me": panel.view(acc) if acc else None,
+                               "version": VERSION})
+
+        if path == "/register" and method == "POST":
+            data = body()
+            username = (data.get("username") or "").strip()
+            name = (data.get("name") or "").strip()
+            password = data.get("password") or ""
+            note = (data.get("note") or "").strip()[:200]
+            if not (3 <= len(username) <= 24) or not all(
+                    c.isalnum() or c in "._-" for c in username):
+                raise model.ApiError("用户名需 3~24 位，只能用字母数字和 . _ -")
+            if not name:
+                raise model.ApiError("请填写称呼")
+            if len(password) < 8:
+                raise model.ApiError("密码至少 8 位")
+            with panel.tx() as tx:
+                if tx.execute("SELECT 1 FROM accounts WHERE lower(username)=lower(?)",
+                              (username,)).fetchone():
+                    raise model.ApiError("用户名已被占用", 409)
+                tx.execute(
+                    "INSERT INTO accounts (username, name, role, status, pass, note, created_at) "
+                    "VALUES (?,?,?,?,?,?,?)",
+                    (username, name, "admin", "pending", panel.hash_password(password),
+                     note, time.time()))
+                panel.audit(tx, "anon", "register", username, note)
+            return self._json({"ok": True, "status": "pending"})
+
+        if path == "/login" and method == "POST":
+            data = body()
+            block = _PANEL_FAILS.get(ip, 0)
+            if block > time.time():
+                raise model.ApiError("尝试过于频繁，请稍后再试", 429)
+            username = (data.get("username") or "").strip()
+            row = conn.execute("SELECT * FROM accounts WHERE lower(username)=lower(?)",
+                               (username,)).fetchone()
+            if row is None or not panel.verify_password(data.get("password") or "", row["pass"]):
+                fails = _PANEL_FAILS.get(ip + ":n", 0) + 1
+                _PANEL_FAILS[ip + ":n"] = fails
+                if fails >= 6:
+                    _PANEL_FAILS[ip] = time.time() + 30
+                    _PANEL_FAILS[ip + ":n"] = 0
+                raise model.ApiError("用户名或密码不对", 401)
+            if row["status"] == "pending":
+                raise model.ApiError("账号待审核，通过后才能登录", 403)
+            if row["status"] == "rejected":
+                raise model.ApiError("注册申请未通过", 403)
+            if row["status"] == "disabled":
+                raise model.ApiError("账号已停用", 403)
+            _PANEL_FAILS.pop(ip, None)
+            _PANEL_FAILS.pop(ip + ":n", None)
+            with panel.tx() as tx:
+                token = panel.create_session(tx, row["id"], ip)
+                tx.execute("UPDATE accounts SET last_login=? WHERE id=?",
+                           (time.time(), row["id"]))
+                panel.audit(tx, row["username"], "login", None, ip)
+            cookie = "%s=%s; Path=%s; HttpOnly; SameSite=Lax; Max-Age=%d" % (
+                panel.COOKIE, token, panel.cookie_path_for(raw_path, route), panel.SESSION_TTL)
+            return self._json({"ok": True, "me": panel.view(row)},
+                              headers=[("Set-Cookie", cookie)])
+
+        if path == "/logout" and method == "POST":
+            body()
+            token = self._panel_token()
+            if token:
+                with panel.tx() as tx:
+                    panel.destroy_session(tx, token)
+            cookie = "%s=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0" % panel.COOKIE
+            return self._json({"ok": True}, headers=[("Set-Cookie", cookie)])
+
+        # ---- everything below needs a signed-in account ----
+        acc = panel.session_account(conn, self._panel_token())
+        if acc is None:
+            raise model.ApiError("未登录或登录已过期", 401)
+
+        def need(*roles):
+            if roles and acc["role"] not in roles:
+                raise model.ApiError("当前账号无权执行该操作", 403)
+            return acc
+
+        if path == "/password" and method == "POST":
+            data = body()
+            if not panel.verify_password(data.get("old") or "", acc["pass"]):
+                raise model.ApiError("当前密码不对", 403)
+            new = (data.get("new") or "").strip()
+            if len(new) < 8:
+                raise model.ApiError("新密码至少 8 位")
+            with panel.tx() as tx:
+                tx.execute("UPDATE accounts SET pass=? WHERE id=?",
+                           (panel.hash_password(new), acc["id"]))
+                panel.audit(tx, acc["username"], "password_change")
+            return self._json({"ok": True})
+
+        if path == "/accounts" and method == "GET":
+            rows = conn.execute(
+                "SELECT * FROM accounts ORDER BY "
+                "CASE role WHEN 'owner' THEN 0 WHEN 'superadmin' THEN 1 ELSE 2 END, "
+                "CASE status WHEN 'pending' THEN 0 WHEN 'active' THEN 1 ELSE 2 END, created_at"
+            ).fetchall()
+            return self._json({"ok": True, "me": panel.view(acc),
+                               "accounts": [panel.view(r) for r in rows]})
+
+        if path == "/events" and method == "GET":
+            # the public base lives in the event database, not the panel one
+            base = public_base_url(db.connect())
+            rows = conn.execute("SELECT * FROM events ORDER BY created_at").fetchall()
+            return self._json({"ok": True, "events": [panel.event_view(r, base) for r in rows]})
+
+        if path == "/account/decide" and method == "POST":
+            actor = need("superadmin", "owner")
+            data = body()
+            target = conn.execute("SELECT * FROM accounts WHERE id=?",
+                                  (int(data.get("id") or 0),)).fetchone()
+            if target is None:
+                raise model.ApiError("账号不存在", 404)
+            if target["role"] == "owner":
+                raise model.ApiError("站长的账号不可操作", 403)
+            if actor["role"] == "superadmin" and target["role"] != "admin":
+                raise model.ApiError("超级管理员只能审核普通管理员", 403)
+            action = (data.get("action") or "").strip()
+            status = {"approve": "active", "reject": "rejected",
+                      "disable": "disabled", "enable": "active"}.get(action)
+            if status is None:
+                raise model.ApiError("未知操作")
+            with panel.tx() as tx:
+                tx.execute("UPDATE accounts SET status=?, decided_at=?, decided_by=? WHERE id=?",
+                           (status, time.time(), acc["username"], target["id"]))
+                panel.audit(tx, acc["username"], action, target["username"])
+            return self._json({"ok": True, "status": status})
+
+        if path == "/account/role" and method == "POST":
+            actor = need("owner")
+            data = body()
+            role = (data.get("role") or "").strip()
+            if role not in ("superadmin", "admin"):
+                raise model.ApiError("只能设为超级管理员或管理员")
+            target = conn.execute("SELECT * FROM accounts WHERE id=?",
+                                  (int(data.get("id") or 0),)).fetchone()
+            if target is None:
+                raise model.ApiError("账号不存在", 404)
+            if target["role"] == "owner":
+                raise model.ApiError("站长的角色不可更改", 403)
+            with panel.tx() as tx:
+                tx.execute("UPDATE accounts SET role=? WHERE id=?", (role, target["id"]))
+                panel.audit(tx, acc["username"], "role_change", target["username"], role)
+            return self._json({"ok": True, "role": role})
+
+        if path == "/audit" and method == "GET":
+            need("superadmin", "owner")
+            rows = conn.execute("SELECT * FROM audit ORDER BY id DESC LIMIT 200").fetchall()
+            return self._json({"ok": True, "audit": [dict(r) for r in rows]})
+
+        return self._err("not found", 404)
 
     # ---------------- pages ----------------
     def _page(self, method, path):
@@ -1036,6 +1279,8 @@ def main():
     bootstrap_secrets()
     conn = db.connect()
     ensure_public_url(conn)
+    panel.init_db()
+    panel.bootstrap(LOCAL_CFG, event_token_hint=SECRET, log=log)
     model.ensure_seed(conn)
 
     pidfile = os.path.join(db.DATA_DIR, "service.pid")

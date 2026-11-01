@@ -2,32 +2,36 @@
 
 The patch scripts used during development wrote through Python's text mode, which
 on Windows turns every "\\n" into "\\r\\n".  Harmless for .py/.js/.html, fatal for
-.sh (the shebang becomes #!/bin/sh\\r and the kernel cannot find the interpreter).
+.sh (the shebang becomes #!/bin/sh\\r and the kernel cannot find the interpreter),
+and noisy for git (a one-line edit becomes a whole-file diff).
+
+Run this before committing and before deploying.
 """
 import pathlib
 
-ROOTS = ("app.py", "db.py", "model.py", "auth.py", "localconfig.py", "checkin.py",
-         "pinyintable.py", "run.sh", "service.sh", "README.md", "deploy.ps1")
-DIRS = ("tpl", "static", "tools")
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+SKIP_DIRS = {"data", "tmp", "__pycache__", ".git", ".vscode", "node_modules"}
+SUFFIXES = {".py", ".js", ".css", ".html", ".sh", ".ps1", ".md", ".json"}
 
 changed = []
-for name in ROOTS:
-    p = pathlib.Path(name)
-    if not p.is_file():
+for path in sorted(ROOT.rglob("*")):
+    if not path.is_file() or path.suffix not in SUFFIXES:
         continue
-    data = p.read_bytes()
+    rel = path.relative_to(ROOT)
+    if any(part in SKIP_DIRS for part in rel.parts):
+        continue
+    data = path.read_bytes()
     if b"\r\n" in data:
-        p.write_bytes(data.replace(b"\r\n", b"\n"))
-        changed.append(name)
-
-for d in DIRS:
-    for p in pathlib.Path(d).rglob("*"):
-        if p.is_file() and p.suffix in (".py", ".js", ".css", ".html", ".sh", ".ps1"):
-            data = p.read_bytes()
-            if b"\r\n" in data:
-                p.write_bytes(data.replace(b"\r\n", b"\n"))
-                changed.append(str(p))
+        path.write_bytes(data.replace(b"\r\n", b"\n"))
+        changed.append(str(rel))
 
 print("normalised to LF:", len(changed), "file(s)")
 for c in changed:
     print("  ", c)
+
+print()
+print("still CRLF:", sum(
+    1 for p in ROOT.rglob("*")
+    if p.is_file() and p.suffix in SUFFIXES
+    and not any(part in SKIP_DIRS for part in p.relative_to(ROOT).parts)
+    and b"\r\n" in p.read_bytes()))

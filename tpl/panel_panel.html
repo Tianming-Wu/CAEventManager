@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>主面板 · xlottery</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="panel_static/panel.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="name">xlottery 主面板</div>
+  <div class="ver">v{{VERSION}}</div>
+  <div class="spacer"></div>
+  <div class="who" id="who"></div>
+  <button class="btn sm danger" id="logoutBtn">退出登录</button>
+</header>
+
+<main class="wrap">
+
+  <section class="panel">
+    <h2>活动</h2>
+    <p class="panel-hint">每个活动通过自己的 id 访问；页面路径与访问 id 一一对应。</p>
+    <div class="tblwrap">
+      <table class="tbl" id="eventsTable">
+        <thead><tr>
+          <th>活动 id</th><th>名称</th><th>创建时间</th><th class="actions">入口</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel" id="pendingPanel" style="display:none">
+    <h2>待审核</h2>
+    <p class="panel-hint">通过后对方才能登录。</p>
+    <div class="tblwrap">
+      <table class="tbl" id="pendingTable">
+        <thead><tr>
+          <th>用户名</th><th>称呼</th><th>申请说明</th><th>提交时间</th>
+          <th class="actions">操作</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>账号</h2>
+    <p class="panel-hint" id="accountsHint"></p>
+    <div class="tblwrap">
+      <table class="tbl" id="accountsTable">
+        <thead><tr>
+          <th>用户名</th><th>称呼</th><th>角色</th><th>状态</th>
+          <th>最近登录</th><th class="actions">操作</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>修改密码</h2>
+    <div class="row" style="align-items:flex-end">
+      <div class="field" style="flex:1;min-width:150px;margin:0">
+        <label for="pwOld">当前密码</label>
+        <input id="pwOld" type="password" autocomplete="current-password">
+      </div>
+      <div class="field" style="flex:1;min-width:150px;margin:0">
+        <label for="pwNew">新密码（至少 8 位）</label>
+        <input id="pwNew" type="password" autocomplete="new-password">
+      </div>
+      <button class="btn" id="pwBtn">修改</button>
+    </div>
+    <div class="err" id="pwErr" style="margin-top:8px"></div>
+  </section>
+
+  <section class="panel" id="auditPanel" style="display:none">
+    <h2>操作日志</h2>
+    <div class="tblwrap" style="max-height:340px">
+      <table class="tbl" id="auditTable">
+        <thead><tr><th>时间</th><th>操作人</th><th>动作</th><th>对象</th><th>说明</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <div class="site-foot">{{FOOTER}}</div>
+</main>
+
+<script src="panel_static/common.js"></script>
+<script src="panel_static/panel.js"></script>
+</body>
+</html>

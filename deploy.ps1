@@ -23,7 +23,11 @@ $files = @(
     (Get-ChildItem -File -Filter *.md | Select-Object -ExpandProperty Name)
     "run.sh", "service.sh"
 )
-$dirs = @("tpl", "static", "tools")
+# Collected too: tpl / static / panel_static / tools - a hand-written list here
+# silently skipped a new asset directory once already.
+$skip = @("data", "tmp", "__pycache__", ".git", ".vscode")
+$dirs = @(Get-ChildItem -Directory | Where-Object { $skip -notcontains $_.Name } |
+          Select-Object -ExpandProperty Name)
 
 $tarball = $null
 Push-Location $root
@@ -64,7 +68,7 @@ sed -i 's/\r$//' run.sh service.sh 2>/dev/null || true
 chmod +x run.sh service.sh
 find . -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/null || true
 __EXISTENCE__
-python3 -c "import app, db, model, auth, localconfig, checkin" || {
+python3 -c "import app, db, model, auth, localconfig, checkin, exporter, panel" || {
     echo "PREFLIGHT FAILED: deployed modules do not import" >&2
     exit 1
 }

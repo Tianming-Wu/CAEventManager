@@ -77,11 +77,11 @@ def ui_login(page, user=None, password=None):
     page.click("#go")
     page.wait_for_url("**/panel", timeout=20000)
     page.wait_for_selector(".shell", timeout=20000)
-    # .shell is static markup; wait for the account to land, not for a stopwatch
+    # panel.js sets data-booted once the account and the first page are in place
     page.wait_for_function(
-        "() => document.getElementById('acctName').textContent.trim().length > 0",
+        "() => document.documentElement.getAttribute('data-booted') === '1'",
         timeout=25000)
-    page.wait_for_timeout(250)
+    page.wait_for_timeout(200)
 
 
 def visible_nav(page):
@@ -161,6 +161,12 @@ def login_page(page):
     except Exception:
         landed = False
     check("second attempt signs in", landed, page.url + " | " + page.title())
+    # the console is a separate page load; wait for its own boot, not for a
+    # static string that the server already sent
+    page.wait_for_selector(".shell", timeout=25000)
+    page.wait_for_function(
+        "() => document.documentElement.getAttribute('data-booted') === '1'",
+        timeout=25000)
     body = page.content()
     check("console rendered", "总览" in body or "我的活动" in body, page.title())
     check("no 501 page", "Unsupported method" not in body)

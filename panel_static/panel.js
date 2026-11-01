@@ -1126,6 +1126,8 @@
       return reloadAll().then(function () {
         startHostPolling();
         onRoute();
+        // a real readiness signal: tests used to poll the placeholder text
+        document.documentElement.setAttribute("data-booted", "1");
       });
     }).catch(function (e) {
       if (e.status === 401) location.href = "login";

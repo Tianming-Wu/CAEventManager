@@ -42,7 +42,7 @@ import panel
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TPL_DIR = os.path.join(BASE_DIR, "tpl")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 

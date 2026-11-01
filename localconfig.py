@@ -33,6 +33,11 @@ DEFAULTS = {
     "path_secret": "",
     "host": "0.0.0.0",
     "port": 8931,
+    # Who the owner signs in as, and what the console calls them.  The two are
+    # separate on purpose: the display name is what anyone looking at the screen
+    # sees, the login name is what actually opens the account.
+    "owner_username": "owner",
+    "owner_name": "站长",
     # Where the service is published.  Used ONLY to build links (QR codes, short
     # links, cookie paths).  Routing does not depend on it: the app answers on
     # whatever path the request arrives by, so local access always works and a
@@ -77,6 +82,8 @@ def save(cfg):
         "host": cfg.get("host") or DEFAULTS["host"],
         "port": int(cfg.get("port") or DEFAULTS["port"]),
         "public_base_prefix": (cfg.get("public_base_prefix") or DEFAULTS["public_base_prefix"]).rstrip("/"),
+        "owner_username": (cfg.get("owner_username") or DEFAULTS["owner_username"]).strip(),
+        "owner_name": (cfg.get("owner_name") or DEFAULTS["owner_name"]).strip(),
     }
     directory = os.path.dirname(CONFIG_PATH) or "."
     os.makedirs(directory, exist_ok=True)

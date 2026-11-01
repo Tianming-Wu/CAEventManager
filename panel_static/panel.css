@@ -311,6 +311,55 @@ svg {
   border-top: 1px solid var(--line-soft);
 }
 .nav-sep { height: 1px; background: var(--line-soft); margin: 8px 10px; }
+.nav-foot-sep { height: 1px; background: var(--line-soft); margin: 8px 10px 10px; }
+
+.nav-account {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+  color: inherit;
+  text-decoration: none;
+  min-height: 56px;
+}
+.nav-account:hover { background: var(--surface-2); text-decoration: none; }
+.nav-account:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.nav-account[aria-current="page"] {
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.nav-account-avatar {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  color: var(--accent-strong);
+  font-size: .95rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.nav-account-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  align-items: flex-start;
+}
+.nav-account-name {
+  font-size: .88rem;
+  font-weight: 600;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nav-account .tag { font-size: .7rem; }
 
 .nav-item {
   position: relative;
@@ -381,7 +430,19 @@ button.nav-item {
 .nav-group.open > .nav-group-head .nav-caret { transform: rotate(90deg); }
 .nav-group.has-current > .nav-group-head { color: var(--accent-strong); }
 
-.nav-sub { display: flex; flex-direction: column; gap: 2px; }
+.nav-sub {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows .2s ease;
+}
+.nav-group.open > .nav-sub { grid-template-rows: 1fr; }
+.nav-sub-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  overflow: hidden;
+}
 .nav-sub-item {
   padding-left: 41px;          /* 10 + icon 20 + gap 11 */
   font-size: .84rem;
@@ -493,32 +554,130 @@ a.stat:hover { background: var(--surface-2); text-decoration: none; }
 a.stat:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .stat-label { font-size: .76rem; color: var(--dim); }
 .stat-num {
+  display: block;
   font-size: 1.5rem;
   font-weight: 650;
   line-height: 1.25;
   font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
 /* ---------- events ---------- */
 .event-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
+  gap: 12px;
 }
 .event-card {
+  position: relative;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--surface-2);
-  padding: 12px 14px;
+  padding: 16px 16px 14px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 10px;
   min-width: 0;
+  min-height: 148px;
 }
-.event-title { font-weight: 650; }
-.event-meta { font-size: .76rem; color: var(--dim); }
-.event-meta code { font-size: .72rem; word-break: break-all; }
-.event-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
+.event-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.event-title {
+  flex: 1 1 auto;
+  font-size: 1.02rem;
+  font-weight: 650;
+  line-height: 1.35;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.event-meta { font-size: .78rem; color: var(--dim); }
+
+/* the token is for recognising a card, not for copying by hand */
+.event-token { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.event-token code {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: .78rem;
+  color: var(--muted);
+  letter-spacing: .01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.event-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: auto; }
+.event-actions .btn { flex: 1 1 auto; }
+
+.card-menu-btn {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  margin: -4px -6px 0 0;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--dim);
+  cursor: pointer;
+}
+.card-menu-btn:hover { background: var(--surface-3); color: var(--text); }
+.card-menu-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.card-menu-btn svg { width: 18px; height: 18px; }
+
+/* one floating menu, positioned next to whichever card asked for it */
+.card-menu {
+  position: fixed;
+  z-index: 70;
+  min-width: 168px;
+  padding: 5px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+}
+.card-menu button {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  color: var(--text);
+  font: inherit;
+  font-size: .86rem;
+  text-align: left;
+  padding: 8px 10px;
+  min-height: 36px;
+  cursor: pointer;
+}
+.card-menu button:hover:not(:disabled) { background: var(--surface-2); }
+.card-menu button:disabled { color: var(--dim); cursor: default; }
+.card-menu .menu-sep { height: 1px; background: var(--line-soft); margin: 4px 2px; }
+
+/* ---------- copy button ---------- */
+.copy-btn {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--dim);
+  cursor: pointer;
+}
+.copy-btn:hover { background: var(--surface-3); color: var(--text); }
+.copy-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.copy-btn svg { width: 14px; height: 14px; }
+.copy-btn.copied { color: var(--accent-strong); }
 
 /* ---------- tables ---------- */
 .tblwrap {
@@ -887,17 +1046,15 @@ input:focus, textarea:focus, select:focus {
 /* ==========================================================================
    theme switch
 
-   Colours are toggled by swapping color-scheme, which on its own lands in one
-   frame.  The class is added for the duration of the switch only, so hover and
-   navigation never inherit a transition.
+   Animating the properties themselves does not hold: measured frame by frame,
+   an h1 heading that inherits its colour jumps back to a mid grey at the moment
+   the transition is supposed to end and runs a second time.  A view transition
+   cross-fades two snapshots instead, so what is on screen can only move one way.
    ========================================================================== */
-:root.theming,
-:root.theming *,
-:root.theming *::before,
-:root.theming *::after {
-  transition: background-color .26s ease, color .26s ease, border-color .26s ease,
-              box-shadow .26s ease, fill .26s ease, stroke .26s ease,
-              outline-color .26s ease !important;
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: .22s;
+  animation-timing-function: ease;
 }
 
 /* ==========================================================================
@@ -909,7 +1066,10 @@ input:focus, textarea:focus, select:focus {
   .shell { grid-template-columns: var(--side-rail) minmax(0, 1fr); }
   .nav-item { justify-content: center; padding: 0 6px; gap: 0; }
   .nav-text, .brand-ver, .nav-caret { display: none; }
+  .nav-account { justify-content: center; padding: 9px 4px; }
+  .nav-account-text { display: none; }
   .nav-sub { display: none; }           /* children live in the pane */
+  .nav-sub-inner { overflow: visible; }
   .nav-badge {
     position: absolute;
     top: 4px;
@@ -943,9 +1103,11 @@ input:focus, textarea:focus, select:focus {
   .shell.nav-open .nav-caret { display: inline; }
   .shell.nav-open .nav-badge { position: static; margin-left: auto; }
   .shell.nav-open .nav-badge.count { display: inline-block; }
-  .shell.nav-open .nav-sub:not([hidden]) { display: flex; }
+  .shell.nav-open .nav-sub { display: grid; }
   .shell.nav-open .nav-item { justify-content: flex-start; padding: 0 10px; gap: 11px; }
   .shell.nav-open .nav-item[aria-current="page"]::before { left: -8px; }
+  .shell.nav-open .nav-account { justify-content: flex-start; padding: 9px 10px; }
+  .shell.nav-open .nav-account-text { display: flex; }
 }
 
 /* ---------- drawer: the sidebar leaves the flow on a phone ---------- */
@@ -979,7 +1141,7 @@ input:focus, textarea:focus, select:focus {
   .nav-text, .nav-caret { display: inline; }
   .nav-badge { position: static; margin-left: auto; }
   .nav-badge.count { display: inline-block; }
-  .nav-sub:not([hidden]) { display: flex; }
+  .nav-sub { display: grid; }
   .nav-item[aria-current="page"]::before { left: -10px; }
 
   .content { padding: 16px 14px calc(24px + env(safe-area-inset-bottom)); }

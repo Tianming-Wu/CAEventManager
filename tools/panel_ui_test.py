@@ -21,6 +21,8 @@ from playwright.sync_api import sync_playwright
 
 BASE = (sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8931").rstrip("/")
 PASSWORD = sys.argv[2] if len(sys.argv) > 2 else ""
+LOGIN = sys.argv[3] if len(sys.argv) > 3 and not sys.argv[3].startswith("--") \
+    else "owner"
 WITH_ACCOUNTS = "--accounts" in sys.argv
 TAG = str(random.randint(1000, 9999))
 
@@ -39,7 +41,7 @@ def check(name, cond, detail=""):
 def owner_opener():
     jar = urllib.request.HTTPCookieProcessor()
     opener = urllib.request.build_opener(jar)
-    call(opener, "/api/panel/login", {"username": "owner", "password": PASSWORD})
+    call(opener, "/api/panel/login", {"username": LOGIN, "password": PASSWORD})
     return opener
 
 
@@ -65,7 +67,9 @@ def new_page(browser, width=1440, height=900, touch=False, mobile=False, dpr=1):
     return ctx, page
 
 
-def ui_login(page, user, password):
+def ui_login(page, user=None, password=None):
+    user = user or LOGIN
+    password = password or PASSWORD
     page.goto(BASE + "/login", wait_until="domcontentloaded")
     page.fill("#username", user)
     page.fill("#password", password)
@@ -135,7 +139,7 @@ def login_page(page):
           page.locator('a[href*="register"]').count() == 1)
 
     print("== a rejected attempt stays on the page ==")
-    page.fill("#username", "owner")
+    page.fill("#username", LOGIN)
     page.fill("#password", "definitely-not-the-password")
     page.click("#go")
     page.wait_for_function(
@@ -167,7 +171,10 @@ def login_page(page):
 def shell_page(page):
     print("== the shell ==")
     check("account name shown", page.locator("#acctName").inner_text().strip() != "")
-    check("account role shown", "站长" in page.locator("#acctRole").inner_text())
+    corner = page.evaluate(
+        "() => document.getElementById('acctName').textContent + ' ' +"
+        " document.getElementById('acctRole').textContent")
+    check("the account role is shown in the corner", "站长" in corner, corner)
     check("avatar shows one letter",
           len(page.locator("#acctAvatar").inner_text().strip()) == 1)
     nav = visible_nav(page)
@@ -175,6 +182,36 @@ def shell_page(page):
                  "server", "audit", "account", "appearance"):
         check("nav has %s" % item, item in nav["items"], nav["items"])
     check("nav has the approvals group", "approvals" in nav["groups"], nav["groups"])
+
+    order = page.evaluate(
+        "() => Array.from(document.querySelector('.nav-foot').children)"
+        ".map(el => el.className)")
+    check("界面设置 sits above a rule, the account card below",
+          "nav-item" in order[0] and "nav-foot-sep" in order[1]
+          and "nav-account" in order[2], order)
+    card = page.evaluate("""() => {
+        const c = document.querySelector('.nav-account').getBoundingClientRect();
+        const av = document.querySelector('.nav-account-avatar').getBoundingClientRect();
+        const name = document.getElementById('sideName').getBoundingClientRect();
+        const tag = document.getElementById('sideRole').getBoundingClientRect();
+        return {h: Math.round(c.height), avatarLeft: av.left < name.left,
+                nameAboveTag: name.top < tag.top,
+                avatarRound: getComputedStyle(
+                    document.querySelector('.nav-account-avatar')).borderRadius};
+    }""")
+    check("it is a card, not a row", card["h"] >= 52, card)
+    check("the avatar is round and on the left",
+          card["avatarLeft"] and card["avatarRound"] == "999px", card)
+    check("the name sits above the role tag", card["nameAboveTag"], card)
+
+    print("== the login name is not on display ==")
+    shown = page.evaluate(
+        "() => document.getElementById('acctName').textContent + '|' +"
+        " document.getElementById('sideName').textContent + '|' +"
+        " document.getElementById('acctBtn').title")
+    check("the corner and the card show a display name",
+          shown.replace("|", "").strip() != "", shown)
+    check("neither shows the login name", LOGIN not in shown, shown)
 
     print("== the account card is invisible until hovered ==")
     rest = page.evaluate("""() => {
@@ -270,6 +307,59 @@ def search_page(page):
         "() => document.getElementById('userSearch').value") != "owner")
 
 
+def card_page(page):
+    print("== the activity card ==")
+    page.goto(BASE + "/panel#/events")
+    page.wait_for_timeout(400)
+    cols = page.evaluate("""() => {
+        const grid = document.getElementById('myEvents');
+        return getComputedStyle(grid).gridTemplateColumns.split(' ')
+            .filter(Boolean).length;
+    }""")
+    check("three cards fit across a page", cols == 3, cols)
+    check("the token is shortened, not wrapped",
+          page.locator("#myEvents .event-token code").count() == 1)
+    check("it keeps both ends and stars the middle", page.evaluate("""() => {
+        const el = document.querySelector('#myEvents .event-token code');
+        const full = el.title, shown = el.textContent;
+        return shown.length < full.length && full.startsWith(shown.slice(0, 4))
+               && full.endsWith(shown.slice(-5)) && shown.indexOf('****') > 0;
+    }"""))
+    check("one 管理面板 button, nothing else",
+          page.locator("#myEvents .event-actions a").count() == 1 and
+          page.locator("#myEvents .event-actions a").inner_text().strip() == "管理面板")
+
+    print("== the card menu ==")
+    check("no menu until asked", page.locator(".card-menu").count() == 0)
+    page.click("#myEvents .card-menu-btn")
+    page.wait_for_timeout(240)
+    check("the three-dot button opens a menu",
+          page.locator(".card-menu").is_visible())
+    items = page.evaluate(
+        "() => Array.from(document.querySelectorAll('.card-menu button'))"
+        ".map(b => b.textContent.trim())")
+    check("it holds the less-used actions",
+          "活动设置" in items and "复制活动 token" in items, items)
+    check("the unfinished one is disabled", page.evaluate(
+        "() => Array.from(document.querySelectorAll('.card-menu button'))"
+        ".some(b => b.textContent.trim() === '活动设置' && b.disabled)"))
+    check("the menu stays inside the window", page.evaluate("""() => {
+        const m = document.querySelector('.card-menu').getBoundingClientRect();
+        return m.left >= 0 && m.right <= window.innerWidth
+            && m.top >= 0 && m.bottom <= window.innerHeight;
+    }"""))
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(220)
+    check("escape closes it", page.locator(".card-menu").count() == 0)
+
+    print("== copy ==")
+    page.click("#myEvents .copy-btn")
+    page.wait_for_timeout(320)
+    check("the copy button reports back", page.evaluate(
+        "() => document.querySelector('#myEvents .copy-btn').classList"
+        ".contains('copied')"))
+
+
 def dialog_page(page):
     print("== 用户管理 opens a dialog per account ==")
     page.goto(BASE + "/panel#/users")
@@ -302,16 +392,21 @@ def theme_page(page):
     print("== theme ==")
     page.goto(BASE + "/panel#/appearance")
     page.wait_for_timeout(260)
+    page.evaluate("""() => {
+        window.__vt = 0;
+        const original = document.startViewTransition;
+        if (!original) return;
+        document.startViewTransition = function (cb) {
+            window.__vt += 1;
+            return original.call(this, cb);
+        };
+    }""")
     page.click('#themeSeg button[data-theme-pref="dark"]')
-    fading = page.evaluate(
-        "() => document.documentElement.classList.contains('theming')")
+    page.wait_for_timeout(120)
     check("the switch cross-fades instead of cutting",
-          fading and page.evaluate(
-              "() => getComputedStyle(document.body)"
-              ".transitionProperty.indexOf('background-color') >= 0"), fading)
-    page.wait_for_timeout(420)
-    check("the fade is over", not page.evaluate(
-        "() => document.documentElement.classList.contains('theming')"))
+          page.evaluate("() => window.__vt") == 1,
+          page.evaluate("() => window.__vt"))
+    page.wait_for_timeout(400)
     check("dark applied",
           page.evaluate("() => document.documentElement.dataset.theme") == "dark")
     check("dark really repaints", page.evaluate(
@@ -333,7 +428,7 @@ def layout_page(browser):
             (390, 844, 2, True, "phone-portrait")]:
         ctx, page = new_page(browser, w, h, touch, touch and w < 800, dpr)
         try:
-            ui_login(page, "owner", PASSWORD)
+            ui_login(page)
             over = page.evaluate(
                 "() => document.documentElement.scrollWidth - window.innerWidth")
             check("%-16s no horizontal overflow" % name, over <= 1, "%dpx" % over)
@@ -358,7 +453,7 @@ def touch_page(browser):
     print("== tablet: the rail must still reach sub-items ==")
     ctx, page = new_page(browser, 1024, 768, touch=True)
     try:
-        ui_login(page, "owner", PASSWORD)
+        ui_login(page)
         check("labels hidden on the rail",
               not page.locator('[data-nav="overview"] .nav-text').is_visible())
         check("hover titles exist", page.evaluate(
@@ -391,7 +486,7 @@ def touch_page(browser):
     print("== phone: drawer and the dialog sheet ==")
     ctx, page = new_page(browser, 390, 844, touch=True, mobile=True, dpr=2)
     try:
-        ui_login(page, "owner", PASSWORD)
+        ui_login(page)
         page.click("#menuBtn")
         page.wait_for_timeout(420)
         page.click('[data-toggle="approvals"]')
@@ -416,7 +511,7 @@ def touch_page(browser):
     print("== landscape phone: short viewport ==")
     ctx, page = new_page(browser, 844, 390, touch=True)
     try:
-        ui_login(page, "owner", PASSWORD)
+        ui_login(page)
         check("the content scrolls, the page does not", page.evaluate(
             """() => { const c = document.getElementById('content');
                        return c.scrollHeight > c.clientHeight; }"""))
@@ -533,7 +628,7 @@ def denied_flow(browser):
               "/login" in page.url, page.url)
         check("and carries the way back", "s_return=server" in page.url, page.url)
 
-        page.fill("#username", "owner")
+        page.fill("#username", LOGIN)
         page.fill("#password", PASSWORD)
         page.click("#go")
         # the return target lives in the fragment, which a glob will not match
@@ -561,6 +656,7 @@ def main():
                 shell_page(page)
                 routes_page(page)
                 group_page(page)
+                card_page(page)
                 dialog_page(page)
                 theme_page(page)
                 audit_page(page)

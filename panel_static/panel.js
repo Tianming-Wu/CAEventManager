@@ -64,9 +64,18 @@
   function canAudit() { return allowed("audit"); }
   function canReview() { return allowed("approval-users"); }
 
+  // The login name is for signing in; what the console shows is the display
+  // name, so showing someone the interface does not hand them the account name.
+  function displayName(me) {
+    if (!me) return "";
+    return me.name || me.roleLabel || "";
+  }
   function initialOf(me) {
-    var s = (me && (me.name || me.username)) || "?";
+    var s = displayName(me) || "?";
     return s.trim().charAt(0);
+  }
+  function roleIfDistinct(me) {
+    return (me && me.name && me.name !== me.roleLabel) ? me.roleLabel : "";
   }
 
   // The adopted first event has no owner recorded; treat it as the owner's.
@@ -83,20 +92,39 @@
   function pct(n) { return (n === null || n === undefined) ? "–" : Math.round(n) + "%"; }
   function eventTitle(e) { return e.title || "未命名活动"; }
 
-  function eventCard(e, extra) {
+  // A long token identifies the card, it is not something to retype: keep the
+  // ends, star the middle, and put the real value one click away.
+  function shortToken(id) {
+    if (!id) return "";
+    if (id.length <= 16) return id;
+    return id.slice(0, 4) + "****" + id.slice(-5);
+  }
+
+  var ICON_COPY = '<svg viewBox="0 0 20 20" aria-hidden="true">' +
+    '<rect x="6.6" y="6.6" width="9.2" height="9.2" rx="1.8"/>' +
+    '<path d="M13.4 6.6V5.2a1.6 1.6 0 0 0-1.6-1.6H5.2a1.6 1.6 0 0 0-1.6 1.6v6.6a1.6 1.6 0 0 0 1.6 1.6h1.4"/></svg>';
+  var ICON_DOTS = '<svg viewBox="0 0 20 20" aria-hidden="true">' +
+    '<circle cx="10" cy="4.3" r="1.35" fill="currentColor" stroke="none"/>' +
+    '<circle cx="10" cy="10" r="1.35" fill="currentColor" stroke="none"/>' +
+    '<circle cx="10" cy="15.7" r="1.35" fill="currentColor" stroke="none"/></svg>';
+
+  function eventCard(e) {
+    var meta = [];
+    if (e.createdAt) meta.push("建于 " + PX.when(e.createdAt));
     return '<div class="event-card">' +
+      '<div class="event-card-head">' +
       '<div class="event-title">' + PX.esc(eventTitle(e)) + "</div>" +
-      '<div class="event-meta">' +
-      "token <code>" + PX.esc(e.id) + "</code>" +
-      (e.createdAt ? " · 建于 " + PX.when(e.createdAt) : "") +
-      (e.owner ? " · " + PX.esc(e.owner) : "") +
+      '<button class="card-menu-btn" type="button" data-menu="' + PX.esc(e.id) + '" ' +
+      'aria-haspopup="menu" aria-label="更多操作">' + ICON_DOTS + "</button>" +
       "</div>" +
-      (extra || "") +
+      '<div class="event-token"><code title="' + PX.esc(e.id) + '">' +
+      PX.esc(shortToken(e.id)) + "</code>" +
+      '<button class="copy-btn" type="button" data-copy="' + PX.esc(e.id) + '" ' +
+      'aria-label="复制活动 token">' + ICON_COPY + "</button></div>" +
+      '<div class="event-meta">' + PX.esc(meta.join(" · ")) + "</div>" +
       '<div class="event-actions">' +
-      '<a class="btn sm" href="' + PX.esc(e.url) + '" target="_blank" rel="noopener">公示</a>' +
-      '<a class="btn sm" href="' + PX.esc(e.screen) + '" target="_blank" rel="noopener">大屏</a>' +
-      '<a class="btn sm primary" href="' + PX.esc(e.admin) + '" target="_blank" rel="noopener">后台</a>' +
-      "</div></div>";
+      '<a class="btn primary" href="' + PX.esc(e.admin) + '" target="_blank" ' +
+      'rel="noopener">管理面板</a></div></div>';
   }
 
   function emptyRow(cols, text) {
@@ -142,6 +170,76 @@
     if (e.target === $("#overlay")) closeOverlay();   // click the scrim
   });
 
+  /* ------------------------------------------------------------ card menu */
+  var cardMenuEl = null;
+
+  function closeCardMenu() {
+    if (cardMenuEl) {
+      cardMenuEl.remove();
+      cardMenuEl = null;
+    }
+  }
+
+  function openCardMenu(anchor, id) {
+    closeCardMenu();
+    var e = S.events.filter(function (x) { return x.id === id; })[0];
+    if (!e) return;
+    var menu = document.createElement("div");
+    menu.className = "card-menu";
+    menu.setAttribute("role", "menu");
+    menu.innerHTML =
+      '<button type="button" role="menuitem" data-open-link="' + PX.esc(e.admin) + '">' +
+      "管理面板</button>" +
+      '<button type="button" role="menuitem" data-copy="' + PX.esc(e.url) + '">' +
+      "复制访问链接</button>" +
+      '<button type="button" role="menuitem" data-copy="' + PX.esc(e.id) + '">' +
+      "复制活动 token</button>" +
+      '<div class="menu-sep"></div>' +
+      // UNWIRED(event-settings): 活动设置还没有页面，先占位
+      '<button type="button" role="menuitem" disabled>活动设置</button>';
+    document.body.appendChild(menu);
+
+    var rect = anchor.getBoundingClientRect();
+    var left = Math.min(Math.max(8, rect.right - menu.offsetWidth),
+                        window.innerWidth - menu.offsetWidth - 8);
+    var top = rect.bottom + 6;
+    if (top + menu.offsetHeight > window.innerHeight - 8) {
+      top = Math.max(8, rect.top - menu.offsetHeight - 6);
+    }
+    menu.style.left = left + "px";
+    menu.style.top = top + "px";
+    cardMenuEl = menu;
+    var first = menu.querySelector("button:not([disabled])");
+    if (first) first.focus();
+  }
+
+  function copyText(text, button) {
+    var done = function () {
+      PX.toast("已复制");
+      if (button) {
+        button.classList.add("copied");
+        setTimeout(function () { button.classList.remove("copied"); }, 1200);
+      }
+    };
+    var fallback = function () {
+      var area = document.createElement("textarea");
+      area.value = text;
+      area.setAttribute("readonly", "");
+      area.style.position = "fixed";
+      area.style.opacity = "0";
+      document.body.appendChild(area);
+      area.select();
+      try { document.execCommand("copy"); } catch (e) { /* nothing else to try */ }
+      area.remove();
+      done();
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done).catch(fallback);
+    } else {
+      fallback();
+    }
+  }
+
   /* -------------------------------------------------------- role visibility */
   function applyRoleVisibility() {
     $$("[data-min-role]").forEach(function (el) {
@@ -156,14 +254,27 @@
       var t = a.querySelector(".nav-text");
       if (t && !a.getAttribute("title")) a.setAttribute("title", t.textContent.trim());
     });
+    var acct = $(".nav-account");
+    if (acct && !acct.getAttribute("title")) acct.setAttribute("title", "账户信息");
   }
 
   function renderIdentity() {
     if (!S.me) return;
-    $("#acctName").textContent = S.me.name || S.me.username;
-    $("#acctRole").textContent = S.me.roleLabel;
+    var name = displayName(S.me);
+    var sub = roleIfDistinct(S.me);
+    $("#acctName").textContent = name;
+    $("#acctRole").textContent = sub;
+    $("#acctRole").hidden = !sub;
     $("#acctAvatar").textContent = initialOf(S.me);
-    $("#acctBtn").title = S.me.username + " · " + S.me.roleLabel;
+    $("#acctBtn").title = name + (sub ? " · " + sub : "");
+
+    $("#sideName").textContent = name;
+    $("#sideAvatar").textContent = initialOf(S.me);
+    var tag = $("#sideRole");
+    tag.textContent = S.me.roleLabel;
+    tag.className = "tag " + (S.me.role === "owner" ? "owner"
+                              : (S.me.role === "superadmin" ? "superadmin" : ""));
+    tag.hidden = false;
   }
 
   /* -------------------------------------------------------------- nav groups */
@@ -175,7 +286,9 @@
     var g = groupEl(name);
     if (!g) return;
     S.openGroups[name] = !!open;
-    g.querySelector(".nav-sub").hidden = !open;
+    // the list is clipped, not hidden, so the height can animate; inert keeps
+    // the clipped links out of the tab order while it is shut
+    g.querySelector(".nav-sub").inert = !open;
     g.querySelector(".nav-group-head").setAttribute("aria-expanded", open ? "true" : "false");
     g.classList.toggle("open", !!open);
   }
@@ -669,15 +782,23 @@
     var next = dark ? "dark" : "light";
     var changed = root.getAttribute("data-theme") !== next;
 
-    if (changed && !reducedMotion()) {
-      // Colours only cross-fade while the theme is actually changing; the class
-      // is removed afterwards so hovering a nav item stays instant.
-      root.classList.add("theming");
-      void root.offsetWidth;
-      setTimeout(function () { root.classList.remove("theming"); }, 340);
+    var apply = function () {
+      root.setAttribute("data-theme", next);
+      root.setAttribute("data-theme-pref", pref);
+    };
+
+    // Cross-fade two snapshots rather than animating each property: measured
+    // frame by frame, transitioning colour made headings jump back to a mid grey
+    // and run twice, which reads as a flicker.
+    if (changed && !reducedMotion() && document.startViewTransition) {
+      try {
+        document.startViewTransition(apply);
+      } catch (err) {
+        apply();
+      }
+    } else {
+      apply();
     }
-    root.setAttribute("data-theme", next);
-    root.setAttribute("data-theme-pref", pref);
     drawAppearance();
   }
 
@@ -706,6 +827,26 @@
 
     var toggle = t.closest("[data-toggle]");
     if (toggle) return onGroupHead(toggle.getAttribute("data-toggle"));
+
+    var menuBtn = t.closest("[data-menu]");
+    if (menuBtn) {
+      e.stopPropagation();
+      return openCardMenu(menuBtn, menuBtn.getAttribute("data-menu"));
+    }
+
+    var copyBtn = t.closest("[data-copy]");
+    if (copyBtn) {
+      e.stopPropagation();
+      closeCardMenu();
+      return copyText(copyBtn.getAttribute("data-copy"), copyBtn);
+    }
+
+    var openLink = t.closest("[data-open-link]");
+    if (openLink) {
+      closeCardMenu();
+      window.open(openLink.getAttribute("data-open-link"), "_blank", "noopener");
+      return;
+    }
 
     var logoutBtn = t.closest("[data-logout]");
     if (logoutBtn) return logout(logoutBtn.getAttribute("data-logout"));
@@ -736,6 +877,13 @@
     $("#acctBtn").setAttribute("aria-expanded", open ? "true" : "false");
   });
   document.addEventListener("click", function (e) {
+    // The opener is also on the document, so exclude it: otherwise the menu is
+    // closed by the same click that opened it.
+    if (cardMenuEl && !(e.target.closest &&
+                        (e.target.closest(".card-menu") ||
+                         e.target.closest("[data-menu]")))) {
+      closeCardMenu();
+    }
     var menu = $("#acctMenu");
     if (menu.hidden) return;
     if (e.target.closest && e.target.closest(".acct-wrap")) return;
@@ -822,6 +970,7 @@
 
   window.addEventListener("keydown", function (e) {
     if (e.key === "Escape") {
+      if (cardMenuEl) return closeCardMenu();
       if (!$("#overlay").hidden) return closeOverlay();
       if (!$("#acctMenu").hidden) {
         $("#acctMenu").hidden = true;

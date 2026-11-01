@@ -69,8 +69,13 @@
 | 启动 | `./service.sh start`（`setsid` 后台，`flock` 防重复） |
 | 数据库 | `data/lottery.sqlite3`（SQLite + WAL） |
 | 访问 id / 端口 | `config.json`（`path_secret`/`host`/`port`/`public_base_prefix`） |
+| 站长的登录名与显示名 | `config.json`（`owner_username`/`owner_name`） |
 | 管理员 | `laffey`，初始密码在 `data/admin_password.txt`（0600） |
 | 日志 | `data/service.log` |
+
+`config.json` 的 `owner_username` / `owner_name` 是站长的**登录名**与**显示名**，两者
+故意分开：界面上只出现显示名，所以把界面给别人看不会顺带交出自己的登录名。改完重启即生效，
+启动日志会把新旧值都打出来（改错会改掉登录名，日志是唯一线索）。显示名留空时退回角色名"站长"。
 
 `config.json` 的 `public_base_prefix` 必须等于线上真实路径前缀（默认
 `https://lab.nwuca.tech/u/laffey/xlottery`）。**服务名换了就改这里再重启**，

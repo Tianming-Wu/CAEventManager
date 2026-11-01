@@ -228,18 +228,47 @@ def event_view(row, base):
 # --------------------------------------------------------------------------- #
 # bootstrap
 # --------------------------------------------------------------------------- #
+def _sync_owner_identity(conn, owner, cfg, log=print):
+    """Keep the owner row in step with config.json.
+
+    The config file is the source of truth here, which also means a typo in it
+    renames the login.  That is why every change is logged with both values.
+    """
+    wanted_user = (cfg.get("owner_username") or "").strip()
+    wanted_name = (cfg.get("owner_name") or "").strip()
+    new_user = wanted_user or owner["username"]
+    new_name = wanted_name or owner["name"]
+    if new_user == owner["username"] and new_name == owner["name"]:
+        return
+    with tx() as t:
+        t.execute("UPDATE accounts SET username=?, name=? WHERE id=?",
+                  (new_user, new_name, owner["id"]))
+        audit(t, "system", "owner_identity", new_user,
+              "%s -> %s / %r -> %r" % (owner["username"], new_user,
+                                       owner["name"], new_name))
+    log("站长账号已按 config.json 更新")
+    log("  username: %s -> %s" % (owner["username"], new_user))
+    log("  name    : %r -> %r" % (owner["name"], new_name))
+
+
 def bootstrap(cfg, event_token_hint=None, log=print):
-    """Create the owner account on first run; record the pre-existing event."""
+    """Create the owner account on first run; record the pre-existing event.
+
+    ``config.json`` owns the owner's login name and display name, so an existing
+    installation follows the file too - see ``_sync_owner_identity``.
+    """
     conn = connect()
     owner = conn.execute("SELECT * FROM accounts WHERE role='owner'").fetchone()
     if owner is None:
-        username = cfg.get("owner_username") or "owner"
+        username = (cfg.get("owner_username") or "owner").strip() or "owner"
+        display = (cfg.get("owner_name") or "").strip()
         password = os.environ.get("XTPANEL_OWNER_PASSWORD") or secrets.token_urlsafe(9)
         with tx() as t:
             t.execute(
                 "INSERT INTO accounts (username, name, role, status, pass, note, created_at) "
                 "VALUES (?,?,?,?,?,?,?)",
-                (username, "", "owner", "active", hash_password(password), "", time.time()),
+                (username, display, "owner", "active", hash_password(password), "",
+                 time.time()),
             )
             audit(t, "system", "bootstrap_owner", username, None)
         path = os.path.join(os.path.dirname(db_path()), "owner_password.txt")
@@ -255,7 +284,10 @@ def bootstrap(cfg, event_token_hint=None, log=print):
         log("  username: %s" % username)
         log("  password: %s" % password)
         log("  （同时写入 data/owner_password.txt）")
+        log("  登录名与显示名都来自 config.json 的 owner_username / owner_name")
         log("=" * 60)
+    else:
+        _sync_owner_identity(conn, owner, cfg, log)
 
     # the first event already exists as the service's original access id
     if event_token_hint:

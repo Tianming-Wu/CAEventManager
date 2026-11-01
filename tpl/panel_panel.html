@@ -131,14 +131,16 @@
             <path d="M7.5 5l5 5-5 5"/>
           </svg>
         </button>
-        <div class="nav-sub" id="nav-approvals" hidden>
-          <a class="nav-item nav-sub-item" href="#/approval-users" data-nav="approval-users">
-            <span class="nav-text">注册申请</span>
-            <span class="nav-badge count" id="pendingBadge" hidden>0</span>
-          </a>
-          <a class="nav-item nav-sub-item" href="#/approval-events" data-nav="approval-events">
-            <span class="nav-text">活动申请</span>
+        <div class="nav-sub" id="nav-approvals">
+          <div class="nav-sub-inner">
+            <a class="nav-item nav-sub-item" href="#/approval-users" data-nav="approval-users">
+              <span class="nav-text">注册申请</span>
+              <span class="nav-badge count" id="pendingBadge" hidden>0</span>
             </a>
+            <a class="nav-item nav-sub-item" href="#/approval-events" data-nav="approval-events">
+              <span class="nav-text">活动申请</span>
+            </a>
+          </div>
         </div>
       </div>
 
@@ -162,14 +164,6 @@
     </div>
 
     <div class="nav-foot">
-      <a class="nav-item" href="#/account" data-nav="account">
-        <svg viewBox="0 0 20 20" aria-hidden="true">
-          <circle cx="10" cy="10" r="7.3"/>
-          <circle cx="10" cy="8.2" r="2.5"/>
-          <path d="M5.3 15.7c.9-1.9 2.6-2.9 4.7-2.9s3.8 1 4.7 2.9"/>
-        </svg>
-        <span class="nav-text">账户信息</span>
-      </a>
       <a class="nav-item" href="#/appearance" data-nav="appearance">
         <svg viewBox="0 0 20 20" aria-hidden="true">
           <path d="M3.2 6.4h13.6M3.2 13.6h13.6"/>
@@ -177,6 +171,14 @@
           <circle cx="12.6" cy="13.6" r="1.9"/>
         </svg>
         <span class="nav-text">界面设置</span>
+      </a>
+      <div class="nav-foot-sep" role="separator"></div>
+      <a class="nav-account" href="#/account" data-nav="account">
+        <span class="nav-account-avatar" id="sideAvatar" aria-hidden="true"></span>
+        <span class="nav-account-text">
+          <span class="nav-account-name" id="sideName">—</span>
+          <span class="tag" id="sideRole">—</span>
+        </span>
       </a>
     </div>
   </nav>

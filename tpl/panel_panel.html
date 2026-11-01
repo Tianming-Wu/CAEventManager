@@ -2,93 +2,526 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="light dark">
 <title>主面板 · xlottery</title>
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="panel_static/panel.css">
+<script>
+/* Resolve the theme before the first paint so the shell never flashes light.
+   data-theme is the resolved value; data-theme-pref keeps what the user chose. */
+(function () {
+  var pref = "auto";
+  try { pref = localStorage.getItem("xl.panel.theme") || "auto"; } catch (e) {}
+  var dark = pref === "dark" ||
+    (pref === "auto" && window.matchMedia &&
+     window.matchMedia("(prefers-color-scheme: dark)").matches);
+  document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+  document.documentElement.setAttribute("data-theme-pref", pref);
+})();
+</script>
 </head>
 <body>
 
-<header class="topbar">
-  <div class="name">xlottery 主面板</div>
-  <div class="ver">v{{VERSION}}</div>
-  <div class="spacer"></div>
-  <div class="who" id="who"></div>
-  <button class="btn sm danger" id="logoutBtn">退出登录</button>
-</header>
+<div class="shell" id="shell">
 
-<main class="wrap">
-
-  <section class="panel">
-    <h2>活动</h2>
-    <p class="panel-hint">每个活动通过自己的 id 访问；页面路径与访问 id 一一对应。</p>
-    <div class="tblwrap">
-      <table class="tbl" id="eventsTable">
-        <thead><tr>
-          <th>活动 id</th><th>名称</th><th>创建时间</th><th class="actions">入口</th>
-        </tr></thead>
-        <tbody></tbody>
-      </table>
+  <!-- ---------------------------------------------------------- title bar -->
+  <header class="titlebar">
+    <button class="icon-btn only-narrow" id="menuBtn" type="button"
+            aria-label="打开导航" aria-expanded="false" aria-controls="sidebar">
+      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h14M3 10h14M3 15h14"/></svg>
+    </button>
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span class="brand-name">xlottery</span>
+      <span class="brand-ver">v{{VERSION}}</span>
     </div>
-  </section>
 
-  <section class="panel" id="pendingPanel" style="display:none">
-    <h2>待审核</h2>
-    <p class="panel-hint">通过后对方才能登录。</p>
-    <div class="tblwrap">
-      <table class="tbl" id="pendingTable">
-        <thead><tr>
-          <th>用户名</th><th>称呼</th><th>申请说明</th><th>提交时间</th>
-          <th class="actions">操作</th>
-        </tr></thead>
-        <tbody></tbody>
-      </table>
+    <div class="titlebar-gap"></div>
+
+    <!-- device load: owner only, filled by panel.js -->
+    <div class="hoststats" id="hostStats" hidden>
+      <span class="hoststat" title="CPU 占用">
+        <span class="hoststat-label">CPU</span>
+        <span class="hoststat-bar"><i id="cpuBar"></i></span>
+        <span class="hoststat-num" id="cpuNum">–</span>
+      </span>
+      <span class="hoststat" title="内存占用">
+        <span class="hoststat-label">MEM</span>
+        <span class="hoststat-bar"><i id="memBar"></i></span>
+        <span class="hoststat-num" id="memNum">–</span>
+      </span>
     </div>
-  </section>
 
-  <section class="panel">
-    <h2>账号</h2>
-    <p class="panel-hint" id="accountsHint"></p>
-    <div class="tblwrap">
-      <table class="tbl" id="accountsTable">
-        <thead><tr>
-          <th>用户名</th><th>称呼</th><th>角色</th><th>状态</th>
-          <th>最近登录</th><th class="actions">操作</th>
-        </tr></thead>
-        <tbody></tbody>
-      </table>
-    </div>
-  </section>
-
-  <section class="panel">
-    <h2>修改密码</h2>
-    <div class="row" style="align-items:flex-end">
-      <div class="field" style="flex:1;min-width:150px;margin:0">
-        <label for="pwOld">当前密码</label>
-        <input id="pwOld" type="password" autocomplete="current-password">
+    <div class="acct-wrap">
+      <button class="acct" id="acctBtn" type="button"
+              aria-haspopup="menu" aria-expanded="false" aria-controls="acctMenu">
+        <span class="acct-text">
+          <span class="acct-name" id="acctName">…</span>
+          <span class="acct-role" id="acctRole"></span>
+        </span>
+        <span class="avatar" id="acctAvatar" aria-hidden="true"></span>
+      </button>
+      <div class="acct-menu" id="acctMenu" role="menu" hidden>
+        <button type="button" role="menuitem" data-go="account">账户信息</button>
+        <button type="button" role="menuitem" data-go="appearance">界面设置</button>
+        <div class="menu-sep"></div>
+        <button type="button" role="menuitem" class="danger" id="logoutBtn">退出登录</button>
       </div>
-      <div class="field" style="flex:1;min-width:150px;margin:0">
-        <label for="pwNew">新密码（至少 8 位）</label>
-        <input id="pwNew" type="password" autocomplete="new-password">
+    </div>
+  </header>
+
+  <!-- ------------------------------------------------------------- sidebar -->
+  <nav class="sidebar" id="sidebar" aria-label="主导航">
+    <div class="nav-scroll">
+      <a class="nav-item" href="#/overview" data-nav="overview">
+        <svg viewBox="0 0 20 20" aria-hidden="true">
+          <rect x="2.5" y="2.5" width="6" height="6" rx="1.4"/>
+          <rect x="11.5" y="2.5" width="6" height="6" rx="1.4"/>
+          <rect x="2.5" y="11.5" width="6" height="6" rx="1.4"/>
+          <rect x="11.5" y="11.5" width="6" height="6" rx="1.4"/>
+        </svg>
+        <span class="nav-text">总览</span>
+      </a>
+      <a class="nav-item" href="#/events" data-nav="events">
+        <svg viewBox="0 0 20 20" aria-hidden="true">
+          <path d="M4 6.5h12M4 13.5h12"/>
+          <path d="M4 4.2h12a1.6 1.6 0 0 1 1.6 1.6v8.4a1.6 1.6 0 0 1-1.6 1.6H4a1.6 1.6 0 0 1-1.6-1.6V5.8A1.6 1.6 0 0 1 4 4.2Z"/>
+          <path d="M7.2 6.5v7M12.8 6.5v7"/>
+        </svg>
+        <span class="nav-text">我的活动</span>
+        <span class="nav-badge" id="inviteBadge" hidden>!</span>
+      </a>
+      <a class="nav-item" href="#/templates" data-nav="templates">
+        <svg viewBox="0 0 20 20" aria-hidden="true">
+          <rect x="2.7" y="2.7" width="9.2" height="9.2" rx="1.6"/>
+          <path d="M8.1 17.3h7.6a1.6 1.6 0 0 0 1.6-1.6V8.1"/>
+        </svg>
+        <span class="nav-text">模板管理</span>
+      </a>
+
+      <div class="nav-sep" role="separator"></div>
+
+      <a class="nav-item" href="#/users" data-nav="users" data-min-role="superadmin">
+        <svg viewBox="0 0 20 20" aria-hidden="true">
+          <circle cx="10" cy="6.4" r="3.1"/>
+          <path d="M3.9 16.6c0-3.1 2.7-4.9 6.1-4.9s6.1 1.8 6.1 4.9"/>
+        </svg>
+        <span class="nav-text">用户管理</span>
+        <span class="nav-lock" title="站长与超级管理员可见">m</span>
+      </a>
+      <a class="nav-item" href="#/all-events" data-nav="all-events" data-min-role="superadmin">
+        <svg viewBox="0 0 20 20" aria-hidden="true">
+          <rect x="2.7" y="3.6" width="14.6" height="12.8" rx="1.7"/>
+          <path d="M5.8 7.6h8.4M5.8 10.4h8.4M5.8 13.2h5"/>
+        </svg>
+        <span class="nav-text">活动管理</span>
+        <span class="nav-lock" title="站长与超级管理员可见">m</span>
+      </a>
+
+      <!-- a group: the header only expands, the children lead to pages -->
+      <div class="nav-group" data-group="approvals" data-min-role="superadmin">
+        <button class="nav-item nav-group-head" type="button"
+                aria-expanded="false" aria-controls="nav-approvals" data-toggle="approvals">
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <path d="M6.4 2.9h7.2a1.6 1.6 0 0 1 1.6 1.6v11a1.6 1.6 0 0 1-1.6 1.6H6.4a1.6 1.6 0 0 1-1.6-1.6v-11a1.6 1.6 0 0 1 1.6-1.6Z"/>
+            <path d="M7.4 9.9l1.9 1.9 3.4-3.7"/>
+          </svg>
+          <span class="nav-text">活跃审批</span>
+          <span class="nav-lock" title="站长与超级管理员可见">m</span>
+          <svg class="nav-caret" viewBox="0 0 20 20" aria-hidden="true">
+            <path d="M7.5 5l5 5-5 5"/>
+          </svg>
+        </button>
+        <div class="nav-sub" id="nav-approvals" hidden>
+          <a class="nav-item nav-sub-item" href="#/approval-users" data-nav="approval-users">
+            <span class="nav-text">注册申请</span>
+            <span class="nav-badge count" id="pendingBadge" hidden>0</span>
+          </a>
+          <a class="nav-item nav-sub-item" href="#/approval-events" data-nav="approval-events">
+            <span class="nav-text">活动申请</span>
+            <span class="nav-lock">自动</span>
+          </a>
+        </div>
       </div>
-      <button class="btn" id="pwBtn">修改</button>
-    </div>
-    <div class="err" id="pwErr" style="margin-top:8px"></div>
-  </section>
 
-  <section class="panel" id="auditPanel" style="display:none">
-    <h2>操作日志</h2>
-    <div class="tblwrap" style="max-height:340px">
-      <table class="tbl" id="auditTable">
-        <thead><tr><th>时间</th><th>操作人</th><th>动作</th><th>对象</th><th>说明</th></tr></thead>
-        <tbody></tbody>
-      </table>
-    </div>
-  </section>
+      <div class="nav-sep" role="separator"></div>
 
-  <div class="site-foot">{{FOOTER}}</div>
-</main>
+      <a class="nav-item" href="#/server" data-nav="server" data-min-role="owner">
+        <svg viewBox="0 0 20 20" aria-hidden="true">
+          <rect x="2.7" y="3.1" width="14.6" height="5.6" rx="1.5"/>
+          <rect x="2.7" y="11.3" width="14.6" height="5.6" rx="1.5"/>
+          <path d="M6 5.9h.01M6 14.1h.01"/>
+        </svg>
+        <span class="nav-text">服务器管理</span>
+        <span class="nav-lock owner" title="仅站长可见">o</span>
+      </a>
+      <a class="nav-item" href="#/audit" data-nav="audit" data-min-role="owner">
+        <svg viewBox="0 0 20 20" aria-hidden="true">
+          <path d="M5.6 2.9h6.2l3.4 3.4v10.8a1.4 1.4 0 0 1-1.4 1.4H5.6a1.4 1.4 0 0 1-1.4-1.4V4.3a1.4 1.4 0 0 1 1.4-1.4Z"/>
+          <path d="M11.6 3.1v3.4h3.4M7.2 11h5.6M7.2 13.8h3.8"/>
+        </svg>
+        <span class="nav-text">审计日志</span>
+        <span class="nav-lock owner" title="仅站长可见">o</span>
+      </a>
+    </div>
+
+    <div class="nav-foot">
+      <a class="nav-item" href="#/account" data-nav="account">
+        <svg viewBox="0 0 20 20" aria-hidden="true">
+          <circle cx="10" cy="10" r="7.3"/>
+          <circle cx="10" cy="8.2" r="2.5"/>
+          <path d="M5.3 15.7c.9-1.9 2.6-2.9 4.7-2.9s3.8 1 4.7 2.9"/>
+        </svg>
+        <span class="nav-text">账户信息</span>
+      </a>
+      <a class="nav-item" href="#/appearance" data-nav="appearance">
+        <svg viewBox="0 0 20 20" aria-hidden="true">
+          <path d="M3.2 6.4h13.6M3.2 13.6h13.6"/>
+          <circle cx="7.6" cy="6.4" r="1.9"/>
+          <circle cx="12.6" cy="13.6" r="1.9"/>
+        </svg>
+        <span class="nav-text">界面设置</span>
+      </a>
+    </div>
+  </nav>
+
+  <div class="scrim" id="scrim" hidden></div>
+
+  <!-- ------------------------------------------------------------- content -->
+  <main class="content" id="content">
+
+    <!-- ========================================================== 总览 -->
+    <section class="page" data-page="overview" hidden>
+      <header class="page-head">
+        <h1>总览</h1>
+        <p class="page-sub" id="overviewSub">—</p>
+      </header>
+
+      <div class="stat-grid">
+        <a class="stat" href="#/events">
+          <span class="stat-label">我的活动</span>
+          <span class="stat-num" id="statEvents">–</span>
+        </a>
+        <div class="stat">
+          <span class="stat-label">账号总数</span>
+          <span class="stat-num" id="statAccounts">–</span>
+        </div>
+        <a class="stat" href="#/approval-users" id="statPendingBox">
+          <span class="stat-label">待审核申请</span>
+          <span class="stat-num" id="statPending">–</span>
+        </a>
+        <div class="stat">
+          <span class="stat-label">待处理邀请</span>
+          <span class="stat-num" id="statInvites">–</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>我的活动</h2>
+          <button class="btn sm" data-go="events">全部</button>
+        </div>
+        <div class="event-grid" id="overviewEvents"></div>
+      </div>
+
+      <div class="card" id="overviewAuditCard" hidden>
+        <div class="card-head">
+          <h2>最近操作</h2>
+          <button class="btn sm" data-go="audit">审计日志</button>
+        </div>
+        <ul class="feed" id="overviewAudit"></ul>
+      </div>
+    </section>
+
+    <!-- ====================================================== 我的活动 -->
+    <section class="page" data-page="events" hidden>
+      <header class="page-head">
+        <h1>我的活动</h1>
+        <p class="page-sub">你参与和申请的活动。</p>
+        <div class="page-actions">
+          <button class="btn primary" id="newEventBtn">申请新活动</button>
+        </div>
+      </header>
+
+      <div class="invite-stack" id="inviteStack" hidden>
+        <h2 class="stack-title">待处理的邀请</h2>
+        <div id="inviteList"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2>活动列表</h2></div>
+        <div class="event-grid" id="myEvents"></div>
+      </div>
+    </section>
+
+    <!-- ====================================================== 模板管理 -->
+    <section class="page" data-page="templates" hidden>
+      <header class="page-head">
+        <h1>模板管理</h1>
+        <p class="page-sub">新建活动时可以直接套用一套固定设定。</p>
+        <div class="page-actions">
+          <button class="btn primary" disabled>新建模板</button>
+        </div>
+      </header>
+      <div class="card">
+        <div class="unwired-note">
+          模板功能尚未接入。下面的条目只是把计划中的可配置项列出来，避免建活动时再临时想。
+        </div>
+        <div class="tile-grid" id="templateTiles"></div>
+      </div>
+    </section>
+
+    <!-- ====================================================== 用户管理 -->
+    <section class="page" data-page="users" hidden>
+      <header class="page-head">
+        <h1>用户管理</h1>
+        <p class="page-sub" id="usersSub">—</p>
+      </header>
+      <div class="card">
+        <div class="card-head">
+          <h2>账号</h2>
+          <input class="search" id="userSearch" type="search" placeholder="搜索用户名或称呼"
+                 autocomplete="off" aria-label="搜索账号">
+        </div>
+        <div class="tblwrap">
+          <table class="tbl" id="accountsTable">
+            <thead><tr>
+              <th>用户名</th><th>称呼</th><th>角色</th><th>状态</th>
+              <th>最近登录</th><th class="actions">操作</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <p class="page-sub" style="margin-top:10px">
+          注册审批不在这里，统一在侧栏的「活跃审批 → 注册申请」。
+        </p>
+      </div>
+    </section>
+
+    <!-- ====================================================== 活动管理 -->
+    <section class="page" data-page="all-events" hidden>
+      <header class="page-head">
+        <h1>活动管理</h1>
+        <p class="page-sub">服务上所有活动。每个活动通过自己的 token 访问。</p>
+        <div class="page-actions">
+          <button class="btn primary" id="createEventBtn">新建活动</button>
+        </div>
+      </header>
+      <div class="card">
+        <div class="tblwrap">
+          <table class="tbl" id="allEventsTable">
+            <thead><tr>
+              <th>活动</th><th>token</th><th>负责人</th><th>创建时间</th><th class="actions">入口</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================ 活跃审批 › 注册申请 -->
+    <section class="page" data-page="approval-users" hidden>
+      <header class="page-head">
+        <h1>注册申请</h1>
+        <p class="page-sub" id="approvalUsersSub">—</p>
+      </header>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>待审核</h2>
+        </div>
+        <div class="tblwrap">
+          <table class="tbl" id="pendingTable">
+            <thead><tr>
+              <th>用户名</th><th>称呼</th><th>申请说明</th><th>提交时间</th>
+              <th class="actions">操作</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>最近处理</h2>
+        </div>
+        <div class="tblwrap">
+          <table class="tbl" id="decidedTable">
+            <thead><tr>
+              <th>用户名</th><th>称呼</th><th>结果</th><th>处理人</th><th>处理时间</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================ 活跃审批 › 活动申请 -->
+    <section class="page" data-page="approval-events" hidden>
+      <header class="page-head">
+        <h1>活动申请</h1>
+        <p class="page-sub">管理员申请新建活动时才需要这一环。</p>
+      </header>
+
+      <div class="card">
+        <div class="unwired-note">
+          活动申请与审批尚未接入。现在的设定是<strong>默认自动通过</strong>：
+          在「活动管理」里新建的活动直接生效，不进队列。
+        </div>
+        <dl class="kv">
+          <dt>当前策略</dt><dd>自动通过</dd>
+          <dt>可随时改</dt><dd>改策略只需要一个开关，不需要改代码结构</dd>
+          <dt>待处理</dt><dd>0</dd>
+        </dl>
+        <div class="empty-state">
+          <div class="empty-title">没有待审批的活动申请</div>
+          <div class="empty-sub">功能接通后，这里的列表会出现待处理项。</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====================================================== 服务器管理 -->
+    <section class="page" data-page="server" hidden>
+      <header class="page-head">
+        <h1>服务器管理</h1>
+        <p class="page-sub">运行这个服务的机器。</p>
+        <div class="page-actions">
+          <button class="btn" id="hostRefresh">刷新</button>
+        </div>
+      </header>
+
+      <div class="stat-grid">
+        <div class="stat">
+          <span class="stat-label">CPU 占用</span>
+          <span class="stat-num" id="srvCpu">–</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">内存占用</span>
+          <span class="stat-num" id="srvMem">–</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">运行时长</span>
+          <span class="stat-num sm" id="srvUptime">–</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">版本</span>
+          <span class="stat-num sm" id="srvVersion">–</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2>服务信息</h2></div>
+        <dl class="kv" id="srvInfo"></dl>
+      </div>
+
+      <!-- UNWIRED(ops): 备份、重启服务、日志查看 -->
+      <div class="card">
+        <div class="card-head"><h2>运维操作</h2></div>
+        <div class="unwired-note">
+          备份、重启服务、查看日志还没有接入。现在只能在服务器上跑 service.sh。
+        </div>
+        <div class="row">
+          <button class="btn" disabled>下载数据备份</button>
+          <button class="btn" disabled>重启服务</button>
+          <button class="btn" disabled>查看日志</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====================================================== 审计日志 -->
+    <section class="page" data-page="audit" hidden>
+      <header class="page-head">
+        <h1>审计日志</h1>
+        <p class="page-sub">最近 200 条账号与活动操作。</p>
+      </header>
+      <div class="card">
+        <div class="tblwrap">
+          <table class="tbl" id="auditTable">
+            <thead><tr>
+              <th>时间</th><th>操作人</th><th>动作</th><th>对象</th><th>说明</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====================================================== 账户信息 -->
+    <section class="page" data-page="account" hidden>
+      <header class="page-head">
+        <h1>账户信息</h1>
+        <p class="page-sub">你自己的账号。</p>
+      </header>
+
+      <div class="card">
+        <div class="card-head"><h2>资料</h2></div>
+        <dl class="kv" id="accountInfo"></dl>
+        <div class="unwired-note" style="margin-top:12px">
+          头像、称呼与用户名都还不能改，需要先加资料编辑接口。
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2>修改密码</h2></div>
+        <div class="row">
+          <div class="field grow">
+            <label for="pwOld">当前密码</label>
+            <input id="pwOld" type="password" autocomplete="current-password">
+          </div>
+          <div class="field grow">
+            <label for="pwNew">新密码（至少 8 位）</label>
+            <input id="pwNew" type="password" autocomplete="new-password">
+          </div>
+          <button class="btn primary" id="pwBtn">修改</button>
+        </div>
+        <div class="err" id="pwErr"></div>
+      </div>
+    </section>
+
+    <!-- ====================================================== 界面设置 -->
+    <section class="page" data-page="appearance" hidden>
+      <header class="page-head">
+        <h1>界面设置</h1>
+        <p class="page-sub">只影响这个浏览器。</p>
+      </header>
+
+      <div class="card">
+        <div class="card-head"><h2>主题</h2></div>
+        <div class="seg" id="themeSeg" role="radiogroup" aria-label="主题">
+          <button type="button" role="radio" data-theme-pref="auto">跟随系统</button>
+          <button type="button" role="radio" data-theme-pref="light">浅色</button>
+          <button type="button" role="radio" data-theme-pref="dark">深色</button>
+        </div>
+        <p class="page-sub" style="margin-top:10px">
+          默认跟随系统。深色模式下色板整体偏暖，跟活动页面保持一致。
+        </p>
+      </div>
+
+      <!-- UNWIRED(appearance): 侧栏密度、语言、快捷键说明 -->
+      <div class="card">
+        <div class="card-head"><h2>其他</h2></div>
+        <div class="unwired-note">侧栏密度、语言与快捷键说明还没有接入。</div>
+      </div>
+    </section>
+
+    <div class="site-foot">{{FOOTER}}</div>
+  </main>
+</div>
+
+<!-- ------------------------------------------------------------- overlay -->
+<div class="overlay" id="overlay" hidden>
+  <div class="overlay-card" role="dialog" aria-modal="true" aria-labelledby="overlayTitle">
+    <header class="overlay-head">
+      <h2 id="overlayTitle">—</h2>
+      <button class="icon-btn" id="overlayClose" type="button" aria-label="关闭">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5.5 5.5l9 9M14.5 5.5l-9 9"/></svg>
+      </button>
+    </header>
+    <div class="overlay-body" id="overlayBody"></div>
+  </div>
+</div>
 
 <script src="panel_static/common.js"></script>
 <script src="panel_static/panel.js"></script>

@@ -73,8 +73,15 @@ def summary(conn, cfg, students=None):
         ["参与速度排名人数", plans.get("present")],
         ["速度权重 β", plans.get("beta")],
         ["", ""],
-        ["中奖记录数", len(model.draw_history(conn, 10000))],
+        ["中奖记录", "%d 条有效（另有 %d 条作废）" % (
+            conn.execute("SELECT COUNT(*) c FROM draws WHERE voided_at IS NULL").fetchone()["c"],
+            conn.execute("SELECT COUNT(*) c FROM draws WHERE voided_at IS NOT NULL").fetchone()["c"],)],
     ]
+    if st["live_tickets"] != st["pool_size"]:
+        off = st["live_tickets"] - st["pool_size"]
+        rows.append(["票池核对", "已发出 %d 张，奖票池 %d 张，差 %+d"
+                     % (st["live_tickets"], st["pool_size"], off)])
+
     rows.append(["", ""])
     rows.append(["奖品", "中奖方式 / 数量 / 已抽 / 剩余"])
     for p in prizes:
@@ -109,10 +116,14 @@ def tickets(conn, cfg):
     rows = [["奖票号码", "持有人", "学号", "身份", "来源", "发出时间", "状态"]]
     for r in conn.execute(
         "SELECT t.code, t.kind, t.assigned_at, t.released_at, s.name, s.sid, s.role "
-        "FROM tickets t JOIN students s ON s.id=t.student_id ORDER BY t.code"
+        "FROM tickets t LEFT JOIN students s ON s.id=t.student_id ORDER BY t.code"
     ):
+        # a deleted student's ticket still exists; dropping the row would make
+        # this sheet disagree with the issued-ticket count in the summary
+        name = r["name"] or "（记录已删除）"
         rows.append([
-            "%03d" % r["code"], r["name"], r["sid"], _role(cfg).get(r["role"], r["role"]),
+            "%03d" % r["code"], name, r["sid"] or "",
+            _role(cfg).get(r["role"], r["role"] or ""),
             KIND_LABEL.get(r["kind"], r["kind"]),
             _clock(cfg, r["assigned_at"]),
             "已作废" if r["released_at"] else "有效",

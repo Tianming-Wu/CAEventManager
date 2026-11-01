@@ -121,6 +121,14 @@ def live_ticket_count(conn):
     return row["n"]
 
 
+def live_ticket_count_of(conn, student_id):
+    row = conn.execute(
+        "SELECT COUNT(*) AS n FROM tickets WHERE student_id=? AND released_at IS NULL",
+        (student_id,),
+    ).fetchone()
+    return row["n"]
+
+
 def max_live_code(conn):
     row = conn.execute(
         "SELECT COALESCE(MAX(code), 0) AS m FROM tickets WHERE released_at IS NULL"
@@ -405,9 +413,11 @@ def update_student(conn, student_id, actor="admin", **fields):
         if key in fields and fields[key] is not None:
             sets.append("%s=?" % key)
             vals.append(fields[key])
-    if fields.get("role") in ROLES:
+    role_changed = None
+    if fields.get("role") in ROLES and fields["role"] != (stu["role"] or "participant"):
         sets.append("role=?")
         vals.append(fields["role"])
+        role_changed = fields["role"]
     if "name" in fields and fields["name"] and not fields.get("py"):
         py, pyi = normalize_pinyin({"name": fields["name"], "py": None, "pyi": fields.get("pyi")})
         sets += ["py=?", "pyi=?"]
@@ -415,6 +425,18 @@ def update_student(conn, student_id, actor="admin", **fields):
     if not sets:
         return dict(stu)
     conn.execute("UPDATE students SET %s WHERE id=?" % ",".join(sets), vals + [student_id])
+    # Turning someone into staff/volunteer must take back the tickets they were
+    # given while they still counted as a participant, otherwise they stay in the
+    # ticket draw and the pool no longer adds up.
+    if role_changed and role_changed != "participant":
+        held = live_ticket_count_of(conn, student_id)
+        if held:
+            conn.execute(
+                "UPDATE tickets SET released_at=? WHERE student_id=? AND released_at IS NULL",
+                (time.time(), student_id),
+            )
+            db.audit(conn, "revoke_tickets", student_id, None,
+                     "身份改为%s，收回 %d 张奖票" % (ROLE_LABEL[role_changed], held), actor)
     row = _get_student(conn, student_id)
     db.audit(conn, "edit_student", student_id, None, str(fields), actor)
     return dict(row)
@@ -686,7 +708,12 @@ def plan_bonus(conn, cfg=None, students=None):
     beta = float(cfg.get("beta") if cfg.get("beta") is not None else 1.0)
     st = stats(conn, cfg, students)
     pool = st["pool_size"]
-    bonus = max(0, pool - st["guaranteed"]) if cfg.get("allow_bonus", True) else 0
+    # "already handed out" is the number of live tickets, not the number of
+    # marks: if anything ever makes the two differ (a staff member who held a
+    # ticket, a ticket kept after a role change), the total still lands on the
+    # pool exactly instead of overshooting it.
+    issued = max(st["live_tickets"], st["guaranteed"])
+    bonus = max(0, pool - issued) if cfg.get("allow_bonus", True) else 0
 
     order = ranking(conn, students, cfg)
     m = len(order)

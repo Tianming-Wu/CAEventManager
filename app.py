@@ -21,6 +21,7 @@ import csv
 import io
 import json
 import os
+import platform
 import mimetypes
 import secrets
 import sys
@@ -40,7 +41,8 @@ import panel
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TPL_DIR = os.path.join(BASE_DIR, "tpl")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
-VERSION = "1.1.0"
+VERSION = "1.2.0"
+START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 
 # Filled in by main() before the server starts listening.
@@ -273,6 +275,74 @@ def student_admin(stu):
 # --------------------------------------------------------------------------- #
 # handler
 # --------------------------------------------------------------------------- #
+_HOST_CACHE = {"ts": 0.0, "value": None}
+
+
+def host_stats(sleep=0.12):
+    """CPU and memory of this machine, for the owner's title bar.
+
+    Linux only: it reads /proc/stat and /proc/meminfo.  Anywhere else it returns
+    None, and the panel hides the widget instead of showing invented numbers.
+    The 0.12 s sample window is fine - ThreadingHTTPServer gives every request its
+    own thread, and the panel asks for this once every five seconds.
+    """
+    try:
+        with open("/proc/stat", "r") as fh:
+            first = fh.readline().split()
+        time.sleep(sleep)
+        with open("/proc/stat", "r") as fh:
+            second = fh.readline().split()
+    except OSError:
+        return None
+    try:
+        def split(row):
+            vals = [int(v) for v in row[1:]]
+            idle = vals[3] + (vals[4] if len(vals) > 4 else 0)
+            return sum(vals) - idle, sum(vals)
+
+        busy_a, total_a = split(first)
+        busy_b, total_b = split(second)
+    except (ValueError, IndexError):
+        return None
+
+    cpu = None
+    if total_b > total_a:
+        cpu = max(0.0, min(100.0, 100.0 * (busy_b - busy_a) / (total_b - total_a)))
+
+    mem_total = mem_avail = None
+    try:
+        info = {}
+        with open("/proc/meminfo", "r") as fh:
+            for line in fh:
+                key, _, rest = line.partition(":")
+                field = rest.split()
+                if field:
+                    info[key] = int(field[0])
+        mem_total = info.get("MemTotal")
+        mem_avail = info.get("MemAvailable", info.get("MemFree"))
+    except (OSError, ValueError):
+        pass
+
+    mem = None
+    mem_mb = None
+    if mem_total:
+        mem_mb = mem_total / 1024.0
+        if mem_avail is not None:
+            mem = 100.0 * (mem_total - mem_avail) / mem_total
+
+    return {
+        "cpu": cpu,
+        "mem": mem,
+        "memTotalMB": mem_mb,
+        "host": socket.gethostname(),
+        "pid": os.getpid(),
+        "python": platform.python_version(),
+        "dataDir": db.DATA_DIR,
+        "uptime": time.time() - START_TIME,
+        "version": VERSION,
+    }
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "LotteryHTTP/" + VERSION
     protocol_version = "HTTP/1.1"
@@ -601,9 +671,15 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/events" and method == "GET":
             # the public base lives in the event database, not the panel one
-            base = public_base_url(db.connect())
+            event_conn = db.connect()
+            base = public_base_url(event_conn)
             rows = conn.execute("SELECT * FROM events ORDER BY created_at").fetchall()
-            return self._json({"ok": True, "events": [panel.event_view(r, base) for r in rows]})
+            events = [panel.event_view(r, base) for r in rows]
+            # The adopted first event has no name of its own; borrow the live one
+            # while there is exactly one event, so the list is not a row of dashes.
+            if len(events) == 1 and not events[0]["title"]:
+                events[0]["title"] = db.all_config(event_conn).get("title") or ""
+            return self._json({"ok": True, "events": events})
 
         if path == "/account/decide" and method == "POST":
             actor = need("superadmin", "owner")
@@ -643,6 +719,10 @@ class Handler(BaseHTTPRequestHandler):
                 tx.execute("UPDATE accounts SET role=? WHERE id=?", (role, target["id"]))
                 panel.audit(tx, acc["username"], "role_change", target["username"], role)
             return self._json({"ok": True, "role": role})
+
+        if path == "/host" and method == "GET":
+            need("owner")
+            return self._json({"ok": True, "host": host_stats()})
 
         if path == "/audit" and method == "GET":
             need("superadmin", "owner")

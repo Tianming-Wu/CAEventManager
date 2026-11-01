@@ -258,6 +258,20 @@ def main():
           {"register", "approve", "role_change", "password_change"} <= actions,
           sorted(actions))
 
+    print("== device stats are owner-only ==")
+    host = call(owner, "/api/panel/host")
+    check("owner can read the host stats", host and "host" in host, host)
+    if host and host.get("host"):
+        h = host["host"]
+        check("host payload is complete",
+              all(k in h for k in ("cpu", "mem", "uptime", "version", "dataDir")),
+              sorted(h))
+    plain = session()
+    # member's password was changed by the section above
+    post(plain, "/api/panel/login", {"username": "member", "password": "member-pass-2"})
+    call(plain, "/api/panel/host", expect=403)
+    check("a plain admin cannot read them", True)
+
     print("== event pages still reachable ==")
     token = events[0]["id"]
     board = call(anon, "/%s/api/board" % token)

@@ -5,9 +5,9 @@
 
 ```
 /              主面板：登录（根路径直接进登录，页脚有「没有账号？去注册」）
-/register      主面板注册（提交后等 owner 审核）
+/register      主面板注册（提交后等站长/超管在「活跃审批」里审核）
 /login         主面板登录（与根路径同一页）
-/panel         主面板控制台：活动列表、账号审核与分级
+/panel         主面板控制台（左侧栏导航，见下）
 
 <id>/          某个活动的公示页（扫码打开，只读，无鉴权）
 <id>/checkin   签到页（必须扫大屏的时效二维码才能进；签完自动跳公示）
@@ -22,6 +22,28 @@
 **路由与外部前缀无关**：服务先认活动 token（出现在路径任意位置都行），剩下的路径再按主面板
 路由匹配，所以本地怎么访问都通，平台前缀换成子域名也不用改代码。`config.json` 的
 `public_base_prefix` **只用来生成链接**（二维码、短链、Cookie 路径），不参与路由判定。
+
+主面板的页面用 hash 路由，都挂在 `/panel` 这同一个文档上：
+
+```
+#/overview         总览：账号与活动数、我的活动、最近操作
+#/events           我的活动（置顶是收到的邀请，下面是自己参与的活动）
+#/templates        模板管理                      [计划中]
+#/users            用户管理                      [m] 每个账号一个详情弹窗
+#/all-events       活动管理                      [m]
+#/approval-users   活跃审批 › 注册申请            [m] 待审核 + 最近处理
+#/approval-events  活跃审批 › 活动申请            [m] 现在默认自动通过，留位
+#/server           服务器管理                    [o] CPU / 内存 / 运行时长
+#/audit            审计日志                      [o]
+#/account          账户信息（改密码）
+#/appearance       界面设置（主题：跟随系统 / 浅色 / 深色）
+```
+
+`[m]` 只对站长与超级管理员可见，`[o]` 只对站长可见。界面上藏起来只是第一层，
+直接改 hash 也会被弹回总览，接口本身就是拒绝的。
+
+侧栏随屏宽改变形态：≥1100px 是完整侧栏，760~1100px 收成图标栏（点分组标题把面板滑出来），
+≤760px 变成抽屉（标题栏左上角汉堡按钮）。手指设备上按钮最小 36px、导航项 46px。
 
 发布后（服务名 `xlottery`）：
 
@@ -287,8 +309,11 @@ sqlite3 data/lottery.sqlite3 ".backup data/backup-$(date +%Y%m%d-%H%M).sqlite3"
 python tools\simulate.py       # 只跑数学模型
 python tools\smoke_test.py http://127.0.0.1:8931 <密码>   # 活动接口测试（100 项）
 python tools\panel_test.py http://127.0.0.1:8931 <owner密码> # 主面板接口测试（31 项）
-python tools\panel_ui_test.py http://127.0.0.1:8931 <owner密码> --register
-                                # 主面板页面测试：登录/重试/注册/退出（浏览器，19 项）
+python tools\panel_ui_test.py http://127.0.0.1:8931 <owner密码>
+                                # 主面板页面测试（浏览器，75 项）：登录重试、11 个路由、
+                                # 折叠分组、账号弹窗、主题、六种屏宽、触屏可达、
+                                # 角色可见性（加 --accounts 才会真实建号）
+
 python tools\prod_check.py https://lab.nwuca.tech/u/laffey/xlottery <id>
                                 # 线上只读巡检：路由 + 登录页 + keep-alive（21 项）
 .\deploy.ps1                   # 归一化行尾 → 打包 → 上传 → 解包 → 校验文件+import → 重启
@@ -299,7 +324,9 @@ python tools\prod_check.py https://lab.nwuca.tech/u/laffey/xlottery <id>
 
 **接口测试和页面测试必须都跑。** `panel_test.py` 直接打 `/api/panel/*`，所以两个登录/注册
 页面曾经一直把请求发到 `/api/panel/api/login`（页面说“登录”，服务答“未登录”）它都是绿的；
-`panel_ui_test.py` 驱动真实页面，才抓得住这类错误。
+`panel_ui_test.py` 驱动真实页面，才抓得住这类错误。布局同理：只看截图看不出
+「表格在手机上横向溢出」或者「图标栏点不到分组子项」，`panel_ui_test.py` 对这六个屏宽
+逐个断言横向溢出为 0、外壳高度等于视口，并且在触屏尺寸下真的去点开分组。
 
 ## 13. 文件结构
 

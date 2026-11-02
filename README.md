@@ -7,9 +7,8 @@
 ## 路由
 
 ```
-/                  主面板登录页
+/                  主面板登录页（/login 是同一页）
 /register          主面板注册（提交后待审核）
-/login             主面板登录（与 / 同一页）
 /panel             主面板控制台
 /panel_static/*    主面板静态资源
 /api/panel/*       主面板接口
@@ -34,13 +33,13 @@
 公示页只读，展示签到人数、任务完成数、已发奖票与中奖名单。大屏页在签到阶段显示签到二维码，抽奖阶段
 改为活动地址与常驻中奖名单。签到页必须扫大屏二维码进入：token 按 10 秒窗口切片，扫码通过后手机得到
 签名 presence cookie，再填学号与姓名，两项都与名单匹配才算签到成功。控制台页面栏由活动模块声明
-（操作台、名单、奖票、抽奖），平台固定追加活动设置与日志。
+（操作台、名单、奖票、抽奖），平台追加活动设置与日志。
 
 ## 账号与权限
 
 账号分三级：站长（唯一）> 超级管理员 > 管理员。注册一律先落到「管理员 + 待审核」，审核通过才能登录。
 用户管理、活动管理、审批只对超级管理员及以上可见，服务器管理与审计日志只对站长可见，接口层同样校验。
-撤销、改时间、删人、作废抽奖、重置奖票、重新生成访问 id 需要先打开「解锁修改」，30 秒无操作自动上锁。
+撤销、改时间、删人、作废抽奖、重置奖票、重新生成访问 id 需先打开「解锁修改」，30 秒无操作自动上锁。
 
 ## 奖票池
 
@@ -58,9 +57,9 @@ AST 求值器执行，只允许数字、上下文名字、四则运算与 `min` 
 ## 名单与导出
 
 名单支持 CSV 与 TSV 导入，有表头自动识别，无表头按「学号,姓名」解析，按学号增量更新，重复导入不留
-重复记录。姓名拼音由内置拼音表生成，检索同时匹配姓名、全拼、首字母与学号片段。所有改变状态的动作写入
-审计日志；活动结束后从名单页导出 ZIP：`01-汇总`、`02-名单`、`03-奖票明细`、`04-抽奖记录`、
-`05-中奖汇总` 五张 CSV 与 `06-操作日志.log`。
+重复记录。姓名拼音由内置拼音表生成，检索同时匹配姓名、全拼、首字母与学号片段。所有动作写入审计日志；
+活动结束后从名单页导出 ZIP：`01-汇总`、`02-名单`、`03-奖票明细`、`04-抽奖记录`、`05-中奖汇总`
+五张 CSV 与 `06-操作日志.log`。
 
 ## 活动模块与模板
 
@@ -89,9 +88,9 @@ cd ~/apps/eventmanager
 ```
 
 服务不会自动拉起。挂载在 `https://example.org/mount` 时，活动页形如 `https://example.org/mount/<token>/`，
-大屏、签到、控制台是同前缀下的 `screen`、`checkin`、`admin`。部署后可用 `tools/` 下的脚本自检：
-`unit_test.py` 无需服务，`panel_test.py` 打主面板接口，`smoke_test.py` 打活动接口，
-`panel_ui_test.py` 与 `ui_test.py` 用 Playwright 驱动真实页面。
+大屏、签到、控制台是同前缀下的 `screen`、`checkin`、`admin`。部署后可用 `tools/` 下的脚本自检：`unit_test.py`
+无需服务，`panel_test.py` 打主面板接口，`smoke_test.py` 打活动接口，`panel_ui_test.py` 与 `ui_test.py`
+用 Playwright 驱动真实页面。
 
 ## 配置
 
@@ -104,12 +103,11 @@ cd ~/apps/eventmanager
 | `port` | `8931` | 监听端口 |
 | `public_base_prefix` | `http://127.0.0.1:8931` | 对外访问前缀，只用于拼绝对链接 |
 | `owner_username` | `owner` | 站长登录名 |
-| `owner_name` | `站长` | 站长显示名，界面上只出现这个 |
+| `owner_name` | `站长` | 站长显示名，界面只出现这个 |
 
 活动标题、奖票池、奖品、大屏阶段、导出时区等属于单个活动，存在该活动自己的库里，不进 `config.json`。
 环境变量可覆盖：`LOTTERY_CONFIG`、`LOTTERY_DATA_DIR`、`LOTTERY_HOST`、`LOTTERY_PORT`。数据目录中，
-`data/panel.sqlite3` 存账号、活动元数据、成员与审计，`data/events/<seq>.sqlite3` 是每个活动自己的库，
-`data/avatars/` 存头像，日志在 `data/service.log`；首次启动生成的两个密码在 `data/owner_password.txt`
-与 `data/admin_password.txt`。
+`data/panel.sqlite3` 存账号与活动元数据，`data/events/<seq>.sqlite3` 是每个活动自己的库，`data/avatars/`
+存头像，首次启动生成的站长与活动管理员密码在 `data/owner_password.txt` 与 `data/admin_password.txt`。
 
 Powered with ❤ by Tianming & Deepseek

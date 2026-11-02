@@ -6,10 +6,11 @@ could otherwise check themselves in from home.  The big screen therefore shows a
 QR whose token is *time sliced* - it is only valid for the 10 second window it
 was rendered in (plus the previous one, for slow phones and slow wifis).
 
-The token is handed out only through an admin-authenticated endpoint, because a
-public one would let anybody outside the room mint the same token.  Consequence:
-the machine that projects the screen must have an admin session - which is
-naturally true when the operator projects from their own laptop.
+The token is handed out by ``/api/screen/token``, which the projector page calls
+without a session: the screen is a public kiosk and has to be able to draw its own
+QR code.  A window is ten seconds, so a leaked token is worthless by the time it
+travels anywhere.  The check-in form itself still requires the presence cookie
+this module signs, and the roster still decides who is actually present.
 
 Once a phone presents a valid token it is given a signed presence cookie, so the
 member can take their time typing their student id without racing the clock.

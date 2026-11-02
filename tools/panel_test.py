@@ -399,9 +399,9 @@ def main():
         check("a cleared avatar is a 404", False, "still served")
     except urllib.error.HTTPError as exc:
         check("a cleared avatar is a 404", exc.code == 404, exc.code)
+    data_dir = os.environ.get("LOTTERY_DATA_DIR") or os.path.join(HERE, "data")
     check("the old file is gone from disk",
-          not (os.path.exists(os.path.join(HERE, "data", "avatars", name))
-               if os.path.isdir(os.path.join(HERE, "data")) else True))
+          not os.path.exists(os.path.join(data_dir, "avatars", name)))
 
     print("== event pages still reachable ==")
     token = events[0]["id"]

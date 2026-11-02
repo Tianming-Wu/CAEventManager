@@ -28,6 +28,21 @@ LEGACY_DB = os.path.join(DATA_DIR, "lottery.sqlite3")
 DEFAULT_SEQ = 1
 
 
+def use_data_dir(path):
+    """Point everything at another data directory.
+
+    The paths are derived once at import, which is fine for the service but not
+    for tests or tools that build a throwaway installation.
+    """
+    global DATA_DIR, EVENTS_DIR, LEGACY_DB, DB_PATH
+    DATA_DIR = os.path.abspath(path)
+    EVENTS_DIR = os.path.join(DATA_DIR, "events")
+    LEGACY_DB = os.path.join(DATA_DIR, "lottery.sqlite3")
+    DB_PATH = event_path(DEFAULT_SEQ)
+    _local.conn = None
+    _local.path = None
+
+
 def event_path(seq):
     return os.path.join(EVENTS_DIR, "%s.sqlite3" % int(seq))
 

@@ -603,7 +603,7 @@
     }
     return rows.map(function (k) {
       var meta = [(k.builtin ? "\u5185\u7f6e" : "\u7528\u6237\u5bfc\u5165"),
-                  "v" + k.version].join(" \u00b7 ");
+                  "v" + k.version, k.author].filter(Boolean).join(" \u00b7 ");
       return '<button class="kind-tile' + (k.ok ? "" : " is-off") + '" type="button" ' +
         (k.ok ? 'data-kind="' + PX.esc(k.id) + '"' : "disabled") + ">" +
         '<span class="kind-name">' + PX.esc(k.name) + "</span>" +
@@ -617,8 +617,9 @@
   function drawKindForm(kind) {
     $("#kindFormTitle").textContent = kind.name;
     $("#kindFormSub").textContent = [kind.id, "v" + kind.version,
-                                     kind.builtin ? "\u5185\u7f6e" : "\u7528\u6237\u5bfc\u5165"]
-      .join(" \u00b7 ");
+                                     kind.builtin ? "\u5185\u7f6e" : "\u7528\u6237\u5bfc\u5165",
+                                     kind.author, kind.homepage]
+      .filter(Boolean).join(" \u00b7 ");
     $("#kindFields").innerHTML = kind.fields.map(function (f) {
       var id = "kf_" + f.key;
       var attr = ' data-kind-field="' + PX.esc(f.key) + '"';

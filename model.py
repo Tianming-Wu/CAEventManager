@@ -32,6 +32,7 @@ import random
 import time
 
 import db
+import expr
 import pinyintable
 
 TASK_KINDS = ("task1", "task2")
@@ -146,14 +147,51 @@ def effective_pool(conn, cfg=None, students=None):
 
     ``fixed`` mode is the manual escape hatch (exactly ``pool_size``), for when a
     specific number of tickets has been printed.
+
+    ``expr`` mode evaluates ``pool_expr`` against the live counts, so the pool can
+    follow the room in a shape the operator chooses.  It is re-evaluated on every
+    read, which is the whole difference from ``fixed``.
     """
     cfg = cfg or db.all_config(conn)
-    if (cfg.get("pool_mode") or "auto") == "fixed":
+    mode = cfg.get("pool_mode") or "auto"
+    if mode == "fixed":
         return max(0, int(cfg.get("pool_size") or 0))
     students = students if students is not None else snapshot(conn, cfg)
+    if mode == "expr":
+        try:
+            return max(0, int(expr.evaluate(cfg.get("pool_expr") or "",
+                                            pool_context(students))))
+        except expr.ExprError:
+            # a broken expression must not take the whole page down; the
+            # settings page shows the same message
+            return 0
     # only participants earn tickets, so only they may grow the pool
     present = sum(1 for s in students if s["marks"]["checkin"] and is_participant(s))
     return max(0, present * 3 + int(cfg.get("bonus_constant") or 0))
+
+
+POOL_NAMES = ("signed_in", "present", "participants", "staff_present",
+              "tasks_done", "guaranteed", "bonus_constant", "pool_size")
+
+
+def pool_context(students):
+    """The names a pool expression may use."""
+    signed_in = sum(1 for s in students
+                    if s["marks"]["checkin"] and is_participant(s))
+    participants = sum(1 for s in students if is_participant(s))
+    staff = sum(1 for s in students
+                if not is_participant(s) and s["marks"]["checkin"])
+    tasks = sum(1 for s in students
+                if s["marks"]["checkin"] and s["marks"]["task1"]
+                and s["marks"]["task2"])
+    return {
+        "signed_in": signed_in,
+        "present": signed_in + staff,
+        "participants": participants,
+        "staff_present": staff,
+        "tasks_done": tasks,
+        "guaranteed": signed_in * 3,
+    }
 
 
 # --------------------------------------------------------------------------- #

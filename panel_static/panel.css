@@ -87,7 +87,7 @@
   :root { --tap: 46px; }
 }
 
-* { box-sizing: border-box; }
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 [hidden] { display: none !important; }
 
 html, body {
@@ -829,6 +829,24 @@ table.tbl td.wrap { white-space: normal; min-width: 12em; }
 .tile b { display: block; color: var(--text); font-size: .88rem; margin-bottom: 2px; }
 .tile .tag { margin-top: 8px; }
 
+/* ---------- breadcrumb header ---------- */
+.crumb-back { flex: 0 0 auto; margin-right: -4px; }
+.crumb-title {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 1.35rem;
+  letter-spacing: -.01em;
+}
+.crumb {
+  color: var(--muted);
+  font-weight: 550;
+  text-decoration: none;
+}
+.crumb:hover { color: var(--accent-strong); text-decoration: none; }
+.crumb-sep { color: var(--dim); font-weight: 400; }
+
 /* ---------- create an activity ---------- */
 .kind-tile {
   appearance: none;
@@ -847,6 +865,10 @@ table.tbl td.wrap { white-space: normal; min-width: 12em; }
   cursor: pointer;
 }
 .kind-tile:hover { border-color: var(--accent-line); background: var(--surface-2); }
+.kind-tile:active { background: var(--surface-3); }
+.pick-tile:active { background: var(--surface-3); }
+.btn:active:not(:disabled) { background: var(--surface-3); }
+.nav-item:active { background: var(--surface-3); }
 .kind-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .kind-tile.is-off { opacity: .55; cursor: not-allowed; }
 .kind-name { font-size: .96rem; font-weight: 650; }

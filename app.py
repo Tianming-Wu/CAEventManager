@@ -35,6 +35,7 @@ from urllib.parse import urlparse, parse_qs
 import auth
 import checkin
 import db
+import expr
 import exporter
 import kinds
 import localconfig
@@ -686,7 +687,9 @@ class Handler(BaseHTTPRequestHandler):
             if len(rows) == 1:
                 db.set_current_event(rows[0]["seq"])
             event_conn = db.connect()
-            base = public_base_url(event_conn)
+            # links come from the configured prefix plus each row's own token -
+            # reading a per-event URL would point every row at one activity
+            base = (LOCAL_CFG.get("public_base_prefix") or "").rstrip("/")
             events = [panel.event_view(r, base, r["my_role"]) for r in rows]
             # The adopted first event has no name of its own; borrow the live one
             # while there is exactly one event, so the list is not a row of dashes.
@@ -1386,6 +1389,7 @@ class Handler(BaseHTTPRequestHandler):
                 "subtitle": str,
                 "pool_mode": str,
                 "pool_size": int,
+                "pool_expr": str,
                 "bonus_constant": int,
                 "nominal_guaranteed": int,
                 "beta": float,
@@ -1409,7 +1413,7 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     raise model.ApiError("设置项 %s 格式不对" % key)
                 updates[key] = val
-            if "pool_mode" in updates and updates["pool_mode"] not in ("auto", "fixed"):
+            if "pool_mode" in updates and updates["pool_mode"] not in ("auto", "fixed", "expr"):
                 raise model.ApiError("奖票池模式只能是 auto 或 fixed")
             if "bonus_constant" in updates:
                 if not (0 <= updates["bonus_constant"] <= 1000):
@@ -1425,6 +1429,14 @@ class Handler(BaseHTTPRequestHandler):
                         "已经发出 %d 张奖票,奖票池不能小于 %d(不用重置,调大或改成自动模式即可)"
                         % (live, live)
                     )
+            if updates.get("pool_mode") == "expr" or "pool_expr" in updates:
+                text = updates.get("pool_expr")
+                if text is None:
+                    text = db.get_config(conn, "pool_expr") or ""
+                try:
+                    expr.check(text, model.POOL_NAMES)
+                except expr.ExprError as exc:
+                    raise model.ApiError(str(exc))
             if "beta" in updates and not (-0.0 <= updates["beta"] <= 5.0):
                 raise model.ApiError("beta 需在 0..5 之间")
             with db.tx(conn):

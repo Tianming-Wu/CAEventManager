@@ -480,6 +480,7 @@
     $("#setScreenWall").checked = !!c.screen_show_wall;
     $("#setPoolMode").value = c.pool_mode || "auto";
     $("#setPool").value = c.pool_size;
+    $("#setPoolExpr").value = c.pool_expr || "";
     $("#setBonusConstant").value = c.bonus_constant;
     $("#setBeta").value = c.beta;
     $("#setAllowBonus").checked = c.allow_bonus !== false;
@@ -500,6 +501,7 @@
       "（保底 " + st.guaranteed + " + 速度奖励 " + st.bonus_pool + "）" +
       (auto ? "。<br>之后每多签到一人，池子自动 +3。" : "。<br>固定模式下池子不随人数变化。");
     $("#setPool").disabled = auto;
+    $("#setPoolExpr").disabled = (S.config.pool_mode || "auto") !== "expr";
   }
 
   function renderQR() {
@@ -1059,6 +1061,7 @@
       screen_show_wall: $("#setScreenWall").checked,
       pool_mode: $("#setPoolMode").value,
       pool_size: Number($("#setPool").value),
+      pool_expr: $("#setPoolExpr").value.trim(),
       bonus_constant: Number($("#setBonusConstant").value),
       beta: Number($("#setBeta").value),
       allow_bonus: $("#setAllowBonus").checked

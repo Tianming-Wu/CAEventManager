@@ -646,6 +646,10 @@ def create_page(browser):
               page.locator("[data-kind-field]").count())
         check("a required field is marked",
               page.locator(".kind-field .req, .field .req").count() >= 1)
+        check("a required choice starts empty, so it has to be answered",
+              page.evaluate(
+                  "() => document.getElementById('kf_pool_mode').value") == "",
+              page.evaluate("() => document.getElementById('kf_pool_mode').value"))
         page.screenshot(path="tmp/ui/kind-form.png")
 
         print("== refusals happen in place ==")

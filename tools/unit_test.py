@@ -122,6 +122,80 @@ def migrate_events():
             os.environ["LOTTERY_DATA_DIR"] = previous
 
 
+BAD_EXPRESSIONS = [
+    '__import__("os")',
+    "open",
+    "a.b",
+    "[1][0]",
+    "x if 1 else 2",
+    "signed_in ** 99",
+    "2 / 0",
+    "nope + 1",
+    "lambda: 1",
+    "[x for x in (1, 2)]",
+    "open('x')",
+]
+
+
+def expressions():
+    """The pool expression must add numbers and nothing else."""
+    import expr
+
+    ctx = {"signed_in": 12, "staff": 3, "guaranteed": 30}
+    check("arithmetic works", expr.evaluate("signed_in * 3 + 20", ctx) == 56)
+    check("functions work", expr.evaluate("max(signed_in, staff) * 2", ctx) == 24)
+    check("names are reported",
+          expr.names("signed_in*3+guaranteed") == ["guaranteed", "signed_in"],
+          expr.names("signed_in*3+guaranteed"))
+    check("unknown names are caught before running",
+          [n for n in expr.names("a + b") if n not in ctx] == ["a", "b"])
+    accepted = []
+    for bad in BAD_EXPRESSIONS:
+        try:
+            expr.evaluate(bad, ctx)
+            accepted.append(bad)
+        except expr.ExprError:
+            continue
+    check("nothing outside arithmetic is accepted", not accepted, accepted)
+    check("an empty expression is refused",
+          refuses(expr, "", ctx))
+
+    print("== the ticket pool follows the expression ==")
+    import db
+    import model
+
+    root = tempfile.mkdtemp(prefix="expr-pool-")
+    previous = os.environ.get("LOTTERY_DATA_DIR")
+    os.environ["LOTTERY_DATA_DIR"] = root
+    db.use_data_dir(root)
+    try:
+        db.set_current_event(1)
+        db.init_db()
+        conn = db.connect()
+        with db.tx(conn):
+            db.set_config_raw(conn, "pool_mode", "expr")
+            db.set_config_raw(conn, "pool_expr", "signed_in * 2 + 10")
+        check("an expression drives the pool",
+              model.effective_pool(conn) == 10, model.effective_pool(conn))
+        with db.tx(conn):
+            db.set_config_raw(conn, "pool_expr", "signed_in * 99")
+        check("and it is re-evaluated each time",
+              model.effective_pool(conn) == 0, model.effective_pool(conn))
+    finally:
+        if previous is None:
+            os.environ.pop("LOTTERY_DATA_DIR", None)
+        else:
+            os.environ["LOTTERY_DATA_DIR"] = previous
+
+
+def refuses(expr, src, ctx):
+    try:
+        expr.evaluate(src, ctx)
+        return False
+    except expr.ExprError:
+        return True
+
+
 def main():
     print("== host_stats reads a Linux /proc ==")
     # cpu lines: user nice system idle iowait irq softirq steal
@@ -162,6 +236,9 @@ def main():
     finally:
         builtins.open = real_open
     check("a broken file returns None instead of raising", broken is None, broken)
+
+    print("== the expression language ==")
+    expressions()
 
     print("== the event table migration ==")
     migrate_events()

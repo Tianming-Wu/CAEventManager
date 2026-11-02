@@ -281,6 +281,7 @@
           <select id="setPoolMode">
             <option value="auto">自动（到场 × 3 + 额外票）</option>
             <option value="fixed">固定张数</option>
+            <option value="expr">表达式</option>
           </select>
         </div>
         <div class="field">
@@ -292,6 +293,17 @@
           <label>固定奖票池总数（仅固定模式）</label>
           <input id="setPool" type="number" min="1" max="5000">
           <p class="note">已发出的奖票不受影响，只要不低于已发张数。</p>
+        </div>
+        <div class="field">
+          <label>池子表达式（仅表达式模式）</label>
+          <input id="setPoolExpr" type="text" spellcheck="false"
+                 placeholder="signed_in * 3 + 20">
+          <p class="note">
+            可用：signed_in（已签到参加人员）、present（含工作人员）、
+            participants、staff_present、tasks_done、guaranteed。
+            支持 + - * / // % **、括号、min/max/round/abs/int。
+            每次状态变化都会重算。
+          </p>
         </div>
         <p class="note" id="poolPreview"></p>
         <div class="field">

@@ -449,18 +449,13 @@
       </header>
 
       <div class="card">
-        <div class="card-head"><h2>资料</h2></div>
+        <div class="card-head"><h2>个人资料</h2></div>
         <div class="profile-grid">
-          <div class="profile-avatar">
-            <span class="avatar avatar-lg" id="profileAvatar" aria-hidden="true"></span>
-            <div class="profile-avatar-actions">
-              <button class="btn sm" type="button" id="avatarPick">更换头像</button>
-              <button class="btn sm ghost" type="button" id="avatarClear" hidden>移除</button>
-            </div>
-            <p class="hint" id="avatarHint">PNG / JPEG / WebP，不超过 512 KB</p>
-            <input type="file" id="avatarFile" hidden
-                   accept="image/png,image/jpeg,image/webp">
-          </div>
+          <span class="avatar-wrap">
+            <span class="avatar avatar-xl" id="profileAvatar" aria-hidden="true"></span>
+            <button class="avatar-edit" type="button" id="avatarPick"
+                    aria-label="更换头像" title="更换头像"></button>
+          </span>
           <div class="profile-fields">
             <div class="field">
               <label for="pfName">显示名</label>
@@ -479,27 +474,25 @@
           </div>
         </div>
         <dl class="kv kv-inline" id="accountInfo"></dl>
+        <input type="file" id="avatarFile" hidden
+               accept="image/png,image/jpeg,image/webp">
       </div>
 
       <div class="card">
-        <div class="card-head"><h2>修改密码</h2></div>
+        <div class="card-head"><h2>安全</h2></div>
         <div class="row">
           <div class="field grow">
             <label for="pwOld">当前密码</label>
             <input id="pwOld" type="password" autocomplete="current-password">
           </div>
           <div class="field grow">
-            <label for="pwNew">新密码（至少 8 位）</label>
+            <label for="pwNew">新密码（10 位以上）</label>
             <input id="pwNew" type="password" autocomplete="new-password">
           </div>
-          <button class="btn primary" id="pwBtn">修改</button>
+          <button class="btn primary" type="button" id="pwBtn">修改</button>
         </div>
         <div class="err" id="pwErr"></div>
-      </div>
-
-      <div class="card">
-        <div class="card-head"><h2>会话</h2></div>
-        <div class="row">
+        <div class="row" style="margin-top:16px">
           <button class="btn danger" type="button" id="logoutBtn">退出登录</button>
         </div>
       </div>

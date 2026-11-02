@@ -53,6 +53,18 @@ def new_secret():
     return secrets.token_urlsafe(24)[:SECRET_LEN]
 
 
+def raw():
+    """The file exactly as written, without defaults filled in."""
+    if not os.path.exists(CONFIG_PATH):
+        return {}
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
 def load():
     cfg = dict(DEFAULTS)
     changed = False
@@ -64,6 +76,8 @@ def load():
                 cfg.update({k: v for k, v in data.items() if v is not None})
         except (OSError, ValueError):
             pass
+    # which of these the operator actually wrote down, as opposed to defaults
+    cfg["_explicit"] = set(c for c in raw() if c in DEFAULTS)
 
     secret = str(cfg.get("path_secret") or "").strip()
     if not secret or not all(c.isalnum() or c in "-_" for c in secret):

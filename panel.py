@@ -257,6 +257,20 @@ def save_avatar(account_id, data):
     return name
 
 
+def is_avatar_url(value):
+    return (value or "").startswith(("http://", "https://"))
+
+
+def clean_avatar_url(value):
+    """Only http(s) URLs of a sane length are stored as a remote avatar."""
+    url = (value or "").strip()
+    if not url or len(url) > 500:
+        return None
+    if not url.startswith(("http://", "https://")):
+        return None
+    return url
+
+
 def drop_avatar(account_id):
     """Remove every stored file for this account."""
     for ext in (".png", ".jpg", ".webp"):
@@ -287,6 +301,14 @@ def view(row):
 
 
 def event_view(row, base):
+    """Links for one event.
+
+    ``base`` is the event's public URL, which for the single-event installation
+    already ends in the token - appending it again produced
+    ``.../<token>/<token>/admin``.  Accept either shape.
+    """
+    base = (base or "").rstrip("/")
+    root = base if base.endswith("/" + row["id"]) else base + "/" + row["id"]
     return {
         "id": row["id"],
         "title": row["title"],
@@ -294,23 +316,26 @@ def event_view(row, base):
         "note": row["note"],
         "createdAt": row["created_at"],
         "archivedAt": row["archived_at"],
-        "url": base + "/" + row["id"] + "/",
-        "screen": base + "/" + row["id"] + "/screen",
-        "admin": base + "/" + row["id"] + "/admin",
+        "url": root + "/",
+        "screen": root + "/screen",
+        "admin": root + "/admin",
     }
 
 
 # --------------------------------------------------------------------------- #
 # bootstrap
 # --------------------------------------------------------------------------- #
-def _sync_owner_identity(conn, owner, cfg, log=print):
+def _sync_owner_identity(conn, owner, cfg, log=print, explicit=None):
     """Keep the owner row in step with config.json.
 
-    The config file is the source of truth here, which also means a typo in it
-    renames the login.  That is why every change is logged with both values.
+    Only keys that are literally present in the file count.  Without that rule a
+    default value would fight the console: rename yourself to "Laffey" in the UI,
+    restart, and the profile would silently go back to the default.  A typo in an
+    explicit owner_username still renames the login, so both values are logged.
     """
-    wanted_user = (cfg.get("owner_username") or "").strip()
-    wanted_name = (cfg.get("owner_name") or "").strip()
+    explicit = explicit or set()
+    wanted_user = (cfg.get("owner_username") or "").strip() if "owner_username" in explicit else ""
+    wanted_name = (cfg.get("owner_name") or "").strip() if "owner_name" in explicit else ""
     new_user = wanted_user or owner["username"]
     new_name = wanted_name or owner["name"]
     if new_user == owner["username"] and new_name == owner["name"]:
@@ -362,7 +387,7 @@ def bootstrap(cfg, event_token_hint=None, log=print):
         log("  登录名与显示名都来自 config.json 的 owner_username / owner_name")
         log("=" * 60)
     else:
-        _sync_owner_identity(conn, owner, cfg, log)
+        _sync_owner_identity(conn, owner, cfg, log, cfg.get("_explicit") or set())
 
     # the first event already exists as the service's original access id
     if event_token_hint:

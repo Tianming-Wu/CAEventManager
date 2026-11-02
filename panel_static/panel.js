@@ -51,6 +51,11 @@
 
   var RAIL_QUERY = "(max-width: 1100px)";
   var AVATAR_HINT = "PNG / JPEG / WebP，不超过 512 KB";
+  var ICON_PLUS = '<svg viewBox="0 0 20 20" aria-hidden="true">' +
+    '<path d="M10 5.2v9.6M5.2 10h9.6"/></svg>';
+  var ICON_PENCIL = '<svg viewBox="0 0 20 20" aria-hidden="true">' +
+    '<path d="M4.2 15.8h3.1l7.5-7.5a1.6 1.6 0 0 0-2.3-2.3l-7.5 7.5v2.3Z"/>' +
+    '<path d="M11.5 7l2.3 2.3"/></svg>';
 
   /* ---------------------------------------------------------------- helpers */
   function rank(role) {
@@ -80,6 +85,8 @@
   // cookie rides along.  ?v= busts the cache when the picture changes.
   function avatarUrl(acc) {
     if (!acc || !acc.avatar) return "";
+    // a stored link points straight at its host; a stored file comes from us
+    if (/^https?:\/\//i.test(acc.avatar)) return acc.avatar;
     return PX.PREFIX + "/api/panel/avatar/" + acc.id +
       "?v=" + Math.round(acc.avatarAt || 0);
   }
@@ -674,7 +681,9 @@
     if (!me) return;
 
     paintAvatar($("#profileAvatar"), me, initialOf(me));
-    $("#avatarClear").hidden = !me.avatar;
+    var badge = $("#avatarPick");
+    badge.innerHTML = me.avatar ? ICON_PENCIL : ICON_PLUS;
+    badge.title = me.avatar ? "更换头像" : "添加头像";
 
     $("#pfName").value = me.name || "";
     var user = $("#pfUser");
@@ -725,28 +734,36 @@
     });
   }
 
-  function sendAvatar(dataUrl) {
-    var hint = $("#avatarHint");
-    hint.textContent = "上传中…";
-    PX.api("/avatar", { method: "POST", body: { data: dataUrl } })
+  function sendAvatar(body, doneMessage) {
+    PX.api("/avatar", { method: "POST", body: body })
       .then(function (d) {
         applyMe(d.me);
-        hint.textContent = AVATAR_HINT;
-        PX.toast("头像已更新");
-      })
-      .catch(function (e) {
-        hint.textContent = AVATAR_HINT;
-        PX.toast(PX.esc(e.message), true);
-      });
-  }
-
-  function clearAvatar() {
-    PX.api("/avatar", { method: "POST", body: { clear: true } })
-      .then(function (d) {
-        applyMe(d.me);
-        PX.toast("头像已移除");
+        closeOverlay();
+        PX.toast(doneMessage);
+        return reloadAll();
       })
       .catch(function (e) { PX.toast(PX.esc(e.message), true); });
+  }
+
+  function openAvatarDialog() {
+    var has = !!(S.me && S.me.avatar);
+    openOverlay("avatar", has ? "更换头像" : "添加头像",
+      '<div class="avatar-rows">' +
+      '<div class="field"><label for="avatarUrl">图片链接</label>' +
+      '<div class="avatar-row">' +
+      '<input id="avatarUrl" type="url" placeholder="https://…" ' +
+      'autocomplete="off" spellcheck="false">' +
+      '<button class="btn primary" type="button" data-avatar-url="1">使用</button>' +
+      "</div></div>" +
+      '<div class="avatar-or">或者</div>' +
+      '<div class="avatar-row">' +
+      '<button class="btn" type="button" data-avatar-file="1">从本机导入图片</button>' +
+      (has ? '<button class="btn danger" type="button" data-avatar-clear="1">' +
+        "移除头像</button>" : "") +
+      "</div>" +
+      '<p class="hint">' + AVATAR_HINT + "</p></div>");
+    var box = $("#avatarUrl");
+    if (box) box.focus();
   }
 
   function drawAppearance() {
@@ -929,6 +946,20 @@
       return;
     }
 
+    if (t.closest("[data-avatar-file]")) return $("#avatarFile").click();
+    if (t.closest("[data-avatar-clear]")) {
+      return sendAvatar({ clear: true }, "头像已移除");
+    }
+    if (t.closest("[data-avatar-url]")) {
+      var box = $("#avatarUrl");
+      var link = box ? box.value.trim() : "";
+      if (!/^https?:\/\//i.test(link)) {
+        PX.toast("链接需要是 http 或 https 开头", true);
+        return;
+      }
+      return sendAvatar({ url: link }, "头像已更新");
+    }
+
     var logoutBtn = t.closest("[data-logout]");
     if (logoutBtn) return logout(logoutBtn.getAttribute("data-logout"));
 
@@ -1029,8 +1060,7 @@
   bindUserSearch();
 
   $("#pfSave").addEventListener("click", saveProfile);
-  $("#avatarPick").addEventListener("click", function () { $("#avatarFile").click(); });
-  $("#avatarClear").addEventListener("click", clearAvatar);
+  $("#avatarPick").addEventListener("click", openAvatarDialog);
   $("#avatarFile").addEventListener("change", function (e) {
     var file = e.target.files && e.target.files[0];
     e.target.value = "";
@@ -1040,7 +1070,9 @@
       return;
     }
     var reader = new FileReader();
-    reader.onload = function () { sendAvatar(String(reader.result)); };
+    reader.onload = function () {
+      sendAvatar({ data: String(reader.result) }, "头像已更新");
+    };
     reader.onerror = function () { PX.toast("读不了这个文件", true); };
     reader.readAsDataURL(file);
   });

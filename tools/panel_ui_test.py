@@ -249,6 +249,20 @@ def routes_page(page):
         check("%-16s -> %s" % (route, title), expect in title, title)
 
 
+def title_row(page):
+    print("== page titles sit at the same height everywhere ==")
+    tops = {}
+    for route in ("overview", "events", "users", "all-events", "server", "account"):
+        page.goto(BASE + "/panel#/" + route)
+        page.wait_for_timeout(260)
+        tops[route] = page.evaluate(
+            "() => Math.round(document.querySelector('.page:not([hidden]) h1')"
+            ".getBoundingClientRect().top)")
+    heights = sorted(set(tops.values()))
+    check("one title height for pages with and without a button",
+          len(heights) == 1, tops)
+
+
 def group_page(page):
     print("== the collapsible group ==")
     page.goto(BASE + "/panel#/overview")
@@ -301,8 +315,20 @@ def search_page(page):
         const r = document.getElementById('userSearchClear').getBoundingClientRect();
         return {w: Math.round(r.width), h: Math.round(r.height)};
     }""")
-    check("it is a real 28px target, not a hairline cross",
-          box["w"] >= 26 and box["h"] >= 26, box)
+    check("the circle is small under a mouse",
+          12 <= box["w"] <= 22 and 12 <= box["h"] <= 22, box)
+    check("but a finger still gets a big one", page.evaluate("""() => {
+        for (const sheet of document.styleSheets) {
+            let rules;
+            try { rules = sheet.cssRules; } catch (e) { continue; }
+            for (const rule of rules) {
+                if (rule.conditionText && rule.conditionText.indexOf('coarse') >= 0 &&
+                    rule.cssText.indexOf('.search-clear') >= 0 &&
+                    /width:\s*30px/.test(rule.cssText)) return true;
+            }
+        }
+        return false;
+    }"""))
     clear.click()
     page.wait_for_timeout(200)
     check("clicking it empties the box",
@@ -395,18 +421,56 @@ def profile_page(page):
     check("no leftover 'cannot edit' note",
           "还不能改" not in page.content())
 
-    # a real upload, not a stubbed one
-    png = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
-                       "tmp", "avatar-probe.png")
-    png = os.path.abspath(png)
+    # start from a known state: a previous run may have left an avatar behind
+    if page.evaluate("""() => document.getElementById('profileAvatar')
+                              .querySelector('img') !== null"""):
+        page.click("#avatarPick")
+        page.wait_for_timeout(300)
+        page.click("#overlay [data-avatar-clear]")
+        page.wait_for_function(
+            "() => document.querySelectorAll('#profileAvatar img').length === 0",
+            timeout=20000)
+        page.wait_for_timeout(250)
+
+    print("== the avatar badge opens a dialog ==")
+    check("no format line on the page itself",
+          "512 KB" not in page.locator('.page[data-page="account"]').inner_text())
+    badge = page.evaluate("""() => {
+        const el = document.getElementById('avatarPick');
+        const av = document.querySelector('.avatar-wrap .avatar').getBoundingClientRect();
+        const b = el.getBoundingClientRect();
+        return {overlaps: b.left < av.right && b.top < av.bottom,
+                inside: b.right <= av.right + 12 && b.bottom <= av.bottom + 12,
+                icon: el.innerHTML.indexOf('M10 5.2v9.6') >= 0 ? 'plus' : 'other'};
+    }""")
+    check("the badge sits on the avatar's corner",
+          badge["overlaps"] and badge["inside"], badge)
+    check("with no picture it shows a plus", badge["icon"] == "plus", badge)
+
+    page.click("#avatarPick")
+    page.wait_for_timeout(320)
+    check("the dialog opens", page.locator("#overlay").is_visible())
+    check("it offers a link and a file",
+          page.locator("#overlay [data-avatar-url]").count() == 1 and
+          page.locator("#overlay [data-avatar-file]").count() == 1)
+    check("the format rule lives here now",
+          "512 KB" in page.locator("#overlayBody").inner_text())
+
+    print("== importing a file ==")
+    png = os.path.abspath(os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "..", "tmp", "avatar-probe.png"))
     os.makedirs(os.path.dirname(png), exist_ok=True)
     write_png(png)
+    page.click("#overlay [data-avatar-file]")
+    page.wait_for_timeout(150)
     page.set_input_files("#avatarFile", png)
     page.wait_for_function(
         "() => document.querySelectorAll('#profileAvatar img').length === 1",
         timeout=20000)
-    check("uploading an avatar shows the picture", page.evaluate(
+    page.wait_for_timeout(300)
+    check("the picture appears", page.evaluate(
         "() => document.querySelectorAll('#profileAvatar img').length === 1"))
+    check("the dialog closes itself", not page.locator("#overlay").is_visible())
     check("the sidebar card picks it up too", page.evaluate(
         "() => document.querySelectorAll('#sideAvatar img').length === 1"))
     check("and the sidebar image is scaled to its circle", page.evaluate("""() => {
@@ -418,15 +482,38 @@ def profile_page(page):
                Math.abs(r.height - el.clientHeight) < 2 &&
                getComputedStyle(img).objectFit === 'cover';
     }"""))
-    check("the remove button appears",
-          page.locator("#avatarClear").is_visible())
+    check("the badge becomes a pencil", page.evaluate(
+        "() => document.getElementById('avatarPick').innerHTML"
+        ".indexOf('M4.2 15.8h3.1') >= 0"))
 
-    page.click("#avatarClear")
+    print("== an avatar by link ==")
+    page.click("#avatarPick")
+    page.wait_for_timeout(300)
+    page.fill("#avatarUrl", "not-a-link")
+    page.click("#overlay [data-avatar-url]")
+    page.wait_for_timeout(300)
+    check("a bad link is refused without closing", page.locator("#overlay").is_visible())
+    page.fill("#avatarUrl", "https://example.com/avatar.png")
+    page.click("#overlay [data-avatar-url]")
+    page.wait_for_timeout(900)
+    src = page.evaluate(
+        "() => (document.querySelector('#profileAvatar img') || {}).src || ''")
+    check("a link is stored as the image source",
+          src == "https://example.com/avatar.png", src)
+
+    print("== removing it ==")
+    page.click("#avatarPick")
+    page.wait_for_timeout(300)
+    page.click("#overlay [data-avatar-clear]")
     page.wait_for_function(
         "() => document.querySelectorAll('#profileAvatar img').length === 0",
         timeout=20000)
-    check("removing returns to the initial", page.evaluate(
-        "() => document.getElementById('profileAvatar').textContent.trim().length > 0"))
+    page.wait_for_timeout(200)
+    check("the letter comes back", page.evaluate(
+        "() => document.getElementById('profileAvatar').textContent.trim().length === 1"))
+    check("and so does the plus", page.evaluate(
+        "() => document.getElementById('avatarPick').innerHTML"
+        ".indexOf('M10 5.2v9.6') >= 0"))
 
     print("== saving a display name ==")
     before = page.locator("#pfName").input_value()
@@ -806,9 +893,13 @@ def main():
                 login_page(page)
                 shell_page(page)
                 routes_page(page)
+                title_row(page)
                 group_page(page)
                 card_page(page)
-                profile_page(page)
+                # profile_page edits the signed-in account, so it only runs on a
+                # throw-away instance
+                if WITH_ACCOUNTS:
+                    profile_page(page)
                 users_table(page)
                 events_table(page)
                 dialog_page(page)

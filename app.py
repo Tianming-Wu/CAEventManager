@@ -769,6 +769,22 @@ class Handler(BaseHTTPRequestHandler):
                                    (acc["id"],)).fetchone()
                 return self._json({"ok": True, "me": panel.view(row)})
 
+            link = data.get("url")
+            if link is not None:
+                cleaned = panel.clean_avatar_url(link)
+                if cleaned is None:
+                    raise model.ApiError(
+                        "\u5934\u50cf\u94fe\u63a5\u9700\u8981\u662f http \u6216 https \u5f00\u5934", 400)
+                stamp = time.time()
+                with panel.tx() as tx:
+                    tx.execute("UPDATE accounts SET avatar=?, avatar_at=? WHERE id=?",
+                               (cleaned, stamp, acc["id"]))
+                    panel.audit(tx, acc["username"], "avatar_url", None, cleaned[:120])
+                panel.drop_avatar(acc["id"])
+                row = conn.execute("SELECT * FROM accounts WHERE id=?",
+                                   (acc["id"],)).fetchone()
+                return self._json({"ok": True, "me": panel.view(row)})
+
             raw = data.get("data") or ""
             if "," in raw and raw.strip().lower().startswith("data:"):
                 raw = raw.split(",", 1)[1]
@@ -800,6 +816,9 @@ class Handler(BaseHTTPRequestHandler):
                 raise model.ApiError("bad id", 400)
             row = conn.execute("SELECT avatar FROM accounts WHERE id=?", (who,)).fetchone()
             name = row["avatar"] if row else ""
+            if panel.is_avatar_url(name):
+                # a remote avatar is loaded straight from its host, not through us
+                return self._err("not found", 404)
             full = panel.avatar_path(name)
             if not full or not os.path.exists(full):
                 return self._err("not found", 404)

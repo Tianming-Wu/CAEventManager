@@ -417,6 +417,7 @@
       <div class="card">
         <div class="card-head">
           <h2>账号</h2>
+          <span class="hint" id="usersCount"></span>
           <!-- Honeypot: Edge treats a lone search box as a login field and drops the
                saved account name into it. It fills this one instead, and panel.js
                scrubs anything that appears without a keystroke. -->
@@ -445,6 +446,9 @@
             </tr></thead>
             <tbody></tbody>
           </table>
+        </div>
+        <div class="row" style="margin-top:10px;justify-content:flex-end">
+          <button class="btn sm" id="usersMore" type="button" hidden>加载更多</button>
         </div>
       </div>
     </section>
@@ -602,7 +606,19 @@
     <section class="page" data-page="audit" hidden>
       <header class="page-head">
         <h1>审计日志</h1>
-        <p class="page-sub">最近 200 条账号与活动操作</p>
+        <p class="page-sub" id="auditCount">—</p>
+        <div class="page-actions">
+          <span class="searchbox">
+            <input class="search" id="auditSearch" type="search" autocomplete="off"
+                   placeholder="搜索操作人、动作或对象">
+            <button class="search-clear" id="auditSearchClear" type="button"
+                    aria-label="清空搜索" hidden>
+              <svg viewBox="0 0 20 20" aria-hidden="true">
+                <path d="M5.5 5.5l9 9M14.5 5.5l-9 9"/>
+              </svg>
+            </button>
+          </span>
+        </div>
       </header>
       <div class="card">
         <div class="tblwrap">
@@ -612,6 +628,9 @@
             </tr></thead>
             <tbody></tbody>
           </table>
+        </div>
+        <div class="row" style="margin-top:10px;justify-content:flex-end">
+          <button class="btn sm" id="auditMore" type="button" hidden>加载更多</button>
         </div>
       </div>
     </section>

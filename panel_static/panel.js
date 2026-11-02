@@ -488,6 +488,11 @@
   // Errors that only mean "the operator changed their mind" stay silent.
   function fail(e) {
     if (e && e.silent) return;
+    if (e && e.data && e.data.conflict) {
+      PX.notice("另一个会话已经改过这里，本次更改没有生效", "warn");
+      reloadAll().catch(function () {});
+      return;
+    }
     PX.toast(PX.esc((e && e.message) || "操作失败"), true);
   }
 
@@ -1210,6 +1215,16 @@
 
   function markDirty() { S.dirty = true; }
 
+  var reloadTimer = null;
+  function scheduleReload() {
+    if (reloadTimer) return;
+    reloadTimer = setTimeout(function () {
+      reloadTimer = null;
+      if (S.dirty) return;          // do not throw away what is being typed
+      reloadAll().catch(function () {});
+    }, 400);
+  }
+
   function saveDraft() {
     var payload = draftPayload();
     S.dirty = false;
@@ -1625,13 +1640,7 @@
   }
 
   function renderAccountsTable() {
-    var q = S.userFilter.trim().toLowerCase();
-    var rows = S.accounts.filter(function (a) {
-      if (!q) return true;
-      return (a.username || "").toLowerCase().indexOf(q) >= 0 ||
-        (a.name || "").toLowerCase().indexOf(q) >= 0;
-    });
-
+    var rows = S.accounts;
     $("#accountsTable tbody").innerHTML = rows.length ? rows.map(function (a) {
       return "<tr>" +
         "<td><b>" + PX.esc(a.username) + "</b>" +
@@ -1643,7 +1652,43 @@
         '<td class="actions">' +
         '<button class="btn sm" data-acct="' + a.id + '">管理</button>' +
         "</td></tr>";
-    }).join("") : emptyRow(6, "没有匹配的账号");
+    }).join("") : emptyRow(6, S.userFilter.trim()
+      ? "没有匹配的账号" : "还没有别的账号");
+    var more = $("#usersMore");
+    if (more) {
+      var left = Math.max(0, (S.accountsTotal || 0) - S.accounts.length);
+      more.hidden = left <= 0;
+      more.textContent = left > 0 ? "再显示 " + Math.min(50, left) + " 个" : "加载更多";
+    }
+    var count = $("#usersCount");
+    if (count) count.textContent = S.accountsTotal ? "共 " + S.accountsTotal + " 个账号" : "";
+  }
+
+  function loadAccountsPage(reset) {
+    if (S.accountsLoading) return Promise.resolve();
+    if (reset) {
+      S.accounts = [];
+      S.accountsTotal = 0;
+    } else if (S.accountsTotal !== null && S.accounts.length >= S.accountsTotal) {
+      return Promise.resolve();
+    }
+    S.accountsLoading = true;
+    var q = S.userFilter.trim();
+    return PX.api("/accounts?offset=" + S.accounts.length + "&limit=50" +
+                  (q ? "&q=" + encodeURIComponent(q) : ""))
+      .then(function (d) {
+        S.me = d.me || S.me;
+        S.accounts = S.accounts.concat(d.accounts || []);
+        S.accountsTotal = d.total || 0;
+      })
+      .catch(function (e) { PX.toast(PX.esc(e.message), true); })
+      .then(function () {
+        S.accountsLoading = false;
+        renderIdentity();
+        applyRoleVisibility();
+        syncPendingBadge();
+        renderAccountsTable();
+      });
   }
 
   function openAccountOverlay(id) {
@@ -1839,13 +1884,21 @@
   }
 
   function drawAudit() {
+    var count = $("#auditCount");
+    if (count) {
+      count.textContent = S.auditTotal
+        ? (S.auditFilter ? "匹配 " + S.auditTotal + " 条" : "共 " + S.auditTotal + " 条操作")
+        : "没有记录";
+    }
+    var more = $("#auditMore");
+    if (more) more.hidden = S.audit.length >= (S.auditTotal || 0);
     $("#auditTable tbody").innerHTML = S.audit.length ? S.audit.map(function (r) {
       return '<tr><td class="mono">' + PX.whenExact(r.ts) + "</td>" +
         "<td>" + PX.esc(r.actor || "") + "</td>" +
         "<td>" + PX.esc(r.action) + "</td>" +
         "<td>" + PX.esc(r.target || "") + "</td>" +
         '<td class="wrap">' + PX.esc(r.detail || "") + "</td></tr>";
-    }).join("") : emptyRow(5, "还没有记录");
+    }).join("") : emptyRow(5, S.auditFilter ? "没有匹配的记录" : "还没有记录");
   }
 
   function drawAccount() {
@@ -1979,9 +2032,10 @@
 
   /* ------------------------------------------------------------------ data */
   function loadAccounts() {
-    return PX.api("/accounts").then(function (d) {
-      S.me = d.me;
+    return PX.api("/accounts?limit=50").then(function (d) {
+      S.me = d.me || S.me;
       S.accounts = d.accounts || [];
+      S.accountsTotal = d.total || S.accounts.length;
       renderIdentity();
       applyRoleVisibility();
       syncPendingBadge();
@@ -2002,10 +2056,31 @@
       .catch(function () { S.events = []; });
   }
 
-  function loadAudit() {
+  function loadAudit(q) {
     if (!canAudit()) return Promise.resolve();
-    return PX.api("/audit").then(function (d) { S.audit = d.audit || []; })
-      .catch(function () { S.audit = []; });
+    S.auditFilter = (q === undefined) ? (S.auditFilter || "") : q;
+    var query = "?limit=60" +
+      (S.auditFilter ? "&q=" + encodeURIComponent(S.auditFilter) : "");
+    return PX.api("/audit" + query).then(function (d) {
+      S.audit = d.audit || [];
+      S.auditTotal = d.total || 0;
+    }).catch(function () { S.audit = []; S.auditTotal = 0; });
+  }
+
+  function loadMoreAudit() {
+    if (!canAudit() || S.auditLoading) return Promise.resolve();
+    if (S.audit.length >= (S.auditTotal || 0)) return Promise.resolve();
+    S.auditLoading = true;
+    var query = "?limit=60&offset=" + S.audit.length +
+      (S.auditFilter ? "&q=" + encodeURIComponent(S.auditFilter) : "");
+    return PX.api("/audit" + query).then(function (d) {
+      S.audit = S.audit.concat(d.audit || []);
+      S.auditTotal = d.total || 0;
+    }).catch(function (e) { PX.toast(PX.esc(e.message), true); })
+      .then(function () {
+        S.auditLoading = false;
+        drawAudit();
+      });
   }
 
   function syncPendingBadge() {
@@ -2291,16 +2366,17 @@
   function bindUserSearch() {
     var box = $("#userSearch");
     var clear = $("#userSearchClear");
-    box.addEventListener("input", function (e) {
-      S.userFilter = e.target.value || "";
+    var timer = null;
+    var search = function (value) {
+      S.userFilter = value || "";
       syncClearButton();
-      renderAccountsTable();
-    });
+      clearTimeout(timer);
+      timer = setTimeout(function () { loadAccountsPage(true); }, 220);
+    };
+    box.addEventListener("input", function (e) { search(e.target.value); });
     clear.addEventListener("click", function () {
       box.value = "";
-      S.userFilter = "";
-      syncClearButton();
-      renderAccountsTable();
+      search("");
       box.focus();
     });
     PX.guardAutofill(box, function () {
@@ -2330,6 +2406,11 @@
   });
 
   bindUserSearch();
+  bindLiveSearch("#auditSearch", "#auditSearchClear", function (value) {
+    loadAudit(value).then(drawAudit);
+  });
+  $("#usersMore").addEventListener("click", function () { loadAccountsPage(false); });
+  $("#auditMore").addEventListener("click", loadMoreAudit);
 
   $("#pfSave").addEventListener("click", saveProfile);
   $("#avatarPick").addEventListener("click", openAvatarDialog);
@@ -2445,6 +2526,12 @@
       renderIdentity();
       applyRoleVisibility();
       labelNav();
+      // another session's writes come back through the stream
+      PX.watch(function (revs, before) {
+        if (!before || before.panel === undefined) return;
+        if (revs.panel === before.panel) return;
+        scheduleReload();
+      });
       // a reload keeps an elevation that has not run out yet
       setSudo(d.sudoUntil, d.now);
       return reloadAll().then(function () {

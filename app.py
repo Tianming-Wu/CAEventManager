@@ -33,6 +33,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 import auth
+import bus
 import checkin
 import db
 import expr
@@ -373,6 +374,13 @@ def presets_ok_slug(slug):
     return bool(slug) and bool(presets.ID_RE.match(slug))
 
 
+class Conflict(model.ApiError):
+    """A write that lost the race with another session."""
+
+    def __init__(self, msg):
+        super().__init__(msg, 409)
+
+
 class SudoRequired(model.ApiError):
     """A sensitive endpoint refused: this session has not re-entered a password.
 
@@ -383,6 +391,14 @@ class SudoRequired(model.ApiError):
 
     def __init__(self):
         super().__init__("该操作需要 sudo 模式", 403)
+
+
+def _int_arg(query, name, default, low, high):
+    try:
+        value = int((query.get(name) or [str(default)])[0])
+    except (TypeError, ValueError):
+        return default
+    return max(low, min(high, value))
 
 
 def quote_path(value):
@@ -427,12 +443,15 @@ class ConsoleUser:
 class Handler(BaseHTTPRequestHandler):
     server_version = "LotteryHTTP/" + VERSION
     protocol_version = "HTTP/1.1"
+    # which scope a write belongs to; set by the dispatcher before routing
+    _scope = None
 
     # ---------------- plumbing ----------------
     def log_message(self, fmt, *args):
         log("%s %s" % (self.address_string(), fmt % args))
 
     def _send(self, status, body=b"", ctype="application/json; charset=utf-8", headers=None):
+        self._status = status
         if isinstance(body, str):
             body = body.encode("utf-8")
         self.send_response(status)
@@ -448,6 +467,10 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
 
     def _json(self, obj, status=200, headers=None):
+        if self.command == "POST" and status == 200 and self._scope:
+            bus.bump(self._scope)
+        if isinstance(obj, dict) and "revs" not in obj and self.path.startswith("/api/panel"):
+            obj = dict(obj, revs=bus.snapshot())
         self._send(status, json.dumps(obj, ensure_ascii=False, default=str), headers=headers)
 
     def _err(self, msg, status=400):
@@ -459,6 +482,42 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", "0")
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
+
+    def _stream(self):
+        """Server-sent events: the panel says when something changed.
+
+        A stream that drops only delays the notice - the next event carries the
+        whole revision map, so a client cannot end up behind after a gap.
+        """
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Connection", "keep-alive")
+        self.send_header("X-Accel-Buffering", "no")
+        self.end_headers()
+        bus.watch_enter()
+        try:
+            seen = {}
+            self._sse({"revs": bus.snapshot()})
+            seen = bus.snapshot()
+            self.wfile.flush()
+            while True:
+                revs = bus.wait_for_change(seen, timeout=25.0)
+                if revs == seen:
+                    self.wfile.write(b": keep-alive\n\n")
+                    self.wfile.flush()
+                    continue
+                seen = revs
+                self._sse({"revs": revs})
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
+        finally:
+            bus.watch_leave()
+
+    def _sse(self, payload):
+        data = json.dumps(payload, ensure_ascii=False)
+        self.wfile.write(("data: %s\n\n" % data).encode("utf-8"))
 
     def _console_account(self):
         """The panel account behind this request, with its session token.
@@ -587,6 +646,7 @@ class Handler(BaseHTTPRequestHandler):
             self._drain_body()
 
             kind, route, token = panel.classify(parsed.path, EVENT_TOKENS)
+            self._scope = "panel" if kind == "panel" else None
             if kind == "panel":
                 return self._panel(method, route, parsed.path, query)
 
@@ -612,9 +672,13 @@ class Handler(BaseHTTPRequestHandler):
                     "text/html; charset=utf-8",
                 )
             elif path.startswith("/api/"):
+                self._scope = "event:%s" % db.current_event()
                 self._api(method, path, query)
             else:
                 self._page(method, path)
+        except Conflict as exc:
+            self._json({"ok": False, "error": exc.msg, "conflict": True,
+                        "revs": bus.snapshot()}, 409)
         except SudoRequired as exc:
             # The client answers this by asking for the password and repeating
             # the same request, so it must be able to tell it apart from a plain
@@ -701,6 +765,12 @@ class Handler(BaseHTTPRequestHandler):
             if self.headers.get("X-Requested-With") != "CAEventManager":
                 raise model.ApiError("缺少请求标记", 403)
             return self._body()
+
+        if path == "/stream" and method == "GET":
+            acc = panel.session_account(conn, self._panel_token())
+            if acc is None:
+                raise model.ApiError("未登录或登录已过期", 401)
+            return self._stream()
 
         if path == "/me" and method == "GET":
             token = self._panel_token()
@@ -815,6 +885,14 @@ class Handler(BaseHTTPRequestHandler):
         if acc is None:
             raise model.ApiError("未登录或登录已过期", 401)
 
+        # First write wins: a change built on a revision that has since moved on
+        # was made without seeing what the other session did, so it is refused
+        # rather than silently overwriting it.
+        if method == "POST":
+            base = self.headers.get("X-Base-Rev") or ""
+            if base.isdigit() and int(base) < bus.revision("panel"):
+                raise Conflict("另一个会话已经改过这里，本次更改没有生效")
+
         def need(*roles):
             if roles and acc["role"] not in roles:
                 raise model.ApiError("当前账号无权执行该操作", 403)
@@ -889,12 +967,28 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True})
 
         if path == "/accounts" and method == "GET":
+            # an installation can hold a lot of accounts: one page at a time,
+            # and the search runs on the server so paging stays honest
+            q = (query.get("q") or [""])[0].strip()
+            decided = (query.get("decided") or ["0"])[0] in ("1", "true", "yes")
+            offset = _int_arg(query, "offset", 0, 0, 100000)
+            limit = _int_arg(query, "limit", 50, 1, 200)
+            where, args = [], []
+            if q:
+                where.append("(username LIKE ? OR name LIKE ? OR note LIKE ?)")
+                args += ["%" + q + "%"] * 3
+            if decided:
+                where.append("status <> 'pending' AND decided_at > 0")
+            clause = (" WHERE " + " AND ".join(where)) if where else ""
+            total = conn.execute("SELECT COUNT(*) AS n FROM accounts" + clause,
+                                 args).fetchone()["n"]
             rows = conn.execute(
-                "SELECT * FROM accounts ORDER BY "
-                "CASE role WHEN 'owner' THEN 0 WHEN 'superadmin' THEN 1 ELSE 2 END, "
-                "CASE status WHEN 'pending' THEN 0 WHEN 'active' THEN 1 ELSE 2 END, created_at"
-            ).fetchall()
-            return self._json({"ok": True, "me": panel.view(acc),
+                "SELECT * FROM accounts" + clause +
+                " ORDER BY CASE role WHEN 'owner' THEN 0 WHEN 'superadmin' THEN 1 ELSE 2 END,"
+                " CASE status WHEN 'pending' THEN 0 WHEN 'active' THEN 1 ELSE 2 END,"
+                " created_at LIMIT ? OFFSET ?", args + [limit, offset]).fetchall()
+            return self._json({"ok": True, "me": panel.view(acc), "total": int(total or 0),
+                               "offset": offset, "limit": limit,
                                "accounts": [panel.view(r) for r in rows]})
 
         if path == "/events" and method == "GET":
@@ -1531,8 +1625,22 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/audit" and method == "GET":
             need("superadmin", "owner")
-            rows = conn.execute("SELECT * FROM audit ORDER BY id DESC LIMIT 200").fetchall()
-            return self._json({"ok": True, "audit": [dict(r) for r in rows]})
+            q = (query.get("q") or [""])[0].strip()
+            offset = _int_arg(query, "offset", 0, 0, 1000000)
+            limit = _int_arg(query, "limit", 60, 1, 200)
+            where, args = [], []
+            if q:
+                where.append("(actor LIKE ? OR action LIKE ? OR target LIKE ?"
+                             " OR detail LIKE ?)")
+                args += ["%" + q + "%"] * 4
+            clause = (" WHERE " + " AND ".join(where)) if where else ""
+            total = conn.execute("SELECT COUNT(*) AS n FROM audit" + clause,
+                                 args).fetchone()["n"]
+            rows = conn.execute(
+                "SELECT * FROM audit" + clause + " ORDER BY id DESC LIMIT ? OFFSET ?",
+                args + [limit, offset]).fetchall()
+            return self._json({"ok": True, "total": int(total or 0), "offset": offset,
+                               "limit": limit, "audit": [dict(r) for r in rows]})
 
         return self._err("not found", 404)
 

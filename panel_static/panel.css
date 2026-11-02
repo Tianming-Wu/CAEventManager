@@ -1407,18 +1407,19 @@ select:invalid { color: var(--dim); }
   transform: translateY(-50%);
   display: grid;
   place-items: center;
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   padding: 0;
   border: 0;
   border-radius: 999px;
   background: transparent;
-  color: var(--dim);
+  color: var(--muted);
   cursor: pointer;
 }
 .search-clear:hover { background: var(--surface-3); color: var(--text); }
 .search-clear:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.search-clear svg { width: 9px; height: 9px; stroke-width: 2; }
+/* the cross fills the circle instead of floating in it */
+.search-clear svg { width: 12px; height: 12px; stroke-width: 1.9; }
 
 .search {
   flex: 1 1 180px;
@@ -1845,4 +1846,36 @@ input:focus, textarea:focus, select:focus {
 .req {
   -webkit-user-select: none;
   user-select: none;
+}
+
+/* ---------- notices: top right, for what happened in another session ------ */
+.notice-stack {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  z-index: 90;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: min(360px, calc(100vw - 24px));
+  pointer-events: none;
+}
+.notice {
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  font-size: .84rem;
+  line-height: 1.5;
+  opacity: 0;
+  transform: translateY(-6px);
+  transition: opacity .18s ease, transform .18s ease;
+}
+.notice.show { opacity: 1; transform: none; }
+.notice.warn {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
 }

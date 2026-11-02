@@ -9,11 +9,18 @@
   }
   var PREFIX = prefix();
 
+  // The revision this page last saw.  A write that carries it is refused if
+  // another session moved on in the meantime (first write wins).
+  var revs = {};
+  var watchers = [];
+
   function api(path, options) {
     options = options || {};
+    var headers = { "X-Requested-With": "CAEventManager" };
+    if (revs.panel !== undefined) headers["X-Base-Rev"] = String(revs.panel);
     var init = {
       method: options.method || "GET",
-      headers: { "X-Requested-With": "CAEventManager" },
+      headers: headers,
       credentials: "same-origin",
       cache: "no-store"
     };
@@ -27,6 +34,7 @@
         try { data = text ? JSON.parse(text) : {}; } catch (e) {
           data = { ok: false, error: text || "响应无法解析" };
         }
+        if (data && data.revs) revs = data.revs;
         if (!res.ok || data.ok === false) {
           var err = new Error((data && data.error) || ("HTTP " + res.status));
           err.status = res.status;
@@ -87,6 +95,58 @@
     return scrub;
   }
 
+  /* ---- notices: the top-right corner, for things that happen elsewhere ---- */
+  var noticeBox = null;
+
+  function notice(text, kind) {
+    if (!noticeBox) {
+      noticeBox = document.createElement("div");
+      noticeBox.className = "notice-stack";
+      noticeBox.setAttribute("role", "status");
+      noticeBox.setAttribute("aria-live", "polite");
+      document.body.appendChild(noticeBox);
+    }
+    var item = document.createElement("div");
+    item.className = "notice" + (kind ? " " + kind : "");
+    item.textContent = text;
+    noticeBox.appendChild(item);
+    void item.offsetWidth;
+    item.classList.add("show");
+    setTimeout(function () {
+      item.classList.remove("show");
+      setTimeout(function () { item.remove(); }, 220);
+    }, 5200);
+  }
+
+  /* ---- the stream: someone else changed something -------------------------- */
+  function watch(handler) {
+    watchers.push(handler);
+    if (typeof window.EventSource !== "function") return;
+    var source = null;
+    var open = function () {
+      if (source) return;
+      source = new EventSource(PREFIX + "/api/panel/stream");
+      source.onmessage = function (event) {
+        var data;
+        try { data = JSON.parse(event.data); } catch (e) { return; }
+        if (!data || !data.revs) return;
+        var before = revs;
+        revs = data.revs;
+        watchers.forEach(function (fn) {
+          try { fn(data.revs, before); } catch (e) { /* one bad watcher */ }
+        });
+      };
+      source.onerror = function () {
+        // the browser retries by itself; reconnect with a clean slate
+        if (source && source.readyState === 2) {
+          source = null;
+          setTimeout(open, 4000);
+        }
+      };
+    };
+    open();
+  }
+
   var toastEl = null, toastTimer = null;
   function toast(msg, bad) {
     if (!toastEl) {
@@ -105,6 +165,9 @@
   window.PX = {
     PREFIX: PREFIX,
     api: api,
+    watch: watch,
+    notice: notice,
+    revs: function () { return revs; },
     esc: esc,
     when: when,
     whenExact: whenExact,

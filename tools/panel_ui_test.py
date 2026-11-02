@@ -823,6 +823,39 @@ def sudo_page(page):
     check("a clean session still works",
           page.locator(".page[data-page=events]").is_visible())
 
+    # the mode can also be entered on purpose, from the account page
+    page.goto(BASE + "/panel#/account")
+    page.wait_for_timeout(500)
+    check("the account page offers the switch",
+          page.locator("#sudoBtn").inner_text().strip() == "进入 sudo 模式",
+          page.locator("#sudoBtn").inner_text())
+    check("and says the mode is off", "未进入" in page.inner_text("#sudoState"),
+          page.inner_text("#sudoState"))
+    page.click("#sudoBtn")
+    page.wait_for_selector("#sudoPass", timeout=8000)
+    check("it asks for the password too", page.locator("#sudoPass").count() == 1)
+    page.fill("#sudoPass", PASSWORD)
+    page.click("#sudoEnter")
+    page.wait_for_function(
+        "() => document.getElementById('shell').classList.contains('sudo')",
+        timeout=8000)
+    page.wait_for_timeout(500)
+    check("the switch elevates the session", page.locator("#sudoChip").is_visible())
+    check("the button flips to leaving",
+          page.locator("#sudoBtn").inner_text().strip() == "退出 sudo 模式",
+          page.locator("#sudoBtn").inner_text())
+    check("the card counts down", "已进入" in page.inner_text("#sudoState"),
+          page.inner_text("#sudoState"))
+    first = page.inner_text("#sudoState")
+    page.wait_for_timeout(1200)
+    check("and its countdown runs", page.inner_text("#sudoState") != first,
+          (first, page.inner_text("#sudoState")))
+    page.click("#sudoBtn")
+    page.wait_for_timeout(900)
+    check("clicking it again leaves the mode", not page.locator("#sudoChip").is_visible())
+    check("and the card says so", "未进入" in page.inner_text("#sudoState"),
+          page.inner_text("#sudoState"))
+
     # put the instance back: the spare is archived, the token rotation stays on
     # the spare alone
     call(owner, "/api/panel/sudo", {"password": PASSWORD})

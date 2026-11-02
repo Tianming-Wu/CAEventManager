@@ -260,12 +260,23 @@
   }
 
   function paintSudoClock() {
-    var el = $("#sudoClock");
-    if (!el) return;
     var left = sudoLeft();
-    el.textContent = "sudo 模式将于 " + clockText(left) + " 后自动退出。";
-    // the last three seconds blink, then the mode ends on its own
-    el.classList.toggle("blink", left <= 3);
+    var el = $("#sudoClock");
+    if (el) {
+      el.textContent = "sudo 模式将于 " + clockText(left) + " 后自动退出。";
+      // the last three seconds blink, then the mode ends on its own
+      el.classList.toggle("blink", left <= 3);
+    }
+    // the account page offers the same switch, with the same countdown
+    var state = $("#sudoState");
+    if (state) {
+      state.textContent = left > 0
+        ? "已进入，将于 " + clockText(left) + " 后退出"
+        : "未进入";
+      state.classList.toggle("on", left > 0);
+    }
+    var button = $("#sudoBtn");
+    if (button) button.textContent = left > 0 ? "退出 sudo 模式" : "进入 sudo 模式";
   }
 
   function sudoChipEl() { return $("#sudoChip"); }
@@ -275,11 +286,21 @@
     else openSudoPop();
   });
 
+  // The account page offers the switch directly, so the mode can be entered on
+  // purpose instead of only as the answer to a refused action.
+  $("#sudoBtn").addEventListener("click", function () {
+    if (sudoActive()) return quitSudo();
+    askSudoPassword().then(function () {
+      PX.toast("已进入 sudo 模式");
+    }).catch(fail);
+  });
+
   // The mark sits in the title bar; the class on the shell grows it into place,
   // which pushes the product name over instead of covering it.
   function syncSudo() {
     $("#shell").classList.toggle("sudo", sudoActive());
     if (!sudoActive()) closeSudoPop();
+    paintSudoClock();
   }
 
   function openSudoPop() {
@@ -332,6 +353,7 @@
     stopSudoClock();
     SUDO.deadline = 0;
     closeSudoPop();
+    paintSudoClock();
     var shell = $("#shell");
     // one last blink, then the chip fades and the title slides back
     shell.classList.add("sudo-out");
@@ -345,7 +367,7 @@
     if (SUDO.asker) return SUDO.asker.promise;
     var cancel = null;
     var promise = new Promise(function (resolve, reject) {
-      var label = what ? "「" + PX.esc(what) + "」" : "该操作";
+      var label = what ? "「" + PX.esc(what) + "」" : "进入 sudo 模式";
       openOverlay("sudo", "sudo 模式",
         '<p class="page-sub">' + label + "需要再次输入密码确认身份</p>" +
         '<div class="field" style="margin-top:14px">' +

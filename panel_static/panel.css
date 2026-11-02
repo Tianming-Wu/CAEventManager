@@ -509,6 +509,17 @@ button.nav-item {
 }
 .shell.sudo-out .sudo-chip { animation: sudo-blink .3s ease-in-out 1; }
 
+/* the account page's own switch, showing the same countdown */
+.sudo-state {
+  /* the text stays left, the button stays right, and neither wraps */
+  flex: 0 1 auto;
+  margin-right: auto;
+  font-size: .84rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.sudo-state.on { color: var(--accent-strong); font-weight: 600; }
+
 .sudo-pop {
   position: fixed;
   z-index: 70;

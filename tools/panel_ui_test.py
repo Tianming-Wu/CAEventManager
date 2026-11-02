@@ -249,10 +249,10 @@ def shell_page(page):
 def routes_page(page):
     print("== every route renders its own page ==")
     for route, expect in [
-            ("overview", "总览"), ("events", "我的活动"), ("templates", "模板管理"),
+            ("overview", "总览"), ("events", "我的活动"), ("templates", "预设管理"),
             ("users", "用户管理"), ("all-events", "活动管理"),
             ("approval-users", "注册申请"), ("approval-events", "活动申请"),
-            ("server", "服务器管理"), ("audit", "审计日志"),
+            ("modules", "模块管理"), ("server", "服务器管理"), ("audit", "审计日志"),
             ("account", "账户信息"), ("appearance", "界面设置")]:
         page.goto(BASE + "/panel#/" + route)
         page.wait_for_timeout(230)
@@ -418,16 +418,19 @@ def card_page(page):
     check("the three-dot button opens a menu",
           page.locator(".card-menu").is_visible())
     items = page.evaluate(
-        "() => Array.from(document.querySelectorAll('.card-menu button'))"
-        ".map(b => b.textContent.trim())")
+        "() => Array.from(document.querySelectorAll('.card-menu button, "
+        ".card-menu .menu-link')).map(b => b.textContent.trim())")
+    joined = " ".join(items)
     check("it holds the less-used actions",
-          "活动设置" in items and "保存为模板" in items, items)
+          "活动设置" in joined and "保存为预设" in joined, items)
     check("nothing already on the card is repeated",
           "复制活动 token" not in items and "管理面板" not in items, items)
-    check("the unfinished ones are disabled", page.evaluate(
+    # both entries do something now, so neither is greyed out
+    check("nothing in the menu is a placeholder", page.evaluate(
         "() => Array.from(document.querySelectorAll('.card-menu button'))"
-        ".filter(b => b.disabled).map(b => b.textContent.trim())"
-        ".join(',') === '保存为模板,活动设置'"))
+        ".filter(b => b.disabled).length") == 0)
+    check("活动设置 opens the activity's own page", page.evaluate(
+        "() => !!document.querySelector('.card-menu .menu-link[href]')"))
     check("the menu stays inside the window", page.evaluate("""() => {
         const m = document.querySelector('.card-menu').getBoundingClientRect();
         return m.left >= 0 && m.right <= window.innerWidth

@@ -1378,6 +1378,9 @@ select:invalid { color: var(--dim); }
 .grow { flex: 1 1 160px; min-width: 140px; }
 .field { margin-bottom: 0; }
 .field label { display: block; font-size: .78rem; color: var(--muted); margin-bottom: 6px; }
+/* stacked fields in a card need a gap that is clearly bigger than the label's
+   own gap, or a label reads as belonging to the box above it */
+.card > .field + .field { margin-top: 16px; }
 .hp {
   position: absolute;
   width: 1px;
@@ -1681,3 +1684,41 @@ input:focus, textarea:focus, select:focus {
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }
+
+/* ---------- presets ---------- */
+.preset-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+.preset-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--tint);
+}
+.preset-name { font-weight: 650; }
+.preset-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.preset-note {
+  margin: 0;
+  font-size: .82rem;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.preset-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: auto; }
+.preset-card .empty { padding: 0; }
+.tag.vis-private { color: var(--muted); }
+.tag.vis-public { color: var(--accent-strong); border-color: var(--accent-line); }
+.tag.vis-org { color: var(--muted); border-style: dashed; }
+.menu-link {
+  display: block;
+  padding: 8px 10px;
+  border-radius: 5px;
+  color: var(--text);
+  font-size: .86rem;
+  text-decoration: none;
+}
+.menu-link:hover { background: var(--surface-2); }

@@ -27,6 +27,7 @@
     "approval-users": { min: "superadmin", group: "approvals" },
     "approval-events": { min: "superadmin", group: "approvals" },
     "new-event": { min: "admin" },
+    "modules": { min: "owner" },
     "server": { min: "owner" },
     "audit": { min: "owner" },
     "account": { min: "admin" },
@@ -508,15 +509,11 @@
         : "") +
       '<button type="button" role="menuitem" data-copy="' + PX.esc(e.url) + '">' +
       "复制访问链接</button>" +
-      // UNWIRED(templates): saving a template has no backend yet
-      '<button type="button" role="menuitem" disabled ' +
-      'title="模板功能还没有接入">' +
-      "保存为模板</button>" +
+      '<button type="button" role="menuitem" data-save-preset="' + e.seq + '">' +
+      "保存为预设</button>" +
       '<div class="menu-sep"></div>' +
-      // UNWIRED(event-settings): there is no settings page yet
-      '<button type="button" role="menuitem" disabled ' +
-      'title="活动设置还没有接入">' +
-      "活动设置</button>" +
+      '<a role="menuitem" class="menu-link" href="' + PX.esc(e.admin) +
+      '" target="_blank" rel="noopener">活动设置 ↗</a>' +
       (e.role === "owner"
         ? '<div class="menu-sep"></div>' +
           '<button type="button" role="menuitem" data-rotate="' + e.seq + '">' +
@@ -813,8 +810,17 @@
     if (el) el.scrollTop = 0;
   }
 
+  var guardBypass = false;
+
   function onRoute() {
     var wanted = routeFromHash() || FALLBACK_ROUTE;
+    if (!guardBypass && S.route === "new-event" && wanted !== "new-event" && S.dirty) {
+      // put the address back where the form is, then ask what to do with it
+      var here = "#/" + S.route + (S.templateId ? "/" + encodeURIComponent(S.templateId) : "");
+      location.replace(here);
+      askDraftChoice(wanted);
+      return;
+    }
     if (!allowed(wanted)) {
       // Reachable by typing the hash; say so instead of silently moving them.
       showDenied(wanted);
@@ -861,6 +867,7 @@
       case "all-events": return drawAllEvents();
       case "approval-users": return drawApprovalUsers();
       case "approval-events": return drawApprovalEvents();
+      case "modules": return drawModules();
       case "server": return drawServer();
       case "audit": return drawAudit();
       case "account": return drawAccount();
@@ -932,25 +939,274 @@
       : '<div class="empty">还没有参与别人创建的活动</div>';
   }
 
-  function drawTemplates() {
-    // UNWIRED(templates): 模板是计划中的功能，这里只列出打算做成可配置的项目。
-    var planned = [
-      ["任务链是否强制", "不完成任务链就抽不了奖，还是只做提示。"],
-      ["是否允许重复中奖", "同一个人能否中多个等级的奖。"],
-      ["奖票池模式", "按到场人数自动伸缩，还是固定数量。"],
-      ["特等奖范围", "只算参加人员，还是把工作人员与志愿者也算进来。"]
+  // A preset is a saved snapshot of one activity's setup: module, parameters and
+  // a suggested name.  Three shelves: what I starred, what I made, what is out
+  // there for everyone.
+  function presetCard(p, shelf) {
+    var tags = ['<span class="tag">' + PX.esc(p.moduleName) + "</span>"];
+    if (p.builtin) tags.push('<span class="tag">内置</span>');
+    if (shelf !== "mine" && p.ownerName) {
+      tags.push('<span class="tag">' + PX.esc(p.ownerName) + "</span>");
+    }
+    tags.push('<span class="tag vis-' + PX.esc(p.visibility) + '">' +
+      PX.esc(p.visibilityLabel) + "</span>");
+    var actions = [
+      '<button class="btn sm primary" type="button" data-preset-use="' +
+        PX.esc(p.id) + '">用它创建</button>',
+      '<button class="btn sm" type="button" data-preset-fav="' + PX.esc(p.id) +
+        '" data-on="' + (p.fav ? "0" : "1") + '">' +
+        (p.fav ? "取消收藏" : "收藏") + "</button>"
     ];
-    $("#templateTiles").innerHTML = planned.map(function (p) {
-      return '<div class="tile"><b>' + PX.esc(p[0]) + "</b>" + PX.esc(p[1]) +
-        '<span class="tag">未接入</span></div>';
-    }).join("");
+    if (p.mine && !p.builtin) {
+      actions.push('<button class="btn sm" type="button" data-preset-edit="' +
+        PX.esc(p.id) + '">编辑</button>');
+      actions.push('<button class="btn sm danger" type="button" data-preset-drop="' +
+        PX.esc(p.id) + '">删除</button>');
+    }
+    return '<div class="preset-card">' +
+      '<div class="preset-name">' + PX.esc(p.name) + "</div>" +
+      '<div class="preset-tags">' + tags.join("") + "</div>" +
+      (p.note ? '<p class="preset-note">' + PX.esc(p.note) + "</p>" : "") +
+      '<div class="preset-actions">' + actions.join("") + "</div></div>";
   }
 
-  function loadTemplates() {
-    if (S.templates.length) return Promise.resolve();
+  function presetShelf(id, rows, shelf, empty) {
+    var el = $(id);
+    if (!el) return;
+    el.innerHTML = rows.length
+      ? rows.map(function (p) { return presetCard(p, shelf); }).join("")
+      : '<div class="empty">' + PX.esc(empty) + "</div>";
+  }
+
+  function drawTemplates() {
     return PX.api("/templates").then(function (d) {
-      S.templates = d.templates || [];
+      S.templates = d.presets || [];
+      S.visibilityOptions = d.visibility || [];
+      var fav = S.templates.filter(function (p) { return p.fav; });
+      var mine = S.templates.filter(function (p) { return p.mine && !p.builtin; });
+      var square = S.templates.filter(function (p) { return !p.fav; });
+      presetShelf("#presetFavorites", fav, "fav", "还没有收藏，在广场里点一下星就行");
+      presetShelf("#presetMine", mine, "mine", "还没有自己的预设，活动卡片菜单里可以存一份");
+      presetShelf("#presetSquare", square, "square", "广场还是空的");
+    }).catch(function (e) { PX.toast(PX.esc(e.message), true); });
+  }
+
+  function presetDialog(preset) {
+    var p = preset || {};
+    var options = S.visibilityOptions.length ? S.visibilityOptions : [
+      { value: "private", label: "私有" },
+      { value: "public", label: "公开" },
+      { value: "org", label: "组织公开" }
+    ];
+    openOverlay("preset", preset ? "编辑预设" : "新建预设",
+      '<div class="field"><label for="presetName">名称</label>' +
+      '<input id="presetName" type="text" maxlength="40" value="' +
+      PX.esc(p.name || "") + '"></div>' +
+      '<div class="field"><label for="presetNote">说明</label>' +
+      '<input id="presetNote" type="text" maxlength="200" value="' +
+      PX.esc(p.note || "") + '"></div>' +
+      '<div class="field"><label for="presetVis">可见性</label>' +
+      '<select id="presetVis">' + options.map(function (o) {
+        return '<option value="' + PX.esc(o.value) + '"' +
+          ((p.visibility || "private") === o.value ? " selected" : "") + ">" +
+          PX.esc(o.label) + "</option>";
+      }).join("") + "</select>" +
+      '<p class="hint">组织公开会在组织建好之后只对本组织可见</p></div>' +
+      '<div class="row" style="margin-top:18px;justify-content:flex-end">' +
+      '<button class="btn" type="button" data-close-overlay="1">取消</button>' +
+      '<button class="btn primary" type="button" id="presetSave">保存</button></div>');
+    $("#presetName").focus();
+    $("#presetSave").addEventListener("click", function () {
+      var payload = {
+        id: p.id || "",
+        name: $("#presetName").value.trim(),
+        note: $("#presetNote").value.trim(),
+        visibility: $("#presetVis").value,
+        module: p.module || (S.templates[0] && S.templates[0].module) || "",
+        params: p.params || {},
+        title: p.title || ""
+      };
+      PX.api("/preset", { method: "POST", body: payload })
+        .then(function () {
+          closeOverlay();
+          PX.toast("已保存预设");
+          return loadTemplates().then(drawTemplates);
+        })
+        .catch(function (e) { PX.toast(PX.esc(e.message), true); });
+    });
+  }
+
+  function presetFavorite(id, on) {
+    PX.api("/preset/favorite", { method: "POST", body: { id: id, on: on } })
+      .then(function () { return loadTemplates().then(drawTemplates); })
+      .catch(function (e) { PX.toast(PX.esc(e.message), true); });
+  }
+
+  function presetDelete(id) {
+    var p = S.templates.filter(function (x) { return x.id === id; })[0] || {};
+    openOverlay("preset-del", "删除预设",
+      '<p class="page-sub">「' + PX.esc(p.name || id) +
+      "」会被删掉，已经用它建出来的活动不受影响</p>" +
+      '<div class="row" style="margin-top:18px;justify-content:flex-end">' +
+      '<button class="btn" type="button" data-close-overlay="1">取消</button>' +
+      '<button class="btn danger" type="button" id="presetDropYes">删除</button></div>');
+    $("#presetDropYes").addEventListener("click", function () {
+      PX.api("/preset/delete", { method: "POST", body: { id: id } })
+        .then(function () {
+          closeOverlay();
+          PX.toast("已删除");
+          return loadTemplates().then(drawTemplates);
+        })
+        .catch(function (e) { PX.toast(PX.esc(e.message), true); });
+    });
+  }
+
+  // Snapshot an activity as it is set up right now.
+  function saveAsPreset(seq) {
+    var e = S.events.filter(function (x) { return String(x.seq) === String(seq); })[0];
+    closeCardMenu();
+    openOverlay("preset-save", "保存为预设",
+      '<p class="page-sub">把「' + PX.esc(e ? eventTitle(e) : "") +
+      "」现在的设定存成一份预设，下次建活动可以直接套用</p>" +
+      '<div class="field" style="margin-top:14px"><label for="presetSaveName">名称</label>' +
+      '<input id="presetSaveName" type="text" maxlength="40" value="' +
+      PX.esc(e ? eventTitle(e) : "") + '"></div>' +
+      '<div class="row" style="margin-top:18px;justify-content:flex-end">' +
+      '<button class="btn" type="button" data-close-overlay="1">取消</button>' +
+      '<button class="btn primary" type="button" id="presetSaveYes">保存</button></div>');
+    $("#presetSaveName").focus();
+    $("#presetSaveYes").addEventListener("click", function () {
+      PX.api("/event/preset", {
+        method: "POST",
+        body: { seq: Number(seq), name: $("#presetSaveName").value.trim(),
+                visibility: "private" }
+      }).then(function (d) {
+        closeOverlay();
+        PX.toast("已保存预设「" + PX.esc(d.name) + "」");
+        return loadTemplates();
+      }).catch(function (err) { PX.toast(PX.esc(err.message), true); });
+    });
+  }
+
+  function drawModules() {
+    return PX.api("/modules").then(function (d) {
+      S.modules = d.modules || [];
+      $("#moduleTable tbody").innerHTML = S.modules.map(function (m) {
+        return "<tr>" +
+          "<td><b>" + PX.esc(m.name) + "</b><br>" +
+          '<span class="page-sub">' + PX.esc(m.id) + "</span></td>" +
+          '<td class="mono">v' + PX.esc(m.version) + "</td>" +
+          "<td>" + PX.esc(m.author || "—") + "</td>" +
+          "<td>" + (m.pages || []).map(function (p) {
+            return PX.esc(p.title);
+          }).join("、") + "</td>" +
+          "<td>" + (m.external || []).join("、") + "</td></tr>";
+      }).join("") || emptyRow(5, "没有装任何模块");
+      $("#moduleHint").textContent =
+        "模块是活动形式的实现；导入与更新还没有接入，目前随服务一起发布";
+    }).catch(function (e) {
+      if (e.status === 403) return showDenied("modules");
+      PX.toast(PX.esc(e.message), true);
+    });
+  }
+
+  function loadTemplates(force) {
+    if (S.templates.length && !force) return Promise.resolve();
+    return PX.api("/templates").then(function (d) {
+      S.templates = d.presets || d.templates || [];
+      S.visibilityOptions = d.visibility || [];
     }).catch(function () { S.templates = []; });
+  }
+
+  /* ------------------------------------------------------------- drafts */
+  /* Leaving the create form with typing in it asks what to do.  A draft is the
+   * same payload the create endpoint takes, saved on the account so it is there
+   * on another machine too. */
+  function draftPayload() {
+    return {
+      title: $("#neTitle").value,
+      note: $("#neNote").value,
+      params: collectKindParams(),
+      members: (S.invited || []).slice()
+    };
+  }
+
+  function markDirty() { S.dirty = true; }
+
+  function saveDraft() {
+    var payload = draftPayload();
+    S.dirty = false;
+    return PX.api("/draft", {
+      method: "POST",
+      body: { key: S.templateId || "picker", payload: payload }
+    }).then(function () {
+      PX.toast("已保存草稿");
+    }).catch(function (e) {
+      S.dirty = true;
+      PX.toast(PX.esc(e.message || "草稿没存上"), true);
+    });
+  }
+
+  function dropDraft() {
+    S.dirty = false;
+    return PX.api("/draft", {
+      method: "POST",
+      body: { key: S.templateId || "picker", payload: null }
+    }).catch(function () { /* a draft that will not drop is not worth a toast */ });
+  }
+
+  function restoreDraft(tpl) {
+    return PX.api("/draft?key=" + encodeURIComponent(S.templateId || "picker"))
+      .then(function (d) {
+        if (!d.draft) return false;
+        var payload;
+        try { payload = JSON.parse(d.draft.payload); } catch (e) { return false; }
+        if (!payload || typeof payload !== "object") return false;
+        if (payload.title) $("#neTitle").value = payload.title;
+        if (payload.note) $("#neNote").value = payload.note;
+        Object.keys(payload.params || {}).forEach(function (key) {
+          var el = $('[data-kind-field="' + key + '"]');
+          if (!el) return;
+          if (el.type === "checkbox") el.checked = !!payload.params[key];
+          else el.value = payload.params[key];
+        });
+        S.invited = (payload.members || []).filter(function (id) {
+          return S.accounts.some(function (a) { return a.id === id; });
+        });
+        renderInviteChips();
+        var rows = $$("[data-show-when]", $("#kindFields"));
+        rows.forEach(function (row) {
+          var driver = $('[data-kind-field="' + row.getAttribute("data-show-when") + '"]');
+          row.hidden = !driver || String(driver.value) !== row.getAttribute("data-show-is");
+        });
+        PX.toast("已恢复上次的草稿");
+        return true;
+      })
+      .catch(function () { return false; });
+  }
+
+  // The three answers when the form has typing in it and the page is leaving.
+  function askDraftChoice(into) {
+    openOverlay("draft", "离开创建活动？",
+      '<p class="page-sub">还没有创建。填过的内容可以留成草稿，下次进来接着改</p>' +
+      '<div class="row" style="margin-top:18px;justify-content:flex-end">' +
+      '<button class="btn" type="button" data-close-overlay="1">继续编辑</button>' +
+      '<button class="btn danger" type="button" id="draftDrop">丢弃</button>' +
+      '<button class="btn primary" type="button" id="draftKeep">保存草稿</button></div>');
+    var leave = function () {
+      guardBypass = true;
+      S.dirty = false;
+      go(into);
+      setTimeout(function () { guardBypass = false; }, 80);
+    };
+    $("#draftDrop").addEventListener("click", function () {
+      closeOverlay();
+      dropDraft().then(leave);
+    });
+    $("#draftKeep").addEventListener("click", function () {
+      closeOverlay();
+      saveDraft().then(leave);
+    });
   }
 
   function templateById(id) {
@@ -1059,6 +1315,10 @@
     if (!$("#neTitle").value) $("#neTitle").value = tpl.title || "";
     renderInviteChips();
     bindShowWhen($("#kindFields"));
+    S.dirty = false;
+    $("#kindForm").addEventListener("input", markDirty);
+    $("#kindForm").addEventListener("change", markDirty);
+    restoreDraft(tpl);
   }
 
   // A field can say what it depends on; the whole row disappears when the
@@ -1192,6 +1452,7 @@
 
   function createEvent() {
     var err = $("#createErr");
+    S.dirty = false;
     err.textContent = "";
     var body = {
       template: S.templateId,
@@ -1209,6 +1470,7 @@
     btn.disabled = true;
     PX.api("/events/create", { method: "POST", body: body })
       .then(function (d) {
+        dropDraft();          // the draft became an activity
         PX.toast("\u5df2\u521b\u5efa");
         location.href = d.event.admin;
       })
@@ -1691,6 +1953,35 @@
                           requestBtn.getAttribute("data-request"));
     }
 
+    var wantPreset = t.closest("[data-save-preset]");
+    if (wantPreset) {
+      return saveAsPreset(wantPreset.getAttribute("data-save-preset"));
+    }
+
+    var usePreset = t.closest("[data-preset-use]");
+    if (usePreset) {
+      return go("new-event/" + usePreset.getAttribute("data-preset-use"));
+    }
+
+    var favPreset = t.closest("[data-preset-fav]");
+    if (favPreset) {
+      return presetFavorite(favPreset.getAttribute("data-preset-fav"),
+                            favPreset.getAttribute("data-on") === "1");
+    }
+
+    var editPreset = t.closest("[data-preset-edit]");
+    if (editPreset) {
+      var found = S.templates.filter(function (x) {
+        return x.id === editPreset.getAttribute("data-preset-edit");
+      })[0];
+      return presetDialog(found || null);
+    }
+
+    var dropPreset = t.closest("[data-preset-drop]");
+    if (dropPreset) {
+      return presetDelete(dropPreset.getAttribute("data-preset-drop"));
+    }
+
     var renameBtn = t.closest("[data-rename]");
     if (renameBtn) return openRename(renameBtn.getAttribute("data-rename"));
 
@@ -1873,14 +2164,19 @@
     loadTemplates().then(function () { go("new-event"); });
   }
   $("#newEventBtn").addEventListener("click", newEvent);
+  $("#presetNewBtn").addEventListener("click", function () { presetDialog(null); });
   // 活动管理 is a superadmin view; creating from there uses the same flow
   $("#createEventBtn").addEventListener("click", newEvent);
 
   $("#kindBack").addEventListener("click", function () {
+    if (S.dirty) return askDraftChoice("new-event");
     S.invited = [];
     go("new-event");
   });
-  $("#pickerBack").addEventListener("click", function () { go("events"); });
+  $("#pickerBack").addEventListener("click", function () {
+    if (S.dirty) return askDraftChoice("events");
+    go("events");
+  });
   $("#kindCreate").addEventListener("click", createEvent);
   $("#kindImport").addEventListener("click", function () {
     $("#kindImportFile").click();
@@ -1897,6 +2193,13 @@
   });
 
   window.addEventListener("hashchange", onRoute);
+
+  window.addEventListener("beforeunload", function (e) {
+    if (S.route === "new-event" && S.dirty) {
+      e.preventDefault();
+      e.returnValue = "";
+    }
+  });
 
   window.addEventListener("keydown", function (e) {
     if (e.key === "Escape") {

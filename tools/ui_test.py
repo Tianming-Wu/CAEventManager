@@ -460,20 +460,32 @@ def main():
         check("draw screen drops the task counters", "任务" not in draw_txt, draw_txt)
         check("name wall stays hidden", screen.locator(".wall .w").count() == 0)
 
-        # the toggle must bring it back
+        # the toggle must bring it back.  The screen polls, so wait for what the
+        # setting is supposed to cause instead of guessing at a delay.
         page.click('#tabs button[data-tab="config"]')
         page.wait_for_timeout(500)
         page.click("label:has(#setScreenWall)")
         page.click("#saveSettingsBtn")
-        page.wait_for_timeout(2600)
-        check("enabling the toggle renders the wall",
-              screen.locator(".wall .w").count() == st["stats"]["total"],
+        walled = True
+        try:
+            screen.wait_for_function(
+                "n => document.querySelectorAll('.wall .w').length === n",
+                arg=st["stats"]["total"], timeout=15000)
+        except Exception:
+            walled = False
+        check("enabling the toggle renders the wall", walled,
               screen.locator(".wall .w").count())
         page.click("label:has(#setScreenWall)")
         page.click("#saveSettingsBtn")
-        page.wait_for_timeout(2600)
-        check("disabling it hides the wall again",
-              screen.locator(".wall .w").count() == 0)
+        hidden = True
+        try:
+            screen.wait_for_function(
+                "() => document.querySelectorAll('.wall .w').length === 0",
+                timeout=15000)
+        except Exception:
+            hidden = False
+        check("disabling it hides the wall again", hidden,
+              screen.locator(".wall .w").count())
         page.click('#tabs button[data-tab="draw"]')
         page.wait_for_timeout(400)
         check("QR becomes the static public link", after["match"] is True, after)

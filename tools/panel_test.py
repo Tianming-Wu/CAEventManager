@@ -307,8 +307,8 @@ def main():
     call(plain, "/api/panel/host", expect=403)
     check("a plain admin cannot read them", True)
 
-    print("== templates and modules ==")
-    tpls = call(owner, "/api/panel/templates")["templates"]
+    print("== presets and modules ==")
+    tpls = call(owner, "/api/panel/templates")["presets"]
     ids = [t["id"] for t in tpls]
     check("the built-in template is listed", "nwuca.salon" in ids, ids)
     tpl = [t for t in tpls if t["id"] == "nwuca.salon"][0]
@@ -320,6 +320,45 @@ def main():
           [f.get("visibleWhen") for f in tpl["fields"]])
     check("the template carries preset parameters",
           tpl["params"].get("pool_mode") == "auto", tpl["params"])
+    check("the built-in preset is visible to everyone",
+          tpl["visibility"] == "public" and tpl["builtin"], tpl)
+    visibility = [v["value"] for v in call(owner, "/api/panel/templates")["visibility"]]
+    check("private, public and organisation-wide are offered",
+          visibility == ["private", "public", "org"], visibility)
+    mods = call(owner, "/api/panel/modules")
+    check("the owner can list modules",
+          mods and mods["modules"] and mods["modules"][0]["id"], mods)
+    check("a superadmin cannot",
+          call(teacher, "/api/panel/modules", expect=403) is not None)
+
+    print("== a preset saved from an activity ==")
+    made = post(owner, "/api/panel/event/preset",
+                {"seq": ev["seq"], "name": "快照一", "visibility": "private"})
+    check("an activity can be snapshotted", made and made.get("id"), made)
+    shelf = call(owner, "/api/panel/templates")["presets"]
+    snap = [p for p in shelf if p["id"] == made["id"]][0]
+    check("the snapshot carries the module", snap["module"], snap)
+    check("and its parameters", isinstance(snap["params"], dict), snap)
+    check("it is mine and private", snap["mine"] and snap["visibility"] == "private", snap)
+    post(owner, "/api/panel/preset/favorite", {"id": made["id"], "on": True})
+    shelf = call(owner, "/api/panel/templates")["presets"]
+    check("favourites are marked",
+          [p for p in shelf if p["id"] == made["id"]][0]["fav"])
+    check("nobody else can delete it",
+          post(teacher, "/api/panel/preset/delete", {"id": made["id"]},
+               expect=403) is not None)
+    post(owner, "/api/panel/preset/delete", {"id": made["id"]})
+    shelf = call(owner, "/api/panel/templates")["presets"]
+    check("and the owner can", all(p["id"] != made["id"] for p in shelf), shelf)
+
+    print("== drafts ==")
+    post(owner, "/api/panel/draft",
+         {"key": "nwuca.salon", "payload": {"title": "写了一半"}})
+    got = call(owner, "/api/panel/draft?key=nwuca.salon")
+    check("a draft comes back", got and "写了一半" in got["draft"]["payload"], got)
+    post(owner, "/api/panel/draft", {"key": "nwuca.salon", "payload": None})
+    got = call(owner, "/api/panel/draft?key=nwuca.salon")
+    check("and can be thrown away", got and got["draft"] is None, got)
 
     print("== creating an activity ==")
     before = len(call(owner, "/api/panel/events")["events"])

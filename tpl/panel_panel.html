@@ -91,7 +91,7 @@
           <rect x="2.7" y="2.7" width="9.2" height="9.2" rx="1.6"/>
           <path d="M8.1 17.3h7.6a1.6 1.6 0 0 0 1.6-1.6V8.1"/>
         </svg>
-        <span class="nav-text">模板管理</span>
+        <span class="nav-text">预设管理</span>
       </a>
 
       <div class="nav-sep" role="separator"></div>
@@ -147,7 +147,14 @@
         </svg>
         <span class="nav-text">服务器管理</span>
       </a>
-      <a class="nav-item" href="#/audit" data-nav="audit" data-min-role="owner">
+            <a class="nav-item" href="#/modules" data-nav="modules" data-min-role="owner">
+        <svg viewBox="0 0 20 20" aria-hidden="true">
+          <path d="M10 2.6l6.4 3.6v7.6L10 17.4 3.6 13.8V6.2L10 2.6Z"/>
+          <path d="M10 9.9l6.4-3.5M10 9.9v7.5M10 9.9L3.6 6.4"/>
+        </svg>
+        <span class="nav-text">模块管理</span>
+      </a>
+<a class="nav-item" href="#/audit" data-nav="audit" data-min-role="owner">
         <svg viewBox="0 0 20 20" aria-hidden="true">
           <path d="M5.6 2.9h6.2l3.4 3.4v10.8a1.4 1.4 0 0 1-1.4 1.4H5.6a1.4 1.4 0 0 1-1.4-1.4V4.3a1.4 1.4 0 0 1 1.4-1.4Z"/>
           <path d="M11.6 3.1v3.4h3.4M7.2 11h5.6M7.2 13.8h3.8"/>
@@ -345,20 +352,49 @@
       </div>
     </section>
 
-    <!-- ====================================================== 模板管理 -->
+    <!-- ====================================================== 预设管理 -->
     <section class="page" data-page="templates" hidden>
       <header class="page-head">
-        <h1>模板管理</h1>
-        <p class="page-sub">新建活动可以套用的固定设定</p>
+        <h1>预设管理</h1>
+        <p class="page-sub">一份存下来的活动配置，拿来起下一场</p>
         <div class="page-actions">
-          <button class="btn primary" disabled>新建模板</button>
+          <button class="btn primary" id="presetNewBtn" type="button">新建预设</button>
         </div>
       </header>
+
+      <div class="card" id="presetFavCard">
+        <div class="card-head"><h2>我收藏的预设</h2></div>
+        <div class="preset-grid" id="presetFavorites"></div>
+      </div>
+
       <div class="card">
-        <div class="unwired-note">
-          模板功能尚未接入。下面的条目只是把计划中的可配置项列出来，避免建活动时再临时想。
+        <div class="card-head"><h2>我创建的预设</h2></div>
+        <div class="preset-grid" id="presetMine"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2>预设广场</h2></div>
+        <div class="preset-grid" id="presetSquare"></div>
+      </div>
+    </section>
+
+    <!-- ====================================================== 模块管理 -->
+    <section class="page" data-page="modules" hidden>
+      <header class="page-head">
+        <h1>模块管理</h1>
+        <p class="page-sub">活动形式的实现，决定一次活动能有哪些页面</p>
+      </header>
+
+      <div class="card">
+        <div class="tblwrap">
+          <table class="tbl fixed" id="moduleTable">
+            <thead><tr>
+              <th>模块</th><th>版本</th><th>作者</th><th>控制台页面</th><th>公开页</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
         </div>
-        <div class="tile-grid" id="templateTiles"></div>
+        <p class="hint" id="moduleHint"></p>
       </div>
     </section>
 

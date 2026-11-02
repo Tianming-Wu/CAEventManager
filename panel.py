@@ -112,6 +112,37 @@ CREATE TABLE IF NOT EXISTS sessions (
     unlock_until REAL NOT NULL DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS presets (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    slug       TEXT    NOT NULL UNIQUE,       -- what a URL carries
+    owner_id   INTEGER NOT NULL DEFAULT 0,    -- 0 for the built-in ones
+    name       TEXT    NOT NULL,
+    note       TEXT    NOT NULL DEFAULT '',
+    module     TEXT    NOT NULL,
+    params     TEXT    NOT NULL DEFAULT '{}',
+    title      TEXT    NOT NULL DEFAULT '',
+    visibility TEXT    NOT NULL DEFAULT 'private',  -- private | public | org
+    org_id     INTEGER NOT NULL DEFAULT 0,          -- UNWIRED(orgs)
+    builtin    INTEGER NOT NULL DEFAULT 0,
+    created_at REAL    NOT NULL,
+    updated_at REAL    NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS preset_favorites (
+    account_id INTEGER NOT NULL,
+    preset_id  INTEGER NOT NULL,
+    created_at REAL    NOT NULL,
+    PRIMARY KEY (account_id, preset_id)
+);
+
+CREATE TABLE IF NOT EXISTS drafts (
+    account_id INTEGER NOT NULL,
+    key        TEXT    NOT NULL,
+    payload    TEXT    NOT NULL,
+    updated_at REAL    NOT NULL,
+    PRIMARY KEY (account_id, key)
+);
+
 CREATE TABLE IF NOT EXISTS audit (
     id      INTEGER PRIMARY KEY AUTOINCREMENT,
     ts      REAL NOT NULL,
@@ -413,6 +444,28 @@ def open_seats(conn, seq):
         "SELECT COUNT(*) AS n FROM event_members"
         " WHERE seq=? AND state='active'", (int(seq),)).fetchone()
     return int(row["n"] or 0)
+
+
+def draft_get(conn, account_id, key):
+    row = conn.execute(
+        "SELECT payload, updated_at FROM drafts WHERE account_id=? AND key=?",
+        (int(account_id), key)).fetchone()
+    if row is None:
+        return None
+    return {"payload": row["payload"], "updatedAt": row["updated_at"]}
+
+
+def draft_put(conn, account_id, key, payload):
+    conn.execute(
+        "INSERT INTO drafts (account_id, key, payload, updated_at) VALUES (?,?,?,?)"
+        " ON CONFLICT(account_id, key) DO UPDATE SET"
+        "   payload=excluded.payload, updated_at=excluded.updated_at",
+        (int(account_id), key, payload, time.time()))
+
+
+def draft_drop(conn, account_id, key):
+    conn.execute("DELETE FROM drafts WHERE account_id=? AND key=?",
+                 (int(account_id), key))
 
 
 def owners_of(conn, seq):

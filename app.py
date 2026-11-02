@@ -660,7 +660,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             return self._serve_panel_page(name)
 
-        return self._panel_api(method, route, raw_path)
+        return self._panel_api(method, route, raw_path, query)
 
     def _serve_panel_page(self, name):
         path = os.path.join(TPL_DIR, name)
@@ -681,10 +681,11 @@ class Handler(BaseHTTPRequestHandler):
                 return part.split("=", 1)[1]
         return None
 
-    def _panel_api(self, method, route, raw_path):
+    def _panel_api(self, method, route, raw_path, query=None):
         conn = panel.connect()
         ip = self.client_address[0]
         path = route[len("/api/panel"):] or "/"
+        query = query or {}
 
         def body():
             if self.headers.get("X-Requested-With") != "CAEventManager":
@@ -962,15 +963,169 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True, "role": role})
 
         if path == "/templates" and method == "GET":
+            # every preset this account may see: its own, its favourites and the
+            # square.  The old name stays so a stale page still gets an answer.
             by_id = {m["id"]: m for m in modules.all_modules(VERSION)}
+            rows = presets.visible(conn, acc["id"], by_id)
             return self._json({
                 "ok": True, "version": VERSION,
-                "templates": presets.all_templates(VERSION, by_id, include_broken=True)})
+                "presets": rows, "templates": rows,
+                "visibility": [{"value": v, "label": presets.VISIBILITY_LABEL[v]}
+                               for v in presets.VISIBILITY]})
+
+        if path == "/preset" and method == "POST":
+            data = body()
+            by_id = {m["id"]: m for m in modules.all_modules(VERSION)}
+            name = (data.get("name") or "").strip()
+            if not name:
+                raise model.ApiError("请给这个预设起个名字")
+            if len(name) > 40:
+                raise model.ApiError("预设名称最长 40 个字")
+            module_id = (data.get("module") or "").strip()
+            kind = by_id.get(module_id)
+            if kind is None:
+                raise model.ApiError("没有这个活动模块", 404)
+            visibility = (data.get("visibility") or "private").strip()
+            if visibility not in presets.VISIBILITY:
+                raise model.ApiError("可见性只能是私有、公开或组织公开")
+            try:
+                params = modules.coerce_params(kind, data.get("params") or {})
+            except ValueError as exc:
+                raise model.ApiError(str(exc))
+            note = (data.get("note") or "").strip()[:200]
+            title = (data.get("title") or "").strip()[:60]
+            slug = (data.get("id") or "").strip()
+            now = time.time()
+            with panel.tx() as tx:
+                row = None
+                if slug:
+                    row = tx.execute(
+                        "SELECT * FROM presets WHERE slug=?", (slug,)).fetchone()
+                    if row is None or row["builtin"] or row["owner_id"] != acc["id"]:
+                        raise model.ApiError("这个预设不能改", 403)
+                if row is None:
+                    slug = presets.new_slug(tx, acc["id"])
+                    tx.execute(
+                        "INSERT INTO presets (slug, owner_id, name, note, module,"
+                        " params, title, visibility, org_id, builtin, created_at,"
+                        " updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                        (slug, acc["id"], name, note, module_id,
+                         json.dumps(params, ensure_ascii=False), title, visibility,
+                         0, 0, now, now))
+                    panel.audit(tx, acc["username"], "preset_create", slug, name)
+                else:
+                    tx.execute(
+                        "UPDATE presets SET name=?, note=?, params=?, title=?,"
+                        " visibility=?, updated_at=? WHERE id=?",
+                        (name, note, json.dumps(params, ensure_ascii=False), title,
+                         visibility, now, row["id"]))
+                    panel.audit(tx, acc["username"], "preset_update", slug, name)
+            return self._json({"ok": True, "id": slug})
+
+        if path == "/preset/favorite" and method == "POST":
+            data = body()
+            slug = (data.get("id") or "").strip()
+            row = conn.execute("SELECT * FROM presets WHERE slug=?", (slug,)).fetchone()
+            if row is None:
+                raise model.ApiError("没有这个预设", 404)
+            on = bool(data.get("on", True))
+            with panel.tx() as tx:
+                if on:
+                    tx.execute(
+                        "INSERT OR IGNORE INTO preset_favorites"
+                        " (account_id, preset_id, created_at) VALUES (?,?,?)",
+                        (acc["id"], row["id"], time.time()))
+                else:
+                    tx.execute(
+                        "DELETE FROM preset_favorites WHERE account_id=? AND preset_id=?",
+                        (acc["id"], row["id"]))
+            return self._json({"ok": True, "favorite": on})
+
+        if path == "/preset/delete" and method == "POST":
+            data = body()
+            slug = (data.get("id") or "").strip()
+            row = conn.execute("SELECT * FROM presets WHERE slug=?", (slug,)).fetchone()
+            if row is None:
+                raise model.ApiError("没有这个预设", 404)
+            if row["builtin"] or row["owner_id"] != acc["id"]:
+                raise model.ApiError("只能删除自己创建的预设", 403)
+            with panel.tx() as tx:
+                tx.execute("DELETE FROM presets WHERE id=?", (row["id"],))
+                tx.execute("DELETE FROM preset_favorites WHERE preset_id=?",
+                           (row["id"],))
+                panel.audit(tx, acc["username"], "preset_delete", slug, row["name"])
+            return self._json({"ok": True})
+
+        if path == "/event/preset" and method == "POST":
+            # a preset is a snapshot: take the activity exactly as it is set up
+            data = body()
+            seq = int(data.get("seq") or 0)
+            row = conn.execute(
+                "SELECT e.*, m.role AS my_role FROM events e"
+                " LEFT JOIN event_members m ON m.seq = e.seq AND m.account_id = ?"
+                "   AND m.state='active'"
+                " WHERE e.seq=?", (acc["id"], seq)).fetchone()
+            if row is None or row["my_role"] not in ("owner", "member"):
+                raise model.ApiError("你不是这个活动的成员", 403)
+            by_id = {m["id"]: m for m in modules.all_modules(VERSION)}
+            module_id = row["kind"] or panel.DEFAULT_KIND
+            kind = by_id.get(module_id)
+            if kind is None:
+                raise model.ApiError("没有这个活动模块", 404)
+            db.set_current_event(seq)
+            cfg = db.all_config(db.connect())
+            keys = {f["key"] for f in kind["fields"]}
+            params = {k: cfg[k] for k in keys if k in cfg and cfg[k] is not None}
+            name = (data.get("name") or "").strip() or \
+                (row["title"] or cfg.get("title") or "未命名预设")
+            if len(name) > 40:
+                name = name[:40]
+            visibility = (data.get("visibility") or "private").strip()
+            if visibility not in presets.VISIBILITY:
+                visibility = "private"
+            now = time.time()
+            with panel.tx() as tx:
+                slug = presets.new_slug(tx, acc["id"])
+                tx.execute(
+                    "INSERT INTO presets (slug, owner_id, name, note, module, params,"
+                    " title, visibility, org_id, builtin, created_at, updated_at)"
+                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (slug, acc["id"], name, (data.get("note") or "").strip()[:200],
+                     module_id, json.dumps(params, ensure_ascii=False),
+                     row["title"] or cfg.get("title") or "", visibility, 0, 0,
+                     now, now))
+                panel.audit(tx, acc["username"], "preset_from_event", slug,
+                            str(seq))
+            return self._json({"ok": True, "id": slug, "name": name})
+
+        if path == "/modules" and method == "GET":
+            need("owner")
+            return self._json({"ok": True, "version": VERSION,
+                               "modules": modules.all_modules(VERSION)})
+
+        if path == "/draft" and method == "GET":
+            key = (query.get("key") or [""])[0]
+            return self._json({"ok": True, "draft": panel.draft_get(conn, acc["id"], key)})
+
+        if path == "/draft" and method == "POST":
+            data = body()
+            key = (data.get("key") or "").strip()
+            if not key:
+                raise model.ApiError("缺少草稿标识")
+            payload = data.get("payload")
+            with panel.tx() as tx:
+                if payload is None:
+                    panel.draft_drop(tx, acc["id"], key)
+                else:
+                    panel.draft_put(tx, acc["id"], key,
+                                    json.dumps(payload, ensure_ascii=False))
+            return self._json({"ok": True})
 
         if path == "/events/create" and method == "POST":
             data = body()
             by_id = {m["id"]: m for m in modules.all_modules(VERSION)}
-            chosen = presets.get((data.get("template") or "").strip(), VERSION, by_id)
+            chosen = presets.get(conn, (data.get("template") or "").strip(), by_id,
+                                 acc["id"])
             if chosen is None:
                 raise model.ApiError("\u6ca1\u6709\u8fd9\u4e2a\u6d3b\u52a8\u6a21\u677f", 404)
             if not chosen["ok"]:
@@ -1979,6 +2134,7 @@ def bootstrap_secrets():
             db.set_config_raw(conn, "seeded", 1)
 
 
+
 def main():
     global SECRET, LOCAL_CFG
     LOCAL_CFG = localconfig.load()
@@ -1997,6 +2153,11 @@ def main():
     ensure_public_url(conn)
     panel.init_db()
     panel.bootstrap(LOCAL_CFG, event_token_hint=SECRET, log=log)
+    # the built-in presets live in templates/*.json; the table is what the app
+    # reads, so they are copied in on every start
+    by_id = {m["id"]: m for m in modules.all_modules(VERSION)}
+    with panel.tx() as tx:
+        presets.seed(tx, by_id)
     model.ensure_seed(conn)
 
     pidfile = os.path.join(db.DATA_DIR, "service.pid")

@@ -34,6 +34,10 @@ STATUS_LABEL = {"pending": "待审核", "active": "正常", "disabled": "已停�
                 "rejected": "已拒绝", "banned": "已封禁"}
 COOKIE = "xl_panel_session"
 SESSION_TTL = 7 * 24 * 3600
+# How long a re-entered password keeps the session elevated.  It lives on the
+# session row, not on the account: another device signing in as the same person
+# starts from zero, and signing out drops it with the session.
+SUDO_TTL = 600
 FOOTER = "CAEventManager | Powered with ❤ by Tianming &amp; Deepseek ❤🐋"
 
 # The events table: ``seq`` is the storage id, ``token`` is the access one.
@@ -97,7 +101,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     account_id  INTEGER NOT NULL,
     created_at  REAL NOT NULL,
     expires_at  REAL NOT NULL,
-    ip          TEXT
+    ip          TEXT,
+    sudo_until  REAL NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS audit (
@@ -159,6 +164,7 @@ LATE_COLUMNS = (
     ("accounts", "avatar", "TEXT NOT NULL DEFAULT ''"),
     ("accounts", "avatar_at", "REAL NOT NULL DEFAULT 0"),
     ("accounts", "ban_reason", "TEXT NOT NULL DEFAULT ''"),
+    ("sessions", "sudo_until", "REAL NOT NULL DEFAULT 0"),
 )
 
 
@@ -288,6 +294,24 @@ def session_account(conn, token):
 
 def destroy_session(conn, token):
     conn.execute("DELETE FROM sessions WHERE token=?", (token,))
+
+
+def session_sudo(conn, token):
+    """Unix time the elevation ends, 0.0 when this session is not elevated."""
+    if not token:
+        return 0.0
+    row = conn.execute("SELECT sudo_until FROM sessions WHERE token=?",
+                       (token,)).fetchone()
+    if row is None:
+        return 0.0
+    return float(row["sudo_until"] or 0)
+
+
+def set_sudo(conn, token, seconds):
+    """Elevate (seconds > 0) or drop the elevation; returns the new deadline."""
+    until = time.time() + seconds if seconds else 0.0
+    conn.execute("UPDATE sessions SET sudo_until=? WHERE token=?", (until, token))
+    return until
 
 
 def audit(conn, actor, action, target=None, detail=None):

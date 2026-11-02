@@ -348,6 +348,18 @@ def host_stats(root="/proc", sleep=0.12):
     }
 
 
+class SudoRequired(model.ApiError):
+    """A sensitive endpoint refused: this session has not re-entered a password.
+
+    Not an error the operator has to read - the panel turns it into a password
+    prompt and repeats the request - but it is an error on the wire, because
+    nothing happened and nothing may be reported as done.
+    """
+
+    def __init__(self):
+        super().__init__("该操作需要 sudo 模式", 403)
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "LotteryHTTP/" + VERSION
     protocol_version = "HTTP/1.1"
@@ -490,6 +502,11 @@ class Handler(BaseHTTPRequestHandler):
                 self._api(method, path, query)
             else:
                 self._page(method, path)
+        except SudoRequired as exc:
+            # The client answers this by asking for the password and repeating
+            # the same request, so it must be able to tell it apart from a plain
+            # refusal.
+            self._json({"ok": False, "error": exc.msg, "sudoRequired": True}, 403)
         except model.ApiError as exc:
             self._err(exc.msg, exc.code)
         except BrokenPipeError:
@@ -572,9 +589,14 @@ class Handler(BaseHTTPRequestHandler):
             return self._body()
 
         if path == "/me" and method == "GET":
-            acc = panel.session_account(conn, self._panel_token())
+            token = self._panel_token()
+            acc = panel.session_account(conn, token)
+            sudo_until = panel.session_sudo(conn, token) if acc else 0
             return self._json({"ok": True, "authed": acc is not None,
                                "me": panel.view(acc) if acc else None,
+                               "sudoUntil": sudo_until,
+                               "sudoTtl": panel.SUDO_TTL,
+                               "now": time.time(),
                                "version": VERSION})
 
         if path == "/register" and method == "POST":
@@ -650,7 +672,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True}, headers=[("Set-Cookie", cookie)])
 
         # ---- everything below needs a signed-in account ----
-        acc = panel.session_account(conn, self._panel_token())
+        # named sess and not token: /event/rotate rebinds `token` to the new
+        # access credential further down
+        sess = self._panel_token()
+        acc = panel.session_account(conn, sess)
         if acc is None:
             raise model.ApiError("未登录或登录已过期", 401)
 
@@ -658,6 +683,39 @@ class Handler(BaseHTTPRequestHandler):
             if roles and acc["role"] not in roles:
                 raise model.ApiError("当前账号无权执行该操作", 403)
             return acc
+
+        def need_sudo():
+            """Elevation is per session, so this is the only place it is checked."""
+            if panel.session_sudo(conn, sess) <= time.time():
+                raise SudoRequired()
+
+        if path == "/sudo" and method == "POST":
+            data = body()
+            block = _PANEL_FAILS.get(ip, 0)
+            if block > time.time():
+                raise model.ApiError("尝试过于频繁，请稍后再试", 429)
+            if not panel.verify_password(data.get("password") or "", acc["pass"]):
+                fails = _PANEL_FAILS.get(ip + ":n", 0) + 1
+                _PANEL_FAILS[ip + ":n"] = fails
+                if fails >= 6:
+                    _PANEL_FAILS[ip] = time.time() + 30
+                    _PANEL_FAILS[ip + ":n"] = 0
+                raise model.ApiError("密码不对", 403)
+            _PANEL_FAILS.pop(ip, None)
+            _PANEL_FAILS.pop(ip + ":n", None)
+            with panel.tx() as tx:
+                until = panel.set_sudo(tx, sess, panel.SUDO_TTL)
+                panel.audit(tx, acc["username"], "sudo_on", None, ip)
+            return self._json({"ok": True, "sudoUntil": until,
+                               "sudoTtl": panel.SUDO_TTL,
+                               "now": time.time()})
+
+        if path == "/sudo/exit" and method == "POST":
+            body()
+            with panel.tx() as tx:
+                panel.set_sudo(tx, sess, 0)
+                panel.audit(tx, acc["username"], "sudo_off")
+            return self._json({"ok": True, "sudoUntil": 0})
 
         if path == "/password" and method == "POST":
             data = body()
@@ -724,6 +782,10 @@ class Handler(BaseHTTPRequestHandler):
             reason = (data.get("reason") or "").strip()[:120]
             if action == "ban" and not reason:
                 raise model.ApiError("封禁需要写明原因")
+            # Locking someone out is the one account decision that cannot be
+            # undone by the other side, so it asks for the password again.
+            if action in ("ban", "disable"):
+                need_sudo()
             with panel.tx() as tx:
                 tx.execute("UPDATE accounts SET status=?, decided_at=?, decided_by=?,"
                            " ban_reason=? WHERE id=?",
@@ -735,6 +797,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/account/role" and method == "POST":
             actor = need("owner")
+            need_sudo()
             data = body()
             role = (data.get("role") or "").strip()
             if role not in ("superadmin", "admin"):
@@ -847,6 +910,8 @@ class Handler(BaseHTTPRequestHandler):
                 (seq, acc["id"])).fetchone()
             if mine is None or mine["role"] != "owner":
                 raise model.ApiError("\u53ea\u6709\u8be5\u6d3b\u52a8\u7684\u8d1f\u8d23\u4eba\u80fd\u91cd\u7f6e\u8bbf\u95ee\u5730\u5740", 403)
+            # every address handed out stops working, so ask for the password
+            need_sudo()
             row = conn.execute("SELECT token, title FROM events WHERE seq=?",
                                (seq,)).fetchone()
             if row is None:
@@ -878,6 +943,7 @@ class Handler(BaseHTTPRequestHandler):
                 (seq, acc["id"])).fetchone()
             if mine is None or mine["role"] != "owner":
                 raise model.ApiError("\u53ea\u6709\u8be5\u6d3b\u52a8\u7684\u8d1f\u8d23\u4eba\u80fd\u5b58\u6863", 403)
+            need_sudo()
             row = conn.execute("SELECT title, archived_at FROM events WHERE seq=?",
                                (seq,)).fetchone()
             if row is None:

@@ -65,6 +65,7 @@ def load_file(path, modules_by_id):
         "name": str(meta.get("name") or template_id),
         "module": module_id,
         "moduleName": module["name"],
+        "moduleVersion": module.get("version") or "",
         "description": str(meta.get("description") or ""),
         "title": str(meta.get("title") or ""),
         "params": params,

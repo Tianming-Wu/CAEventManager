@@ -32,6 +32,15 @@
             aria-label="打开导航" aria-expanded="false" aria-controls="sidebar">
       <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h14M3 10h14M3 15h14"/></svg>
     </button>
+    <!-- sudo mode: a shield holding a prompt, drawn left of the product name -->
+    <button class="sudo-chip" id="sudoChip" type="button" aria-haspopup="dialog"
+            aria-expanded="false" aria-label="sudo 模式" title="sudo 模式">
+      <svg viewBox="0 0 20 20" aria-hidden="true">
+        <path d="M10 2.4l6.1 2.1v5c0 3.6-2.5 6.6-6.1 7.7-3.6-1.1-6.1-4.1-6.1-7.7v-5L10 2.4Z"/>
+        <path d="M7.3 7.8l2.4 2.2-2.4 2.2"/>
+        <path d="M10.9 12.2h2.7"/>
+      </svg>
+    </button>
     <div class="brand">
       <span class="brand-mark" aria-hidden="true"></span>
       <span class="brand-name">CAEventManager</span>
@@ -246,11 +255,13 @@
 
       <div id="kindPicker">
         <header class="page-head">
-          <button class="icon-btn crumb-back" id="pickerBack" type="button"
-                  aria-label="回到我的活动" title="回到我的活动">
-            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12 5l-5 5 5 5"/></svg>
-          </button>
-          <h1>创建活动</h1>
+          <div class="head-title">
+            <button class="icon-btn crumb-back" id="pickerBack" type="button"
+                    aria-label="回到我的活动" title="回到我的活动">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12 5l-5 5 5 5"/></svg>
+            </button>
+            <h1>创建活动</h1>
+          </div>
           <p class="page-sub">先选一种活动形式</p>
         </header>
         <div class="card">
@@ -278,15 +289,17 @@
 
       <div id="kindForm" hidden>
         <header class="page-head">
-          <button class="icon-btn crumb-back" id="kindBack" type="button"
-                  aria-label="换一种活动形式" title="换一种活动形式">
-            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12 5l-5 5 5 5"/></svg>
-          </button>
-          <h1 class="crumb-title">
-            <a class="crumb" href="#/new-event">创建活动</a>
-            <span class="crumb-sep" aria-hidden="true">›</span>
-            <span id="kindFormTitle">—</span>
-          </h1>
+          <div class="head-title">
+            <button class="icon-btn crumb-back" id="kindBack" type="button"
+                    aria-label="换一种活动形式" title="换一种活动形式">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12 5l-5 5 5 5"/></svg>
+            </button>
+            <h1 class="crumb-title">
+              <a class="crumb" href="#/new-event">创建活动</a>
+              <span class="crumb-sep" aria-hidden="true">›</span>
+              <span id="kindFormTitle">—</span>
+            </h1>
+          </div>
           <p class="page-sub" id="kindFormSub"></p>
           <div class="page-actions">
             <button class="btn" id="kindImport" type="button">导入配置</button>

@@ -193,6 +193,24 @@ def main():
     check("owner sees the pending request", len(pending) == 1, accs["accounts"])
     teacher_id = pending[0]["id"]
 
+    print("== sudo mode ==")
+    check("a fresh session is not elevated", me.get("sudoUntil") == 0, me)
+    post(owner, "/api/panel/sudo", {"password": "not-the-password"}, expect=403)
+    check("a wrong password does not elevate anything", True)
+    refused = call(owner, "/api/panel/event/rotate", {"seq": ev["seq"]}, expect=403)
+    check("a sensitive action is refused while not elevated", True)
+    check("and says why, so the panel can ask for the password",
+          refused and refused.get("sudoRequired") is True, refused)
+    check("a refusal is not an error message to read",
+          refused and refused.get("ok") is False, refused)
+    promoted = post(owner, "/api/panel/sudo", {"password": owner_password()})
+    check("the password elevates the session",
+          promoted and promoted.get("sudoUntil", 0) > 0, promoted)
+    check("the elevation has a deadline",
+          0 < promoted.get("sudoUntil", 0) - promoted.get("now", 0) <= 600, promoted)
+    check("and the session reports it",
+          call(owner, "/api/panel/me")["sudoUntil"] > 0)
+
     print("== approval ==")
     post(owner, "/api/panel/account/decide", {"id": teacher_id, "action": "approve"})
     res = post(teacher, "/api/panel/login",
@@ -200,6 +218,9 @@ def main():
     check("approved account can log in", res and res["ok"], res)
     check("new account is a plain admin",
           call(teacher, "/api/panel/me")["me"]["role"] == "admin")
+    # the elevation belongs to the session that earned it, not to the account
+    check("a second sign-in of another account is not elevated",
+          call(teacher, "/api/panel/me")["sudoUntil"] == 0)
     post(teacher, "/api/panel/account/decide", {"id": teacher_id, "action": "disable"},
          expect=403)
     check("admin cannot decide anything", True)
@@ -431,6 +452,19 @@ def main():
     post(plain, "/api/panel/login", {"username": "member2", "password": "member-pass-2"})
     target = [a for a in call(owner, "/api/panel/accounts")["accounts"]
               if a["username"] == "member2"][0]
+    # leaving sudo mode is what the chip's 退出 does
+    left = post(owner, "/api/panel/sudo/exit")
+    check("sudo can be left", left and left.get("sudoUntil") == 0, left)
+    check("and the session is back to normal",
+          call(owner, "/api/panel/me")["sudoUntil"] == 0)
+    post(owner, "/api/panel/account/decide",
+         {"id": target["id"], "action": "ban", "reason": "测试封禁"}, expect=403)
+    check("a ban needs the password again", True)
+    banner = [a for a in call(owner, "/api/panel/accounts")["accounts"]
+              if a["id"] == target["id"]][0]
+    check("the refused ban changed nothing", banner["status"] != "banned", banner)
+
+    post(owner, "/api/panel/sudo", {"password": owner_password()})
     post(owner, "/api/panel/account/decide",
          {"id": target["id"], "action": "ban"}, expect=400)
     check("a ban needs a reason", True)
@@ -449,6 +483,8 @@ def main():
     check("and can be released", post(session(), "/api/panel/login",
                                       {"username": "member2",
                                        "password": "member-pass-2"}) is not None)
+    check("unbanning does not need the password again",
+          call(owner, "/api/panel/me")["sudoUntil"] > 0)
 
     print("== profile: avatar ==")
     pixel = ("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8"

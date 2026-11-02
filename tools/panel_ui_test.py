@@ -68,6 +68,17 @@ def new_page(browser, width=1440, height=900, touch=False, mobile=False, dpr=1):
     return ctx, page
 
 
+def enter_sudo(page, expect_prompt=True):
+    """Answer the password prompt that a sensitive action raises."""
+    if expect_prompt:
+        page.wait_for_selector("#sudoPass", timeout=8000)
+        page.fill("#sudoPass", PASSWORD)
+        page.click("#sudoEnter")
+    page.wait_for_function(
+        "() => document.getElementById('shell').classList.contains('sudo')",
+        timeout=8000)
+
+
 def ui_login(page, user=None, password=None):
     user = user or LOGIN
     password = password or PASSWORD
@@ -684,13 +695,139 @@ def create_page(browser):
             page.wait_for_timeout(300)
             check("archiving confirms first", page.locator("#overlay").is_visible())
             page.click("[data-archive-confirm]")
+            page.wait_for_timeout(500)
+            # archiving is behind the password; it has to be typed in first
+            check("archiving then asks for the password",
+                  page.locator("#sudoPass").count() == 1)
+            enter_sudo(page)
             page.wait_for_timeout(900)
             left = page.evaluate("""() => Array.from(
                 document.querySelectorAll('#ownedEvents .card-menu-btn'))
                 .map(el => el.getAttribute('data-menu'))""")
             check("and the activity is gone from the list", newest not in left, left)
+
+        sudo_page(page)
     finally:
         ctx.close()
+
+
+def brand_left(page):
+    """The product name's left edge: sudo mode pushes it over, it never moves otherwise."""
+    return page.evaluate(
+        "() => Math.round(document.querySelector('.titlebar .brand')"
+        ".getBoundingClientRect().left)")
+
+
+def sudo_page(page):
+    """The elevated mode: what it looks like, what it says, and how it ends."""
+    print("== sudo mode ==")
+    # the archive above left this session elevated; end it and start clean
+    if page.locator("#sudoChip").is_visible():
+        page.click("#sudoChip")
+        page.wait_for_timeout(250)
+        page.click("#sudoQuit")
+        page.wait_for_timeout(800)
+    # a throw-away activity, so the sensitive action has nothing real to break
+    owner = owner_opener()
+    spare = call(owner, "/api/panel/events/create", {"template": "nwuca.salon"})
+    spare_id = spare["event"]["id"]
+    page.reload()
+    page.wait_for_function(
+        "() => document.documentElement.getAttribute('data-booted') === '1'",
+        timeout=25000)
+    page.wait_for_timeout(500)
+    check("nothing is elevated to begin with", not page.locator("#sudoChip").is_visible())
+    rest_left = brand_left(page)
+    card = '.page[data-page=events] [data-menu="%s"]' % spare_id
+    check("the throw-away activity is on the page",
+          page.locator(card).count() == 1, page.locator(card).count())
+
+    page.click(card)
+    page.wait_for_timeout(250)
+    page.click(".card-menu [data-rotate]")
+    page.wait_for_timeout(300)
+    page.click("#overlayBody [data-rotate-confirm]")
+    page.wait_for_timeout(600)
+    check("a sensitive action asks for the password",
+          page.locator("#sudoPass").count() == 1)
+    check("and says which action",
+          "重置访问地址" in page.inner_text("#overlayBody"),
+          page.inner_text("#overlayBody")[:60])
+    page.click("#sudoCancel")
+    page.wait_for_timeout(400)
+    check("cancelling closes the dialog", page.locator("#overlay").is_hidden())
+    check("cancelling does not elevate", not page.locator("#sudoChip").is_visible())
+    check("and the name has not moved", brand_left(page) == rest_left)
+
+    page.click(card)
+    page.wait_for_timeout(250)
+    page.click(".card-menu [data-rotate]")
+    page.wait_for_timeout(300)
+    page.click("#overlayBody [data-rotate-confirm]")
+    page.wait_for_timeout(500)
+    page.fill("#sudoPass", "wrong-password")
+    page.click("#sudoEnter")
+    page.wait_for_timeout(700)
+    check("a wrong password is reported in place",
+          page.locator("#sudoErr").inner_text().strip() != "",
+          page.locator("#sudoErr").inner_text())
+    page.fill("#sudoPass", PASSWORD)
+    page.click("#sudoEnter")
+    page.wait_for_function(
+        "() => document.getElementById('shell').classList.contains('sudo')",
+        timeout=8000)
+    page.wait_for_timeout(600)
+    check("the chip appears once elevated", page.locator("#sudoChip").is_visible())
+    moved = brand_left(page) - rest_left
+    check("the name is pushed right", moved >= 28, moved)
+    check("the action went through this time",
+          page.evaluate("() => document.getElementById('overlay').hidden"))
+
+    page.reload()
+    page.wait_for_function(
+        "() => document.documentElement.getAttribute('data-booted') === '1'",
+        timeout=25000)
+    page.wait_for_timeout(500)
+    check("the elevation survives a reload", page.locator("#sudoChip").is_visible())
+    check("and the name is still pushed", brand_left(page) == rest_left + moved,
+          (brand_left(page), rest_left + moved))
+
+    page.click("#sudoChip")
+    page.wait_for_timeout(320)
+    check("the chip opens the sudo panel", page.locator(".sudo-pop").count() == 1)
+    said = page.inner_text(".sudo-pop")
+    check("it explains what the mode means",
+          "敏感操作不会再次要求二次确认" in said, said)
+    check("it warns that the next one asks again",
+          "再次进入" in said, said)
+    clock = page.inner_text("#sudoClock")
+    check("it counts down in mm:ss", ":" in clock and "自动退出" in clock, clock)
+    page.wait_for_timeout(1400)
+    check("the countdown actually runs", page.inner_text("#sudoClock") != clock,
+          (clock, page.inner_text("#sudoClock")))
+
+    page.click("#sudoQuit")
+    page.wait_for_timeout(900)
+    check("退出 sudo 模式 closes the panel", page.locator(".sudo-pop").count() == 0)
+    check("the chip fades out", not page.locator("#sudoChip").is_visible())
+    check("the name slides back", brand_left(page) == rest_left,
+          (brand_left(page), rest_left))
+
+    page.reload()
+    page.wait_for_function(
+        "() => document.documentElement.getAttribute('data-booted') === '1'",
+        timeout=25000)
+    page.wait_for_timeout(500)
+    check("leaving is remembered by the server",
+          not page.locator("#sudoChip").is_visible())
+    check("a clean session still works",
+          page.locator(".page[data-page=events]").is_visible())
+
+    # put the instance back: the spare is archived, the token rotation stays on
+    # the spare alone
+    call(owner, "/api/panel/sudo", {"password": PASSWORD})
+    gone = call(owner, "/api/panel/event/archive", {"seq": spare["event"]["seq"]})
+    check("the spare activity is cleaned up", gone.get("ok") is True, gone)
 
 
 def dialog_page(page):
@@ -977,6 +1114,75 @@ def denied_flow(browser):
 
 
 # --------------------------------------------------------------------------- #
+def sudo_expiry(browser):
+    """The deadline is real: the last seconds blink, then the mode ends itself.
+
+    A browser clock is installed first, because waiting ten minutes for a
+    countdown is not a test anybody runs twice.
+    """
+    print("== sudo mode expires on its own ==")
+    owner = owner_opener()
+    spare = call(owner, "/api/panel/events/create", {"template": "nwuca.salon"})
+    card = '.page[data-page=events] [data-menu="%s"]' % spare["event"]["id"]
+    ctx, page = new_page(browser)
+    try:
+        page.clock.install()
+        ui_login(page)
+        page.goto(BASE + "/panel#/events")
+        page.wait_for_timeout(400)
+        rest_left = brand_left(page)
+        page.click(card)
+        page.wait_for_timeout(250)
+        page.click(".card-menu [data-rotate]")
+        page.wait_for_timeout(250)
+        page.click("#overlayBody [data-rotate-confirm]")
+        page.wait_for_timeout(500)
+        page.fill("#sudoPass", PASSWORD)
+        page.click("#sudoEnter")
+        page.wait_for_function(
+            "() => document.getElementById('shell').classList.contains('sudo')",
+            timeout=8000)
+        page.wait_for_timeout(400)
+        page.click("#sudoChip")
+        page.wait_for_timeout(250)
+        check("the countdown starts at ten minutes",
+              "10:00" in page.inner_text("#sudoClock"), page.inner_text("#sudoClock"))
+        check("nothing blinks yet",
+              "blink" not in (page.get_attribute("#sudoClock", "class") or ""))
+
+        page.clock.fast_forward(598000)
+        page.wait_for_timeout(60)
+        check("the last seconds blink",
+              "blink" in (page.get_attribute("#sudoClock", "class") or ""),
+              page.inner_text("#sudoClock"))
+        check("and the mode is still on", page.locator("#sudoChip").is_visible())
+
+        page.clock.fast_forward(4000)
+        page.wait_for_timeout(800)
+        check("then it ends by itself", not page.locator("#sudoChip").is_visible())
+        check("the panel closes with it", page.locator(".sudo-pop").count() == 0)
+        check("and the name slides back", brand_left(page) == rest_left,
+              (brand_left(page), rest_left))
+        # the rotation gave the spare a new token, so find its card again
+        rotated = [e for e in call(owner, "/api/panel/events")["events"]
+                   if e["seq"] == spare["event"]["seq"]][0]
+        card = '.page[data-page=events] [data-menu="%s"]' % rotated["id"]
+        page.click(card)
+        page.wait_for_timeout(250)
+        page.click(".card-menu [data-archive]")
+        page.wait_for_timeout(250)
+        page.click("#overlayBody [data-archive-confirm]")
+        page.wait_for_timeout(500)
+        check("the password is asked for again", page.locator("#sudoPass").count() == 1)
+        page.click("#sudoCancel")
+        page.wait_for_timeout(200)
+    finally:
+        ctx.close()
+    # put the instance back
+    call(owner, "/api/panel/sudo", {"password": PASSWORD})
+    call(owner, "/api/panel/event/archive", {"seq": spare["event"]["seq"]})
+
+
 def main():
     with sync_playwright() as pw:
         browser = pw.chromium.launch(channel="msedge", headless=True)
@@ -1009,6 +1215,7 @@ def main():
 
             layout_page(browser)
             touch_page(browser)
+            sudo_expiry(browser)
             if WITH_ACCOUNTS:
                 role_page(browser)
                 denied_flow(browser)

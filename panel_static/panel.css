@@ -426,8 +426,24 @@ button.nav-item {
   flex-wrap: wrap;
   margin-bottom: 16px;
 }
-.page-head .page-actions,
-.page-head .crumb-back { align-self: center; }
+.page-head .page-actions { align-self: center; }
+
+/* the back button and the title are one item, so the button centres on the
+   title instead of on a row that the button itself stretched */
+.head-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.head-title h1 { min-width: 0; }
+/* the 30px button overhangs the 24px title line symmetrically: it centres on
+   the title without making the header taller than the other pages */
+.page-head .crumb-back {
+  width: 30px;
+  height: 30px;
+  margin: -3px 0 -3px -4px;
+}
 .page-head h1 { line-height: 1.2; }
 .page-head h1 { flex: 0 0 auto; }
 .page-sub {
@@ -437,6 +453,119 @@ button.nav-item {
   /* grows so the action buttons keep their place at the right edge */
   flex: 1 1 220px;
   min-width: 0;
+}
+
+/* -------------------------------------------------------------- sudo mode */
+/* The mark sits in the title bar, left of the product name: elevation is a
+   state of the whole console, not of whichever page is on screen.  It grows
+   out of nothing, so the name is pushed over rather than covered. */
+.sudo-chip {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 0;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  overflow: hidden;
+  background: transparent;
+  color: var(--accent-strong);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  /* kept out of the tab order while it cannot be seen */
+  visibility: hidden;
+  transition: width .22s cubic-bezier(.4, 0, .2, 1), background .12s ease,
+              opacity .16s ease, visibility 0s linear .22s;
+}
+.shell.sudo .sudo-chip {
+  width: 30px;
+  opacity: 1;
+  pointer-events: auto;
+  visibility: visible;
+  transition: width .22s cubic-bezier(.4, 0, .2, 1), background .12s ease,
+              opacity .16s ease .06s, visibility 0s;
+}
+.sudo-chip:hover,
+.sudo-chip[aria-expanded="true"] { background: var(--accent-soft); }
+.sudo-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.sudo-chip svg {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* leaving: one blink on the mark, then it fades while the name slides back */
+@keyframes sudo-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .18; }
+}
+.shell.sudo-out .sudo-chip { animation: sudo-blink .3s ease-in-out 1; }
+
+.sudo-pop {
+  position: fixed;
+  z-index: 70;
+  width: 296px;
+  padding: 14px 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  animation: sudo-pop-in .16s ease both;
+}
+@keyframes sudo-pop-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: none; }
+}
+.sudo-pop-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--accent-strong);
+}
+.sudo-pop-head svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linejoin: round;
+}
+.sudo-pop-head h3 { font-size: .92rem; margin: 0; }
+.sudo-pop-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: .82rem;
+  line-height: 1.55;
+}
+.sudo-pop-clock {
+  margin: 2px 0 0;
+  font-family: var(--mono);
+  font-size: .8rem;
+  color: var(--text);
+}
+.sudo-pop-clock.blink { color: var(--danger); animation: sudo-blink .6s steps(2, jump-none) infinite; }
+.sudo-pop-foot {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sudo-chip { transition: none; }
+  .shell.sudo-out .sudo-chip { animation: none; }
+  .sudo-pop { animation: none; }
+  .sudo-pop-clock.blink { animation: none; color: var(--danger); }
 }
 .page-actions {
   display: flex;

@@ -190,10 +190,14 @@
 
   function closeOverlay() {
     if ($("#overlay").hidden) return;
+    var asked = overlayKind === "sudo";
     $("#overlay").hidden = true;
     $("#overlayBody").innerHTML = "";
     document.body.style.overflow = "";
     overlayKind = null;
+    // the x, the scrim and Escape close the dialog before asking anything;
+    // a pending password prompt must be settled or its caller waits forever
+    if (asked) abortSudoAsk();
     if (overlayOpener && overlayOpener.focus) overlayOpener.focus();
     overlayOpener = null;
   }
@@ -202,6 +206,239 @@
   $("#overlay").addEventListener("click", function (e) {
     if (e.target === $("#overlay")) closeOverlay();   // click the scrim
   });
+
+  /* ------------------------------------------------------------ sudo mode */
+  /* Re-entering the password raises this one session for a few minutes.  The
+   * deadline is stored on the session row, so a second device signed in as the
+   * same person is not elevated, and signing out ends the elevation with the
+   * session.  Sensitive endpoints answer 403 + sudoRequired; apiSudo below
+   * turns that into a password prompt and repeats the very same request. */
+  var SUDO = { deadline: 0, timer: null, pop: null, asker: null };
+
+  // the same shield-with-a-prompt mark the title bar shows
+  var ICON_SHIELD = '<svg viewBox="0 0 20 20" aria-hidden="true">' +
+    '<path d="M10 2.6l6 2.05v4.9c0 3.55-2.45 6.5-6 7.6-3.55-1.1-6-4.05-6-7.6V4.65l6-2.05Z"/>' +
+    '<path d="M7.7 9.4l2.1 2-2.1 2"/>' +
+    '<path d="M10.9 13.4h2.7"/>' +
+    "</svg>";
+
+  function sudoLeft() {
+    return SUDO.deadline ? Math.max(0, SUDO.deadline - Date.now() / 1000) : 0;
+  }
+  function sudoActive() { return sudoLeft() > 0; }
+
+  function clockText(sec) {
+    sec = Math.max(0, Math.ceil(sec));
+    return PX.pad(Math.floor(sec / 60)) + ":" + PX.pad(sec % 60);
+  }
+
+  // The server sends an absolute deadline; Date.now() on this device may not
+  // agree with the server's clock, so the remaining time is applied locally.
+  function setSudo(until, serverNow) {
+    var local = Date.now() / 1000;
+    var base = (serverNow === undefined || serverNow === null) ? local : serverNow;
+    SUDO.deadline = until ? local + Math.max(0, until - base) : 0;
+    if (SUDO.deadline > local) startSudoClock();
+    else stopSudoClock();
+    syncSudo();
+  }
+
+  function startSudoClock() {
+    if (SUDO.timer) return;
+    SUDO.timer = setInterval(function () {
+      // running out goes through the same door as 退出: the server is told, so
+      // a device whose clock jumped cannot leave an elevation behind it
+      if (!sudoActive()) return quitSudo();
+      paintSudoClock();
+    }, 1000);
+  }
+  function stopSudoClock() {
+    if (SUDO.timer) {
+      clearInterval(SUDO.timer);
+      SUDO.timer = null;
+    }
+  }
+
+  function paintSudoClock() {
+    var el = $("#sudoClock");
+    if (!el) return;
+    var left = sudoLeft();
+    el.textContent = "sudo 模式将于 " + clockText(left) + " 后自动退出。";
+    // the last three seconds blink, then the mode ends on its own
+    el.classList.toggle("blink", left <= 3);
+  }
+
+  function sudoChipEl() { return $("#sudoChip"); }
+
+  $("#sudoChip").addEventListener("click", function () {
+    if (SUDO.pop) closeSudoPop();
+    else openSudoPop();
+  });
+
+  // The mark sits in the title bar; the class on the shell grows it into place,
+  // which pushes the product name over instead of covering it.
+  function syncSudo() {
+    $("#shell").classList.toggle("sudo", sudoActive());
+    if (!sudoActive()) closeSudoPop();
+  }
+
+  function openSudoPop() {
+    closeSudoPop();
+    var pop = document.createElement("div");
+    pop.className = "sudo-pop";
+    pop.setAttribute("role", "dialog");
+    pop.setAttribute("aria-label", "sudo 模式");
+    pop.innerHTML =
+      '<div class="sudo-pop-head">' + ICON_SHIELD + "<h3>sudo 模式</h3></div>" +
+      '<p class="sudo-pop-note">您正处于 sudo 模式，期间敏感操作不会再次要求二次确认。</p>' +
+      '<p class="sudo-pop-note">再次进入 sudo 模式将会要求您输入密码。</p>' +
+      '<p class="sudo-pop-clock" id="sudoClock">—</p>' +
+      '<div class="sudo-pop-foot">' +
+      '<button class="btn sm danger" type="button" id="sudoQuit">退出 sudo 模式</button>' +
+      "</div>";
+    document.body.appendChild(pop);
+
+    var chip = sudoChipEl();
+    var r = chip.getBoundingClientRect();
+    var left = Math.min(Math.max(8, r.left), window.innerWidth - pop.offsetWidth - 8);
+    var top = r.bottom + 8;
+    if (top + pop.offsetHeight > window.innerHeight - 8) {
+      top = Math.max(8, r.top - pop.offsetHeight - 8);
+    }
+    pop.style.left = left + "px";
+    pop.style.top = top + "px";
+    SUDO.pop = pop;
+    chip.setAttribute("aria-expanded", "true");
+    $("#sudoQuit").addEventListener("click", quitSudo);
+    paintSudoClock();
+  }
+
+  function closeSudoPop() {
+    if (SUDO.pop) {
+      SUDO.pop.remove();
+      SUDO.pop = null;
+    }
+    var chip = $("#sudoChip");
+    if (chip) chip.setAttribute("aria-expanded", "false");
+  }
+
+  function quitSudo() {
+    // Dropping the elevation locally is the half that always works; the server
+    // is told as well so the record and the deadline agree with the screen.
+    PX.api("/sudo/exit", { method: "POST" }).catch(function () { }).then(exitSudo);
+  }
+
+  function exitSudo() {
+    stopSudoClock();
+    SUDO.deadline = 0;
+    closeSudoPop();
+    var shell = $("#shell");
+    // one last blink, then the chip fades and the title slides back
+    shell.classList.add("sudo-out");
+    setTimeout(function () {
+      shell.classList.remove("sudo-out");
+      shell.classList.remove("sudo");
+    }, 320);
+  }
+
+  function askSudoPassword(what) {
+    if (SUDO.asker) return SUDO.asker.promise;
+    var cancel = null;
+    var promise = new Promise(function (resolve, reject) {
+      var label = what ? "「" + PX.esc(what) + "」" : "该操作";
+      openOverlay("sudo", "sudo 模式",
+        '<p class="page-sub">' + label + "需要再次输入密码确认身份</p>" +
+        '<div class="field" style="margin-top:14px">' +
+        '<label for="sudoPass">当前账号密码</label>' +
+        '<input id="sudoPass" type="password" autocomplete="current-password" ' +
+        'maxlength="128"></div>' +
+        '<div class="row" style="margin-top:18px;justify-content:flex-end">' +
+        '<span class="err" id="sudoErr"></span>' +
+        '<button class="btn" type="button" id="sudoCancel">取消</button>' +
+        '<button class="btn primary" type="button" id="sudoEnter">进入 sudo 模式</button>' +
+        "</div>");
+      var box = $("#sudoPass");
+      if (box) box.focus();
+
+      var settle = function (ok, err) {
+        SUDO.asker = null;
+        if (ok) resolve(true);
+        else reject(err);
+      };
+      // closeOverlay calls this: the x, the scrim and Escape all mean "no"
+      cancel = function () {
+        var err = new Error("已取消");
+        err.silent = true;
+        settle(false, err);
+      };
+
+      var submit = function () {
+        var errEl = $("#sudoErr");
+        var go = $("#sudoEnter");
+        var pw = box ? box.value : "";
+        if (!pw) {
+          if (errEl) errEl.textContent = "请输入密码";
+          return;
+        }
+        if (go) go.disabled = true;
+        PX.api("/sudo", { method: "POST", body: { password: pw } })
+          .then(function (d) {
+            settle(true);        // first, so closing does not cancel it
+            closeOverlay();
+            setSudo(d.sudoUntil, d.now);
+          })
+          .catch(function (e) {
+            if (go) go.disabled = false;
+            if (errEl) errEl.textContent = e.message || "密码不对";
+            if (box) {
+              box.focus();
+              box.select();
+            }
+          });
+      };
+
+      $("#sudoCancel").addEventListener("click", function () {
+        cancel();
+        closeOverlay();
+      });
+      $("#sudoEnter").addEventListener("click", submit);
+      if (box) {
+        box.addEventListener("keydown", function (e) {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            e.stopPropagation();
+            submit();
+          }
+        });
+      }
+    });
+    SUDO.asker = { promise: promise, cancel: cancel };
+    return promise;
+  }
+
+  function abortSudoAsk() {
+    var a = SUDO.asker;
+    if (!a) return;
+    SUDO.asker = null;
+    a.cancel();
+  }
+
+  // Same contract as PX.api, except a "needs the password again" refusal is
+  // answered with the password prompt and the request is repeated once.
+  function apiSudo(path, options, what) {
+    return PX.api(path, options).catch(function (e) {
+      if (!e.sudo) throw e;
+      return askSudoPassword(what).then(function () {
+        return PX.api(path, options);
+      });
+    });
+  }
+
+  // Errors that only mean "the operator changed their mind" stay silent.
+  function fail(e) {
+    if (e && e.silent) return;
+    PX.toast(PX.esc((e && e.message) || "操作失败"), true);
+  }
 
   /* ------------------------------------------------------------ card menu */
   var cardMenuEl = null;
@@ -309,14 +546,14 @@
 
   function doBan(id) {
     var box = $("#banReason");
-    PX.api("/account/decide", {
+    apiSudo("/account/decide", {
       method: "POST",
       body: { id: Number(id), action: "ban", reason: box ? box.value.trim() : "" }
-    }).then(function () {
+    }, "封禁账号").then(function () {
       closeOverlay();
       PX.toast("已封禁");
       return reloadAll();
-    }).catch(function (e) { PX.toast(PX.esc(e.message), true); });
+    }).catch(fail);
   }
 
   function confirmRotate(seq) {
@@ -333,13 +570,13 @@
   }
 
   function rotateEvent(seq) {
-    PX.api("/event/rotate", { method: "POST", body: { seq: Number(seq) } })
+    apiSudo("/event/rotate", { method: "POST", body: { seq: Number(seq) } }, "重置访问地址")
       .then(function () {
         closeOverlay();
         PX.toast("已生成新的访问地址");
         return reloadAll();
       })
-      .catch(function (e) { PX.toast(PX.esc(e.message), true); });
+      .catch(fail);
   }
 
   function confirmArchive(seq) {
@@ -356,13 +593,13 @@
   }
 
   function archiveEvent(seq) {
-    PX.api("/event/archive", { method: "POST", body: { seq: Number(seq) } })
+    apiSudo("/event/archive", { method: "POST", body: { seq: Number(seq) } }, "存档活动")
       .then(function () {
         closeOverlay();
         PX.toast("已存档");
         return reloadAll();
       })
-      .catch(function (e) { PX.toast(PX.esc(e.message), true); });
+      .catch(fail);
   }
 
   function copyText(text, button) {
@@ -550,6 +787,7 @@
     closePane();
     $("#content").scrollTop = 0;
     draw();
+    syncSudo();
     if (wanted === "server" || wanted === "overview") refreshHost();
     if (wanted === "audit" && canAudit() && !S.audit.length) loadAudit().then(draw);
   }
@@ -699,7 +937,7 @@
     var kind = tpl;                       // the module supplies the fields
     $("#kindFormTitle").textContent = tpl.name;
     // the header already carries the template name; the version is enough here
-    $("#kindFormSub").textContent = "v" + (tpl.version || "");
+    $("#kindFormSub").textContent = "v" + (tpl.moduleVersion || tpl.version || "");
     $("#kindFormSub").title = [tpl.moduleName, tpl.id, tpl.module]
       .filter(Boolean).join(" \u00b7 ");
     $("#kindFields").innerHTML = kind.fields.map(function (f) {
@@ -1268,20 +1506,23 @@
 
   /* --------------------------------------------------------------- actions */
   function decide(id, action) {
-    PX.api("/account/decide", { method: "POST", body: { id: id, action: action } })
+    // stopping someone's access is the decision that needs the password again
+    var call = action === "disable" ? apiSudo : PX.api;
+    call("/account/decide", { method: "POST", body: { id: id, action: action } },
+         "停用账号")
       .then(function () {
         PX.toast("已" + ({
           approve: "通过", reject: "拒绝", disable: "停用", enable: "启用"
         })[action]);
         return reloadAll().then(afterMutation);
       })
-      .catch(function (e) { PX.toast(PX.esc(e.message), true); });
+      .catch(fail);
   }
 
   function changeRole(id, role) {
-    PX.api("/account/role", { method: "POST", body: { id: id, role: role } })
+    apiSudo("/account/role", { method: "POST", body: { id: id, role: role } }, "修改角色")
       .then(function () { PX.toast("角色已更新"); return reloadAll().then(afterMutation); })
-      .catch(function (e) { PX.toast(PX.esc(e.message), true); });
+      .catch(fail);
   }
 
   // keep an open account dialog in sync with the data behind it
@@ -1444,6 +1685,10 @@
                         (e.target.closest(".card-menu") ||
                          e.target.closest("[data-menu]")))) {
       closeCardMenu();
+    }
+    if (SUDO.pop && e.target.closest &&
+        !e.target.closest(".sudo-pop") && !e.target.closest("#sudoChip")) {
+      closeSudoPop();
     }
   });
 
@@ -1624,6 +1869,8 @@
       renderIdentity();
       applyRoleVisibility();
       labelNav();
+      // a reload keeps an elevation that has not run out yet
+      setSudo(d.sudoUntil, d.now);
       return reloadAll().then(function () {
         startHostPolling();
         onRoute();

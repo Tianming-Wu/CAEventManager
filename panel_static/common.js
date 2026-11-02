@@ -30,6 +30,9 @@
         if (!res.ok || data.ok === false) {
           var err = new Error((data && data.error) || ("HTTP " + res.status));
           err.status = res.status;
+          // the session is not elevated: the caller asks for the password and
+          // repeats the same request
+          err.sudo = !!(data && data.sudoRequired);
           throw err;
         }
         return data;

@@ -622,12 +622,20 @@
       .filter(Boolean).join(" \u00b7 ");
     $("#kindFields").innerHTML = kind.fields.map(function (f) {
       var id = "kf_" + f.key;
+      var when = f.visibleWhen || f.visible_when;
+      var wrapAttr = when
+        ? ' data-show-when="' + PX.esc(when.key) + '" data-show-is="' +
+          PX.esc(String(when.equals)) + '"'
+        : "";
       var attr = ' data-kind-field="' + PX.esc(f.key) + '"';
       var head = '<label for="' + id + '">' + PX.esc(f.label) +
         (f.required ? ' <span class="req">\u5fc5\u586b</span>' : "") + "</label>";
       var help = f.help ? '<p class="hint">' + PX.esc(f.help) + "</p>" : "";
+      var box = function (inner) {
+        return '<div class="field kind-field"' + wrapAttr + ">" + inner + "</div>";
+      };
       if (f.type === "bool") {
-        return '<div class="field kind-field"><label class="check">' +
+        return '<div class="field kind-field"' + wrapAttr + '><label class="check">' +
           '<input id="' + id + '" type="checkbox"' + attr +
           (f.default ? " checked" : "") + "><span>" + PX.esc(f.label) + "</span></label>" +
           help + "</div>";
@@ -638,25 +646,51 @@
           return '<option value="' + PX.esc(o.value) + '"' + sel + ">" +
             PX.esc(o.label || o.value) + "</option>";
         }).join("");
-        return '<div class="field kind-field">' + head + '<select id="' + id + '"' + attr + ">" +
+        return box(head + '<select id="' + id + '"' + attr +
+          (f.required ? " required" : "") + ">" +
           (f.required ? '<option value="">\u8bf7\u9009\u62e9</option>' : "") + opts +
-          "</select>" + help + "</div>";
+          "</select>" + help);
       }
       if (f.type === "int") {
         var hasDef = f.default !== undefined && f.default !== null;
-        return '<div class="field kind-field">' + head + '<input id="' + id + '" type="number"' +
+        return box(head + '<input id="' + id + '" type="number"' +
           attr + (hasDef ? ' value="' + PX.esc(String(f.default)) + '"' : "") +
           (f.min !== undefined && f.min !== null ? ' min="' + f.min + '"' : "") +
           (f.max !== undefined && f.max !== null ? ' max="' + f.max + '"' : "") +
-          ">" + help + "</div>";
+          ">" + help);
       }
       var def = f.default;
-      return '<div class="field kind-field">' + head + '<input id="' + id + '" type="text"' +
+      return box(head + '<input id="' + id + '" type="text"' +
         attr + (def !== undefined && def !== null && def !== ""
-          ? ' value="' + PX.esc(String(def)) + '"' : "") + ">" + help + "</div>";
+          ? ' value="' + PX.esc(String(def)) + '"' : "") + ">" + help);
     }).join("");
     $("#createErr").textContent = "";
     renderInviteChips();
+    bindShowWhen($("#kindFields"));
+  }
+
+  // A field can say what it depends on; the whole row disappears when the
+  // choice it depends on is not the one it applies to.
+  function bindShowWhen(scope) {
+    var rows = $$("[data-show-when]", scope);
+    if (!rows.length) return;
+    var sync = function () {
+      rows.forEach(function (row) {
+        var key = row.getAttribute("data-show-when");
+        var want = row.getAttribute("data-show-is");
+        var driver = $('[data-kind-field="' + key + '"]', scope);
+        var value = driver ? String(driver.value) : "";
+        row.hidden = value !== want;
+      });
+    };
+    rows.forEach(function (row) {
+      var driver = $('[data-kind-field="' + row.getAttribute("data-show-when") + '"]', scope);
+      if (driver) {
+        driver.addEventListener("change", sync);
+        driver.addEventListener("input", sync);
+      }
+    });
+    sync();
   }
 
   function collectKindParams() {
@@ -1363,6 +1397,7 @@
     S.invited = [];
     go("new-event");
   });
+  $("#pickerBack").addEventListener("click", function () { go("events"); });
   $("#kindCreate").addEventListener("click", createEvent);
   $("#invitePick").addEventListener("click", openInvitePicker);
   bindLiveSearch("#kindSearch", "#kindSearchClear", function (value) {

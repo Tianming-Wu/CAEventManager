@@ -888,6 +888,9 @@ table.tbl td.wrap { white-space: normal; min-width: 12em; }
 #kindForm .field select,
 #kindForm .field input[type="number"] { max-width: 460px; }
 .kind-field { margin-bottom: 14px; }
+/* a required choice starts on "请选择" and reads as a placeholder, not an answer */
+select:invalid { color: var(--dim); }
+[data-show-when][hidden] { display: none !important; }
 .kind-field:last-child { margin-bottom: 0; }
 .check { display: flex; align-items: center; gap: 8px; cursor: pointer; }
 .check input { width: auto; margin: 0; }
@@ -906,7 +909,8 @@ table.tbl td.wrap { white-space: normal; min-width: 12em; }
   color: var(--dim);
   cursor: pointer;
 }
-.invite-slot:hover { border-color: var(--accent); color: var(--accent-strong); background: var(--accent-soft); }
+.invite-slot:hover { border-color: var(--accent); color: var(--accent-strong); }
+.invite-slot:active { border-color: var(--accent-line); color: var(--accent-strong); }
 .invite-slot svg { width: 18px; height: 18px; stroke-width: 1.8; }
 .invite-chips { display: flex; gap: 6px; flex-wrap: wrap; min-width: 0; }
 .invite-chip {

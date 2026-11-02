@@ -290,6 +290,11 @@ def main():
     check("it declares its parameters",
           any(k["id"] == "nwuca.lottery" and k["fields"] for k in kinds))
 
+    check("a kind declares its own pages",
+          any(f["key"] == "pool_size" and f.get("visibleWhen", {}) for k in kinds
+              for f in k["fields"] if k["id"] == "nwuca.lottery"),
+          [f.get("visibleWhen") for k in kinds for f in k["fields"]])
+
     print("== creating an activity ==")
     post(owner, "/api/panel/events/create",
          {"kind": "nwuca.lottery", "title": "", "params": {"pool_mode": "auto"}},
@@ -319,6 +324,18 @@ def main():
     first = call(owner, "/api/panel/events")["events"]
     check("a second activity does not disturb the first",
           any(e["seq"] == ev["seq"] for e in first), first)
+
+    print("== the console page bar ==")
+    console = call(owner, "/api/panel/events")
+    import urllib.request as _u
+    token = ev2["token"]
+    req = _u.Request(ROOT + "/" + token + "/api/admin/console",
+                     headers={"X-Requested-With": "lottery"})
+    try:
+        owner.open(req, timeout=20)
+        check("the console page list needs a session", False, "served without one")
+    except urllib.error.HTTPError as exc:
+        check("the console page list needs a session", exc.code == 401, exc.code)
 
     print("== renaming an activity ==")
     ev = call(owner, "/api/panel/events")["events"][0]

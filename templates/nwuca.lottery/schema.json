@@ -20,6 +20,7 @@
       "default": 200,
       "min": 1,
       "max": 5000,
+      "visible_when": { "key": "pool_mode", "equals": "fixed" },
       "help": "只在选固定数量时使用"
     },
     {

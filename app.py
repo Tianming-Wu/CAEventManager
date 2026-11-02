@@ -802,6 +802,7 @@ class Handler(BaseHTTPRequestHandler):
                 if prefix:
                     db.set_config_raw(event_conn, "public_base_url",
                                       prefix + "/" + token)
+                db.set_config_raw(event_conn, "kind", kind["id"])
                 if note:
                     db.set_config_raw(event_conn, "subtitle", note)
                 for key, val in params.items():
@@ -1189,6 +1190,11 @@ class Handler(BaseHTTPRequestHandler):
 
         # ---- everything below needs a session ----
         session, token = self._require_admin(conn)
+
+        if path == "/api/admin/console" and method == "GET":
+            kind_id = db.all_config(conn).get("kind") or db.DEFAULT_CONFIG.get("kind")
+            return self._json({"ok": True,
+                               "pages": kinds.console_pages(kind_id, VERSION)})
 
         if path == "/api/admin/state" and method == "GET":
             cfg = db.all_config(conn)

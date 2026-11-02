@@ -7,5 +7,11 @@
   "license": "MIT",
   "builtin": true,
   "requires": ">=1.4",
-  "description": "签到与任务发奖票，按票抽奖，另有一次到场均等抽特等奖"
+  "description": "签到与任务发奖票，按票抽奖，另有一次到场均等抽特等奖",
+  "pages": [
+    { "id": "ops", "title": "操作台" },
+    { "id": "roster", "title": "名单" },
+    { "id": "tickets", "title": "奖票" },
+    { "id": "draw", "title": "抽奖" }
+  ]
 }

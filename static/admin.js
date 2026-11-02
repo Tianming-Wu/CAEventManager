@@ -500,8 +500,10 @@
       "当前：到场 <b>" + st.checkin + "</b> 人 → 奖票池 <b>" + st.pool_size + "</b> 张" +
       "（保底 " + st.guaranteed + " + 速度奖励 " + st.bonus_pool + "）" +
       (auto ? "。<br>之后每多签到一人，池子自动 +3。" : "。<br>固定模式下池子不随人数变化。");
+    var mode = S.config.pool_mode || "auto";
     $("#setPool").disabled = auto;
-    $("#setPoolExpr").disabled = (S.config.pool_mode || "auto") !== "expr";
+    // a field that does not apply is hidden, not merely disabled
+    $("#poolExprField").hidden = mode !== "expr";
   }
 
   function renderQR() {
@@ -824,6 +826,8 @@
       if (btn) showTab(btn.getAttribute("data-tab"));
     });
 
+    renderTabs();
+
     $("#filters").addEventListener("click", function (e) {
       var btn = e.target.closest("button[data-filter]");
       if (!btn) return;
@@ -894,6 +898,29 @@
   }
 
   // ------------------------------------------------------------------ tabs
+  // The bar comes from the platform; a kind only decides which pages it wants.
+  function renderTabs() {
+    var nav = $("#tabs");
+    LT.api("/api/admin/console").then(function (d) {
+      S.pages = d.pages || [];
+      nav.innerHTML = S.pages.map(function (page) {
+        var extra = page.id === "roster"
+          ? '<span class="badge-n" id="nRoster">0</span>' : "";
+        return '<button data-tab="' + page.id + '">' + LT.esc(page.title) +
+          extra + "</button>";
+      }).join("");
+      var first = S.pages[0];
+      nav.querySelectorAll("button[data-tab]").forEach(function (btn) {
+        if (first && btn.getAttribute("data-tab") === first.id) {
+          btn.classList.add("active");
+        }
+      });
+      if (first) showTab(first.id);
+    }).catch(function () {
+      nav.textContent = "";
+    });
+  }
+
   function showTab(name) {
     S.tab = name;
     $$("#tabs button").forEach(function (b) { b.classList.toggle("active", b.getAttribute("data-tab") === name); });

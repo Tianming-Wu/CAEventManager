@@ -60,6 +60,47 @@ def _read_json(path):
         return json.load(fh)
 
 
+# The pages a kind may ask for.  Anything else is the platform's, not the kind's,
+# so a kind cannot invent a page the console has no section for.
+KIND_PAGES = ("ops", "roster", "tickets", "draw")
+PLATFORM_PAGES = (("settings", "\u6d3b\u52a8\u8bbe\u7f6e"), ("log", "\u65e5\u5fd7"))
+PAGE_TITLE = {
+    "ops": "\u64cd\u4f5c\u53f0",
+    "roster": "\u540d\u5355",
+    "tickets": "\u5956\u7968",
+    "draw": "\u62bd\u5956",
+}
+
+
+def normalize_pages(raw):
+    """Turn a kind's page list into [{"id", "title"}], dropping what we cannot draw."""
+    out = []
+    seen = set()
+    for item in raw or []:
+        if isinstance(item, str):
+            page_id, title = item, ""
+        elif isinstance(item, dict):
+            page_id, title = str(item.get("id") or ""), str(item.get("title") or "")
+        else:
+            continue
+        page_id = page_id.strip()
+        if page_id not in KIND_PAGES or page_id in seen:
+            continue
+        seen.add(page_id)
+        out.append({"id": page_id, "title": title or PAGE_TITLE[page_id]})
+    return out
+
+
+def console_pages(kind_id, version):
+    """Every page the console should show, in order: the kind's, then the platform's."""
+    kind = get(kind_id, version) if kind_id else None
+    pages = list(kind["pages"]) if kind else [
+        {"id": pid, "title": PAGE_TITLE[pid]} for pid in KIND_PAGES]
+    for page_id, title in PLATFORM_PAGES:
+        pages.append({"id": page_id, "title": title, "platform": True})
+    return pages
+
+
 def load_kind(folder, version):
     """Read one kind directory; raises KindError when it is unusable."""
     meta_path = os.path.join(folder, "template.json")
@@ -90,6 +131,11 @@ def load_kind(folder, version):
         key = str(raw.get("key") or "").strip()
         if not key.isalnum() and "_" not in key:
             raise KindError("参数名只能用小写字母、数字和下划线：%s" % key)
+        when = raw.get("visible_when")
+        visible_when = None
+        if isinstance(when, dict) and when.get("key"):
+            visible_when = {"key": str(when["key"]),
+                            "equals": str(when.get("equals", ""))}
         fields.append({
             "key": key,
             "label": str(raw.get("label") or key),
@@ -100,6 +146,10 @@ def load_kind(folder, version):
             "options": raw.get("options") or [],
             "min": raw.get("min"),
             "max": raw.get("max"),
+            # only shown while another field has a particular value
+            "visibleWhen": visible_when,
+            # the value is fixed: the field is not shown and not accepted
+            "locked": raw.get("locked"),
         })
 
     return {
@@ -113,6 +163,7 @@ def load_kind(folder, version):
         "description": str(meta.get("description") or ""),
         "requires": requires,
         "builtin": bool(meta.get("builtin")),
+        "pages": normalize_pages(meta.get("pages")),
         "fields": fields,
         "ok": satisfies(version, requires),
         "reason": "" if satisfies(version, requires)
@@ -131,6 +182,13 @@ def coerce_params(kind, given):
     for field in kind["fields"]:
         key = field["key"]
         label = field["label"]
+        if field.get("locked") is not None:
+            # a locked field always takes the value the kind decided on
+            out[key] = field["locked"]
+            continue
+        when = field.get("visibleWhen")
+        if when and str(given.get(when["key"], "")) != when["equals"]:
+            continue
         raw = given.get(key, field.get("default"))
         if raw is None or raw == "":
             if field["required"]:

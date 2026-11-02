@@ -78,6 +78,7 @@ KINDS = ("checkin", "task1", "task2")
 KIND_LABEL = {"checkin": "签到", "task1": "任务一", "task2": "任务二", "bonus": "速度奖励"}
 
 DEFAULT_CONFIG = {
+    "kind": "nwuca.lottery",     # which activity kind draws this activity
     "title": "抽奖活动",
     "subtitle": "",
     # pool: "auto" => present * 3 + bonus_constant (recomputed live, follows the

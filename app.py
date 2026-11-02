@@ -741,7 +741,7 @@ class Handler(BaseHTTPRequestHandler):
                 if fails >= 6:
                     _PANEL_FAILS[ip] = time.time() + 30
                     _PANEL_FAILS[ip + ":n"] = 0
-                raise model.ApiError("用户名或密码不对", 401)
+                raise model.ApiError("用户名或密码错误", 401)
             if row["status"] == "pending":
                 raise model.ApiError("账号待审核，通过后才能登录", 403)
             if row["status"] == "rejected":
@@ -803,7 +803,7 @@ class Handler(BaseHTTPRequestHandler):
                 if fails >= 6:
                     _PANEL_FAILS[ip] = time.time() + 30
                     _PANEL_FAILS[ip + ":n"] = 0
-                raise model.ApiError("密码不对", 403)
+                raise model.ApiError("密码错误", 403)
             _PANEL_FAILS.pop(ip, None)
             _PANEL_FAILS.pop(ip + ":n", None)
             with panel.tx() as tx:
@@ -823,7 +823,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/password" and method == "POST":
             data = body()
             if not panel.verify_password(data.get("old") or "", acc["pass"]):
-                raise model.ApiError("当前密码不对", 403)
+                raise model.ApiError("当前密码错误", 403)
             new = (data.get("new") or "").strip()
             if len(new) < 8:
                 raise model.ApiError("新密码至少 8 位")

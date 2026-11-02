@@ -509,6 +509,54 @@ button.nav-item {
 }
 .shell.sudo-out .sudo-chip { animation: sudo-blink .3s ease-in-out 1; }
 
+/* the password prompt: one narrow window, one thing to type */
+.overlay-card.narrow { width: min(404px, 100%); }
+.sudo-prompt { display: flex; flex-direction: column; }
+.sudo-prompt-mark {
+  align-self: center;
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  margin: 4px 0 14px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+.sudo-prompt-mark svg {
+  width: 26px;
+  height: 26px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.sudo-prompt-note {
+  margin: 0 0 16px;
+  text-align: center;
+  color: var(--muted);
+  font-size: .86rem;
+  line-height: 1.6;
+}
+.sudo-prompt-label {
+  margin-bottom: 6px;
+  font-size: .78rem;
+  color: var(--muted);
+}
+.sudo-prompt-err {
+  /* a line of its own, reserved: the buttons must not jump when it fills in */
+  min-height: 1.3em;
+  margin: 6px 0 0;
+  font-size: .8rem;
+}
+.sudo-prompt-foot {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 6px;
+}
+
 /* the account page's own switch, showing the same countdown */
 .sudo-state {
   /* the text stays left, the button stays right, and neither wraps */

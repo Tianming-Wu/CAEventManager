@@ -179,6 +179,8 @@
 
   function openOverlay(kind, title, html) {
     overlayKind = kind;
+    var card = $("#overlay").firstElementChild;
+    if (card) card.classList.toggle("narrow", kind === "sudo");
     overlayOpener = document.activeElement;
     $("#overlayTitle").textContent = title;
     $("#overlayBody").innerHTML = html;
@@ -215,12 +217,13 @@
    * turns that into a password prompt and repeats the very same request. */
   var SUDO = { deadline: 0, timer: null, pop: null, asker: null };
 
-  // the same shield-with-a-prompt mark the title bar shows
-  var ICON_SHIELD = '<svg viewBox="0 0 20 20" aria-hidden="true">' +
-    '<path d="M10 2.6l6 2.05v4.9c0 3.55-2.45 6.5-6 7.6-3.55-1.1-6-4.05-6-7.6V4.65l6-2.05Z"/>' +
-    '<path d="M7.7 9.4l2.1 2-2.1 2"/>' +
-    '<path d="M10.9 13.4h2.7"/>' +
-    "</svg>";
+  // One source of truth for the mark: copy it out of the title bar rather than
+  // keeping a second copy of the paths here.
+  function shieldMarkup() {
+    var chip = $("#sudoChip");
+    var svg = chip && chip.querySelector("svg");
+    return svg ? svg.outerHTML : "";
+  }
 
   function sudoLeft() {
     return SUDO.deadline ? Math.max(0, SUDO.deadline - Date.now() / 1000) : 0;
@@ -310,7 +313,7 @@
     pop.setAttribute("role", "dialog");
     pop.setAttribute("aria-label", "sudo 模式");
     pop.innerHTML =
-      '<div class="sudo-pop-head">' + ICON_SHIELD + "<h3>sudo 模式</h3></div>" +
+      '<div class="sudo-pop-head">' + shieldMarkup() + "<h3>sudo 模式</h3></div>" +
       '<p class="sudo-pop-note">您正处于 sudo 模式，期间敏感操作不会再次要求二次确认。</p>' +
       '<p class="sudo-pop-note">再次进入 sudo 模式将会要求您输入密码。</p>' +
       '<p class="sudo-pop-clock" id="sudoClock">—</p>' +
@@ -367,20 +370,31 @@
     if (SUDO.asker) return SUDO.asker.promise;
     var cancel = null;
     var promise = new Promise(function (resolve, reject) {
-      var label = what ? "「" + PX.esc(what) + "」" : "进入 sudo 模式";
+      // the dialog is about one thing, so it says which action opened it
+      var note = what
+        ? "「" + PX.esc(what) + "」需要再次输入密码确认身份"
+        : "再次输入密码确认身份，十分钟内不再询问";
       openOverlay("sudo", "sudo 模式",
-        '<p class="page-sub">' + label + "需要再次输入密码确认身份</p>" +
-        '<div class="field" style="margin-top:14px">' +
-        '<label for="sudoPass">当前账号密码</label>' +
+        '<div class="sudo-prompt">' +
+        '<span class="sudo-prompt-mark">' + shieldMarkup() + "</span>" +
+        '<p class="sudo-prompt-note">' + note + "</p>" +
+        '<label class="sudo-prompt-label" for="sudoPass">当前账号密码</label>' +
         '<input id="sudoPass" type="password" autocomplete="current-password" ' +
-        'maxlength="128"></div>' +
-        '<div class="row" style="margin-top:18px;justify-content:flex-end">' +
-        '<span class="err" id="sudoErr"></span>' +
+        'maxlength="128">' +
+        '<p class="err sudo-prompt-err" id="sudoErr"></p>' +
+        '<div class="sudo-prompt-foot">' +
         '<button class="btn" type="button" id="sudoCancel">取消</button>' +
         '<button class="btn primary" type="button" id="sudoEnter">进入 sudo 模式</button>' +
-        "</div>");
+        "</div></div>");
       var box = $("#sudoPass");
-      if (box) box.focus();
+      if (box) {
+        box.focus();
+        // a fresh keystroke is the answer to whatever the last complaint was
+        box.addEventListener("input", function () {
+          var errEl = $("#sudoErr");
+          if (errEl) errEl.textContent = "";
+        });
+      }
 
       var settle = function (ok, err) {
         SUDO.asker = null;
@@ -411,7 +425,7 @@
           })
           .catch(function (e) {
             if (go) go.disabled = false;
-            if (errEl) errEl.textContent = e.message || "密码不对";
+            if (errEl) errEl.textContent = e.message || "密码错误";
             if (box) {
               box.focus();
               box.select();

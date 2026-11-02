@@ -806,6 +806,29 @@ def sudo_page(page):
     check("the countdown actually runs", page.inner_text("#sudoClock") != clock,
           (clock, page.inner_text("#sudoClock")))
 
+    # while elevated, the next sensitive action must go straight through
+    page.click("body")
+    page.wait_for_timeout(250)
+    rotated = [e for e in call(owner, "/api/panel/events")["events"]
+               if e["seq"] == spare["event"]["seq"]][0]
+    page.click('.page[data-page=events] [data-menu="%s"]' % rotated["id"])
+    page.wait_for_timeout(250)
+    check("no password prompt while elevated",
+          page.locator("#sudoPass").count() == 0)
+    page.click(".card-menu [data-archive]")
+    page.wait_for_timeout(250)
+    page.click("#overlayBody [data-archive-confirm]")
+    page.wait_for_timeout(1000)
+    check("and the second action completes without asking",
+          page.locator("#sudoPass").count() == 0
+          and page.locator("#overlay").is_hidden())
+    left_now = page.evaluate("""() => Array.from(
+        document.querySelectorAll('#ownedEvents .card-menu-btn'))
+        .map(el => el.getAttribute('data-menu'))""")
+    check("the throw-away activity is gone", rotated["id"] not in left_now, left_now)
+
+    page.click("#sudoChip")
+    page.wait_for_timeout(320)
     page.click("#sudoQuit")
     page.wait_for_timeout(900)
     check("退出 sudo 模式 closes the panel", page.locator(".sudo-pop").count() == 0)

@@ -616,9 +616,9 @@
 
   function drawKindForm(kind) {
     $("#kindFormTitle").textContent = kind.name;
-    $("#kindFormSub").textContent = [kind.id, "v" + kind.version,
-                                     kind.builtin ? "\u5185\u7f6e" : "\u7528\u6237\u5bfc\u5165",
-                                     kind.author, kind.homepage]
+    // the header carries the version and nothing else: the rest is on the card
+    $("#kindFormSub").textContent = "v" + kind.version;
+    $("#kindFormSub").title = [kind.id, kind.author, kind.homepage]
       .filter(Boolean).join(" \u00b7 ");
     $("#kindFields").innerHTML = kind.fields.map(function (f) {
       var id = "kf_" + f.key;
@@ -691,6 +691,57 @@
       }
     });
     sync();
+  }
+
+  // Importing a config only fills the form; anything it does not mention keeps
+  // whatever is already there, and nothing is submitted until the button.
+  function importConfig(file) {
+    var reader = new FileReader();
+    reader.onload = function () {
+      var data;
+      try {
+        data = JSON.parse(String(reader.result));
+      } catch (e) {
+        $("#createErr").textContent = "\u8fd9\u4e2a\u6587\u4ef6\u4e0d\u662f\u5408\u6cd5\u7684 JSON";
+        return;
+      }
+      if (!data || typeof data !== "object" || Array.isArray(data)) {
+        $("#createErr").textContent = "\u914d\u7f6e\u6587\u4ef6\u5e94\u8be5\u662f\u4e00\u4e2a\u5bf9\u8c61";
+        return;
+      }
+      var filled = 0;
+      if (typeof data.title === "string" && data.title.trim()) {
+        $("#neTitle").value = data.title.trim();
+        filled += 1;
+      }
+      if (typeof data.note === "string") {
+        $("#neNote").value = data.note;
+        filled += 1;
+      }
+      var params = data.params && typeof data.params === "object" ? data.params : data;
+      $$("[data-kind-field]").forEach(function (el) {
+        var key = el.getAttribute("data-kind-field");
+        if (!(key in params)) return;
+        var value = params[key];
+        if (el.type === "checkbox") {
+          el.checked = !!value;
+        } else if (value !== null && value !== undefined && value !== "") {
+          el.value = String(value);
+        } else {
+          return;
+        }
+        filled += 1;
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+      $("#createErr").textContent = filled
+        ? ""
+        : "\u8fd9\u4e2a\u6587\u4ef6\u91cc\u6ca1\u6709\u80fd\u7528\u7684\u5b57\u6bb5";
+      if (filled) PX.toast("\u5df2\u586b\u5165 " + filled + " \u9879\uff0c\u63d0\u4ea4\u524d\u53ef\u4ee5\u7ee7\u7eed\u6539");
+    };
+    reader.onerror = function () {
+      $("#createErr").textContent = "\u8bfb\u4e0d\u4e86\u8fd9\u4e2a\u6587\u4ef6";
+    };
+    reader.readAsText(file);
   }
 
   function collectKindParams() {
@@ -1399,6 +1450,14 @@
   });
   $("#pickerBack").addEventListener("click", function () { go("events"); });
   $("#kindCreate").addEventListener("click", createEvent);
+  $("#kindImport").addEventListener("click", function () {
+    $("#kindImportFile").click();
+  });
+  $("#kindImportFile").addEventListener("change", function (e) {
+    var file = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (file) importConfig(file);
+  });
   $("#invitePick").addEventListener("click", openInvitePicker);
   bindLiveSearch("#kindSearch", "#kindSearchClear", function (value) {
     S.kindFilter = value;

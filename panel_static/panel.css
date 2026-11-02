@@ -426,7 +426,16 @@ button.nav-item {
 }
 .page-head h1 { line-height: 1.2; }
 .page-head h1 { flex: 0 0 auto; }
-.page-sub { color: var(--muted); font-size: .84rem; margin: 0; flex: 1 1 220px; }
+.page-sub {
+  color: var(--muted);
+  font-size: .84rem;
+  margin: 0;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .page-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .stack-title { margin: 0 0 8px; color: var(--muted); font-size: .82rem; font-weight: 600; }
 .invite-stack { margin-bottom: 16px; }
@@ -893,7 +902,13 @@ select:invalid { color: var(--dim); }
 [data-show-when][hidden] { display: none !important; }
 .kind-field:last-child { margin-bottom: 0; }
 .check { display: flex; align-items: center; gap: 8px; cursor: pointer; }
-.check input { width: auto; margin: 0; }
+.check input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
 
 .invite-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .invite-slot {
@@ -1155,7 +1170,8 @@ select:invalid { color: var(--dim); }
 }
 .search:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 
-input[type="text"], input[type="password"], input[type="search"], textarea, select {
+input[type="text"], input[type="password"], input[type="search"],
+input[type="number"], input[type="url"], textarea, select {
   font-family: inherit;
   font-size: .9rem;
   color: var(--text);
@@ -1172,7 +1188,8 @@ input:focus, textarea:focus, select:focus {
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 @media (pointer: coarse) {
-  input[type="text"], input[type="password"], input[type="search"], textarea, select {
+  input[type="text"], input[type="password"], input[type="search"],
+  input[type="number"], input[type="url"], textarea, select {
     min-height: var(--tap);
     font-size: 16px;      /* below 16px iOS zooms the page on focus */
   }

@@ -458,7 +458,7 @@ class Handler(BaseHTTPRequestHandler):
 
             self._drain_body()
 
-            kind, route = panel.classify(parsed.path, EVENT_TOKENS)
+            kind, route, token = panel.classify(parsed.path, EVENT_TOKENS)
             if kind == "panel":
                 return self._panel(method, route, parsed.path, query)
 
@@ -472,6 +472,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.end_headers()
                 return
 
+            # every event request reads and writes that event's own database
+            db.set_current_event(panel.event_seq(token) or db.DEFAULT_SEQ)
             path = route
             if path is None:
                 # No panel route and no event token: nothing to serve.
@@ -672,15 +674,18 @@ class Handler(BaseHTTPRequestHandler):
                                "accounts": [panel.view(r) for r in rows]})
 
         if path == "/events" and method == "GET":
-            # the public base lives in the event database, not the panel one
-            event_conn = db.connect()
-            base = public_base_url(event_conn)
             rows = conn.execute(
                 "SELECT e.*, m.role AS my_role, o.name AS owner_name"
                 " FROM events e"
                 " LEFT JOIN event_members m ON m.seq = e.seq AND m.account_id = ?"
                 " LEFT JOIN accounts o ON o.id = e.owner_id"
                 " ORDER BY e.created_at", (acc["id"],)).fetchall()
+            # the public base lives in an event database, not the panel one;
+            # with a single event there is no ambiguity about which one
+            if len(rows) == 1:
+                db.set_current_event(rows[0]["seq"])
+            event_conn = db.connect()
+            base = public_base_url(event_conn)
             events = [panel.event_view(r, base, r["my_role"]) for r in rows]
             # The adopted first event has no name of its own; borrow the live one
             # while there is exactly one event, so the list is not a row of dashes.

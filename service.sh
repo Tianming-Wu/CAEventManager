@@ -96,7 +96,8 @@ reset)
     fi
     "$0" stop >/dev/null 2>&1 || true
     stamp=$(date +%Y%m%d-%H%M%S)
-    for f in data/lottery.sqlite3 data/lottery.sqlite3-wal data/lottery.sqlite3-shm; do
+    for f in data/events/*.sqlite3 data/events/*.sqlite3-wal data/events/*.sqlite3-shm \
+         data/lottery.sqlite3 data/lottery.sqlite3-wal data/lottery.sqlite3-shm; do
         if [ -f "$f" ]; then
             cp "$f" "data/backup-$stamp-$(basename "$f")" 2>/dev/null || true
             rm -f "$f"

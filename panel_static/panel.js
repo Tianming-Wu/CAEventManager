@@ -138,11 +138,12 @@
     if (e.createdAt) meta.push("建于 " + PX.when(e.createdAt));
     return '<div class="event-card">' +
       '<div class="event-card-head">' +
+      '<div class="event-titlewrap">' +
       '<div class="event-title">' + PX.esc(eventTitle(e)) + "</div>" +
+      '<div class="event-id">#' + PX.esc(String(e.seq)) + "</div></div>" +
       '<button class="card-menu-btn" type="button" data-menu="' + PX.esc(e.id) + '" ' +
       'aria-haspopup="menu" aria-label="更多操作">' + ICON_DOTS + "</button>" +
       "</div>" +
-      '<div class="event-meta">#' + PX.esc(String(e.seq)) + "</div>" +
       '<div class="event-token"><span class="token-label">token</span>' +
       '<code title="' + PX.esc(e.id) + '">' +
       PX.esc(shortToken(e.id)) + "</code>" +

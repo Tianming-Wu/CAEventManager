@@ -534,10 +534,22 @@ def event_tokens(extra=()):
     return tokens
 
 
+def event_seq(token):
+    """The numeric id behind a token, or None."""
+    if not token:
+        return None
+    try:
+        row = connect().execute("SELECT seq FROM events WHERE token=?",
+                                (token,)).fetchone()
+    except Exception:
+        return None
+    return row["seq"] if row else None
+
+
 def classify(raw_path, tokens):
     """Decide which family a request belongs to.
 
-    Returns ("event", route) / ("panel", route) / (None, None).
+    Returns ("event", route, token) / ("panel", route, None) / (None, None, None).
 
     A path segment that equals a known event token wins over everything else, so
     ``/<token>/login`` stays the event's login and is never mistaken for the
@@ -548,14 +560,14 @@ def classify(raw_path, tokens):
     for seg in parts:
         if seg and seg in tokens:
             idx = parts.index(seg)
-            return "event", "/" + "/".join(parts[idx + 1:])
+            return "event", "/" + "/".join(parts[idx + 1:]), seg
     if _is_panel_route(raw_path):
-        return "panel", raw_path
+        return "panel", raw_path, None
     for i in range(1, len(parts)):
         cand = "/" + "/".join(parts[i:])
         if _is_panel_route(cand):
-            return "panel", cand
-    return None, None
+            return "panel", cand, None
+    return None, None, None
 
 
 def cookie_path_for(raw_path, route):

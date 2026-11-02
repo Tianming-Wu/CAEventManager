@@ -16,7 +16,7 @@ here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 os.chdir(here)
 
 cfg = json.load(open("config.json", encoding="utf-8"))
-conn = sqlite3.connect("data/lottery.sqlite3")
+conn = sqlite3.connect(sys.argv[1] if len(sys.argv) > 1 else "data/events/1.sqlite3")
 conn.row_factory = sqlite3.Row
 
 off = 8 * 3600

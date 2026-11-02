@@ -20,7 +20,44 @@ import time
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.environ.get("LOTTERY_DATA_DIR") or os.path.join(BASE_DIR, "data")
-DB_PATH = os.path.join(DATA_DIR, "lottery.sqlite3")
+
+# One file per event, named after its numeric id.  The id is a counter, so the
+# name cannot collide, and the file is the unit of backup, export and deletion.
+EVENTS_DIR = os.path.join(DATA_DIR, "events")
+LEGACY_DB = os.path.join(DATA_DIR, "lottery.sqlite3")
+DEFAULT_SEQ = 1
+
+
+def event_path(seq):
+    return os.path.join(EVENTS_DIR, "%s.sqlite3" % int(seq))
+
+
+# kept for the tools that used to poke at DB_PATH
+DB_PATH = event_path(DEFAULT_SEQ)
+
+
+def migrate_legacy():
+    """Move the single-file database into the per-event layout.
+
+    Runs once: the old name disappears the moment the move succeeds.
+    """
+    if not os.path.exists(LEGACY_DB) or os.path.exists(event_path(1)):
+        return False
+    os.makedirs(EVENTS_DIR, exist_ok=True)
+    os.replace(LEGACY_DB, event_path(1))
+    for suffix in ("-wal", "-shm"):
+        old = LEGACY_DB + suffix
+        if os.path.exists(old):
+            os.replace(old, event_path(1) + suffix)
+    return True
+
+
+def set_current_event(seq):
+    """Point this thread's connection at one event's database."""
+    if seq is None:
+        return
+    if getattr(_local, "seq", None) != int(seq):
+        _local.seq = int(seq)
 
 KINDS = ("checkin", "task1", "task2")
 KIND_LABEL = {"checkin": "签到", "task1": "任务一", "task2": "任务二", "bonus": "速度奖励"}
@@ -177,7 +214,7 @@ class tx:
 def connect():
     """Thread-local connection (http.server serves each request in its own thread)."""
     conn = getattr(_local, "conn", None)
-    path = DB_PATH
+    path = event_path(getattr(_local, "seq", None) or DEFAULT_SEQ)
     if conn is not None and getattr(_local, "path", None) == path:
         return conn
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -195,6 +232,7 @@ def connect():
 def init_db():
     """Create schema and seed missing config keys.  Safe to call repeatedly."""
     global _initialized
+    migrate_legacy()
     with _init_lock:
         conn = connect()
         conn.executescript(SCHEMA)

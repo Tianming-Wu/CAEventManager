@@ -9,7 +9,7 @@ import os
 import sqlite3
 import sys
 
-path = sys.argv[1] if len(sys.argv) > 1 else "data/lottery.sqlite3"
+path = sys.argv[1] if len(sys.argv) > 1 else "data/events/1.sqlite3"
 if not os.path.exists(path):
     raise SystemExit("no database at %s" % path)
 

@@ -1,10 +1,12 @@
 {
   "id": "nwuca.salon",
   "name": "计算机杂谈活动",
-  "module": "nwuca.lottery",
-  "description": "签到一起聊点技术，中间穿插抽奖；按到场人数伸缩奖票池",
+  "note": "沿用上一场的配置：自动奖票池，保底 180 张",
   "title": "计算机杂谈",
-  "builtin": true,
+  "dependency": {
+    "module": "nwuca.lottery",
+    "template": "nwuca.lottery.salon"
+  },
   "params": {
     "pool_mode": "auto",
     "allow_bonus": true,

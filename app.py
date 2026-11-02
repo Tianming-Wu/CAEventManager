@@ -363,6 +363,16 @@ def host_stats(root="/proc", sleep=0.12):
     }
 
 
+def _modules_by_id(conn):
+    """Every installed module, by id, with the administrator's switch applied."""
+    return {m["id"]: m for m in
+            modules.all_modules(VERSION, disabled=panel.disabled_modules(conn))}
+
+
+def presets_ok_slug(slug):
+    return bool(slug) and bool(presets.ID_RE.match(slug))
+
+
 class SudoRequired(model.ApiError):
     """A sensitive endpoint refused: this session has not re-entered a password.
 
@@ -965,7 +975,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/templates" and method == "GET":
             # every preset this account may see: its own, its favourites and the
             # square.  The old name stays so a stale page still gets an answer.
-            by_id = {m["id"]: m for m in modules.all_modules(VERSION)}
+            by_id = _modules_by_id(conn)
             rows = presets.visible(conn, acc["id"], by_id)
             return self._json({
                 "ok": True, "version": VERSION,
@@ -975,7 +985,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/preset" and method == "POST":
             data = body()
-            by_id = {m["id"]: m for m in modules.all_modules(VERSION)}
+            by_id = _modules_by_id(conn)
             name = (data.get("name") or "").strip()
             if not name:
                 raise model.ApiError("请给这个预设起个名字")
@@ -1067,7 +1077,7 @@ class Handler(BaseHTTPRequestHandler):
                 " WHERE e.seq=?", (acc["id"], seq)).fetchone()
             if row is None or row["my_role"] not in ("owner", "member"):
                 raise model.ApiError("你不是这个活动的成员", 403)
-            by_id = {m["id"]: m for m in modules.all_modules(VERSION)}
+            by_id = _modules_by_id(conn)
             module_id = row["kind"] or panel.DEFAULT_KIND
             kind = by_id.get(module_id)
             if kind is None:
@@ -1099,9 +1109,92 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True, "id": slug, "name": name})
 
         if path == "/modules" and method == "GET":
-            need("owner")
+            need("superadmin", "owner")
             return self._json({"ok": True, "version": VERSION,
-                               "modules": modules.all_modules(VERSION)})
+                               "modules": modules.all_modules(
+                                   VERSION, disabled=panel.disabled_modules(conn))})
+
+        if path == "/module/toggle" and method == "POST":
+            # switching a module off keeps every reference to it; it only stops
+            # new activities and presets from being started on it
+            need("superadmin", "owner")
+            data = body()
+            module_id = (data.get("id") or "").strip()
+            known = {m["id"] for m in modules.all_modules(VERSION)}
+            if module_id not in known:
+                raise model.ApiError("没有这个模块", 404)
+            on = bool(data.get("enabled", True))
+            with panel.tx() as tx:
+                panel.set_module_enabled(tx, module_id, on, acc["username"])
+                panel.audit(tx, acc["username"],
+                            "module_enable" if on else "module_disable", module_id)
+            return self._json({"ok": True, "enabled": on})
+
+        if path == "/preset/import" and method == "POST":
+            # a preset file from somewhere else.  If it needs a module this
+            # installation does not have, the answer says so and the operator
+            # decides; importing anyway keeps it listed but unusable.
+            data = body()
+            by_id = _modules_by_id(conn)
+            raw = data.get("preset")
+            if not isinstance(raw, dict):
+                raise model.ApiError("预设内容不是合法对象")
+            slug = str(raw.get("id") or "").strip()
+            if not presets_ok_slug(slug):
+                raise model.ApiError("预设 id 需要形如 nwuca.salon")
+            dep = raw.get("dependency") or {}
+            module_id = str((dep or {}).get("module") or raw.get("module") or "").strip()
+            base = str((dep or {}).get("template") or "").strip()
+            module = by_id.get(module_id)
+            missing = ""
+            if module is None:
+                missing = "依赖的模块不存在：%s" % (module_id or "(未声明)")
+            elif not module.get("ok"):
+                missing = "%s 不可用：%s" % (module.get("name") or module_id,
+                                          module.get("reason") or "")
+            if missing and not data.get("force"):
+                return self._json({"ok": False, "error": missing,
+                                   "dependencyMissing": True,
+                                   "module": module_id}, 409)
+            params = raw.get("params") or {}
+            if not isinstance(params, dict):
+                raise model.ApiError("params 应该是一个对象")
+            if module is not None:
+                try:
+                    params = modules.coerce_params(module, params)
+                except ValueError as exc:
+                    raise model.ApiError(str(exc))
+            name = str(raw.get("name") or slug).strip()[:40]
+            note = str(raw.get("note") or raw.get("description") or "").strip()[:200]
+            title = str(raw.get("title") or "").strip()[:60]
+            visibility = (data.get("visibility") or "private").strip()
+            if visibility not in presets.VISIBILITY:
+                visibility = "private"
+            now = time.time()
+            with panel.tx() as tx:
+                row = tx.execute("SELECT id, owner_id, builtin FROM presets"
+                                 " WHERE slug=?", (slug,)).fetchone()
+                if row is not None and (row["builtin"] or row["owner_id"] != acc["id"]):
+                    raise model.ApiError("这个预设已经存在，且不属于你", 409)
+                if row is None:
+                    tx.execute(
+                        "INSERT INTO presets (slug, owner_id, name, note, module,"
+                        " params, title, visibility, org_id, builtin, created_at,"
+                        " updated_at, dep_module, dep_template, source)"
+                        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        (slug, acc["id"], name, note, module_id,
+                         json.dumps(params, ensure_ascii=False), title, visibility,
+                         0, 0, now, now, module_id, base, "instance"))
+                else:
+                    tx.execute(
+                        "UPDATE presets SET name=?, note=?, module=?, params=?,"
+                        " title=?, visibility=?, updated_at=?, dep_module=?,"
+                        " dep_template=? WHERE id=?",
+                        (name, note, module_id,
+                         json.dumps(params, ensure_ascii=False), title, visibility,
+                         now, module_id, base, row["id"]))
+                panel.audit(tx, acc["username"], "preset_import", slug, module_id)
+            return self._json({"ok": True, "id": slug, "missing": missing})
 
         if path == "/draft" and method == "GET":
             key = (query.get("key") or [""])[0]
@@ -1123,7 +1216,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/events/create" and method == "POST":
             data = body()
-            by_id = {m["id"]: m for m in modules.all_modules(VERSION)}
+            by_id = _modules_by_id(conn)
             chosen = presets.get(conn, (data.get("template") or "").strip(), by_id,
                                  acc["id"])
             if chosen is None:
@@ -1744,8 +1837,10 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/admin/console" and method == "GET":
             cfg = db.all_config(conn)
             kind_id = cfg.get("module") or cfg.get("kind") or "nwuca.lottery"
+            disabled = panel.disabled_modules(panel.connect())
             return self._json({"ok": True,
-                               "pages": modules.console_pages(kind_id, VERSION)})
+                               "pages": modules.console_pages(kind_id, VERSION,
+                                                              disabled=disabled)})
 
         if path == "/api/admin/state" and method == "GET":
             cfg = db.all_config(conn)
@@ -2155,8 +2250,8 @@ def main():
     panel.bootstrap(LOCAL_CFG, event_token_hint=SECRET, log=log)
     # the built-in presets live in templates/*.json; the table is what the app
     # reads, so they are copied in on every start
-    by_id = {m["id"]: m for m in modules.all_modules(VERSION)}
     with panel.tx() as tx:
+        by_id = {m["id"]: m for m in modules.all_modules(VERSION)}
         presets.seed(tx, by_id)
     model.ensure_seed(conn)
 

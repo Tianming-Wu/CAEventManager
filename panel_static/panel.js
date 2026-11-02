@@ -27,7 +27,7 @@
     "approval-users": { min: "superadmin", group: "approvals" },
     "approval-events": { min: "superadmin", group: "approvals" },
     "new-event": { min: "admin" },
-    "modules": { min: "owner" },
+    "modules": { min: "superadmin" },
     "server": { min: "owner" },
     "audit": { min: "owner" },
     "account": { min: "admin" },
@@ -942,32 +942,39 @@
   // A preset is a saved snapshot of one activity's setup: module, parameters and
   // a suggested name.  Three shelves: what I starred, what I made, what is out
   // there for everyone.
+  var ICON_STAR = '<svg viewBox="0 0 20 20" aria-hidden="true">' +
+    '<path d="M10 2.9l2.2 4.5 5 .7-3.6 3.5.9 4.9-4.5-2.4-4.5 2.4.9-4.9L2.8 8.1l5-.7L10 2.9Z"/>' +
+    "</svg>";
+
   function presetCard(p, shelf) {
     var tags = ['<span class="tag">' + PX.esc(p.moduleName) + "</span>"];
     if (p.builtin) tags.push('<span class="tag">内置</span>');
     if (shelf !== "mine" && p.ownerName) {
       tags.push('<span class="tag">' + PX.esc(p.ownerName) + "</span>");
     }
-    tags.push('<span class="tag vis-' + PX.esc(p.visibility) + '">' +
-      PX.esc(p.visibilityLabel) + "</span>");
-    var actions = [
-      '<button class="btn sm primary" type="button" data-preset-use="' +
-        PX.esc(p.id) + '">用它创建</button>',
-      '<button class="btn sm" type="button" data-preset-fav="' + PX.esc(p.id) +
-        '" data-on="' + (p.fav ? "0" : "1") + '">' +
-        (p.fav ? "取消收藏" : "收藏") + "</button>"
-    ];
+    var actions = p.ok
+      ? '<button class="btn sm primary" type="button" data-preset-use="' +
+        PX.esc(p.id) + '">创建活动</button>'
+      : '<span class="tag disabled">' + PX.esc(p.reason || "不可用") + "</span>";
     if (p.mine && !p.builtin) {
-      actions.push('<button class="btn sm" type="button" data-preset-edit="' +
-        PX.esc(p.id) + '">编辑</button>');
-      actions.push('<button class="btn sm danger" type="button" data-preset-drop="' +
-        PX.esc(p.id) + '">删除</button>');
+      actions += '<button class="btn sm" type="button" data-preset-edit="' +
+        PX.esc(p.id) + '">编辑</button>' +
+        '<button class="btn sm danger" type="button" data-preset-drop="' +
+        PX.esc(p.id) + '">删除</button>';
     }
-    return '<div class="preset-card">' +
-      '<div class="preset-name">' + PX.esc(p.name) + "</div>" +
+    return '<div class="preset-card' + (p.ok ? "" : " is-off") + '">' +
+      '<button class="preset-star' + (p.fav ? " on" : "") + '" type="button" ' +
+        'data-preset-fav="' + PX.esc(p.id) + '" data-on="' + (p.fav ? "0" : "1") + '" ' +
+        'aria-pressed="' + (p.fav ? "true" : "false") + '" ' +
+        'title="' + (p.fav ? "取消收藏" : "收藏") + '">' + ICON_STAR + "</button>" +
+      '<div class="preset-head">' +
+        '<span class="preset-name">' + PX.esc(p.name) + "</span>" +
+        '<span class="tag vis-' + PX.esc(p.visibility) + '">' +
+          PX.esc(p.visibilityLabel) + "</span>" +
+      "</div>" +
       '<div class="preset-tags">' + tags.join("") + "</div>" +
       (p.note ? '<p class="preset-note">' + PX.esc(p.note) + "</p>" : "") +
-      '<div class="preset-actions">' + actions.join("") + "</div></div>";
+      '<div class="preset-actions">' + actions + "</div></div>";
   }
 
   function presetShelf(id, rows, shelf, empty) {
@@ -985,9 +992,9 @@
       var fav = S.templates.filter(function (p) { return p.fav; });
       var mine = S.templates.filter(function (p) { return p.mine && !p.builtin; });
       var square = S.templates.filter(function (p) { return !p.fav; });
-      presetShelf("#presetFavorites", fav, "fav", "还没有收藏，在广场里点一下星就行");
-      presetShelf("#presetMine", mine, "mine", "还没有自己的预设，活动卡片菜单里可以存一份");
-      presetShelf("#presetSquare", square, "square", "广场还是空的");
+      presetShelf("#presetFavorites", fav, "fav", "还没有收藏的预设");
+      presetShelf("#presetMine", mine, "mine", "还没有创建的预设");
+      presetShelf("#presetSquare", square, "square", "还没有可用的预设");
     }).catch(function (e) { PX.toast(PX.esc(e.message), true); });
   }
 
@@ -1010,8 +1017,7 @@
         return '<option value="' + PX.esc(o.value) + '"' +
           ((p.visibility || "private") === o.value ? " selected" : "") + ">" +
           PX.esc(o.label) + "</option>";
-      }).join("") + "</select>" +
-      '<p class="hint">组织公开会在组织建好之后只对本组织可见</p></div>' +
+      }).join("") + "</select></div>" +
       '<div class="row" style="margin-top:18px;justify-content:flex-end">' +
       '<button class="btn" type="button" data-close-overlay="1">取消</button>' +
       '<button class="btn primary" type="button" id="presetSave">保存</button></div>');
@@ -1033,6 +1039,51 @@
           return loadTemplates().then(drawTemplates);
         })
         .catch(function (e) { PX.toast(PX.esc(e.message), true); });
+    });
+  }
+
+  /* Importing a preset file.  Its dependency decides whether it can be used at
+   * all: a preset whose module is not installed is still imported, but only
+   * after the operator has been told what that means. */
+  function importPreset(file) {
+    var reader = new FileReader();
+    reader.onload = function () {
+      var raw;
+      try {
+        raw = JSON.parse(String(reader.result));
+      } catch (e) {
+        PX.toast("不是合法的 JSON", true);
+        return;
+      }
+      sendPreset(raw, false);
+    };
+    reader.onerror = function () { PX.toast("读不了这个文件", true); };
+    reader.readAsText(file, "utf-8");
+  }
+
+  function sendPreset(raw, force) {
+    PX.api("/preset/import", {
+      method: "POST",
+      body: { preset: raw, force: force, visibility: "private" }
+    }).then(function (d) {
+      PX.toast(d.missing ? "已导入（不可用）" : "已导入预设");
+      return loadTemplates(true).then(drawTemplates);
+    }).catch(function (e) {
+      if (!(e.data && e.data.dependencyMissing)) {
+        PX.toast(PX.esc(e.message), true);
+        return;
+      }
+      openOverlay("preset-import", "导入预设",
+        '<p class="page-sub">' + PX.esc(e.message) + "</p>" +
+        '<p class="page-sub">预设导入后将不可用。仍然导入吗？</p>' +
+        '<div class="row" style="margin-top:18px;justify-content:flex-end">' +
+        '<button class="btn" type="button" data-close-overlay="1">取消</button>' +
+        '<button class="btn primary" type="button" id="presetForce">仍然导入</button>' +
+        "</div>");
+      $("#presetForce").addEventListener("click", function () {
+        closeOverlay();
+        sendPreset(raw, true);
+      });
     });
   }
 
@@ -1092,22 +1143,30 @@
     return PX.api("/modules").then(function (d) {
       S.modules = d.modules || [];
       $("#moduleTable tbody").innerHTML = S.modules.map(function (m) {
-        return "<tr>" +
+        return "<tr" + (m.enabled ? "" : ' class="muted-row"') + ">" +
           "<td><b>" + PX.esc(m.name) + "</b><br>" +
-          '<span class="page-sub">' + PX.esc(m.id) + "</span></td>" +
-          '<td class="mono">v' + PX.esc(m.version) + "</td>" +
+          '<span class="mono">' + PX.esc(m.id) + "</span></td>" +
+          '<td class="mono">' + PX.esc(m.version) + "</td>" +
           "<td>" + PX.esc(m.author || "—") + "</td>" +
-          "<td>" + (m.pages || []).map(function (p) {
-            return PX.esc(p.title);
-          }).join("、") + "</td>" +
-          "<td>" + (m.external || []).join("、") + "</td></tr>";
-      }).join("") || emptyRow(5, "没有装任何模块");
-      $("#moduleHint").textContent =
-        "模块是活动形式的实现；导入与更新还没有接入，目前随服务一起发布";
+          '<td class="actions">' +
+          '<button class="btn sm' + (m.enabled ? " danger" : "") +
+          '" type="button" data-module-toggle="' + PX.esc(m.id) +
+          '" data-on="' + (m.enabled ? "0" : "1") + '">' +
+          (m.enabled ? "禁用" : "启用") + "</button></td></tr>";
+      }).join("") || emptyRow(4, "没有已安装的模块");
     }).catch(function (e) {
       if (e.status === 403) return showDenied("modules");
       PX.toast(PX.esc(e.message), true);
     });
+  }
+
+  function toggleModule(id, on) {
+    PX.api("/module/toggle", { method: "POST", body: { id: id, enabled: on } })
+      .then(function () {
+        PX.toast(on ? "已启用" : "已禁用");
+        return loadTemplates(true).then(drawModules);
+      })
+      .catch(function (e) { PX.toast(PX.esc(e.message), true); });
   }
 
   function loadTemplates(force) {
@@ -1953,6 +2012,12 @@
                           requestBtn.getAttribute("data-request"));
     }
 
+    var modToggle = t.closest("[data-module-toggle]");
+    if (modToggle) {
+      return toggleModule(modToggle.getAttribute("data-module-toggle"),
+                          modToggle.getAttribute("data-on") === "1");
+    }
+
     var wantPreset = t.closest("[data-save-preset]");
     if (wantPreset) {
       return saveAsPreset(wantPreset.getAttribute("data-save-preset"));
@@ -2165,6 +2230,14 @@
   }
   $("#newEventBtn").addEventListener("click", newEvent);
   $("#presetNewBtn").addEventListener("click", function () { presetDialog(null); });
+  $("#presetImportBtn").addEventListener("click", function () {
+    $("#presetImportFile").click();
+  });
+  $("#presetImportFile").addEventListener("change", function (e) {
+    var file = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (file) importPreset(file);
+  });
   // 活动管理 is a superadmin view; creating from there uses the same flow
   $("#createEventBtn").addEventListener("click", newEvent);
 

@@ -1,22 +1,36 @@
 # -*- coding: utf-8 -*-
-"""Activity kinds ("templates"): what a new activity is allowed to be.
+"""Activity modules: the capability boundary of one activity form.
 
-A module is a directory under ``modules/``::
+A module is a directory::
 
-    modules/<id>/
-        module.json      id, name, version, requires, description
-        schema.json      the parameters that must be settled before creation
-        module.py        (later) the code that draws and plays this kind
+    <module>/module.json     id, name, version, author, requires, description
+    <module>/schema.json     the parameters that must be settled before creation
+    <module>/templates/*     presets that ship with this module
+    <module>/module.py       (later) the code that draws and plays this kind
+
+Two places are searched, in this order:
+
+* ``builtin/modules/<id>`` - shipped with the repository, part of the
+  release, updated by deploying;
+* ``modules/<id>`` - installed on this instance by an administrator, kept out
+  of the repository.
+
+A module is a boundary: enabling one is what makes its settings reachable at
+all.  A preset narrows that boundary further - it is one worked-out configuration
+inside the module, so the next event does not start from an empty form.
 
 Only the metadata is read here.  ``module.py`` is loaded later, after a syntax
-check, and only for kinds whose ``requires`` matches this build.
+check, and only for modules whose ``requires`` matches this build.
 """
 import json
 import os
 import re
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MODULES_DIR = os.path.join(BASE_DIR, "modules")
+# shipped with the release, then whatever this instance installed itself
+BUILTIN_DIR = os.path.join(BASE_DIR, "builtin")
+BUILTIN_MODULES_DIR = os.path.join(BUILTIN_DIR, "modules")
+INSTANCE_MODULES_DIR = os.path.join(BASE_DIR, "modules")
 
 ID_RE = re.compile(r"^[a-z0-9]+(\.[a-z0-9_-]+)+$")
 REQ_RE = re.compile(r"^\s*(>=|<=|>|<|==)\s*([0-9]+(?:\.[0-9]+)*)\s*$")
@@ -124,9 +138,9 @@ def external_routes(module_id, version):
     return set(kind.get("external") or [])
 
 
-def console_pages(module_id, version):
+def console_pages(module_id, version, disabled=()):
     """Every page the console should show, in order: the module's, then the platform's."""
-    kind = get(module_id, version) if module_id else None
+    kind = get(module_id, version, disabled=disabled) if module_id else None
     pages = list(kind["pages"]) if kind else [
         {"id": pid, "title": PAGE_TITLE[pid]} for pid in MODULE_PAGES]
     for page_id, title in PLATFORM_PAGES:
@@ -134,7 +148,7 @@ def console_pages(module_id, version):
     return pages
 
 
-def load_module(folder, version):
+def load_module(folder, version, builtin=False, enabled=True):
     """Read one module directory; raises KindError when it is unusable."""
     meta_path = os.path.join(folder, "module.json")
     if not os.path.isfile(meta_path):
@@ -185,6 +199,11 @@ def load_module(folder, version):
             "locked": raw.get("locked"),
         })
 
+    templates = []
+    tpl_dir = os.path.join(folder, "templates")
+    if os.path.isdir(tpl_dir):
+        templates = sorted(n[:-5] for n in os.listdir(tpl_dir) if n.endswith(".json"))
+
     return {
         "id": kind_id,
         "name": str(meta.get("name")),
@@ -195,13 +214,17 @@ def load_module(folder, version):
         "contact": str(meta.get("contact") or ""),
         "description": str(meta.get("description") or ""),
         "requires": requires,
-        "builtin": bool(meta.get("builtin")),
         "pages": normalize_pages(meta.get("pages")),
         "external": normalize_external(meta.get("external")),
         "fields": fields,
-        "ok": satisfies(version, requires),
-        "reason": "" if satisfies(version, requires)
-                  else "需要系统版本 %s" % requires,
+        "templates": templates,
+        "path": folder,
+        "builtin": builtin,
+        "ok": satisfies(version, requires) and enabled,
+        "reason": ("被管理员禁用" if not enabled
+                   else "" if satisfies(version, requires)
+                   else "需要系统版本 %s" % requires),
+        "enabled": enabled,
     }
 
 
@@ -256,28 +279,48 @@ def coerce_params(kind, given):
     return out
 
 
-def all_modules(version, include_broken=False):
-    """Every kind on disk, in a stable order, with a compatibility verdict."""
-    out = []
-    if not os.path.isdir(MODULES_DIR):
-        return out
-    for name in sorted(os.listdir(MODULES_DIR)):
-        folder = os.path.join(MODULES_DIR, name)
-        if not os.path.isdir(folder):
+def module_dirs():
+    """(folder, builtin) for every installed module, built-ins first."""
+    found = []
+    for root, builtin in ((BUILTIN_MODULES_DIR, True), (INSTANCE_MODULES_DIR, False)):
+        if not os.path.isdir(root):
             continue
+        for name in sorted(os.listdir(root)):
+            folder = os.path.join(root, name)
+            if os.path.isdir(folder):
+                found.append((folder, builtin))
+    return found
+
+
+def all_modules(version, include_broken=False, disabled=()):
+    """Every module on disk, in a stable order, with a usability verdict.
+
+    ``disabled`` is the set of ids an administrator switched off.  A disabled
+    module is still listed and still referenced by the activities and presets
+    that use it - it just cannot be used to start anything new.
+    """
+    out = []
+    seen = set()
+    disabled = {(str(x)).strip() for x in (disabled or ())}
+    for folder, builtin in module_dirs():
+        name = os.path.basename(folder)
         try:
-            kind = load_module(folder, version)
+            kind = load_module(folder, version, builtin, name not in disabled)
         except KindError as exc:
             if include_broken:
                 out.append({"id": name, "name": name, "ok": False,
-                            "reason": str(exc), "fields": []})
+                            "reason": str(exc), "fields": [], "templates": [],
+                            "builtin": builtin, "enabled": True})
             continue
+        if kind["id"] in seen:
+            continue          # an instance copy never shadows the shipped one
+        seen.add(kind["id"])
         out.append(kind)
     return out
 
 
-def get(kind_id, version):
-    for kind in all_modules(version):
+def get(kind_id, version, disabled=()):
+    for kind in all_modules(version, disabled=disabled):
         if kind["id"] == kind_id:
             return kind
     return None

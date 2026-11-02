@@ -13,3 +13,6 @@ tmp/
 # Python
 __pycache__/
 *.py[cod]
+# 内置模块与内置预设随仓库发布；实例自己装的东西不进版本库
+/modules/
+/templates/

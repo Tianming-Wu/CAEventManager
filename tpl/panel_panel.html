@@ -358,6 +358,7 @@
         <h1>预设管理</h1>
         <p class="page-sub">一份存下来的活动配置，拿来起下一场</p>
         <div class="page-actions">
+          <button class="btn" id="presetImportBtn" type="button">导入预设</button>
           <button class="btn primary" id="presetNewBtn" type="button">新建预设</button>
         </div>
       </header>
@@ -375,6 +376,7 @@
       <div class="card">
         <div class="card-head"><h2>预设广场</h2></div>
         <div class="preset-grid" id="presetSquare"></div>
+        <input type="file" id="presetImportFile" hidden accept="application/json,.json">
       </div>
     </section>
 
@@ -389,12 +391,11 @@
         <div class="tblwrap">
           <table class="tbl fixed" id="moduleTable">
             <thead><tr>
-              <th>模块</th><th>版本</th><th>作者</th><th>控制台页面</th><th>公开页</th>
+              <th>模块</th><th>版本</th><th>作者</th><th class="actions">状态</th>
             </tr></thead>
             <tbody></tbody>
           </table>
         </div>
-        <p class="hint" id="moduleHint"></p>
       </div>
     </section>
 

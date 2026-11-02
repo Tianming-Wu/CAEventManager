@@ -328,8 +328,42 @@ def main():
     mods = call(owner, "/api/panel/modules")
     check("the owner can list modules",
           mods and mods["modules"] and mods["modules"][0]["id"], mods)
-    check("a superadmin cannot",
-          call(teacher, "/api/panel/modules", expect=403) is not None)
+    check("a superadmin can read the module list too",
+          call(teacher, "/api/panel/modules") is not None)
+    mods = call(owner, "/api/panel/modules")["modules"]
+    mod = mods[0]
+    check("a module knows where it came from", mod["builtin"] is True, mod)
+    check("and whether it is switched on", mod["enabled"] is True, mod)
+    check("a module ships its own presets", "salon" in mod["templates"], mod)
+    post(owner, "/api/panel/module/toggle", {"id": "nwuca.lottery", "enabled": False})
+    shelf = call(owner, "/api/panel/templates")["presets"]
+    check("a switched-off module takes its presets out of use",
+          all(not p["ok"] for p in shelf if p["module"] == "nwuca.lottery"), shelf)
+    check("and says why",
+          any("被管理员禁用" in p["reason"] for p in shelf), shelf)
+    post(owner, "/api/panel/events/create", {"template": "nwuca.salon", "title": "不该建出来"},
+         expect=400)
+    check("and nothing can be created on it", True)
+    post(owner, "/api/panel/module/toggle", {"id": "nwuca.lottery", "enabled": True})
+    shelf = call(owner, "/api/panel/templates")["presets"]
+    check("switching it back on restores them",
+          all(p["ok"] for p in shelf if p["module"] == "nwuca.lottery"), shelf)
+
+    print("== a preset that arrives from outside ==")
+    orphan = {"id": "demo.orphan", "name": "外部预设",
+              "dependency": {"module": "demo.missing"}}
+    refused = post(owner, "/api/panel/preset/import", {"preset": orphan}, expect=409)
+    check("a missing module is reported", refused and refused.get("dependencyMissing"),
+          refused)
+    forced = post(owner, "/api/panel/preset/import",
+                  {"preset": orphan, "force": True})
+    check("importing anyway is allowed", forced and forced.get("id") == "demo.orphan",
+          forced)
+    shelf = call(owner, "/api/panel/templates")["presets"]
+    orphan_row = [p for p in shelf if p["id"] == "demo.orphan"][0]
+    check("it is listed but unusable", orphan_row["ok"] is False, orphan_row)
+    check("with the reason spelled out",
+          "依赖的模块不存在" in orphan_row["reason"], orphan_row)
 
     print("== a preset saved from an activity ==")
     made = post(owner, "/api/panel/event/preset",

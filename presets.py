@@ -1,20 +1,29 @@
-"""Presets: a saved arrangement on top of a module.
+"""Presets: one worked-out configuration inside a module.
 
-A *module* is the infrastructure of one activity form - it knows how tickets are
-issued, how a draw works, which console pages exist.  A *preset* is a way of
-running such a form: which module, which parameters, and what to call it.  The
-club's own recurring event is a preset, not a module.
+A *module* is a capability boundary: enabling it is what makes its settings
+reachable at all.  A *preset* narrows that boundary further - it is a single
+arrangement of the module's parameters, saved so the next event does not start
+from an empty form.
 
-A preset used to be a JSON file and nothing else.  It is a database row now,
-because saveable snapshots have an owner, a visibility and a favourite flag:
+Presets live in three places, all of which end up in one table:
 
-    presets(id, slug, owner_id, name, note, module, params, title,
-            visibility, org_id, builtin, created_at, updated_at)
+    builtin/modules/<module>/templates/<slug>.json   ships inside the module
+    builtin/templates/<slug>.json                    ships with the release
+    templates/<slug>.json                            installed on this instance
 
-`templates/*.json` still exists and is still the source of the built-in ones:
-they are seeded into the table on startup, so there is one place that lists
-presets instead of two.  A preset can only choose a module and fill in the
-parameters that module already declared - nothing here is executable.
+A preset file declares what it needs:
+
+    {
+      "id": "nwuca.salon",
+      "name": "计算机杂谈活动",
+      "dependency": { "module": "nwuca.lottery", "template": "nwuca.lottery.salon" },
+      "params": { "pool_mode": "auto" }
+    }
+
+``dependency.module`` is the boundary it belongs to; ``dependency.template``
+names the preset it is a variation of (optional).  A preset whose module is
+missing or switched off is kept and listed, but cannot be used - the activities
+that already started from it are unaffected.
 """
 import json
 import os
@@ -22,7 +31,8 @@ import re
 import time
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
+BUILTIN_TEMPLATES_DIR = os.path.join(BASE_DIR, "builtin", "templates")
+INSTANCE_TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
 ID_RE = re.compile(r"^[a-z0-9]+(\.[a-z0-9_-]+)+$")
 
 # Who may see a preset.  "org" is written down and stored now; the organisation
@@ -36,10 +46,14 @@ class TemplateError(Exception):
     """A preset that cannot be used, with a reason for the operator."""
 
 
+def _read(path):
+    with open(path, "r", encoding="utf-8") as fh:
+        return json.load(fh)
+
+
 def load_file(path, modules_by_id):
     try:
-        with open(path, "r", encoding="utf-8") as fh:
-            meta = json.load(fh)
+        meta = _read(path)
     except (OSError, ValueError) as exc:
         raise TemplateError("读不出来：%s" % exc)
     if not isinstance(meta, dict):
@@ -48,90 +62,141 @@ def load_file(path, modules_by_id):
     template_id = str(meta.get("id") or "").strip()
     if not ID_RE.match(template_id):
         raise TemplateError("id 需要形如 nwuca.salon")
-    module_id = str(meta.get("module") or "").strip()
-    module = modules_by_id.get(module_id)
-    if module is None:
-        raise TemplateError("没有这个活动模块：%s" % (module_id or "(空)"))
+
+    dep = meta.get("dependency") or {}
+    if not isinstance(dep, dict):
+        raise TemplateError("dependency 应该是一个对象")
+    module_id = str(dep.get("module") or meta.get("module") or "").strip()
+    base_template = str(dep.get("template") or "").strip()
+    if not module_id:
+        raise TemplateError("缺少 dependency.module")
 
     params = meta.get("params") or {}
     if not isinstance(params, dict):
         raise TemplateError("params 应该是一个对象")
-    # a preset may only set parameters the module actually declared
-    known = {f["key"] for f in module["fields"]}
-    unknown = [k for k in params if k not in known]
-    if unknown:
-        raise TemplateError("模块没有这些参数：%s" % "、".join(sorted(unknown)))
+    module = modules_by_id.get(module_id)
+    if module is not None:
+        # a preset may only set parameters the module actually declared
+        known = {f["key"] for f in module["fields"]}
+        unknown = [k for k in params if k not in known]
+        if unknown:
+            raise TemplateError("模块没有这些参数：%s" % "、".join(sorted(unknown)))
 
     return {
         "id": template_id,
         "name": str(meta.get("name") or template_id),
-        "module": module_id,
-        "description": str(meta.get("description") or ""),
+        "note": str(meta.get("note") or meta.get("description") or ""),
         "title": str(meta.get("title") or ""),
+        "module": module_id,
+        "baseTemplate": base_template,
         "params": params,
         "builtin": bool(meta.get("builtin")),
     }
 
 
-def load_files(modules_by_id):
-    """The built-in presets, read from templates/*.json."""
+def file_presets(modules_by_id):
+    """Every preset file on this installation: module-owned, release, instance.
+
+    A file whose module is missing is still returned, with a reason, so it can
+    be listed as unusable instead of disappearing.
+    """
     out = []
-    if not os.path.isdir(TEMPLATES_DIR):
-        return out
-    for name in sorted(os.listdir(TEMPLATES_DIR)):
-        if not name.endswith(".json"):
-            continue
+    seen = set()
+
+    def take(path):
         try:
-            out.append(load_file(os.path.join(TEMPLATES_DIR, name), modules_by_id))
-        except TemplateError:
+            tpl = load_file(path, modules_by_id)
+        except TemplateError as exc:
+            slug = os.path.basename(path)[:-5]
+            if slug in seen:
+                return
+            seen.add(slug)
+            out.append({"id": slug, "name": slug, "note": str(exc), "title": "",
+                        "module": "", "baseTemplate": "", "params": {},
+                        "builtin": True, "source": "broken"})
+            return
+        if tpl["id"] in seen:
+            return
+        seen.add(tpl["id"])
+        out.append(tpl)
+
+    # module-owned presets ride with the module
+    for module in modules_by_id.values():
+        folder = os.path.join(module.get("path") or "", "templates")
+        if not os.path.isdir(folder):
             continue
+        for name in sorted(os.listdir(folder)):
+            if name.endswith(".json"):
+                take(os.path.join(folder, name))
+                out[-1]["source"] = "module"
+
+    for root, source in ((BUILTIN_TEMPLATES_DIR, "builtin"),
+                         (INSTANCE_TEMPLATES_DIR, "instance")):
+        if not os.path.isdir(root):
+            continue
+        for name in sorted(os.listdir(root)):
+            if not name.endswith(".json"):
+                continue
+            take(os.path.join(root, name))
+            out[-1]["source"] = source
     return out
 
 
 def seed(conn, modules_by_id):
-    """Copy the file presets into the table, so everything reads from one place."""
+    """Copy the preset files into the table; the table is what the app reads."""
     now = time.time()
-    for tpl in load_files(modules_by_id):
-        row = conn.execute("SELECT id FROM presets WHERE slug=?", (tpl["id"],)).fetchone()
-        payload = (
-            tpl["name"], tpl["module"], json.dumps(tpl["params"], ensure_ascii=False),
-            tpl["description"], tpl["title"])
+    for tpl in file_presets(modules_by_id):
+        row = conn.execute("SELECT id, builtin FROM presets WHERE slug=?",
+                           (tpl["id"],)).fetchone()
+        params = json.dumps(tpl["params"], ensure_ascii=False)
         if row is None:
             conn.execute(
                 "INSERT INTO presets (slug, owner_id, name, note, module, params,"
-                " title, visibility, org_id, builtin, created_at, updated_at)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                (tpl["id"], 0, tpl["name"], tpl["description"], tpl["module"],
-                 json.dumps(tpl["params"], ensure_ascii=False), tpl["title"],
-                 "public", 0, 1, now, now))
-        else:
-            # a built-in keeps its identity but follows the file it came from
+                " title, visibility, org_id, builtin, created_at, updated_at,"
+                " dep_module, dep_template, source)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (tpl["id"], 0, tpl["name"], tpl["note"], tpl["module"], params,
+                 tpl["title"], "public", 0, 1, now, now, tpl["module"],
+                 tpl["baseTemplate"], tpl.get("source") or "builtin"))
+        elif row["builtin"]:
+            # a shipped preset keeps its identity but follows its file
             conn.execute(
-                "UPDATE presets SET name=?, module=?, params=?, note=?, title=?,"
-                " updated_at=? WHERE id=? AND builtin=1",
-                payload + (now, row["id"]))
+                "UPDATE presets SET name=?, note=?, module=?, params=?, title=?,"
+                " updated_at=?, dep_module=?, dep_template=?, source=?"
+                " WHERE id=?",
+                (tpl["name"], tpl["note"], tpl["module"], params, tpl["title"],
+                 now, tpl["module"], tpl["baseTemplate"],
+                 tpl.get("source") or "builtin", row["id"]))
 
 
 def _view(row, modules_by_id, account_id):
-    module_id = row["module"]
-    module = modules_by_id.get(module_id) or {}
+    module_id = row["module"] or row["dep_module"] or ""
+    module = modules_by_id.get(module_id)
     try:
         params = json.loads(row["params"] or "{}")
     except ValueError:
         params = {}
     if not isinstance(params, dict):
         params = {}
-    # a preset saved when the module had other fields may not match it today
-    known = {f["key"] for f in module.get("fields", [])}
-    params = {k: v for k, v in params.items() if k in known} if known else params
+    known = {f["key"] for f in (module or {}).get("fields", [])}
+    if known:
+        params = {k: v for k, v in params.items() if k in known}
+    if module is None:
+        ok, reason = False, "依赖的模块不存在：%s" % (module_id or "(未声明)")
+    elif not module.get("ok"):
+        ok, reason = False, (module.get("reason") or "模块不可用")
+    else:
+        ok, reason = True, ""
     return {
         "presetId": row["id"],
         "id": row["slug"],
         "name": row["name"],
         "note": row["note"] or "",
         "module": module_id,
-        "moduleName": module.get("name") or module_id,
-        "moduleVersion": module.get("version") or "",
+        "moduleName": (module or {}).get("name") or module_id,
+        "moduleVersion": (module or {}).get("version") or "",
+        "baseTemplate": row["dep_template"] or "",
+        "source": row["source"] or ("builtin" if row["builtin"] else "user"),
         "description": row["note"] or "",
         "title": row["title"] or "",
         "params": params,
@@ -139,14 +204,14 @@ def _view(row, modules_by_id, account_id):
         "visibility": row["visibility"],
         "visibilityLabel": VISIBILITY_LABEL.get(row["visibility"], row["visibility"]),
         "orgId": row["org_id"],
-        "ownerName": row["owner_name"] or ("内置" if row["builtin"] else ""),
+        "ownerName": row["owner_name"] or "",
         "mine": bool(account_id) and row["owner_id"] == account_id,
         "fav": bool(row["fav"]),
         "createdAt": row["created_at"],
         "updatedAt": row["updated_at"],
-        "ok": bool(module.get("ok")),
-        "reason": module.get("reason") or "",
-        "fields": module.get("fields") or [],
+        "ok": ok,
+        "reason": reason,
+        "fields": (module or {}).get("fields") or [],
     }
 
 

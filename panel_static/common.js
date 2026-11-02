@@ -30,6 +30,8 @@
         if (!res.ok || data.ok === false) {
           var err = new Error((data && data.error) || ("HTTP " + res.status));
           err.status = res.status;
+          // the whole answer, for callers that act on a flag rather than text
+          err.data = data || {};
           // the session is not elevated: the caller asks for the password and
           // repeats the same request
           err.sudo = !!(data && data.sudoRequired);

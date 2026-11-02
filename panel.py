@@ -125,7 +125,10 @@ CREATE TABLE IF NOT EXISTS presets (
     org_id     INTEGER NOT NULL DEFAULT 0,          -- UNWIRED(orgs)
     builtin    INTEGER NOT NULL DEFAULT 0,
     created_at REAL    NOT NULL,
-    updated_at REAL    NOT NULL
+    updated_at REAL    NOT NULL,
+    dep_module   TEXT  NOT NULL DEFAULT '',         -- the boundary it needs
+    dep_template TEXT  NOT NULL DEFAULT '',         -- the preset it derives from
+    source       TEXT  NOT NULL DEFAULT ''          -- module | builtin | instance | user
 );
 
 CREATE TABLE IF NOT EXISTS preset_favorites (
@@ -133,6 +136,13 @@ CREATE TABLE IF NOT EXISTS preset_favorites (
     preset_id  INTEGER NOT NULL,
     created_at REAL    NOT NULL,
     PRIMARY KEY (account_id, preset_id)
+);
+
+CREATE TABLE IF NOT EXISTS module_state (
+    module_id  TEXT    PRIMARY KEY,
+    enabled    INTEGER NOT NULL DEFAULT 1,
+    updated_at REAL    NOT NULL,
+    updated_by TEXT    NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS drafts (
@@ -206,6 +216,9 @@ LATE_COLUMNS = (
     ("sessions", "unlock_until", "REAL NOT NULL DEFAULT 0"),
     ("event_members", "invited_by", "INTEGER NOT NULL DEFAULT 0"),
     ("event_members", "state_at", "REAL NOT NULL DEFAULT 0"),
+    ("presets", "dep_module", "TEXT NOT NULL DEFAULT ''"),
+    ("presets", "dep_template", "TEXT NOT NULL DEFAULT ''"),
+    ("presets", "source", "TEXT NOT NULL DEFAULT ''"),
 )
 
 
@@ -444,6 +457,23 @@ def open_seats(conn, seq):
         "SELECT COUNT(*) AS n FROM event_members"
         " WHERE seq=? AND state='active'", (int(seq),)).fetchone()
     return int(row["n"] or 0)
+
+
+def disabled_modules(conn):
+    """Module ids an administrator switched off; everything else is live."""
+    return {r["module_id"] for r in
+            conn.execute("SELECT module_id FROM module_state WHERE enabled=0")}
+
+
+def set_module_enabled(conn, module_id, on, actor=""):
+    conn.execute(
+        "INSERT INTO module_state (module_id, enabled, updated_at, updated_by)"
+        " VALUES (?,?,?,?)"
+        " ON CONFLICT(module_id) DO UPDATE SET"
+        "   enabled=excluded.enabled, updated_at=excluded.updated_at,"
+        "   updated_by=excluded.updated_by",
+        (module_id, 1 if on else 0, time.time(), actor))
+    return bool(on)
 
 
 def draft_get(conn, account_id, key):

@@ -1,0 +1,15 @@
+{
+  "id": "nwuca.lottery.salon",
+  "name": "杂谈沙龙",
+  "note": "签到与两个任务发奖票，按票抽奖，另有一次到场均等抽特等奖",
+  "title": "计算机杂谈沙龙",
+  "dependency": {
+    "module": "nwuca.lottery"
+  },
+  "params": {
+    "pool_mode": "auto",
+    "allow_bonus": true,
+    "person_draw_no_repeat": true,
+    "nominal_guaranteed": 180
+  }
+}

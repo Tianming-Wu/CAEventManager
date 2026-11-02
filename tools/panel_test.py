@@ -355,6 +355,9 @@ def main():
     refused = post(owner, "/api/panel/preset/import", {"preset": orphan}, expect=409)
     check("a missing module is reported", refused and refused.get("dependencyMissing"),
           refused)
+    check("a superadmin cannot import content",
+          post(teacher, "/api/panel/preset/import", {"preset": orphan},
+               expect=403) is not None)
     forced = post(owner, "/api/panel/preset/import",
                   {"preset": orphan, "force": True})
     check("importing anyway is allowed", forced and forced.get("id") == "demo.orphan",

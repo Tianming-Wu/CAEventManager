@@ -888,3 +888,19 @@ textarea { resize: vertical; min-height: 120px; font-family: var(--mono); font-s
   cursor: pointer;
 }
 .pick:hover { border-color: var(--accent); background: var(--accent-soft); }
+
+/* ---------- chrome is not evidence ---------- */
+/* The frame, page labels and control text are not something to copy out;
+   roster cells, hints and log lines above stay selectable. */
+.topbar,
+.tabs,
+.panel h2,
+.panel-hint,
+.tbl th,
+.chip,
+.btn,
+.switch,
+.note {
+  -webkit-user-select: none;
+  user-select: none;
+}

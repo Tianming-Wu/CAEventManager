@@ -1782,3 +1782,26 @@ input:focus, textarea:focus, select:focus {
   text-decoration: none;
 }
 .menu-link:hover { background: var(--surface-2); }
+
+/* ---------- what is chrome and what is content ---------- */
+/* Chrome - the app frame, page titles, control labels - is not evidence: dragging
+   over it only produces stray highlights.  Anything an operator might want to
+   quote (table cells, hints, notes, audit lines) stays selectable. */
+.titlebar,
+.sidebar,
+.page-head,
+.card-head,
+.page-actions,
+.tbl th,
+.tabs,
+.chip,
+.tag,
+.crumb,
+.stack-title,
+.preset-tags,
+.sudo-chip,
+.icon-btn,
+.btn {
+  -webkit-user-select: none;
+  user-select: none;
+}

@@ -1134,6 +1134,9 @@ class Handler(BaseHTTPRequestHandler):
             # a preset file from somewhere else.  If it needs a module this
             # installation does not have, the answer says so and the operator
             # decides; importing anyway keeps it listed but unusable.
+            # Bringing content into the installation is the station master's
+            # call, not every account's.
+            need("owner")
             data = body()
             by_id = _modules_by_id(conn)
             raw = data.get("preset")

@@ -190,7 +190,10 @@
     }
     overlayOpener = document.activeElement;
     $("#overlayTitle").textContent = title;
-    $("#overlayBody").innerHTML = html;
+    // the body is shared between dialogs: nothing may survive from the last one
+    var body = $("#overlayBody");
+    body.removeAttribute("data-acct");
+    body.innerHTML = html;
     $("#overlay").hidden = false;
     document.body.style.overflow = "hidden";
     var close = $("#overlayClose");
@@ -986,6 +989,9 @@
   }
 
   function drawTemplates() {
+    // importing brings content into the installation: only the station master
+    var importBtn = $("#presetImportBtn");
+    if (importBtn) importBtn.hidden = !isOwner();
     return PX.api("/templates").then(function (d) {
       S.templates = d.presets || [];
       S.visibilityOptions = d.visibility || [];

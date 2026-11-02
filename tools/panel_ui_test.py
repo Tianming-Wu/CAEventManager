@@ -51,7 +51,7 @@ def call(opener, path, body=None):
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(
         BASE + path, data=data, method="POST" if data else "GET",
-        headers={"X-Requested-With": "xlottery", "Content-Type": "application/json"})
+        headers={"X-Requested-With": "CAEventManager", "Content-Type": "application/json"})
     with opener.open(req) if opener else urllib.request.urlopen(req) as res:
         return json.loads(res.read().decode())
 

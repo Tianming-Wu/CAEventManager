@@ -2,7 +2,7 @@
 (function () {
   "use strict";
 
-  // "/u/laffey/xlottery/panel" -> "/u/laffey/xlottery", "/" -> ""
+  // "/<mount>/panel" -> "/<mount>", "/" -> ""
   function prefix() {
     var p = location.pathname.replace(/\/(panel|login|register)?\/?$/, "/");
     return p.replace(/\/+$/, "");
@@ -13,7 +13,7 @@
     options = options || {};
     var init = {
       method: options.method || "GET",
-      headers: { "X-Requested-With": "xlottery" },
+      headers: { "X-Requested-With": "CAEventManager" },
       credentials: "same-origin",
       cache: "no-store"
     };

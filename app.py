@@ -10,7 +10,7 @@ Pages
 /login     login form
 
 Every URL is relative on purpose: the lab platform publishes this app under
-``https://lab.nwuca.tech/u/<user>/<service>/`` and strips that prefix before
+``https://example.org/u/<user>/<service>/`` and strips that prefix before
 forwarding, so a leading "/" in the HTML/JS would escape the prefix.
 
 Run:  python3 app.py [--host 0.0.0.0] [--port 8931]
@@ -130,8 +130,8 @@ def shortlink_redirect(raw_path):
 def resolve_route(raw_path):
     """Map an incoming path onto a route, demanding the secret segment.
 
-    Published URL:  https://lab.nwuca.tech/u/laffey/xlottery/<secret>/admin
-    The platform strips ``/u/laffey/xlottery`` and forwards ``/<secret>/admin``,
+    Published URL:  https://example.org/<mount>/<secret>/admin
+    The platform strips ``/<mount>`` and forwards ``/<secret>/admin``,
     but we also accept the untouched full path, so routing works either way.
 
     Returns the route ("/admin") or None when the secret is missing - which is
@@ -566,7 +566,7 @@ class Handler(BaseHTTPRequestHandler):
         path = route[len("/api/panel"):] or "/"
 
         def body():
-            if self.headers.get("X-Requested-With") != "xlottery":
+            if self.headers.get("X-Requested-With") != "CAEventManager":
                 raise model.ApiError("缺少请求标记", 403)
             return self._body()
 

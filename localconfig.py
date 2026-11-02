@@ -13,8 +13,8 @@ as part of the URL.
 
 Routing never looks at ``public_base_prefix``: the server answers on whatever
 path the request arrives by, so local access, the current
-``https://lab.nwuca.tech/u/laffey/xlottery`` mount and a future subdomain all
-work without a code change.  The prefix is used only to build absolute links
+the mount it is published under and a future subdomain all work without a code
+change.  The prefix is used only to build absolute links
 (QR codes, share links, cookie paths) - set it when the deployment moves.
 
 Everything event-related (title, pool, beta, ...) lives in SQLite instead; this
@@ -42,7 +42,7 @@ DEFAULTS = {
     # links, cookie paths).  Routing does not depend on it: the app answers on
     # whatever path the request arrives by, so local access always works and a
     # future subdomain is a config change, not a code change.
-    "public_base_prefix": "https://lab.nwuca.tech/u/laffey/xlottery",
+    "public_base_prefix": "http://127.0.0.1:8931",
 }
 
 SECRET_LEN = 32

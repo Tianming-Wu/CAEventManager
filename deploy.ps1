@@ -1,14 +1,15 @@
-# Deploy the lottery service to lab812.
+# Deploy the service to a host over ssh.
 #
-#   .\deploy.ps1             # sync + restart
-#   .\deploy.ps1 -NoRestart  # sync only
+#   .\deploy.ps1 -Remote user@host
+#   .\deploy.ps1 -Remote user@host -NoRestart   # sync only
 #
 # Only source files are copied; the remote data/ and config.json (which holds the
 # secret URL id) are never touched.  The remote step verifies that every file
 # landed and that the modules import before restarting, so a forgotten file can
 # never leave a broken service running.
 param(
-    [string]$Remote = "laffey@lab812",
+    [Parameter(Mandatory = $true)]
+    [string]$Remote,
     [string]$Dest = "apps/lottery",
     [switch]$NoRestart
 )

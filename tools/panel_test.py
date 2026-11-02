@@ -16,7 +16,7 @@ import urllib.request
 
 BASE = (sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8931").rstrip("/")
 ROOT = BASE
-HEADER = {"X-Requested-With": "xlottery"}
+HEADER = {"X-Requested-With": "CAEventManager"}
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 problems = []
@@ -87,10 +87,10 @@ def keepalive_desync():
             host = netloc
     bad = json.dumps({"username": "nobody", "password": "wrong-pass-9"}).encode()
     head = ("POST /api/panel/login HTTP/1.1\r\nHost: %s\r\n"
-            "Content-Type: application/json\r\nX-Requested-With: xlottery\r\n"
+            "Content-Type: application/json\r\nX-Requested-With: CAEventManager\r\n"
             "Content-Length: %d\r\n\r\n" % (host, len(bad))).encode()
     ok = b"GET /api/panel/me HTTP/1.1\r\nHost: " + host.encode() + b"\r\n" \
-         b"X-Requested-With: xlottery\r\nConnection: close\r\n\r\n"
+         b"X-Requested-With: CAEventManager\r\nConnection: close\r\n\r\n"
     sock = socket.create_connection((host, int(port)), timeout=10)
     try:
         sock.sendall(head + bad + ok)
@@ -180,8 +180,10 @@ def main():
     check("the event has a numeric id apart from its token",
           isinstance(ev.get("seq"), int) and ev["seq"] >= 1
           and ev["seq"] != ev["token"], ev)
+    # the numeric id must never appear as a path segment ("127.0.0.1" contains
+    # digits, so a substring test would be wrong)
     check("the id is not part of the address",
-          str(ev["seq"]) not in ev["admin"].split(ev["token"])[0], ev["admin"])
+          ("/%d/" % ev["seq"]) not in ev["admin"], ev["admin"])
     check("the event records a kind", bool(ev.get("kind")), ev)
     check("the owner is the owner",
           ev.get("role") == "owner", ev.get("role"))

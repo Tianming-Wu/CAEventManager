@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """Post-deploy smoke check against the published service.
 
-    python tools/prod_check.py https://lab.nwuca.tech/u/laffey/xlottery <token>
+    python tools/prod_check.py https://example.org/mount <token>
 
 Read-only: it never logs in and never writes data, so it is safe to run against
 production at any time.  The token is taken from the command line (or from the
@@ -96,12 +96,12 @@ bad = json.dumps({"username": "_nobody_", "password": "wrong-password-1"}).encod
 conn = connect()
 try:
     conn.request("POST", BASE + "/api/panel/login", body=bad, headers={
-        "Content-Type": "application/json", "X-Requested-With": "xlottery"})
+        "Content-Type": "application/json", "X-Requested-With": "CAEventManager"})
     first = conn.getresponse()
     first.read()
     print("  first response: %d %s" % (first.status, first.reason))
     conn.request("GET", BASE + "/api/panel/me",
-                 headers={"X-Requested-With": "xlottery"})
+                 headers={"X-Requested-With": "CAEventManager"})
     second = conn.getresponse()
     payload = second.read()[:70].decode("utf-8", "replace")
     check("follow-up on the same connection", second.status < 500,

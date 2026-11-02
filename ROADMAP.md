@@ -279,7 +279,7 @@ colspan 单元格会把表头重新分配一遍，一有数据表头又跳回来
   只有站长能导入外部模板仓库，导入后成员才能选用
 - 措辞：一律用「创建」，不用「申请」；右上角按钮叫「创建活动」
 
-详细的页面结构与数据模型见 `D:\Dev\AI_Workspace\doc\lab812-multi-event.md`。
+详细的页面结构与数据模型见 `D:\Dev\AI_Workspace\doc\host-multi-event.md`。
 
 待定（等下一步讨论）：
 

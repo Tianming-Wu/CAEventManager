@@ -33,7 +33,7 @@ ROLE_LABEL = {"owner": "站长", "superadmin": "超级管理员", "admin": "管�
 STATUS_LABEL = {"pending": "待审核", "active": "正常", "disabled": "已停用", "rejected": "已拒绝"}
 COOKIE = "xl_panel_session"
 SESSION_TTL = 7 * 24 * 3600
-FOOTER = "xlottery project | Powered with ❤ by Tianming &amp; Deepseek ❤🐋"
+FOOTER = "CAEventManager | Powered with ❤ by Tianming &amp; Deepseek ❤🐋"
 
 # The events table: ``seq`` is the storage id, ``token`` is the access one.
 # Keeping them apart makes rotating the token a one-column update instead of a

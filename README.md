@@ -1,7 +1,10 @@
-# 抽奖系统（lab812 / xlottery）
+# CAEventManager
 
-社团活动现场抽奖服务。三个页面 + 一个自助签到页，全部无框架、无外部依赖
-（Python 3 标准库 + 原生 JS）。
+社团活动的签到、奖票与抽奖平台，也是活动的留痕与审计台。
+全部无框架、无外部依赖（Python 3 标准库 + 原生 JS）。
+
+> 起步于一场活动的抽奖工具，现在正长成一个通用的活动管理平台：
+> 多活动、主控面板、模块化的活动形式，以及对每一次操作留痕。
 
 ```
 /              主面板：登录（根路径直接进登录，页脚有「没有账号？去注册」）
@@ -45,13 +48,13 @@
 侧栏随屏宽改变形态：≥1100px 是完整侧栏，760~1100px 收成图标栏（点分组标题把面板滑出来），
 ≤760px 变成抽屉（标题栏左上角汉堡按钮）。手指设备上按钮最小 36px、导航项 46px。
 
-发布后（服务名 `xlottery`）：
+发布后（服务名 `CAEventManager`）：
 
 ```
-公示 https://lab.nwuca.tech/u/laffey/xlottery/<id>/
-签到 https://lab.nwuca.tech/u/laffey/xlottery/<id>/checkin   ← 必须带 ?t= 时效 token
-大屏 https://lab.nwuca.tech/u/laffey/xlottery/<id>/screen
-后台 https://lab.nwuca.tech/u/laffey/xlottery/<id>/admin
+公示 https://example.org/mount/<id>/
+签到 https://example.org/mount/<id>/checkin   ← 必须带 ?t= 时效 token
+大屏 https://example.org/mount/<id>/screen
+后台 https://example.org/mount/<id>/admin
 ```
 
 不知道 `<id>` 就跑 `./service.sh status`，三个地址直接打出来。
@@ -62,9 +65,9 @@
 
 | 项 | 值 |
 |---|---|
-| 部署位置 | `lab812:~/apps/lottery`（容器内） |
+| 部署位置 | `user@host:~/apps/eventmanager`（容器内） |
 | 监听端口 | **8931**（发布时在面板里填这个） |
-| 服务名（建议） | **xlottery** |
+| 服务名（建议） | **CAEventManager** |
 | 发布方式 | **公开** |
 | 启动 | `./service.sh start`（`setsid` 后台，`flock` 防重复） |
 | 数据库 | `data/lottery.sqlite3`（SQLite + WAL） |
@@ -79,7 +82,7 @@
 启动日志会把新旧值都打出来（改错会改掉登录名，日志是唯一线索）。显示名留空时退回角色名"站长"。
 
 `config.json` 的 `public_base_prefix` 必须等于线上真实路径前缀（默认
-`https://lab.nwuca.tech/u/laffey/xlottery`）。**服务名换了就改这里再重启**，
+`https://example.org/mount`）。**服务名换了就改这里再重启**，
 否则大屏二维码会指向错误地址。
 
 ---
@@ -166,7 +169,7 @@
 * **配色**：默认浅色，跟随系统的深色模式（`prefers-color-scheme`）。只有一个强调色
   （琥珀），状态靠字重、边框和底色区分；唯一第二种颜色是危险操作的红。
 * **文案**：只留必要说明，正式简短。不写"本页面仅供查看"这类描述性文字。
-* **页脚**：公示页、签到页、后台、登录页底部有 `Powered by ❤ and lab.nwuca.tech`。
+* **页脚**：公示页、签到页、后台、登录页底部有 `Powered by ❤ and example.org`。
   大屏页不放（投影时不加装饰）。
 * **输入框防自动填充**：搜索框会被浏览器误认成账号框自动填入登录名，
   已做字段语义加固 + 首次输入前自动清除。
@@ -255,7 +258,7 @@ CSV 或 TSV（Excel 直接粘贴就是 TSV），有表头自动识别，没表�
 ## 10. 运维
 
 ```sh
-cd ~/apps/lottery
+cd ~/apps/eventmanager
 ./service.sh status      # 状态 + 三个可用地址
 ./service.sh start|stop|restart
 ./service.sh log 50
@@ -321,9 +324,9 @@ python tools\panel_ui_test.py http://127.0.0.1:8931 <owner密码>
                                 # 折叠分组、账号弹窗、主题、六种屏宽、触屏可达、
                                 # 角色可见性（加 --accounts 才会真实建号）
 
-python tools\prod_check.py https://lab.nwuca.tech/u/laffey/xlottery <id>
+python tools\prod_check.py https://example.org/mount <id>
                                 # 线上只读巡检：路由 + 登录页 + keep-alive（21 项）
-.\deploy.ps1                   # 归一化行尾 → 打包 → 上传 → 解包 → 校验文件+import → 重启
+.\deploy.ps1 -Remote user@host  # 归一化行尾 → 打包 → 上传 → 解包 → 校验文件+import → 重启
 ```
 
 `deploy.ps1` 会在重启前**逐个校验文件确实落地并且能 import**，缺文件会直接失败而不是

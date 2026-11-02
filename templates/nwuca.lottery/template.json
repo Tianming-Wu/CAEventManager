@@ -3,7 +3,7 @@
   "name": "奖票抽奖",
   "version": "1.0.0",
   "author": "NWUCA",
-  "homepage": "https://lab.nwuca.tech/",
+  "homepage": "https://example.org/",
   "license": "MIT",
   "builtin": true,
   "requires": ">=1.4",

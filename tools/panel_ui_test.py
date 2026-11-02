@@ -633,12 +633,12 @@ def create_page(browser):
               page.locator("#newEventBtn").inner_text().strip() == "创建活动")
         page.click("#newEventBtn")
         page.wait_for_timeout(700)
-        check("a kind picker appears", page.locator(".kind-tile").count() >= 1)
-        check("the built-in kind is offered", page.evaluate(
-            "() => !!document.querySelector('[data-kind=\\'nwuca.lottery\\']')"))
+        check("a template picker appears", page.locator(".kind-tile").count() >= 1)
+        check("the built-in template is offered", page.evaluate(
+            "() => !!document.querySelector('[data-template=\\'nwuca.salon\\']')"))
         page.screenshot(path="tmp/ui/kind-picker.png")
 
-        page.click("[data-kind='nwuca.lottery']")
+        page.click("[data-template='nwuca.salon']")
         page.wait_for_timeout(600)
         check("choosing one renders its form", page.locator("#neTitle").is_visible())
         check("the schema drew its fields",
@@ -664,6 +664,31 @@ def create_page(browser):
         page.click("#kindCreate")
         page.wait_for_url("**/admin", timeout=25000)
         check("it opens the new activity's console", "/admin" in page.url, page.url)
+        made = page.url
+        print("   created:", made)
+
+        print("== the menu archives it again ==")
+        page.goto(BASE + "/panel#/events")
+        page.wait_for_timeout(600)
+        newest = page.evaluate("""() => {
+            const cards = Array.from(document.querySelectorAll('#ownedEvents .event-card'));
+            const card = cards[cards.length - 1];
+            return card ? card.querySelector('.card-menu-btn').getAttribute('data-menu') : null;
+        }""")
+        check("the new activity is on the page", bool(newest), newest)
+        if newest:
+            page.click('[data-menu="' + newest + '"]')
+            page.wait_for_timeout(300)
+            check("the menu offers 存档活动", page.locator("[data-archive]").count() == 1)
+            page.click("[data-archive]")
+            page.wait_for_timeout(300)
+            check("archiving confirms first", page.locator("#overlay").is_visible())
+            page.click("[data-archive-confirm]")
+            page.wait_for_timeout(900)
+            left = page.evaluate("""() => Array.from(
+                document.querySelectorAll('#ownedEvents .card-menu-btn'))
+                .map(el => el.getAttribute('data-menu'))""")
+            check("and the activity is gone from the list", newest not in left, left)
     finally:
         ctx.close()
 

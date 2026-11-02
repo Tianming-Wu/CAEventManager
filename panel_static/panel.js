@@ -48,9 +48,9 @@
     userFilter: "",
     openGroups: {},
     denied: null,
-    kinds: [],
-    kindId: null,
-    kindFilter: "",
+    templates: [],
+    templateId: null,
+    templateFilter: "",
     invited: []
   };
 
@@ -237,7 +237,12 @@
       // UNWIRED(event-settings): there is no settings page yet
       '<button type="button" role="menuitem" disabled ' +
       'title="活动设置还没有接入">' +
-      "活动设置</button>";
+      "活动设置</button>" +
+      (e.role === "owner"
+        ? '<div class="menu-sep"></div>' +
+          '<button type="button" role="menuitem" class="danger" ' +
+          'data-archive="' + e.seq + '">存档活动</button>'
+        : "");
     document.body.appendChild(menu);
 
     var rect = anchor.getBoundingClientRect();
@@ -280,6 +285,29 @@
       .then(function () {
         closeOverlay();
         PX.toast("已重命名");
+        return reloadAll();
+      })
+      .catch(function (e) { PX.toast(PX.esc(e.message), true); });
+  }
+
+  function confirmArchive(seq) {
+    var e = S.events.filter(function (x) { return String(x.seq) === String(seq); })[0];
+    closeCardMenu();
+    openOverlay("archive", "存档活动",
+      '<p class="page-sub">存档后这个活动不再出现在列表里，它的链接也会失效。'
+      + "数据保留，不会被删除。</p>"
+      + (e ? '<p class="page-sub">存档：' + PX.esc(eventTitle(e)) + "</p>" : "")
+      + '<div class="row" style="margin-top:18px;justify-content:flex-end">'
+      + '<button class="btn" type="button" data-close-overlay="1">取消</button>'
+      + '<button class="btn danger" type="button" data-archive-confirm="' + seq + '">'
+      + "存档</button></div>");
+  }
+
+  function archiveEvent(seq) {
+    PX.api("/event/archive", { method: "POST", body: { seq: Number(seq) } })
+      .then(function () {
+        closeOverlay();
+        PX.toast("已存档");
         return reloadAll();
       })
       .catch(function (e) { PX.toast(PX.esc(e.message), true); });
@@ -400,7 +428,7 @@
     var h = (location.hash || "").replace(/^#\/?/, "").split("?")[0];
     if (ALIAS[h]) h = ALIAS[h];
     if (ROUTES[h]) {
-      S.kindId = null;
+      S.templateId = null;
       return h;
     }
     var cut = h.indexOf("/");
@@ -408,7 +436,7 @@
       var head = h.slice(0, cut);
       var tail = decodeURIComponent(h.slice(cut + 1)).replace(/\/$/, "");
       if (head === "new-event" && ROUTES[head]) {
-        S.kindId = tail || null;
+        S.templateId = tail || null;
         return head;
       }
     }
@@ -561,65 +589,65 @@
     }).join("");
   }
 
-  function loadKinds() {
-    if (S.kinds.length) return Promise.resolve();
-    return PX.api("/templates").then(function (d) { S.kinds = d.kinds || []; })
-      .catch(function () { S.kinds = []; });
+  function loadTemplates() {
+    if (S.templates.length) return Promise.resolve();
+    return PX.api("/templates").then(function (d) {
+      S.templates = d.templates || [];
+    }).catch(function () { S.templates = []; });
   }
 
-  function kindById(id) {
-    return S.kinds.filter(function (k) { return k.id === id; })[0];
+  function templateById(id) {
+    return S.templates.filter(function (t) { return t.id === id; })[0];
   }
 
   function drawNewEvent() {
-    if (!S.kinds.length) {
-      // a direct link carries the kind in the hash, so the list may not be here
-      // yet; load it and draw again
-      loadKinds().then(drawNewEvent);
+    if (!S.templates.length) {
+      // a direct link carries the template in the hash, so the list may not be
+      // here yet; load it and draw again
+      loadTemplates().then(drawNewEvent);
       return;
     }
-    var kind = S.kindId ? kindById(S.kindId) : null;
-    if (S.kindId && !kind) {
-      go("new-event", true);      // unknown kind: back to the picker
+    var tpl = S.templateId ? templateById(S.templateId) : null;
+    if (S.templateId && !tpl) {
+      go("new-event", true);      // unknown template: back to the picker
       return;
     }
-    $("#kindPicker").hidden = !!kind;
-    $("#kindForm").hidden = !kind;
-    if (kind) drawKindForm(kind);
+    $("#kindPicker").hidden = !!tpl;
+    $("#kindForm").hidden = !tpl;
+    if (tpl) drawKindForm(tpl);
     else $("#kindGrid").innerHTML = renderKindTiles();
   }
 
   function renderKindTiles() {
-    var q = S.kindFilter.trim().toLowerCase();
-    var rows = S.kinds.filter(function (k) {
+    var q = S.templateFilter.trim().toLowerCase();
+    var rows = S.templates.filter(function (t) {
       if (!q) return true;
-      return (k.name + " " + k.id + " " + (k.description || ""))
+      return (t.name + " " + t.id + " " + (t.description || "") + " " + t.moduleName)
         .toLowerCase().indexOf(q) >= 0;
     });
     if (!rows.length) {
-      return '<div class="empty">' + (S.kinds.length
-        ? "\u6ca1\u6709\u5339\u914d\u7684\u6d3b\u52a8\u5f62\u5f0f"
-        : "\u8fd8\u6ca1\u6709\u53ef\u7528\u7684\u6d3b\u52a8\u5f62\u5f0f") + "</div>";
+      return '<div class="empty">' + (S.templates.length
+        ? "\u6ca1\u6709\u5339\u914d\u7684\u6a21\u677f"
+        : "\u8fd8\u6ca1\u6709\u53ef\u7528\u7684\u6a21\u677f") + "</div>";
     }
-    return rows.map(function (k) {
-      var meta = [(k.builtin ? "\u5185\u7f6e" : "\u7528\u6237\u5bfc\u5165"),
-                  "v" + k.version, k.author].filter(Boolean).join(" \u00b7 ");
-      return '<button class="kind-tile' + (k.ok ? "" : " is-off") + '" type="button" ' +
-        (k.ok ? 'data-kind="' + PX.esc(k.id) + '"' : "disabled") + ">" +
-        '<span class="kind-name">' + PX.esc(k.name) + "</span>" +
+    return rows.map(function (t) {
+      var meta = [t.moduleName, t.builtin ? "\u5185\u7f6e" : "\u7528\u6237\u5bfc\u5165"]
+        .filter(Boolean).join(" \u00b7 ");
+      return '<button class="kind-tile' + (t.ok ? "" : " is-off") + '" type="button" ' +
+        (t.ok ? 'data-template="' + PX.esc(t.id) + '"' : "disabled") + ">" +
+        '<span class="kind-name">' + PX.esc(t.name) + "</span>" +
         '<span class="kind-meta">' + PX.esc(meta) + "</span>" +
-        (k.description ? '<span class="kind-desc">' + PX.esc(k.description) + "</span>" : "") +
-        (k.ok ? "" : '<span class="tag disabled">' + PX.esc(k.reason || "\u4e0d\u53ef\u7528") + "</span>") +
+        (t.description ? '<span class="kind-desc">' + PX.esc(t.description) + "</span>" : "") +
+        (t.ok ? "" : '<span class="tag disabled">' + PX.esc(t.reason || "\u4e0d\u53ef\u7528") + "</span>") +
         "</button>";
     }).join("");
   }
 
-  function drawKindForm(kind) {
-    $("#kindFormTitle").textContent = kind.name;
-    // the header carries the version and nothing else: the rest is on the card
-    $("#kindFormSub").textContent = "v" + kind.version;
-    $("#kindFormSub").title = [kind.id, kind.author, kind.homepage]
-      .filter(Boolean).join(" \u00b7 ");
+  function drawKindForm(tpl) {
+    var kind = tpl;                       // the module supplies the fields
+    $("#kindFormTitle").textContent = tpl.name;
+    $("#kindFormSub").textContent = tpl.moduleName || "";
+    $("#kindFormSub").title = [tpl.id, tpl.module].filter(Boolean).join(" \u00b7 ");
     $("#kindFields").innerHTML = kind.fields.map(function (f) {
       var id = "kf_" + f.key;
       var when = f.visibleWhen || f.visible_when;
@@ -637,12 +665,15 @@
       if (f.type === "bool") {
         return '<div class="field kind-field"' + wrapAttr + '><label class="check">' +
           '<input id="' + id + '" type="checkbox"' + attr +
-          (f.default ? " checked" : "") + "><span>" + PX.esc(f.label) + "</span></label>" +
+          (((tpl.params && f.key in tpl.params) ? tpl.params[f.key] : f.default)
+            ? " checked" : "") +
+          "><span>" + PX.esc(f.label) + "</span></label>" +
           help + "</div>";
       }
       if (f.type === "select") {
         var opts = (f.options || []).map(function (o) {
-          var sel = (!f.required && String(f.default) === String(o.value)) ? " selected" : "";
+          var preset = (tpl.params && f.key in tpl.params) ? tpl.params[f.key] : f.default;
+          var sel = (!f.required && String(preset) === String(o.value)) ? " selected" : "";
           return '<option value="' + PX.esc(o.value) + '"' + sel + ">" +
             PX.esc(o.label || o.value) + "</option>";
         }).join("");
@@ -652,19 +683,21 @@
           "</select>" + help);
       }
       if (f.type === "int") {
-        var hasDef = f.default !== undefined && f.default !== null;
+        var preset = (tpl.params && f.key in tpl.params) ? tpl.params[f.key] : f.default;
+        var hasDef = preset !== undefined && preset !== null;
         return box(head + '<input id="' + id + '" type="number"' +
-          attr + (hasDef ? ' value="' + PX.esc(String(f.default)) + '"' : "") +
+          attr + (hasDef ? ' value="' + PX.esc(String(preset)) + '"' : "") +
           (f.min !== undefined && f.min !== null ? ' min="' + f.min + '"' : "") +
           (f.max !== undefined && f.max !== null ? ' max="' + f.max + '"' : "") +
           ">" + help);
       }
-      var def = f.default;
+      var def = (tpl.params && f.key in tpl.params) ? tpl.params[f.key] : f.default;
       return box(head + '<input id="' + id + '" type="text"' +
         attr + (def !== undefined && def !== null && def !== ""
           ? ' value="' + PX.esc(String(def)) + '"' : "") + ">" + help);
     }).join("");
     $("#createErr").textContent = "";
+    if (!$("#neTitle").value) $("#neTitle").value = tpl.title || "";
     renderInviteChips();
     bindShowWhen($("#kindFields"));
   }
@@ -802,7 +835,7 @@
     var err = $("#createErr");
     err.textContent = "";
     var body = {
-      kind: S.kindId,
+      template: S.templateId,
       title: $("#neTitle").value.trim(),
       note: $("#neNote").value.trim(),
       params: collectKindParams(),
@@ -1254,14 +1287,22 @@
     var toggle = t.closest("[data-toggle]");
     if (toggle) return onGroupHead(toggle.getAttribute("data-toggle"));
 
-    var kindTile = t.closest("[data-kind]");
-    if (kindTile) return go("new-event/" + kindTile.getAttribute("data-kind"));
+    var tplTile = t.closest("[data-template]");
+    if (tplTile) return go("new-event/" + tplTile.getAttribute("data-template"));
 
     var invite = t.closest("[data-invite]");
     if (invite) return toggleInvite(Number(invite.getAttribute("data-invite")));
 
     var uninvite = t.closest("[data-uninvite]");
     if (uninvite) return toggleInvite(Number(uninvite.getAttribute("data-uninvite")));
+
+    var archiveBtn = t.closest("[data-archive]");
+    if (archiveBtn) return confirmArchive(archiveBtn.getAttribute("data-archive"));
+
+    var archiveYes = t.closest("[data-archive-confirm]");
+    if (archiveYes) {
+      return archiveEvent(archiveYes.getAttribute("data-archive-confirm"));
+    }
 
     var renameBtn = t.closest("[data-rename]");
     if (renameBtn) return openRename(renameBtn.getAttribute("data-rename"));
@@ -1438,7 +1479,7 @@
 
   function newEvent() {
     S.invited = [];
-    loadKinds().then(function () { go("new-event"); });
+    loadTemplates().then(function () { go("new-event"); });
   }
   $("#newEventBtn").addEventListener("click", newEvent);
   // 活动管理 is a superadmin view; creating from there uses the same flow
@@ -1460,7 +1501,7 @@
   });
   $("#invitePick").addEventListener("click", openInvitePicker);
   bindLiveSearch("#kindSearch", "#kindSearchClear", function (value) {
-    S.kindFilter = value;
+    S.templateFilter = value;
     if (!$("#kindPicker").hidden) $("#kindGrid").innerHTML = renderKindTiles();
   });
 

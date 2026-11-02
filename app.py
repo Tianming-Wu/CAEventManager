@@ -37,7 +37,8 @@ import checkin
 import db
 import expr
 import exporter
-import kinds
+import modules
+import presets
 import localconfig
 import model
 import panel
@@ -681,6 +682,7 @@ class Handler(BaseHTTPRequestHandler):
                 " FROM events e"
                 " LEFT JOIN event_members m ON m.seq = e.seq AND m.account_id = ?"
                 " LEFT JOIN accounts o ON o.id = e.owner_id"
+                " WHERE e.archived_at=0"
                 " ORDER BY e.created_at", (acc["id"],)).fetchall()
             # the public base lives in an event database, not the panel one;
             # with a single event there is no ambiguity about which one
@@ -737,24 +739,30 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True, "role": role})
 
         if path == "/templates" and method == "GET":
-            return self._json({"ok": True, "version": VERSION,
-                               "kinds": kinds.all_kinds(VERSION, include_broken=True)})
+            by_id = {m["id"]: m for m in modules.all_modules(VERSION)}
+            return self._json({
+                "ok": True, "version": VERSION,
+                "templates": presets.all_templates(VERSION, by_id, include_broken=True)})
 
         if path == "/events/create" and method == "POST":
             data = body()
-            kind = kinds.get((data.get("kind") or "").strip(), VERSION)
-            if kind is None:
-                raise model.ApiError("\u6ca1\u6709\u8fd9\u4e2a\u6d3b\u52a8\u5f62\u5f0f", 404)
-            if not kind["ok"]:
-                raise model.ApiError(kind["reason"] or "\u5f53\u524d\u7248\u672c\u4e0d\u652f\u6301\u8fd9\u4e2a\u6d3b\u52a8\u5f62\u5f0f")
-            title = (data.get("title") or "").strip()
+            by_id = {m["id"]: m for m in modules.all_modules(VERSION)}
+            chosen = presets.get((data.get("template") or "").strip(), VERSION, by_id)
+            if chosen is None:
+                raise model.ApiError("\u6ca1\u6709\u8fd9\u4e2a\u6d3b\u52a8\u6a21\u677f", 404)
+            if not chosen["ok"]:
+                raise model.ApiError(chosen["reason"] or "\u5f53\u524d\u7248\u672c\u4e0d\u652f\u6301\u8fd9\u4e2a\u6a21\u677f")
+            kind = by_id[chosen["module"]]
+            title = (data.get("title") or "").strip() or chosen.get("title") or ""
             if not title:
                 raise model.ApiError("\u8bf7\u586b\u5199\u6d3b\u52a8\u540d\u79f0")
             if len(title) > 60:
                 raise model.ApiError("\u6d3b\u52a8\u540d\u79f0\u6700\u957f 60 \u4e2a\u5b57")
             note = (data.get("note") or "").strip()[:200]
+            merged = dict(chosen.get("params") or {})
+            merged.update(data.get("params") or {})
             try:
-                params = kinds.coerce_params(kind, data.get("params") or {})
+                params = modules.coerce_params(kind, merged)
             except ValueError as exc:
                 raise model.ApiError(str(exc))
 
@@ -815,6 +823,34 @@ class Handler(BaseHTTPRequestHandler):
             base = public_base_url(event_conn)
             return self._json({"ok": True, "event": panel.event_view(row, base, "owner"),
                                "invited": len(invited)})
+
+        if path == "/event/archive" and method == "POST":
+            # Archiving is the owner's own delete.  The row and the database file
+            # stay: an activity that happened is part of the record, and the
+            # audit log has to keep pointing at something.
+            data = body()
+            seq = int(data.get("seq") or 0)
+            mine = conn.execute(
+                "SELECT role FROM event_members WHERE seq=? AND account_id=?",
+                (seq, acc["id"])).fetchone()
+            if mine is None or mine["role"] != "owner":
+                raise model.ApiError("\u53ea\u6709\u8be5\u6d3b\u52a8\u7684\u8d1f\u8d23\u4eba\u80fd\u5b58\u6863", 403)
+            row = conn.execute("SELECT title, archived_at FROM events WHERE seq=?",
+                               (seq,)).fetchone()
+            if row is None:
+                raise model.ApiError("\u6d3b\u52a8\u4e0d\u5b58\u5728", 404)
+            if row["archived_at"]:
+                return self._json({"ok": True, "seq": seq, "archived": True})
+            with panel.tx() as tx:
+                tx.execute("UPDATE events SET archived_at=? WHERE seq=?",
+                           (time.time(), seq))
+                panel.audit(tx, acc["username"], "event_archive", str(seq),
+                            row["title"])
+            db.set_current_event(seq)
+            with db.tx(db.connect()):
+                db.audit(db.connect(), "event_archive", detail="archived")
+            return self._json({"ok": True, "seq": seq, "archived": True,
+                               "title": row["title"]})
 
         if path == "/event/title" and method == "POST":
             # The name belongs to the event's top-level data, so only that
@@ -1192,9 +1228,10 @@ class Handler(BaseHTTPRequestHandler):
         session, token = self._require_admin(conn)
 
         if path == "/api/admin/console" and method == "GET":
-            kind_id = db.all_config(conn).get("kind") or db.DEFAULT_CONFIG.get("kind")
+            cfg = db.all_config(conn)
+            kind_id = cfg.get("module") or cfg.get("kind") or "nwuca.lottery"
             return self._json({"ok": True,
-                               "pages": kinds.console_pages(kind_id, VERSION)})
+                               "pages": modules.console_pages(kind_id, VERSION)})
 
         if path == "/api/admin/state" and method == "GET":
             cfg = db.all_config(conn)

@@ -10,7 +10,7 @@
 param(
     [Parameter(Mandatory = $true)]
     [string]$Remote,
-    [string]$Dest = "apps/lottery",
+    [string]$Dest = "apps/eventmanager",
     [switch]$NoRestart
 )
 

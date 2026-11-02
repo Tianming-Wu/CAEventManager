@@ -527,7 +527,7 @@ def event_tokens(extra=()):
     tokens = {t for t in extra if t}
     try:
         conn = connect()
-        for row in conn.execute("SELECT token FROM events"):
+        for row in conn.execute("SELECT token FROM events WHERE archived_at=0"):
             tokens.add(row["token"])
     except Exception:
         pass

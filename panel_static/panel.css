@@ -418,25 +418,32 @@ button.nav-item {
 
 .page-head {
   display: flex;
-  align-items: center;   /* the action button no longer moves the title */
+  /* baseline, not centre: the subtitle then sits on the title's baseline
+     instead of floating near the middle of a taller line box */
+  align-items: baseline;
   gap: 10px 16px;
   flex-wrap: wrap;
   min-height: var(--tap);
   margin-bottom: 16px;
 }
+.page-head .crumb-back,
+.page-head .page-actions { align-self: center; }
 .page-head h1 { line-height: 1.2; }
 .page-head h1 { flex: 0 0 auto; }
 .page-sub {
   color: var(--muted);
   font-size: .84rem;
   margin: 0;
-  flex: 0 1 auto;
+  /* grows so the action buttons keep their place at the right edge */
+  flex: 1 1 220px;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
-.page-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.page-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
 .stack-title { margin: 0 0 8px; color: var(--muted); font-size: .82rem; font-weight: 600; }
 .invite-stack { margin-bottom: 16px; }
 
@@ -648,6 +655,8 @@ a.stat:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 }
 .card-menu button:hover:not(:disabled) { background: var(--surface-2); }
 .card-menu button:disabled { color: var(--dim); cursor: default; }
+.card-menu button.danger { color: var(--danger); }
+.card-menu button.danger:hover:not(:disabled) { background: var(--danger-soft); }
 .card-menu .menu-sep { height: 1px; background: var(--line-soft); margin: 4px 2px; }
 
 /* ---------- copy button ---------- */

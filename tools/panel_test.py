@@ -184,7 +184,7 @@ def main():
     # digits, so a substring test would be wrong)
     check("the id is not part of the address",
           ("/%d/" % ev["seq"]) not in ev["admin"], ev["admin"])
-    check("the event records a kind", bool(ev.get("kind")), ev)
+    check("the event records its module", bool(ev.get("kind")), ev)
     check("the owner is the owner",
           ev.get("role") == "owner", ev.get("role"))
 
@@ -283,36 +283,33 @@ def main():
     call(plain, "/api/panel/host", expect=403)
     check("a plain admin cannot read them", True)
 
-    print("== activity kinds ==")
-    kinds = call(owner, "/api/panel/templates")["kinds"]
-    ids = [k["id"] for k in kinds]
-    check("the built-in kind is listed", "nwuca.lottery" in ids, ids)
-    check("it reports compatibility",
-          all("ok" in k for k in kinds), kinds)
-    check("it declares its parameters",
-          any(k["id"] == "nwuca.lottery" and k["fields"] for k in kinds))
-
-    check("a kind declares its own pages",
-          any(f["key"] == "pool_size" and f.get("visibleWhen", {}) for k in kinds
-              for f in k["fields"] if k["id"] == "nwuca.lottery"),
-          [f.get("visibleWhen") for k in kinds for f in k["fields"]])
+    print("== templates and modules ==")
+    tpls = call(owner, "/api/panel/templates")["templates"]
+    ids = [t["id"] for t in tpls]
+    check("the built-in template is listed", "nwuca.salon" in ids, ids)
+    tpl = [t for t in tpls if t["id"] == "nwuca.salon"][0]
+    check("a template names the module behind it",
+          tpl["module"] == "nwuca.lottery", tpl)
+    check("the module brings the fields", bool(tpl["fields"]), tpl["fields"])
+    check("the module declares conditional fields",
+          any(f.get("visibleWhen") for f in tpl["fields"]),
+          [f.get("visibleWhen") for f in tpl["fields"]])
+    check("the template carries preset parameters",
+          tpl["params"].get("pool_mode") == "auto", tpl["params"])
 
     print("== creating an activity ==")
+    before = len(call(owner, "/api/panel/events")["events"])
     post(owner, "/api/panel/events/create",
-         {"kind": "nwuca.lottery", "title": "", "params": {"pool_mode": "auto"}},
-         expect=400)
-    check("a name is required", True)
-    post(owner, "/api/panel/events/create", {"kind": "nwuca.lottery", "title": "x"},
-         expect=400)
-    check("a required parameter cannot be left empty", True)
+         {"template": "nope.nope", "title": "x"}, expect=404)
+    check("an unknown template is refused", True)
     post(owner, "/api/panel/events/create",
-         {"kind": "nope.nope", "title": "x", "params": {"pool_mode": "auto"}},
-         expect=404)
-    check("an unknown kind is refused", True)
+         {"template": "nwuca.salon", "title": "x", "params": {"pool_mode": ""}},
+         expect=400)
+    check("a required parameter cannot be emptied", True)
 
     made = post(owner, "/api/panel/events/create", {
-        "kind": "nwuca.lottery", "title": "第二场",
-        "params": {"pool_mode": "auto", "allow_bonus": False}})
+        "template": "nwuca.salon", "title": "第二场",
+        "params": {"allow_bonus": False}})
     check("an activity can be created", made and made["ok"], made)
     ev2 = made["event"]
     check("it gets its own token and id",
@@ -320,24 +317,45 @@ def main():
     check("its links use its own token", ev2["token"] in ev2["admin"], ev2["admin"])
     check("the creator owns it", ev2["role"] == "owner", ev2)
     listing = call(owner, "/api/panel/events")["events"]
-    check("both activities are listed", len(listing) == 2, listing)
-    check("the list is split by role",
-          sum(1 for e in listing if e["role"] == "owner") == 2, listing)
-    first = call(owner, "/api/panel/events")["events"]
-    check("a second activity does not disturb the first",
-          any(e["seq"] == ev["seq"] for e in first), first)
+    check("exactly one more activity is listed", len(listing) == before + 1, listing)
+    check("the original is untouched",
+          any(e["seq"] == ev["seq"] for e in listing), listing)
+
+    print("== the template fills what it can ==")
+    named = post(owner, "/api/panel/events/create", {"template": "nwuca.salon"})
+    check("a template supplies the name", named and named["event"]["title"], named)
+    if named:
+        post(owner, "/api/panel/event/archive", {"seq": named["event"]["seq"]})
+    check("and it can be archived again", True)
 
     print("== the console page bar ==")
-    console = call(owner, "/api/panel/events")
-    import urllib.request as _u
-    token = ev2["token"]
-    req = _u.Request(ROOT + "/" + token + "/api/admin/console",
-                     headers={"X-Requested-With": "lottery"})
+    req = urllib.request.Request(
+        ROOT + "/" + ev2["token"] + "/api/admin/console",
+        headers={"X-Requested-With": "lottery"})
     try:
         owner.open(req, timeout=20)
         check("the console page list needs a session", False, "served without one")
     except urllib.error.HTTPError as exc:
         check("the console page list needs a session", exc.code == 401, exc.code)
+
+    print("== archiving an activity ==")
+    post(teacher, "/api/panel/event/archive", {"seq": ev2["seq"]}, expect=403)
+    check("a non-owner cannot archive it", True)
+    archived = post(owner, "/api/panel/event/archive", {"seq": ev2["seq"]})
+    check("the owner can archive it", archived and archived["ok"], archived)
+    after = call(owner, "/api/panel/events")["events"]
+    check("an archived activity leaves the list",
+          all(e["seq"] != ev2["seq"] for e in after), after)
+    gone = urllib.request.Request(
+        ROOT + "/" + ev2["token"] + "/api/board",
+        headers={"User-Agent": "curl/8"})
+    try:
+        owner.open(gone, timeout=10)
+        check("its public page stops answering", False, "still served")
+    except urllib.error.HTTPError as exc:
+        check("its public page stops answering", exc.code in (404, 403), exc.code)
+    again = post(owner, "/api/panel/event/archive", {"seq": ev2["seq"]})
+    check("archiving twice is harmless", again and again["ok"], again)
 
     print("== renaming an activity ==")
     ev = call(owner, "/api/panel/events")["events"][0]

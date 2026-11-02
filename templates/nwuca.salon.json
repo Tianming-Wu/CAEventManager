@@ -1,0 +1,13 @@
+{
+  "id": "nwuca.salon",
+  "name": "计算机杂谈活动",
+  "module": "nwuca.lottery",
+  "description": "签到一起聊点技术，中间穿插抽奖；按到场人数伸缩奖票池",
+  "title": "计算机杂谈",
+  "builtin": true,
+  "params": {
+    "pool_mode": "auto",
+    "allow_bonus": true,
+    "nominal_guaranteed": 180
+  }
+}

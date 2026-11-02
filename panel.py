@@ -30,7 +30,8 @@ PANEL_STATIC = os.path.join(BASE_DIR, "panel_static")
 
 ROLES = ("owner", "superadmin", "admin")
 ROLE_LABEL = {"owner": "站长", "superadmin": "超级管理员", "admin": "管理员"}
-STATUS_LABEL = {"pending": "待审核", "active": "正常", "disabled": "已停用", "rejected": "已拒绝"}
+STATUS_LABEL = {"pending": "待审核", "active": "正常", "disabled": "已停用",
+                "rejected": "已拒绝", "banned": "已封禁"}
 COOKIE = "xl_panel_session"
 SESSION_TTL = 7 * 24 * 3600
 FOOTER = "CAEventManager | Powered with ❤ by Tianming &amp; Deepseek ❤🐋"
@@ -64,7 +65,8 @@ CREATE TABLE IF NOT EXISTS accounts (
     decided_by  TEXT    NOT NULL DEFAULT '',
     last_login  REAL    NOT NULL DEFAULT 0,
     avatar      TEXT    NOT NULL DEFAULT '',
-    avatar_at   REAL    NOT NULL DEFAULT 0
+    avatar_at   REAL    NOT NULL DEFAULT 0,
+    ban_reason  TEXT    NOT NULL DEFAULT ''
 );
 
 """ + EVENTS_DDL + """
@@ -156,6 +158,7 @@ class tx:
 LATE_COLUMNS = (
     ("accounts", "avatar", "TEXT NOT NULL DEFAULT ''"),
     ("accounts", "avatar_at", "REAL NOT NULL DEFAULT 0"),
+    ("accounts", "ban_reason", "TEXT NOT NULL DEFAULT ''"),
 )
 
 
@@ -383,6 +386,7 @@ def view(row):
         "decidedAt": row["decided_at"],
         "decidedBy": row["decided_by"],
         "lastLogin": row["last_login"],
+        "banReason": row["ban_reason"] if "ban_reason" in row.keys() else "",
         "avatar": row["avatar"] or "",
         "avatarAt": row["avatar_at"] or 0,
     }

@@ -328,6 +328,26 @@ def main():
         post(owner, "/api/panel/event/archive", {"seq": named["event"]["seq"]})
     check("and it can be archived again", True)
 
+    print("== rotating the access token ==")
+    post(teacher, "/api/panel/event/rotate", {"seq": ev2["seq"]}, expect=403)
+    check("a non-owner cannot rotate it", True)
+    old_token = ev2["token"]
+    rotated = post(owner, "/api/panel/event/rotate", {"seq": ev2["seq"]})
+    check("the owner can rotate it", rotated and rotated["token"] != old_token, rotated)
+    listed = call(owner, "/api/panel/events")["events"]
+    row = [e for e in listed if e["seq"] == ev2["seq"]][0]
+    check("the panel shows the new token", row["token"] == rotated["token"], row)
+    check("and links follow it", rotated["token"] in row["admin"], row["admin"])
+    old_req = urllib.request.Request(
+        ROOT + "/" + old_token + "/api/board", headers={"User-Agent": "curl/8"})
+    try:
+        owner.open(old_req, timeout=10)
+        check("the old address stops answering", False, "still served")
+    except urllib.error.HTTPError as exc:
+        check("the old address stops answering", exc.code == 404, exc.code)
+    check("the numeric id is unchanged", row["seq"] == ev2["seq"], row)
+    ev2["token"] = rotated["token"]      # later checks use the live address
+
     print("== the console page bar ==")
     req = urllib.request.Request(
         ROOT + "/" + ev2["token"] + "/api/admin/console",
@@ -405,6 +425,30 @@ def main():
     kept = post(owner, "/api/panel/profile", {"name": current, "username": "owner"})
     check("the owner can still change the display name",
           kept and kept["me"]["username"] == "owner", kept)
+
+    print("== banning an account ==")
+    plain = session()
+    post(plain, "/api/panel/login", {"username": "member2", "password": "member-pass-2"})
+    target = [a for a in call(owner, "/api/panel/accounts")["accounts"]
+              if a["username"] == "member2"][0]
+    post(owner, "/api/panel/account/decide",
+         {"id": target["id"], "action": "ban"}, expect=400)
+    check("a ban needs a reason", True)
+    post(owner, "/api/panel/account/decide",
+         {"id": target["id"], "action": "ban", "reason": "测试封禁"})
+    banned = [a for a in call(owner, "/api/panel/accounts")["accounts"]
+              if a["id"] == target["id"]][0]
+    check("the account is banned", banned["status"] == "banned", banned)
+    check("the reason is kept", banned["banReason"] == "测试封禁", banned)
+    fresh = session()
+    res = post(fresh, "/api/panel/login",
+               {"username": "member2", "password": "member-pass-2"}, expect=403)
+    check("a banned account cannot log in", True)
+    post(owner, "/api/panel/account/decide",
+         {"id": target["id"], "action": "unban"})
+    check("and can be released", post(session(), "/api/panel/login",
+                                      {"username": "member2",
+                                       "password": "member-pass-2"}) is not None)
 
     print("== profile: avatar ==")
     pixel = ("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8"

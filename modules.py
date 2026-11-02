@@ -64,6 +64,17 @@ def _read_json(path):
 # so a module cannot invent a page the console has no section for.
 MODULE_PAGES = ("ops", "roster", "tickets", "draw")
 PLATFORM_PAGES = (("settings", "\u6d3b\u52a8\u8bbe\u7f6e"), ("log", "\u65e5\u5fd7"))
+# The public pages the core can draw.  A module declares which of them it uses;
+# anything undeclared is a 404 for that activity.
+DEFAULT_EXTERNAL = ("board", "screen", "checkin", "admin", "login")
+EXTERNAL_TITLE = {
+    "board": "\u516c\u793a\u9875",
+    "screen": "\u5927\u5c4f",
+    "checkin": "\u7b7e\u5230",
+    "admin": "\u63a7\u5236\u53f0",
+    "login": "\u767b\u5f55",
+}
+
 PAGE_TITLE = {
     "ops": "\u64cd\u4f5c\u53f0",
     "roster": "\u540d\u5355",
@@ -89,6 +100,28 @@ def normalize_pages(raw):
         seen.add(page_id)
         out.append({"id": page_id, "title": title or PAGE_TITLE[page_id]})
     return out
+
+
+def normalize_external(raw):
+    """The public page ids a module declares; unknown ids are dropped."""
+    if raw is None:
+        return list(DEFAULT_EXTERNAL)
+    out = []
+    for item in raw:
+        page_id = str(item).strip()
+        if page_id in DEFAULT_EXTERNAL and page_id not in out:
+            out.append(page_id)
+    return out
+
+
+def external_routes(module_id, version):
+    """The set of public pages this activity's module is allowed to serve."""
+    if not module_id:
+        return set(DEFAULT_EXTERNAL)
+    kind = get(module_id, version)
+    if kind is None:
+        return set()
+    return set(kind.get("external") or [])
 
 
 def console_pages(module_id, version):
@@ -164,6 +197,7 @@ def load_module(folder, version):
         "requires": requires,
         "builtin": bool(meta.get("builtin")),
         "pages": normalize_pages(meta.get("pages")),
+        "external": normalize_external(meta.get("external")),
         "fields": fields,
         "ok": satisfies(version, requires),
         "reason": "" if satisfies(version, requires)

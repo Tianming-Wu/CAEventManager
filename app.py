@@ -623,6 +623,11 @@ class Handler(BaseHTTPRequestHandler):
                 raise model.ApiError("注册申请未通过", 403)
             if row["status"] == "disabled":
                 raise model.ApiError("账号已停用", 403)
+            if row["status"] == "banned":
+                reason = (row["ban_reason"] or "").strip() \
+                    if "ban_reason" in row.keys() else ""
+                raise model.ApiError(
+                    "账号已被封禁" + ("：" + reason if reason else ""), 403)
             _PANEL_FAILS.pop(ip, None)
             _PANEL_FAILS.pop(ip + ":n", None)
             with panel.tx() as tx:
@@ -712,13 +717,20 @@ class Handler(BaseHTTPRequestHandler):
                 raise model.ApiError("超级管理员只能审核普通管理员", 403)
             action = (data.get("action") or "").strip()
             status = {"approve": "active", "reject": "rejected",
-                      "disable": "disabled", "enable": "active"}.get(action)
+                      "disable": "disabled", "enable": "active",
+                      "ban": "banned", "unban": "active"}.get(action)
             if status is None:
                 raise model.ApiError("未知操作")
+            reason = (data.get("reason") or "").strip()[:120]
+            if action == "ban" and not reason:
+                raise model.ApiError("封禁需要写明原因")
             with panel.tx() as tx:
-                tx.execute("UPDATE accounts SET status=?, decided_at=?, decided_by=? WHERE id=?",
-                           (status, time.time(), acc["username"], target["id"]))
-                panel.audit(tx, acc["username"], action, target["username"])
+                tx.execute("UPDATE accounts SET status=?, decided_at=?, decided_by=?,"
+                           " ban_reason=? WHERE id=?",
+                           (status, time.time(), acc["username"],
+                            reason if action == "ban" else "", target["id"]))
+                panel.audit(tx, acc["username"], action, target["username"],
+                            reason or None)
             return self._json({"ok": True, "status": status})
 
         if path == "/account/role" and method == "POST":
@@ -823,6 +835,37 @@ class Handler(BaseHTTPRequestHandler):
             base = public_base_url(event_conn)
             return self._json({"ok": True, "event": panel.event_view(row, base, "owner"),
                                "invited": len(invited)})
+
+        if path == "/event/rotate" and method == "POST":
+            # A fresh token invalidates every address that carried the old one.
+            # The numeric id does not change, so the panel keeps finding the
+            # activity and can always rebuild the links.
+            data = body()
+            seq = int(data.get("seq") or 0)
+            mine = conn.execute(
+                "SELECT role FROM event_members WHERE seq=? AND account_id=?",
+                (seq, acc["id"])).fetchone()
+            if mine is None or mine["role"] != "owner":
+                raise model.ApiError("\u53ea\u6709\u8be5\u6d3b\u52a8\u7684\u8d1f\u8d23\u4eba\u80fd\u91cd\u7f6e\u8bbf\u95ee\u5730\u5740", 403)
+            row = conn.execute("SELECT token, title FROM events WHERE seq=?",
+                               (seq,)).fetchone()
+            if row is None:
+                raise model.ApiError("\u6d3b\u52a8\u4e0d\u5b58\u5728", 404)
+            token = localconfig.new_secret()
+            with panel.tx() as tx:
+                tx.execute("UPDATE events SET token=? WHERE seq=?", (token, seq))
+                panel.audit(tx, acc["username"], "event_rotate", str(seq), row["title"])
+            db.set_current_event(seq)
+            prefix = (LOCAL_CFG.get("public_base_prefix") or "").rstrip("/")
+            event_conn = db.connect()
+            with db.tx(event_conn):
+                if prefix:
+                    db.set_config_raw(event_conn, "public_base_url",
+                                      prefix + "/" + token)
+                db.audit(event_conn, "event_rotate", detail="token rotated")
+            return self._json({"ok": True, "seq": seq, "token": token,
+                               "admin": (prefix + "/" + token + "/admin") if prefix
+                                        else "/" + token + "/admin"})
 
         if path == "/event/archive" and method == "POST":
             # Archiving is the owner's own delete.  The row and the database file
@@ -999,18 +1042,35 @@ class Handler(BaseHTTPRequestHandler):
         return self._err("not found", 404)
 
     # ---------------- pages ----------------
+    def _external_allowed(self):
+        """Which public pages this activity's module declares.
+
+        The core knows how to draw a handful of pages; a module has to say which
+        of them it uses.  Anything it does not declare is a 404, so a route
+        cannot come into existence just because the code happens to have one.
+        """
+        try:
+            cfg = db.all_config(db.connect())
+        except Exception:
+            return set(modules.DEFAULT_EXTERNAL)
+        module_id = cfg.get("module") or cfg.get("kind") or ""
+        declared = modules.external_routes(module_id, VERSION)
+        return declared if declared else set(modules.DEFAULT_EXTERNAL)
+
     def _page(self, method, path):
         if method != "GET":
             return self._err("method not allowed", 405)
-        routes = {
-            "/": ("board.html", "text/html; charset=utf-8"),
-            "/index.html": ("board.html", "text/html; charset=utf-8"),
-            "/board": ("board.html", "text/html; charset=utf-8"),
-            "/screen": ("screen.html", "text/html; charset=utf-8"),
-            "/admin": ("admin.html", "text/html; charset=utf-8"),
-            "/login": ("login.html", "text/html; charset=utf-8"),
-            "/checkin": ("checkin.html", "text/html; charset=utf-8"),
+        allowed = self._external_allowed()
+        catalogue = {
+            "/": ("board", "board.html", "text/html; charset=utf-8"),
+            "/index.html": ("board", "board.html", "text/html; charset=utf-8"),
+            "/board": ("board", "board.html", "text/html; charset=utf-8"),
+            "/screen": ("screen", "screen.html", "text/html; charset=utf-8"),
+            "/admin": ("admin", "admin.html", "text/html; charset=utf-8"),
+            "/login": ("login", "login.html", "text/html; charset=utf-8"),
+            "/checkin": ("checkin", "checkin.html", "text/html; charset=utf-8"),
         }
+        routes = {k: v for k, v in catalogue.items() if v[0] in allowed}
         if path == "/favicon.ico":
             return self._send(204, b"", "image/x-icon")
         if path == "/checkin":
@@ -1033,7 +1093,7 @@ class Handler(BaseHTTPRequestHandler):
                 )
             return self._page_html("checkin.html")
         if path in routes:
-            name, ctype = routes[path]
+            _page_id, name, ctype = routes[path]
             return self._serve_file(os.path.join(TPL_DIR, name), ctype, cache=False)
         if path.startswith("/static/"):
             rel = path[len("/static/"):]

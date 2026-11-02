@@ -240,6 +240,8 @@
       "活动设置</button>" +
       (e.role === "owner"
         ? '<div class="menu-sep"></div>' +
+          '<button type="button" role="menuitem" data-rotate="' + e.seq + '">' +
+          "重置访问地址</button>" +
           '<button type="button" role="menuitem" class="danger" ' +
           'data-archive="' + e.seq + '">存档活动</button>'
         : "");
@@ -285,6 +287,56 @@
       .then(function () {
         closeOverlay();
         PX.toast("已重命名");
+        return reloadAll();
+      })
+      .catch(function (e) { PX.toast(PX.esc(e.message), true); });
+  }
+
+  function confirmBan(id) {
+    var a = S.accounts.filter(function (x) { return x.id === id; })[0];
+    if (!a) return;
+    openOverlay("ban", "封禁 " + displayName(a),
+      '<div class="field"><label for="banReason">原因</label>'
+      + '<input id="banReason" type="text" maxlength="120" autocomplete="off"'
+      + ' placeholder="对方登录时看得到这句话"></div>'
+      + '<div class="row" style="margin-top:16px;justify-content:flex-end">'
+      + '<button class="btn" type="button" data-close-overlay="1">取消</button>'
+      + '<button class="btn danger" type="button" data-ban-confirm="' + a.id + '">'
+      + "封禁</button></div>");
+    var box = $("#banReason");
+    if (box) box.focus();
+  }
+
+  function doBan(id) {
+    var box = $("#banReason");
+    PX.api("/account/decide", {
+      method: "POST",
+      body: { id: Number(id), action: "ban", reason: box ? box.value.trim() : "" }
+    }).then(function () {
+      closeOverlay();
+      PX.toast("已封禁");
+      return reloadAll();
+    }).catch(function (e) { PX.toast(PX.esc(e.message), true); });
+  }
+
+  function confirmRotate(seq) {
+    var e = S.events.filter(function (x) { return String(x.seq) === String(seq); })[0];
+    closeCardMenu();
+    openOverlay("rotate", "重置访问地址",
+      '<p class="page-sub">会生成一个新的 token，之前所有指向该活动的链接立即失效。'
+      + "</p>"
+      + (e ? '<p class="page-sub">活动：' + PX.esc(eventTitle(e)) + "</p>" : "")
+      + '<div class="row" style="margin-top:18px;justify-content:flex-end">'
+      + '<button class="btn" type="button" data-close-overlay="1">取消</button>'
+      + '<button class="btn primary" type="button" data-rotate-confirm="'
+      + seq + '">重新生成</button></div>');
+  }
+
+  function rotateEvent(seq) {
+    PX.api("/event/rotate", { method: "POST", body: { seq: Number(seq) } })
+      .then(function () {
+        closeOverlay();
+        PX.toast("已生成新的访问地址");
         return reloadAll();
       })
       .catch(function (e) { PX.toast(PX.esc(e.message), true); });
@@ -646,8 +698,10 @@
   function drawKindForm(tpl) {
     var kind = tpl;                       // the module supplies the fields
     $("#kindFormTitle").textContent = tpl.name;
-    $("#kindFormSub").textContent = tpl.moduleName || "";
-    $("#kindFormSub").title = [tpl.id, tpl.module].filter(Boolean).join(" \u00b7 ");
+    // the header already carries the template name; the version is enough here
+    $("#kindFormSub").textContent = "v" + (tpl.version || "");
+    $("#kindFormSub").title = [tpl.moduleName, tpl.id, tpl.module]
+      .filter(Boolean).join(" \u00b7 ");
     $("#kindFields").innerHTML = kind.fields.map(function (f) {
       var id = "kf_" + f.key;
       var when = f.visibleWhen || f.visible_when;
@@ -904,6 +958,7 @@
       ["注册时间", PX.when(a.createdAt)],
       ["最近登录", PX.when(a.lastLogin)]
     ];
+    if (a.banReason) rows.push(["封禁原因", a.banReason]);
     if (a.decidedBy) rows.push(["上次处理", a.decidedBy + " · " + PX.when(a.decidedAt)]);
     if (a.note) rows.push(["申请说明", a.note]);
 
@@ -918,6 +973,11 @@
       }
       if (a.status === "disabled" || a.status === "rejected") {
         btns.push('<button class="btn" data-decide="enable" data-id="' + a.id + '">启用</button>');
+      }
+      if (a.status === "banned") {
+        btns.push('<button class="btn" data-decide="unban" data-id="' + a.id + '">解除封禁</button>');
+      } else {
+        btns.push('<button class="btn danger" data-ban="' + a.id + '">封禁</button>');
       }
     }
     if (isOwner() && a.role !== "owner") {
@@ -1295,6 +1355,18 @@
 
     var uninvite = t.closest("[data-uninvite]");
     if (uninvite) return toggleInvite(Number(uninvite.getAttribute("data-uninvite")));
+
+    var banBtn = t.closest("[data-ban]");
+    if (banBtn) return confirmBan(Number(banBtn.getAttribute("data-ban")));
+
+    var banYes = t.closest("[data-ban-confirm]");
+    if (banYes) return doBan(banYes.getAttribute("data-ban-confirm"));
+
+    var rotateBtn = t.closest("[data-rotate]");
+    if (rotateBtn) return confirmRotate(rotateBtn.getAttribute("data-rotate"));
+
+    var rotateYes = t.closest("[data-rotate-confirm]");
+    if (rotateYes) return rotateEvent(rotateYes.getAttribute("data-rotate-confirm"));
 
     var archiveBtn = t.closest("[data-archive]");
     if (archiveBtn) return confirmArchive(archiveBtn.getAttribute("data-archive"));

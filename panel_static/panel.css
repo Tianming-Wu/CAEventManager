@@ -418,16 +418,16 @@ button.nav-item {
 
 .page-head {
   display: flex;
-  /* baseline, not centre: the subtitle then sits on the title's baseline
-     instead of floating near the middle of a taller line box */
+  /* baseline alignment is the typographic answer: the small line sits on the
+     title's baseline.  The row height is then simply the tallest item, so
+     nothing is padded out and nothing rides up. */
   align-items: baseline;
   gap: 10px 16px;
   flex-wrap: wrap;
-  min-height: var(--tap);
   margin-bottom: 16px;
 }
-.page-head .crumb-back,
-.page-head .page-actions { align-self: center; }
+.page-head .page-actions,
+.page-head .crumb-back { align-self: center; }
 .page-head h1 { line-height: 1.2; }
 .page-head h1 { flex: 0 0 auto; }
 .page-sub {

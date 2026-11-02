@@ -38,6 +38,10 @@ SESSION_TTL = 7 * 24 * 3600
 # session row, not on the account: another device signing in as the same person
 # starts from zero, and signing out drops it with the session.
 SUDO_TTL = 600
+# The console's own "解锁修改": 30 seconds of quiet put the dangerous buttons
+# back to sleep.  It is ergonomics for a live event, not a permission - the
+# account is checked separately and does not change while the clock runs.
+EVENT_UNLOCK_TTL = 30
 FOOTER = "CAEventManager | Powered with ❤ by Tianming &amp; Deepseek ❤🐋"
 
 # The events table: ``seq`` is the storage id, ``token`` is the access one.
@@ -102,7 +106,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     created_at  REAL NOT NULL,
     expires_at  REAL NOT NULL,
     ip          TEXT,
-    sudo_until  REAL NOT NULL DEFAULT 0
+    sudo_until  REAL NOT NULL DEFAULT 0,
+    unlock_until REAL NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS audit (
@@ -165,6 +170,7 @@ LATE_COLUMNS = (
     ("accounts", "avatar_at", "REAL NOT NULL DEFAULT 0"),
     ("accounts", "ban_reason", "TEXT NOT NULL DEFAULT ''"),
     ("sessions", "sudo_until", "REAL NOT NULL DEFAULT 0"),
+    ("sessions", "unlock_until", "REAL NOT NULL DEFAULT 0"),
 )
 
 
@@ -312,6 +318,37 @@ def set_sudo(conn, token, seconds):
     until = time.time() + seconds if seconds else 0.0
     conn.execute("UPDATE sessions SET sudo_until=? WHERE token=?", (until, token))
     return until
+
+
+def unlock_until(conn, token):
+    """When the console's 解锁修改 lapses, 0.0 when it is off."""
+    if not token:
+        return 0.0
+    row = conn.execute("SELECT unlock_until FROM sessions WHERE token=?",
+                       (token,)).fetchone()
+    if row is None:
+        return 0.0
+    return float(row["unlock_until"] or 0)
+
+
+def set_unlock(conn, token, on):
+    until = time.time() + EVENT_UNLOCK_TTL if on else 0.0
+    conn.execute("UPDATE sessions SET unlock_until=? WHERE token=?", (until, token))
+    return until
+
+
+def touch_unlock(conn, token):
+    """Every undo restarts the countdown, so a run of them is one action."""
+    return set_unlock(conn, token, True)
+
+
+def member_of(conn, seq, account_id):
+    """This account's row on that event: role/state, or None if it is not on it."""
+    if seq is None or account_id is None:
+        return None
+    return conn.execute(
+        "SELECT role, state FROM event_members WHERE seq=? AND account_id=?",
+        (int(seq), int(account_id))).fetchone()
 
 
 def audit(conn, actor, action, target=None, detail=None):
@@ -604,3 +641,15 @@ def cookie_path_for(raw_path, route):
         prefix = prefix[: -len(route)]
     prefix = prefix.rstrip("/")
     return (prefix + "/") if prefix else "/"
+
+
+def mount_prefix(raw_path, token):
+    """Everything in front of the token segment: where the panel lives here.
+
+    The app answers on whatever path a request arrives by, so the prefix is read
+    off the request instead of being configured twice.
+    """
+    if not token:
+        return ""
+    head = (raw_path or "").split("/" + token)[0]
+    return head.rstrip("/")

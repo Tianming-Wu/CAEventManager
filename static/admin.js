@@ -485,7 +485,6 @@
     $("#setBeta").value = c.beta;
     $("#setAllowBonus").checked = c.allow_bonus !== false;
     renderPrizeEditor();
-    $("#setUser").value = c.admin_user || "";
     $("#exportLink").href = LT.PREFIX + "/api/admin/export.csv";
     $("#exportZipLink").href = LT.PREFIX + "/api/admin/export.zip";
     $("#secretUrl").textContent = S.publicBaseUrl + "/";
@@ -560,7 +559,7 @@
 
   function load() {
     return LT.api("/api/admin/state").then(applyState).catch(function (e) {
-      if (e.status === 401) { location.href = LT.PREFIX + "/login"; return; }
+      if (e.status === 401) { location.href = LT.panelLoginUrl(); return; }
       bad(e);
     });
   }
@@ -855,8 +854,9 @@
     });
 
     $("#logoutBtn").addEventListener("click", function () {
+      // one session for both surfaces, so this signs out of the panel too
       LT.api("/api/logout", { method: "POST" }).then(function () {
-        location.href = LT.PREFIX + "/login";
+        location.href = LT.PANEL + "/login";
       }).catch(bad);
     });
 
@@ -1109,28 +1109,6 @@
       .catch(bad);
   }
 
-  function rotateSecret() {
-    LT.confirm({
-      title: "重新生成访问 id？",
-      danger: true,
-      okText: "重新生成",
-      html: "所有已经发出去的链接和二维码都会失效，需要用新的地址重新分发。<br>" +
-        "奖票、名单、签到记录不受影响。<br>确认？"
-    }).then(function (yes) {
-      if (!yes) return;
-      LT.api("/api/admin/rotate_secret", { method: "POST" })
-        .then(function (d) {
-          S.publicBaseUrl = d.publicBaseUrl;
-          S.unlocked = false;
-          renderUnlock();
-          renderSettings();
-          ok("已生成新地址，请重新打开：<br><b style='word-break:break-all'>" +
-            LT.esc(d.publicBaseUrl) + "/admin</b>", false, 12000);
-        })
-        .catch(bad);
-    });
-  }
-
   function collectPrizes() {
     var rows = $$("#prizeEditor .prize-row");
     if (!rows.length) return [];
@@ -1158,28 +1136,12 @@
 
   function bindSettings() {
     $("#saveSettingsBtn").addEventListener("click", saveSettings);
-    $("#rotateSecretBtn").addEventListener("click", rotateSecret);
     $("#setPoolMode").addEventListener("change", function () {
       S.config.pool_mode = $("#setPoolMode").value;
       updatePoolPreview();
     });
     $("#setBonusConstant").addEventListener("input", updatePoolPreview);
     $("#savePrizesBtn").addEventListener("click", savePrizes);
-    $("#saveUserBtn").addEventListener("click", function () {
-      LT.api("/api/admin/settings", { method: "POST", body: { admin_user: $("#setUser").value.trim() } })
-        .then(function (d) { S.config = d.config; ok("账号已保存"); })
-        .catch(bad);
-    });
-    $("#pwBtn").addEventListener("click", function () {
-      LT.api("/api/admin/password", {
-        method: "POST",
-        body: { old: $("#pwOld").value, new: $("#pwNew").value }
-      }).then(function () {
-        $("#pwOld").value = ""; $("#pwNew").value = "";
-        $("#pwNote").textContent = "已修改";
-        ok("密码已修改");
-      }).catch(function (e) { $("#pwNote").textContent = e.message; });
-    });
   }
 
   // ------------------------------------------------------------------ boot
@@ -1221,6 +1183,12 @@
       if (S.config.finalized) showTab("draw");
     });
 
+    // who is signed in: the console has no account of its own any more
+    LT.api("/api/me").then(function (d) {
+      var who = $("#whoami");
+      if (who && d.authed) who.textContent = d.user + (d.role === "owner" ? " · 负责人" : "");
+    }).catch(function () { /* the state call reports a dead session first */ });
+
     // keep the unlock countdown honest, and quietly resync every 15s
     setInterval(renderUnlock, 1000);
     setInterval(function () {
@@ -1230,7 +1198,7 @@
       if (editing) return;
       LT.api("/api/admin/state").then(function (d) {
         applyState(d);
-      }).catch(function (e) { if (e.status === 401) location.href = LT.PREFIX + "/login"; });
+      }).catch(function (e) { if (e.status === 401) location.href = LT.panelLoginUrl(); });
     }, 5000);
   }
 

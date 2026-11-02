@@ -50,6 +50,21 @@ VERSION = "1.4.0"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 
+# Served when a signed-in account opens a console it has no seat on.  A redirect
+# would loop: it can pass the login, and the console would just refuse again.
+NOT_A_MEMBER_PAGE = """<!doctype html><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>无权访问 · CAEventManager</title>
+<body style="font-family:system-ui,-apple-system,'Segoe UI','Microsoft YaHei',sans-serif;
+             margin:0;display:grid;place-items:center;min-height:100vh;background:#f5f2ee;
+             color:#1c1917">
+  <div style="text-align:center;padding:2em">
+    <p style="font-size:1.05rem;font-weight:600;margin:0 0 .5em">你不是这个活动的成员</p>
+    <p style="color:#57534e;font-size:.88rem;margin:0">
+      请让活动负责人把你加进成员名单，或换一个账号登录</p>
+  </div>
+</body>""".encode("utf-8")
+
 # Filled in by main() before the server starts listening.
 SECRET = ""
 LOCAL_CFG = {}
@@ -360,6 +375,45 @@ class SudoRequired(model.ApiError):
         super().__init__("该操作需要 sudo 模式", 403)
 
 
+def quote_path(value):
+    from urllib.parse import quote
+    return quote(value, safe="/")
+
+
+class ConsoleUser:
+    """Who is at an activity console: a panel account with a seat on it.
+
+    The console used to keep its own password and its own session table.  It is
+    a panel page now - same account, same cookie, and a seat on the activity is
+    what opens the door - so the only identity here is a panel account, and
+    ``role`` is the seat's role inside this one activity.
+    """
+
+    def __init__(self, acc, role, token, conn):
+        self.acc = acc
+        self.role = role
+        self.token = token
+        self.conn = conn
+
+    @property
+    def name(self):
+        return self.acc["name"] or self.acc["username"]
+
+    def unlock_until(self):
+        return panel.unlock_until(self.conn, self.token)
+
+    def unlocked(self):
+        return self.unlock_until() > time.time()
+
+    def touch_unlock(self):
+        with panel.tx() as tx:
+            return panel.touch_unlock(tx, self.token)
+
+    def set_unlock(self, on):
+        with panel.tx() as tx:
+            return panel.set_unlock(tx, self.token, on)
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "LotteryHTTP/" + VERSION
     protocol_version = "HTTP/1.1"
@@ -389,21 +443,70 @@ class Handler(BaseHTTPRequestHandler):
     def _err(self, msg, status=400):
         self._json({"ok": False, "error": msg}, status)
 
-    def _session(self, conn):
-        cookie = self.headers.get("Cookie") or ""
-        token = None
-        for part in cookie.split(";"):
-            part = part.strip()
-            if part.startswith(auth.COOKIE_NAME + "="):
-                token = part.split("=", 1)[1]
-                break
-        return auth.get_session(conn, token), token
+    def _redirect(self, location):
+        self.send_response(302)
+        self.send_header("Location", location or "/")
+        self.send_header("Content-Length", "0")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
 
-    def _require_admin(self, conn):
-        session, token = self._session(conn)
-        if session is None:
+    def _console_account(self):
+        """The panel account behind this request, with its session token.
+
+        None means there is no session at all - that is the case that should
+        send someone to the login page.  A signed-in account that is simply not
+        on this activity is a different answer (403): bouncing it to a login it
+        can already pass would loop forever.
+        """
+        conn = panel.connect()
+        token = self._panel_token()
+        acc = panel.session_account(conn, token)
+        if acc is None:
+            return None
+        return acc, token, conn
+
+    def _console_seat(self):
+        """The panel account behind this request and its seat on the activity.
+
+        None when there is no session, when the account is not on this activity,
+        or when its seat was revoked - the console has no identity of its own to
+        fall back on any more.
+        """
+        found = self._console_account()
+        if found is None:
+            return None
+        acc, token, conn = found
+        seat = panel.member_of(conn, db.current_event(), acc["id"])
+        if seat is None or seat["state"] != "active":
+            return None
+        return ConsoleUser(acc, seat["role"], token, conn)
+
+    def _require_console(self):
+        if self._console_account() is None:
             raise model.ApiError("未登录或登录已过期", 401)
-        return session, token
+        me = self._console_seat()
+        if me is None:
+            raise model.ApiError("你不是这个活动的成员", 403)
+        return me
+
+    def _console_url(self):
+        """The /admin URL of whichever activity this request is addressed to."""
+        raw = (self.path or "").split("?")[0]
+        for seg in raw.split("/"):
+            if seg and panel.event_seq(seg) is not None:
+                return panel.mount_prefix(raw, seg) + "/" + seg + "/admin"
+        return ""
+
+    def _panel_login_url(self, back=None):
+        """Where this request should sign in, and where to come back to."""
+        token = None
+        for seg in (self.path or "").split("/"):
+            if seg and panel.event_seq(seg) is not None:
+                token = seg
+                break
+        mount = panel.mount_prefix((self.path or "").split("?")[0], token)
+        target = back if back is not None else (self.path or "")
+        return "%s/login?s_return=%s" % (mount, quote_path(target.split("#")[0]))
 
     def _drain_body(self):
         """Read the request body once, before any handler can bail out.
@@ -1133,12 +1236,21 @@ class Handler(BaseHTTPRequestHandler):
             "/board": ("board", "board.html", "text/html; charset=utf-8"),
             "/screen": ("screen", "screen.html", "text/html; charset=utf-8"),
             "/admin": ("admin", "admin.html", "text/html; charset=utf-8"),
-            "/login": ("login", "login.html", "text/html; charset=utf-8"),
             "/checkin": ("checkin", "checkin.html", "text/html; charset=utf-8"),
         }
         routes = {k: v for k, v in catalogue.items() if v[0] in allowed}
         if path == "/favicon.ico":
             return self._send(204, b"", "image/x-icon")
+        if path == "/login":
+            # the console signs in through the panel now; old links still work
+            return self._redirect(self._panel_login_url(back=self._console_url()))
+        if path == "/admin":
+            # a console with no session behind it goes to the panel and comes
+            # back; a session without a seat here is refused, not redirected
+            if self._console_account() is None:
+                return self._redirect(self._panel_login_url())
+            if self._console_seat() is None:
+                return self._send(403, NOT_A_MEMBER_PAGE, "text/html; charset=utf-8")
         if path == "/checkin":
             # A QR scan carries a time-sliced token.  Valid -> hand the phone a
             # presence cookie and let it type at leisure; invalid -> just serve
@@ -1299,60 +1411,36 @@ class Handler(BaseHTTPRequestHandler):
             )
 
         if path == "/api/me" and method == "GET":
-            session, _ = self._session(conn)
-            cfg = db.all_config(conn)
+            me = self._console_seat()
             return self._json(
                 {
                     "ok": True,
-                    "authed": session is not None,
-                    "user": cfg.get("admin_user") if session else None,
-                    "unlockUntil": session["unlock_until"] if session else 0,
+                    "authed": me is not None,
+                    "user": me.name if me else None,
+                    "role": me.role if me else None,
+                    "unlockUntil": me.unlock_until() if me else 0,
                     "version": VERSION,
                 }
             )
 
-        if path == "/api/login" and method == "POST":
-            self._check_csrf()
-            data = self._body()
-            ip = self.client_address[0]
-            wait = auth.login_blocked(ip)
-            if wait:
-                return self._err("密码错误次数过多,请 %d 秒后再试" % wait, 429)
-            cfg = db.all_config(conn)
-            user = (data.get("user") or "").strip()
-            pw = data.get("pass") or ""
-            stored = cfg.get("admin_pass") or ""
-            ok = user == (cfg.get("admin_user") or "") and auth.verify_password(pw, stored)
-            if not ok:
-                auth.note_login_failure(ip)
-                db.audit(conn, "login_failed", detail="user=%s ip=%s" % (user, ip), actor="anon")
-                return self._err("用户名或密码不对", 401)
-            auth.clear_login_failures(ip)
-            with db.tx(conn):
-                token = auth.create_session(conn, ip)
-                auth.purge_expired(conn)
-                db.audit(conn, "login", detail="ip=%s" % ip)
-            cpath = sanitize_cookie_path(data.get("cookie_path"))
-            cookie = "%s=%s; Path=%s; HttpOnly; SameSite=Lax; Max-Age=%d" % (
-                auth.COOKIE_NAME,
-                token,
-                cpath,
-                auth.SESSION_TTL,
-            )
-            return self._json({"ok": True, "user": cfg.get("admin_user")}, headers=[("Set-Cookie", cookie)])
-
         if path == "/api/logout" and method == "POST":
+            # one session for both surfaces: signing out here signs out of the
+            # panel as well, which is what the operator means by 退出
             self._check_csrf()
-            session, token = self._session(conn)
+            token = self._panel_token()
             if token:
-                with db.tx(conn):
-                    auth.destroy_session(conn, token)
-            cookie = "%s=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0" % auth.COOKIE_NAME
+                with panel.tx() as tx:
+                    panel.destroy_session(tx, token)
+                    panel.audit(tx, "console", "logout")
+            cookie = "%s=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0" % panel.COOKIE
             return self._json({"ok": True}, headers=[("Set-Cookie", cookie)])
 
-        # ---- everything below needs a session ----
-        session, token = self._require_admin(conn)
+        if path == "/api/login" and method == "POST":
+            # there is no console password any more; the panel is the only door
+            raise model.ApiError("活动后台已改用面板账号登录", 410)
 
+        # ---- everything below needs a seat on this activity ----
+        me = self._require_console()
         if path == "/api/admin/console" and method == "GET":
             cfg = db.all_config(conn)
             kind_id = cfg.get("module") or cfg.get("kind") or "nwuca.lottery"
@@ -1370,8 +1458,8 @@ class Handler(BaseHTTPRequestHandler):
                     "stats": model.stats(conn, cfg, students),
                     "prizes": model.prize_status(conn, cfg),
                     "students": [student_admin(s) for s in students],
-                    "unlockUntil": session["unlock_until"],
-                    "unlocked": session["unlock_until"] > time.time(),
+                    "unlockUntil": me.unlock_until(),
+                    "unlocked": me.unlocked(),
                     "audit": db.audit_tail(conn, 60),
                     "draws": model.draw_history(conn, 30),
                     "version": VERSION,
@@ -1403,7 +1491,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/admin/undo" and method == "POST":
             self._check_csrf()
-            if not auth.is_unlocked(session):
+            if not me.unlocked():
                 return self._err("撤销操作需要先打开「解锁修改」开关", 403)
             data = self._body()
             with db.tx(conn):
@@ -1413,59 +1501,37 @@ class Handler(BaseHTTPRequestHandler):
                     data.get("kind"),
                     cascade=bool(data.get("cascade")),
                 )
-                auth.touch_unlock(conn, token)
+                me.touch_unlock()
             stu = model.snapshot(conn, db.all_config(conn))
             cur = next((s for s in stu if s["id"] == int(data.get("student_id"))), None)
             return self._json({"ok": True, "result": res, "student": student_admin(cur) if cur else None,
-                               "unlockUntil": time.time() + auth.UNLOCK_TTL})
+                               "unlockUntil": time.time() + panel.EVENT_UNLOCK_TTL})
 
         if path == "/api/admin/set_time" and method == "POST":
             self._check_csrf()
-            if not auth.is_unlocked(session):
+            if not me.unlocked():
                 return self._err("改完成时间需要先打开「解锁修改」开关", 403)
             data = self._body()
             with db.tx(conn):
                 res = model.set_mark_time(
                     conn, int(data.get("student_id")), data.get("kind"), data.get("at")
                 )
-                auth.touch_unlock(conn, token)
-            return self._json({"ok": True, "result": res, "unlockUntil": time.time() + auth.UNLOCK_TTL})
+                me.touch_unlock()
+            return self._json({"ok": True, "result": res, "unlockUntil": time.time() + panel.EVENT_UNLOCK_TTL})
 
         if path == "/api/admin/unlock" and method == "POST":
             self._check_csrf()
             data = self._body()
             on = bool(data.get("on"))
             with db.tx(conn):
-                until = auth.set_unlock(conn, token, on)
+                until = me.set_unlock(on)
                 db.audit(conn, "unlock_on" if on else "unlock_off", detail=None)
             return self._json({"ok": True, "unlocked": on, "unlockUntil": until})
 
         if path == "/api/admin/rotate_secret" and method == "POST":
-            self._check_csrf()
-            if not auth.is_unlocked(session):
-                return self._err("重新生成访问 id 需要先打开「解锁修改」开关", 403)
-            LOCAL_CFG["path_secret"] = localconfig.new_secret()
-            localconfig.save(LOCAL_CFG)
-            SECRET = LOCAL_CFG["path_secret"]
-            new_url = localconfig.public_url(LOCAL_CFG)
-            with db.tx(conn):
-                db.set_config_raw(conn, "public_base_url", new_url)
-                db.audit(conn, "rotate_secret", detail="new public url: " + new_url)
-            return self._json({"ok": True, "publicBaseUrl": new_url, "secret": SECRET})
-
-        if path == "/api/admin/password" and method == "POST":
-            self._check_csrf()
-            data = self._body()
-            cfg = db.all_config(conn)
-            if not auth.verify_password(data.get("old") or "", cfg.get("admin_pass") or ""):
-                return self._err("原密码不对", 403)
-            new = (data.get("new") or "").strip()
-            if len(new) < 6:
-                return self._err("新密码至少 6 位", 400)
-            with db.tx(conn):
-                db.set_config_raw(conn, "admin_pass", auth.hash_password(new))
-                db.audit(conn, "password_change")
-            return self._json({"ok": True})
+            # the console's own copy of the old "rotate the access id" action;
+            # the panel owns this now, with the password behind it
+            raise model.ApiError("重置访问地址已移到面板的活动卡片菜单", 410)
 
         if path == "/api/admin/import" and method == "POST":
             self._check_csrf()
@@ -1504,12 +1570,12 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/admin/student_delete" and method == "POST":
             self._check_csrf()
-            if not auth.is_unlocked(session):
+            if not me.unlocked():
                 return self._err("删除学生需要先打开「解锁修改」开关", 403)
             data = self._body()
             with db.tx(conn):
                 res = model.delete_student(conn, int(data.get("id")))
-                auth.touch_unlock(conn, token)
+                me.touch_unlock()
             return self._json({"ok": True, "result": res})
 
         if path == "/api/admin/shortlink" and method == "POST":
@@ -1570,7 +1636,6 @@ class Handler(BaseHTTPRequestHandler):
                 "self_checkin": bool,
                 "screen_show_wall": bool,
                 "prizes": list,
-                "admin_user": str,
                 "event_timezone_offset": float,
             }
             updates = {}
@@ -1627,20 +1692,20 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/admin/unfinalize" and method == "POST":
             self._check_csrf()
-            if not auth.is_unlocked(session):
+            if not me.unlocked():
                 return self._err("取消结算需要先打开「解锁修改」开关", 403)
             with db.tx(conn):
                 res = model.unfinalize(conn)
-                auth.touch_unlock(conn, token)
+                me.touch_unlock()
             return self._json({"ok": True, "result": res})
 
         if path == "/api/admin/reset_tickets" and method == "POST":
             self._check_csrf()
-            if not auth.is_unlocked(session):
+            if not me.unlocked():
                 return self._err("重置奖票需要先打开「解锁修改」开关", 403)
             with db.tx(conn):
                 res = model.reset_tickets(conn)
-                auth.touch_unlock(conn, token)
+                me.touch_unlock()
             return self._json({"ok": True, "result": res})
 
         if path == "/api/admin/draw" and method == "POST":
@@ -1658,12 +1723,12 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/admin/draw_void" and method == "POST":
             self._check_csrf()
-            if not auth.is_unlocked(session):
+            if not me.unlocked():
                 return self._err("作废抽奖记录需要先打开「解锁修改」开关", 403)
             data = self._body()
             with db.tx(conn):
                 res = model.void_draw(conn, int(data.get("id")))
-                auth.touch_unlock(conn, token)
+                me.touch_unlock()
             return self._json({"ok": True, "result": res})
 
         if path == "/api/admin/audit" and method == "GET":
@@ -1757,26 +1822,16 @@ def bootstrap_secrets():
         with db.tx(conn):
             db.set_config_raw(conn, "public_base_url", localconfig.public_url(LOCAL_CFG))
         cfg = db.all_config(conn)
+    # This activity used to carry its own console password.  The console signs in
+    # through the panel now, so the hash is dropped instead of migrated: leaving
+    # it in place would leave a credential nothing checks and nobody rotates.
     if cfg.get("admin_pass"):
-        return
-    pw = os.environ.get("LOTTERY_ADMIN_PASSWORD") or secrets.token_urlsafe(9)
-    with db.tx(conn):
-        db.set_config_raw(conn, "admin_pass", auth.hash_password(pw))
-        model.ensure_seed(conn)
-    path = os.path.join(db.DATA_DIR, "admin_password.txt")
-    try:
-        os.makedirs(db.DATA_DIR, exist_ok=True)
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write("username: %s\npassword: %s\n" % (cfg.get("admin_user"), pw))
-    except OSError:
-        pass
-    log("=" * 62)
-    log("FIRST RUN - admin account created")
-    log("  username: %s" % cfg.get("admin_user"))
-    log("  password: %s" % pw)
-    log("  (also written to data/admin_password.txt, chmod 600)")
-    log("=" * 62)
+        with db.tx(conn):
+            db.set_config_raw(conn, "admin_pass", "")
+    if not db.get_config(conn, "seeded"):
+        with db.tx(conn):
+            model.ensure_seed(conn)
+            db.set_config_raw(conn, "seeded", 1)
 
 
 def main():

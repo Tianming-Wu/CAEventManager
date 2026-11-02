@@ -66,13 +66,12 @@ MODULE_PAGES = ("ops", "roster", "tickets", "draw")
 PLATFORM_PAGES = (("settings", "\u6d3b\u52a8\u8bbe\u7f6e"), ("log", "\u65e5\u5fd7"))
 # The public pages the core can draw.  A module declares which of them it uses;
 # anything undeclared is a 404 for that activity.
-DEFAULT_EXTERNAL = ("board", "screen", "checkin", "admin", "login")
+DEFAULT_EXTERNAL = ("board", "screen", "checkin", "admin")
 EXTERNAL_TITLE = {
     "board": "\u516c\u793a\u9875",
     "screen": "\u5927\u5c4f",
     "checkin": "\u7b7e\u5230",
     "admin": "\u63a7\u5236\u53f0",
-    "login": "\u767b\u5f55",
 }
 
 PAGE_TITLE = {

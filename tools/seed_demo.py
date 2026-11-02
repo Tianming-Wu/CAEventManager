@@ -2,10 +2,12 @@
 # -*- coding: utf-8 -*-
 """Seed a running instance with a realistic 60-student event (for UI testing).
 
-    python3 tools/seed_demo.py http://127.0.0.1:8931 PASSWORD
+    python3 tools/seed_demo.py http://127.0.0.1:8931 OWNER_PASSWORD
 
 Creates 60 students, staggers check-ins, and completes the two tasks for most of
 them with plausible timing.  Safe to re-run (it updates by student id).
+
+The console signs in with a panel account, so the password here is the owner's.
 """
 import json
 import os
@@ -27,13 +29,17 @@ jar = http.cookiejar.CookieJar()
 opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
 
 
-def call(path, body=None, method=None):
+PANEL = BASE.rsplit("/", 1)[0]
+
+
+def call(path, body=None, method=None, panel=False):
     data = json.dumps(body).encode() if body is not None else None
-    headers = {"X-Requested-With": "lottery"}
+    headers = {"X-Requested-With": "CAEventManager" if panel else "lottery"}
     if data:
         headers["Content-Type"] = "application/json"
     req = urllib.request.Request(
-        BASE + path, data=data, headers=headers, method=method or ("POST" if data else "GET")
+        (PANEL if panel else BASE) + path, data=data, headers=headers,
+        method=method or ("POST" if data else "GET")
     )
     with opener.open(req, timeout=30) as res:
         return json.loads(res.read().decode())
@@ -47,7 +53,9 @@ GIVEN = ["伟", "芳", "娜", "敏", "静", "磊", "洋", "勇", "艳", "杰",
 
 
 def main():
-    call("/api/login", {"user": "laffey", "pass": PASSWORD})
+    # one account for both surfaces: the console rides on the panel session
+    owner = os.environ.get("LOTTERY_OWNER") or "owner"
+    call("/api/panel/login", {"username": owner, "password": PASSWORD}, panel=True)
     rng = random.Random(20261030)
 
     rows = ["学号,姓名,班级,身份"]

@@ -21,6 +21,8 @@ import _baseurl  # noqa: E402
 
 BASE = _baseurl.api_base(sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8931")
 PASSWORD = sys.argv[2] if len(sys.argv) > 2 else ""
+# the console rides on a panel account; the owner is the one that always exists
+OWNER = os.environ.get("LOTTERY_OWNER") or "owner"
 SHOTS = sys.argv[3] if len(sys.argv) > 3 else os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tmp", "ui"
 )
@@ -117,16 +119,23 @@ def main():
 
         # ------------------------------------------------------------ login
         print("== login ==")
+        # The console signs in through the panel now: same account, same cookie.
         page.goto(BASE + "/admin", wait_until="networkidle")
-        check("unauthenticated /admin bounces to login", "/login" in page.url, page.url)
+        check("an unauthenticated console goes to the panel login",
+              "/login" in page.url, page.url)
         shot(page, "00-login")
-        page.fill("#user", "laffey")
-        page.fill("#pass", PASSWORD)
+        page.fill("#username", OWNER)
+        page.fill("#password", PASSWORD)
         page.click("#go")
         page.wait_for_url("**/admin", timeout=15000)
         page.wait_for_selector("#rosterTable tbody tr", timeout=15000)
         page.wait_for_timeout(400)
         check("logged in", "/admin" in page.url)
+        check("it came back to the console it asked for", page.url.endswith("/admin"),
+              page.url)
+        who = page.inner_text("#whoami") or ""
+        check("the console shows who is signed in", bool(who), who)
+        check("and which side of the activity they are on", "负责人" in who, who)
         check("roster table rendered", page.locator("#rosterTable tbody tr").count() > 40,
               page.locator("#rosterTable tbody tr").count())
         shot(page, "01-admin-ops")

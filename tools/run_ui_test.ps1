@@ -34,9 +34,9 @@ Start-Process -FilePath "python" `
     -RedirectStandardOutput "data\out.log" -RedirectStandardError "data\err.log" -NoNewWindow
 Start-Sleep -Seconds 2
 
-if (-not (Test-Path "data\admin_password.txt")) { throw "service did not boot; see data\err.log" }
-$pw = (Get-Content "data\admin_password.txt" | Where-Object { $_ -like "password:*" }) -replace "^password:\s*", ""
-Write-Host "   admin password: $pw"
+if (-not (Test-Path "data\owner_password.txt")) { throw "service did not boot; see data\err.log" }
+$pw = (Get-Content "data\owner_password.txt" | Where-Object { $_ -like "password:*" }) -replace "^password:\s*", ""
+Write-Host "   owner password: $pw"
 
 if (-not $KeepData) {
     Write-Host "== seeding demo event =="

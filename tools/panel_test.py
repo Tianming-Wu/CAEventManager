@@ -369,15 +369,43 @@ def main():
     check("the numeric id is unchanged", row["seq"] == ev2["seq"], row)
     ev2["token"] = rotated["token"]      # later checks use the live address
 
-    print("== the console page bar ==")
-    req = urllib.request.Request(
+    print("== the console rides on the panel session ==")
+    console_req = urllib.request.Request(
         ROOT + "/" + ev2["token"] + "/api/admin/console",
         headers={"X-Requested-With": "lottery"})
     try:
-        owner.open(req, timeout=20)
-        check("the console page list needs a session", False, "served without one")
+        anon.open(console_req, timeout=20)
+        check("the console needs a panel session", False, "served without one")
     except urllib.error.HTTPError as exc:
-        check("the console page list needs a session", exc.code == 401, exc.code)
+        check("the console needs a panel session", exc.code == 401, exc.code)
+    # a signed-in account that is not on this activity gets nothing
+    try:
+        member.open(console_req, timeout=20)
+        check("a seat on the activity is what opens its console", False, "served anyway")
+    except urllib.error.HTTPError as exc:
+        check("a seat on the activity is what opens its console", exc.code == 403,
+              exc.code)
+    mine = urllib.request.Request(
+        ROOT + "/" + ev["token"] + "/api/admin/console",
+        headers={"X-Requested-With": "lottery"})
+    with owner.open(mine, timeout=20) as res:
+        pages = json.loads(res.read())
+        check("the activity the owner runs answers", res.status == 200 and pages["ok"],
+              res.status)
+    # and a browser with no session is sent to the panel's login, not a console one
+    landing = session()
+    with landing.open(ROOT + "/" + ev["token"] + "/admin", timeout=20) as res:
+        check("an unsigned console lands on the panel login",
+              "/login" in res.geturl() and "s_return=" in res.geturl(), res.geturl())
+    # a signed-in account with no seat is refused in place, not sent in circles
+    try:
+        member.open(ROOT + "/" + ev["token"] + "/admin", timeout=20)
+        check("a signed-in non-member is refused, not redirected", False, "served anyway")
+    except urllib.error.HTTPError as exc:
+        refusal = exc.read()
+        check("a signed-in non-member is refused, not redirected",
+              exc.code == 403 and "不是这个活动的成员".encode("utf-8") in refusal,
+              exc.code)
 
     print("== archiving an activity ==")
     post(teacher, "/api/panel/event/archive", {"seq": ev2["seq"]}, expect=403)

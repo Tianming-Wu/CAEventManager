@@ -74,6 +74,11 @@ def set_current_event(seq):
     if getattr(_local, "seq", None) != int(seq):
         _local.seq = int(seq)
 
+
+def current_event():
+    """Which event this thread is serving; the dispatcher sets it per request."""
+    return getattr(_local, "seq", DEFAULT_SEQ)
+
 KINDS = ("checkin", "task1", "task2")
 KIND_LABEL = {"checkin": "签到", "task1": "任务一", "task2": "任务二", "bonus": "速度奖励"}
 
@@ -92,8 +97,6 @@ DEFAULT_CONFIG = {
     "public_base_url": "",
     "show_times": True,
     "show_sid": False,
-    "admin_user": "laffey",
-    "admin_pass": "",           # pbkdf2 hash, set on first run
     "tie_seed": 0,              # 0 => generated lazily; breaks remainder ties
     "finalized": False,
     "finalized_at": 0,
@@ -164,14 +167,6 @@ CREATE TABLE IF NOT EXISTS audit (
     detail      TEXT
 );
 CREATE INDEX IF NOT EXISTS audit_ts ON audit(ts);
-
-CREATE TABLE IF NOT EXISTS sessions (
-    token        TEXT PRIMARY KEY,
-    created_at   REAL NOT NULL,
-    expires_at   REAL NOT NULL,
-    unlock_until REAL NOT NULL DEFAULT 0,
-    ip           TEXT
-);
 
 CREATE TABLE IF NOT EXISTS draws (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -320,7 +315,6 @@ def all_config(conn):
 def config_view(conn):
     """Config with secrets removed - this is what clients may see."""
     cfg = all_config(conn)
-    cfg.pop("admin_pass", None)
     return cfg
 
 

@@ -58,6 +58,41 @@ def post(path, body=None, expect=200):
     return call(path, body if body is not None else {}, method="POST", expect=expect)
 
 
+# The panel sits above the activity's address, and it is the only door now:
+# the console signs in with a panel account and a seat on the activity.
+PANEL = BASE.rsplit("/", 1)[0]
+
+
+def panel_call(path, body=None, expect=200, method=None):
+    url = PANEL + path
+    data = None
+    headers = {"X-Requested-With": "CAEventManager"}
+    if body is not None:
+        data = json.dumps(body).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(
+        url, data=data, headers=headers,
+        method=method or ("POST" if data is not None else "GET"))
+    try:
+        with opener.open(req, timeout=20) as res:
+            status, raw = res.status, res.read()
+    except urllib.error.HTTPError as exc:
+        status, raw = exc.code, exc.read()
+    if status != expect:
+        failures.append("%s %s -> %d (expected %d): %s"
+                        % (method or "GET", path, status, expect, raw[:200]))
+        return None
+    try:
+        return json.loads(raw.decode("utf-8"))
+    except Exception:
+        return raw
+
+
+def console_login(username, password):
+    return panel_call("/api/panel/login",
+                      {"username": username, "password": password})
+
+
 def check(name, cond, detail=""):
     if cond:
         print("  PASS  %s" % name)
@@ -78,18 +113,25 @@ def state_students(state):
     return state["students"]
 
 
-def password():
+def owner_credentials():
+    """The panel account that owns this activity; the console rides on it now."""
+    user = os.environ.get("LOTTERY_OWNER") or "owner"
     if len(sys.argv) > 2:
-        return sys.argv[2]
-    path = os.path.join(HERE, "data", "admin_password.txt")
-    if os.path.exists(path):
+        return user, sys.argv[2]
+    for name in ("owner_password.txt",):
+        path = os.path.join(HERE, "data", name)
+        if not os.path.exists(path):
+            continue
+        found = {}
         for line in open(path, encoding="utf-8"):
-            if line.startswith("password:"):
-                return line.split(":", 1)[1].strip()
-    env = os.environ.get("LOTTERY_ADMIN_PASSWORD")
+            key, _, value = line.partition(":")
+            found[key.strip()] = value.strip()
+        if found.get("password"):
+            return found.get("username", user), found["password"]
+    env = os.environ.get("LOTTERY_OWNER_PASSWORD")
     if env:
-        return env
-    raise SystemExit("no password: pass it as argv[2] or set LOTTERY_ADMIN_PASSWORD")
+        return user, env
+    raise SystemExit("no owner password: pass it as argv[2] or set LOTTERY_OWNER_PASSWORD")
 
 
 def main():
@@ -113,15 +155,25 @@ def main():
     check("board has no secrets", board is None or "admin_pass" not in json.dumps(board))
 
     print("== auth ==")
-    post("/api/login", {"user": "laffey", "pass": "definitely-wrong"}, expect=401)
-    check("bad password rejected", True)
+    # The console has no password of its own any more: the panel account is the
+    # only identity, and a seat on the activity is what opens the console.
+    user, pw = owner_credentials()
     me = call("/api/me")
     check("not authed yet", me and me.get("authed") is False)
     call("/api/admin/state", expect=401)
     check("admin api guarded", True)
-    post("/api/login", {"user": "laffey", "pass": password()})
+    panel_call("/api/panel/login", {"username": user, "password": "definitely-wrong"},
+               expect=401)
+    check("a bad panel password is rejected", True)
+    call("/api/admin/state", expect=401)
+    check("still no console without a session", True)
+    console_login(user, pw)
     me = call("/api/me")
-    check("authed after login", me and me.get("authed") is True)
+    check("authed after the panel login", me and me.get("authed") is True, me)
+    check("the console knows who it is", me and me.get("user"), me)
+    check("and that they run this activity", me and me.get("role") == "owner", me)
+    post("/api/login", {"user": "laffey", "pass": "x"}, expect=410)
+    check("the old console password is gone", True)
 
     print("== csrf ==")
     req = urllib.request.Request(

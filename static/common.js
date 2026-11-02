@@ -12,6 +12,17 @@
 
   var PREFIX = prefix();
 
+  // The activity's own address has the panel one level above it.  The console
+  // has no login of its own any more: it sends people to the panel and comes
+  // back here, which is what makes one account work on both surfaces.
+  var PANEL = PREFIX.replace(/\/[^/]+$/, "");
+
+  function panelLoginUrl(back) {
+    var target = back === undefined ? location.pathname : back;
+    if (!target) return PANEL + "/login";
+    return PANEL + "/login?s_return=" + encodeURIComponent(target);
+  }
+
   function api(path, options) {
     options = options || {};
     var init = {
@@ -176,6 +187,8 @@
 
   window.LT = {
     PREFIX: PREFIX,
+    PANEL: PANEL,
+    panelLoginUrl: panelLoginUrl,
     api: api,
     esc: esc,
     pad: pad,

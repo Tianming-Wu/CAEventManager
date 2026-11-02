@@ -846,3 +846,11 @@ textarea { resize: vertical; min-height: 120px; font-family: var(--mono); font-s
   .prize-row { grid-template-columns: 1fr 4.5em auto; }
   .prize-row .mode { grid-column: 1 / -1; }
 }
+
+/* who is signed in at the console; it is a panel account, so it is shown */
+.who {
+  font-size: .78rem;
+  color: var(--muted);
+  white-space: nowrap;
+  padding-right: 2px;
+}

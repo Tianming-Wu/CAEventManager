@@ -16,10 +16,13 @@
 /<token>/          活动公示页，只读，无鉴权
 /<token>/screen    大屏投影页
 /<token>/checkin   自助签到，须带 ?t= 时效 token
-/<token>/admin     活动控制台
-/<token>/login     活动登录
+/<token>/admin     活动控制台，用主面板账号登录
+/<token>/login     跳转到主面板登录，登录后回到该活动后台
 /s/<code>          限时短码跳转，由控制台生成
 ```
+
+活动后台没有自己的账号体系：它用主面板账号登录，沿用主面板的会话 cookie，因此同一个浏览器里
+不需要输第二次密码。能否进入某个活动的后台，取决于该账号是不是这个活动的负责人或成员。
 
 路由与外部前缀无关：路径里出现已知活动 token 时按活动处理，否则把剩余路径按主面板路由匹配，因此
 本机直连、反向代理前缀、将来的子域名都无需改代码。`public_base_prefix` 只用于生成绝对链接
@@ -112,6 +115,6 @@ cd ~/apps/eventmanager
 活动标题、奖票池、奖品、大屏阶段、导出时区等属于单个活动，存在该活动自己的库里，不进 `config.json`。
 环境变量可覆盖：`LOTTERY_CONFIG`、`LOTTERY_DATA_DIR`、`LOTTERY_HOST`、`LOTTERY_PORT`。数据目录中，
 `data/panel.sqlite3` 存账号与活动元数据，`data/events/<seq>.sqlite3` 是每个活动自己的库，`data/avatars/`
-存头像，首次启动生成的站长与活动管理员密码在 `data/owner_password.txt` 与 `data/admin_password.txt`。
+存头像，首次启动生成的站长密码在 `data/owner_password.txt`。
 
 Powered with ❤ by Tianming & Deepseek

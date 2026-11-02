@@ -22,6 +22,7 @@
     </label>
     <a class="btn sm ghost" href="screen" target="_blank" rel="noopener">大屏 ↗</a>
     <a class="btn sm ghost" href="./" target="_blank" rel="noopener">公示 ↗</a>
+    <span class="who" id="whoami"></span>
     <button class="btn sm ghost" id="logoutBtn">退出</button>
   </div>
 </header>
@@ -335,7 +336,7 @@
   
         <div id="qrHolder" class="row" style="align-items:flex-start;gap:14px;margin-bottom:10px"></div>
         <p class="note" style="word-break:break-all" id="secretUrl"></p>
-        <button class="btn danger sm" id="rotateSecretBtn">重新生成访问 id（需解锁）</button>
+        <p class="note">地址失效请到总管理面板的活动卡片菜单里重置</p>
       </div>
     </div>
 
@@ -348,24 +349,6 @@
         <a class="btn danger" id="exportZipLink" href="#" target="_blank" rel="noopener"
            style="padding:10px 22px;font-size:.95rem">下载数据</a>
         <a class="btn ghost sm" id="exportLink" href="#" target="_blank" rel="noopener">仅名单 CSV</a>
-      </div>
-      <p class="note" style="margin-top:10px">
-        归档（只读冻结、移交总管理面板）等总管理面板上线后再接。
-      </p>
-    </div>
-
-    <div class="panel">
-      <h2>管理员</h2>
-      <div class="row">
-        <div class="field" style="min-width:140px;margin:0"><label>账号</label><input id="setUser" type="text" name="admin_account" autocomplete="off" data-form-type="other" spellcheck="false"></div>
-        <button class="btn" id="saveUserBtn" style="margin-top:18px">保存账号</button>
-      </div>
-      <hr style="border:none;border-top:1px solid var(--line);margin:14px 0">
-      <div class="row">
-        <div class="field" style="min-width:140px;margin:0"><label>当前密码</label><input id="pwOld" type="password" autocomplete="current-password"></div>
-        <div class="field" style="min-width:140px;margin:0"><label>新密码(≥6位)</label><input id="pwNew" type="password" autocomplete="new-password"></div>
-        <button class="btn" id="pwBtn" style="margin-top:18px">修改密码</button>
-        <span class="note" id="pwNote"></span>
       </div>
     </div>
   </section>

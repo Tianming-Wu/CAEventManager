@@ -176,6 +176,15 @@ def main():
     check("the existing event is listed", len(events) == 1, events)
     check("event links point at the token path",
           events and "/" in events[0]["admin"] and events[0]["id"] in events[0]["url"], events)
+    ev = events[0]
+    check("the event has a numeric id apart from its token",
+          isinstance(ev.get("seq"), int) and ev["seq"] >= 1
+          and ev["seq"] != ev["token"], ev)
+    check("the id is not part of the address",
+          str(ev["seq"]) not in ev["admin"].split(ev["token"])[0], ev["admin"])
+    check("the event records a kind", bool(ev.get("kind")), ev)
+    check("the owner is the owner",
+          ev.get("role") == "owner", ev.get("role"))
 
     accs = call(owner, "/api/panel/accounts")
     pending = [a for a in accs["accounts"] if a["status"] == "pending"]

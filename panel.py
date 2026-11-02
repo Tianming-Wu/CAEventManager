@@ -35,6 +35,21 @@ COOKIE = "xl_panel_session"
 SESSION_TTL = 7 * 24 * 3600
 FOOTER = "xlottery project | Powered with ❤ by Tianming &amp; Deepseek ❤🐋"
 
+# The events table: ``seq`` is the storage id, ``token`` is the access one.
+# Keeping them apart makes rotating the token a one-column update instead of a
+# data move, and it keeps the numeric id out of every URL.
+EVENTS_DDL = """CREATE TABLE IF NOT EXISTS events (
+    seq         INTEGER PRIMARY KEY AUTOINCREMENT,
+    token       TEXT    NOT NULL UNIQUE,
+    title       TEXT    NOT NULL DEFAULT '',
+    note        TEXT    NOT NULL DEFAULT '',
+    kind        TEXT    NOT NULL DEFAULT '',
+    params      TEXT    NOT NULL DEFAULT '{}',
+    owner_id    INTEGER,
+    created_at  REAL    NOT NULL,
+    archived_at REAL    NOT NULL DEFAULT 0
+);"""
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS accounts (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -52,13 +67,27 @@ CREATE TABLE IF NOT EXISTS accounts (
     avatar_at   REAL    NOT NULL DEFAULT 0
 );
 
-CREATE TABLE IF NOT EXISTS events (
-    id          TEXT PRIMARY KEY,          -- the 32-char token in the URL
-    title       TEXT    NOT NULL DEFAULT '',
-    owner       TEXT    NOT NULL DEFAULT '',
-    note        TEXT    NOT NULL DEFAULT '',
-    created_at  REAL    NOT NULL,
-    archived_at REAL    NOT NULL DEFAULT 0
+""" + EVENTS_DDL + """
+
+CREATE TABLE IF NOT EXISTS event_members (
+    seq        INTEGER NOT NULL,
+    account_id INTEGER NOT NULL,
+    role       TEXT    NOT NULL DEFAULT 'member',   -- owner | member
+    state      TEXT    NOT NULL DEFAULT 'pending',  -- pending | active
+    added_at   REAL    NOT NULL,
+    PRIMARY KEY (seq, account_id)
+);
+
+CREATE TABLE IF NOT EXISTS account_groups (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT    NOT NULL UNIQUE,
+    created_at REAL    NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS account_group_members (
+    group_id   INTEGER NOT NULL,
+    account_id INTEGER NOT NULL,
+    PRIMARY KEY (group_id, account_id)
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
@@ -130,9 +159,68 @@ LATE_COLUMNS = (
 )
 
 
+DEFAULT_KIND = "nwuca.lottery"
+
+
+def _migrate_events(conn):
+    """Rewrite the first events table into the id/token shape.
+
+    The old table keyed an event by its token, so rotating a token meant moving
+    data.  ``seq`` is the id now: a counter, so it cannot collide, and it never
+    appears in a URL.
+    """
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(events)")}
+    if not columns or "seq" in columns:
+        return False
+
+    owner_id = None
+    row = conn.execute("SELECT id FROM accounts WHERE role='owner'").fetchone()
+    if row is not None:
+        owner_id = row["id"]
+
+    conn.execute("ALTER TABLE events RENAME TO events_old")
+    conn.executescript(EVENTS_DDL)
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS event_members (
+            seq        INTEGER NOT NULL,
+            account_id INTEGER NOT NULL,
+            role       TEXT    NOT NULL DEFAULT 'member',
+            state      TEXT    NOT NULL DEFAULT 'pending',
+            added_at   REAL    NOT NULL,
+            PRIMARY KEY (seq, account_id)
+        );
+    """)
+
+    for old in conn.execute("SELECT * FROM events_old ORDER BY created_at"):
+        who = owner_id
+        if old["owner"]:
+            found = conn.execute("SELECT id FROM accounts WHERE username=?",
+                                 (old["owner"],)).fetchone()
+            if found is not None:
+                who = found["id"]
+        cur = conn.execute(
+            "INSERT INTO events (token, title, note, kind, params, owner_id,"
+            " created_at, archived_at) VALUES (?,?,?,?,?,?,?,?)",
+            (old["id"], old["title"], old["note"], DEFAULT_KIND, "{}",
+             who, old["created_at"], old["archived_at"]))
+        if who is not None:
+            conn.execute(
+                "INSERT OR IGNORE INTO event_members"
+                " (seq, account_id, role, state, added_at) VALUES (?,?,?,?,?)",
+                (cur.lastrowid, who, "owner", "active", old["created_at"]))
+
+    conn.execute("DROP TABLE events_old")
+    conn.execute(
+        "INSERT INTO audit (ts, actor, action, detail) VALUES (?,?,?,?)",
+        (time.time(), "system", "events_migrated", "id/token split"))
+    return True
+
+
 def init_db():
     conn = connect()
     conn.executescript(SCHEMA)
+    if _migrate_events(conn):
+        conn.executescript(SCHEMA)
     for table, column, spec in LATE_COLUMNS:
         have = {row["name"] for row in conn.execute("PRAGMA table_info(%s)" % table)}
         if column not in have:
@@ -300,20 +388,25 @@ def view(row):
     }
 
 
-def event_view(row, base):
-    """Links for one event.
+def event_view(row, base, role=None):
+    """Links and metadata for one event.
 
-    ``base`` is the event's public URL, which for the single-event installation
-    already ends in the token - appending it again produced
-    ``.../<token>/<token>/admin``.  Accept either shape.
+    Links are rebuilt from ``token`` every time and never stored, so rotating a
+    token invalidates the old addresses without touching the event itself.
+    ``base`` may already end in the token; both shapes are accepted.
     """
     base = (base or "").rstrip("/")
-    root = base if base.endswith("/" + row["id"]) else base + "/" + row["id"]
+    token = row["token"]
+    root = base if base.endswith("/" + token) else base + "/" + token
     return {
-        "id": row["id"],
+        "seq": row["seq"],
+        "id": token,
+        "token": token,
+        "kind": row["kind"],
+        "role": role,
         "title": row["title"],
-        "owner": row["owner"],
         "note": row["note"],
+        "ownerName": (row["owner_name"] if "owner_name" in row.keys() else "") or "",
         "createdAt": row["created_at"],
         "archivedAt": row["archived_at"],
         "url": root + "/",
@@ -391,13 +484,23 @@ def bootstrap(cfg, event_token_hint=None, log=print):
 
     # the first event already exists as the service's original access id
     if event_token_hint:
-        row = conn.execute("SELECT 1 FROM events WHERE id=?", (event_token_hint,)).fetchone()
+        row = conn.execute("SELECT 1 FROM events WHERE token=?",
+                           (event_token_hint,)).fetchone()
         if row is None:
+            owner_row = conn.execute("SELECT id FROM accounts WHERE role='owner'").fetchone()
             with tx() as t:
-                t.execute(
-                    "INSERT INTO events (id, title, owner, note, created_at) VALUES (?,?,?,?,?)",
-                    (event_token_hint, "", "", "首个活动（沿用原有访问 id）", time.time()),
+                cur = t.execute(
+                    "INSERT INTO events (token, title, note, kind, params, owner_id,"
+                    " created_at) VALUES (?,?,?,?,?,?,?)",
+                    (event_token_hint, "", "首个活动（沿用原有访问 id）",
+                     DEFAULT_KIND, "{}", owner_row["id"] if owner_row else None,
+                     time.time()),
                 )
+                if owner_row is not None:
+                    t.execute(
+                        "INSERT OR IGNORE INTO event_members"
+                        " (seq, account_id, role, state, added_at) VALUES (?,?,?,?,?)",
+                        (cur.lastrowid, owner_row["id"], "owner", "active", time.time()))
                 audit(t, "system", "event_adopt", event_token_hint, None)
 
 
@@ -415,7 +518,7 @@ def _is_panel_route(path):
 
 
 def event_tokens(extra=()):
-    """Every id that identifies an event: registered ones plus the current one.
+    """Every token that addresses an event: registered ones plus the configured one.
 
     Routing keys off this list, not off the configured public prefix, so the app
     answers on whatever path the request happened to arrive by (local, platform
@@ -424,8 +527,8 @@ def event_tokens(extra=()):
     tokens = {t for t in extra if t}
     try:
         conn = connect()
-        for row in conn.execute("SELECT id FROM events"):
-            tokens.add(row["id"])
+        for row in conn.execute("SELECT token FROM events"):
+            tokens.add(row["token"])
     except Exception:
         pass
     return tokens

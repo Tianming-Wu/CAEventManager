@@ -101,13 +101,15 @@
     }
   }
 
-  // The adopted first event has no owner recorded; treat it as the owner's.
-  function isMine(e) {
-    if (!S.me) return false;
-    if (!e.owner) return isOwner();
-    return e.owner === S.me.username;
+  // The panel reports which side of an event this account is on.  The two lists
+  // are mutually exclusive: an event you created is not one you "joined".
+  function ownedEvents() {
+    return S.events.filter(function (e) { return e.role === "owner"; });
   }
-  function myEvents() { return S.events.filter(isMine); }
+  function joinedEvents() {
+    return S.events.filter(function (e) { return e.role === "member"; });
+  }
+  function myEvents() { return ownedEvents().concat(joinedEvents()); }
   function pendingAccounts() {
     return S.accounts.filter(function (a) { return a.status === "pending"; });
   }
@@ -478,10 +480,15 @@
       stack.hidden = true;
     }
 
-    var mine = myEvents();
-    $("#myEvents").innerHTML = mine.length
-      ? mine.map(function (e) { return eventCard(e); }).join("")
-      : '<div class="empty">还没有活动。申请通过后会出现在这里。</div>';
+    var owned = ownedEvents();
+    $("#ownedEvents").innerHTML = owned.length
+      ? owned.map(function (e) { return eventCard(e); }).join("")
+      : '<div class="empty">还没有创建过活动</div>';
+
+    var joined = joinedEvents();
+    $("#joinedEvents").innerHTML = joined.length
+      ? joined.map(function (e) { return eventCard(e); }).join("")
+      : '<div class="empty">还没有参与别人创建的活动</div>';
   }
 
   function drawTemplates() {
@@ -582,7 +589,7 @@
         "<td><b>" + PX.esc(eventTitle(e)) + "</b></td>" +
         '<td class="mono" style="font-size:.78rem" title="' + PX.esc(e.id) + '">' +
         PX.esc(shortToken(e.id)) + "</td>" +
-        "<td>" + PX.esc(e.owner || "—") + "</td>" +
+        "<td>" + PX.esc(e.ownerName || "—") + "</td>" +
         '<td class="mono">' + PX.when(e.createdAt) + "</td>" +
         '<td class="actions">' +
         // the public board, the projector page and the console are all reachable

@@ -675,8 +675,13 @@ class Handler(BaseHTTPRequestHandler):
             # the public base lives in the event database, not the panel one
             event_conn = db.connect()
             base = public_base_url(event_conn)
-            rows = conn.execute("SELECT * FROM events ORDER BY created_at").fetchall()
-            events = [panel.event_view(r, base) for r in rows]
+            rows = conn.execute(
+                "SELECT e.*, m.role AS my_role, o.name AS owner_name"
+                " FROM events e"
+                " LEFT JOIN event_members m ON m.seq = e.seq AND m.account_id = ?"
+                " LEFT JOIN accounts o ON o.id = e.owner_id"
+                " ORDER BY e.created_at", (acc["id"],)).fetchall()
+            events = [panel.event_view(r, base, r["my_role"]) for r in rows]
             # The adopted first event has no name of its own; borrow the live one
             # while there is exactly one event, so the list is not a row of dashes.
             if len(events) == 1 and not events[0]["title"]:

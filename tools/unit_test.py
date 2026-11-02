@@ -12,6 +12,7 @@ Feeding it a fake ``/proc`` exercises the real code path on any platform.
 import os
 import sys
 import tempfile
+import time
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, HERE)
@@ -50,6 +51,75 @@ def fake_proc(stat_a, stat_b, meminfo):
     with real_open(os.path.join(root, "meminfo"), "w", encoding="utf-8") as fh:
         fh.write(meminfo)
     return root, fake_open
+
+
+OLD_PANEL_DDL = """
+CREATE TABLE accounts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL DEFAULT '', role TEXT NOT NULL DEFAULT 'admin',
+    status TEXT NOT NULL DEFAULT 'pending', pass TEXT NOT NULL,
+    note TEXT NOT NULL DEFAULT '', created_at REAL NOT NULL,
+    decided_at REAL NOT NULL DEFAULT 0, decided_by TEXT NOT NULL DEFAULT '',
+    last_login REAL NOT NULL DEFAULT 0
+);
+CREATE TABLE events (
+    id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '',
+    owner TEXT NOT NULL DEFAULT '', note TEXT NOT NULL DEFAULT '',
+    created_at REAL NOT NULL, archived_at REAL NOT NULL DEFAULT 0
+);
+"""
+
+
+def migrate_events():
+    """An installation from before the id/token split must come out readable."""
+    import sqlite3
+
+    import panel
+
+    root = tempfile.mkdtemp(prefix="panel-migrate-")
+    path = os.path.join(root, "panel.sqlite3")
+    db = sqlite3.connect(path)
+    db.executescript(OLD_PANEL_DDL)
+    db.execute("INSERT INTO accounts (username, name, role, status, pass, created_at)"
+               " VALUES ('owner','老站长','owner','active','x',?)", (time.time(),))
+    db.execute("INSERT INTO events (id, title, owner, note, created_at)"
+               " VALUES (?,?,?,?,?)",
+               ("Old" + "A" * 29, "旧活动", "nobody", "note", time.time() - 60))
+    db.commit()
+    db.close()
+
+    previous = os.environ.get("LOTTERY_DATA_DIR")
+    os.environ["LOTTERY_DATA_DIR"] = root
+    try:
+        panel.init_db()
+        conn = panel.connect()
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(events)")}
+        check("the events table has the new columns",
+              {"seq", "token", "kind", "params", "owner_id"} <= columns, sorted(columns))
+        row = conn.execute("SELECT * FROM events").fetchone()
+        check("the token is kept", row["token"] == "Old" + "A" * 29, dict(row))
+        check("a numeric id is assigned", row["seq"] == 1, row["seq"])
+        check("the old title survives", row["title"] == "旧活动", row["title"])
+        check("a kind is recorded", bool(row["kind"]), row["kind"])
+        member = conn.execute("SELECT * FROM event_members").fetchone()
+        check("the owner becomes a member",
+              member is not None and member["role"] == "owner", dict(member) if member else None)
+        check("routing still finds the token",
+              "Old" + "A" * 29 in panel.event_tokens(), sorted(panel.event_tokens()))
+        view = panel.event_view(row, "https://example.test/prefix", "owner")
+        check("links are rebuilt from the token",
+              view["admin"] == "https://example.test/prefix/Old" + "A" * 29 + "/admin",
+              view["admin"])
+
+        print("== a second run must not migrate again ==")
+        panel.init_db()
+        again = panel.connect().execute("SELECT COUNT(*) AS n FROM events").fetchone()["n"]
+        check("no duplicate rows", again == 1, again)
+    finally:
+        if previous is None:
+            os.environ.pop("LOTTERY_DATA_DIR", None)
+        else:
+            os.environ["LOTTERY_DATA_DIR"] = previous
 
 
 def main():
@@ -92,6 +162,9 @@ def main():
     finally:
         builtins.open = real_open
     check("a broken file returns None instead of raising", broken is None, broken)
+
+    print("== the event table migration ==")
+    migrate_events()
 
     print("== the panel's own helpers ==")
     check("view() maps the role label",

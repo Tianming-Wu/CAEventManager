@@ -338,19 +338,35 @@ def search_page(page):
 
 
 def card_page(page):
+    print("== 我的活动 is two mutually exclusive cards ==")
+    page.goto(BASE + "/panel#/events")
+    page.wait_for_timeout(420)
+    cards = page.evaluate("""() => ({
+        owned: document.querySelectorAll('#ownedEvents .event-card').length,
+        joined: document.querySelectorAll('#joinedEvents .event-card').length,
+        headings: Array.from(document.querySelectorAll(
+            '.page[data-page="events"] .card-head h2')).map(h => h.textContent.trim()),
+    })""")
+    check("the page has both headings",
+          cards["headings"] == ["我创建的活动", "我参与的活动"],
+          cards["headings"])
+    check("an event appears on exactly one side",
+          cards["owned"] + cards["joined"] <= 1 or
+          (cards["owned"] == 1 and cards["joined"] == 0), cards)
+
     print("== the activity card ==")
     page.goto(BASE + "/panel#/events")
     page.wait_for_timeout(400)
     cols = page.evaluate("""() => {
-        const grid = document.getElementById('myEvents');
+        const grid = document.getElementById('ownedEvents');
         return getComputedStyle(grid).gridTemplateColumns.split(' ')
             .filter(Boolean).length;
     }""")
     check("three cards fit across a page", cols == 3, cols)
     check("the token is shortened, not wrapped",
-          page.locator("#myEvents .event-token code").count() == 1)
+          page.locator("#ownedEvents .event-token code").count() == 1)
     label = page.evaluate("""() => {
-        const box = document.querySelector('#myEvents .event-token');
+        const box = document.querySelector('#ownedEvents .event-token');
         const tag = box.querySelector('.token-label');
         if (!tag) return null;
         const code = box.querySelector('code');
@@ -367,18 +383,18 @@ def card_page(page):
     check("the label is darker than the value", label and
           label["labelInk"] < label["valueInk"], label)
     check("it keeps both ends and stars the middle", page.evaluate("""() => {
-        const el = document.querySelector('#myEvents .event-token code');
+        const el = document.querySelector('#ownedEvents .event-token code');
         const full = el.title, shown = el.textContent;
         return shown.length < full.length && full.startsWith(shown.slice(0, 4))
                && full.endsWith(shown.slice(-5)) && shown.indexOf('****') > 0;
     }"""))
     check("one 管理面板 button, nothing else",
-          page.locator("#myEvents .event-actions a").count() == 1 and
-          page.locator("#myEvents .event-actions a").inner_text().strip() == "管理面板")
+          page.locator("#ownedEvents .event-actions a").count() == 1 and
+          page.locator("#ownedEvents .event-actions a").inner_text().strip() == "管理面板")
 
     print("== the card menu ==")
     check("no menu until asked", page.locator(".card-menu").count() == 0)
-    page.click("#myEvents .card-menu-btn")
+    page.click("#ownedEvents .card-menu-btn")
     page.wait_for_timeout(240)
     check("the three-dot button opens a menu",
           page.locator(".card-menu").is_visible())
@@ -403,10 +419,10 @@ def card_page(page):
     check("escape closes it", page.locator(".card-menu").count() == 0)
 
     print("== copy ==")
-    page.click("#myEvents .copy-btn")
+    page.click("#ownedEvents .copy-btn")
     page.wait_for_timeout(320)
     check("the copy button reports back", page.evaluate(
-        "() => document.querySelector('#myEvents .copy-btn').classList"
+        "() => document.querySelector('#ownedEvents .copy-btn').classList"
         ".contains('copied')"))
 
 

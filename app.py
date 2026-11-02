@@ -702,6 +702,28 @@ class Handler(BaseHTTPRequestHandler):
                                "now": time.time(),
                                "version": VERSION})
 
+        if path == "/invites" and method == "GET":
+            acc = panel.session_account(conn, self._panel_token())
+            if acc is None:
+                raise model.ApiError("未登录或登录已过期", 401)
+            rows = panel.invites_for(conn, acc["id"])
+            titles = {}
+            for r in rows:
+                # the row on the events table is often empty: the name lives
+                # in the event's own database, borrowed the way /events does it
+                if not r["title"]:
+                    db.set_current_event(r["seq"])
+                    titles[r["seq"]] = (
+                        db.all_config(db.connect()).get("title") or "")
+            return self._json({"ok": True, "invites": [
+                {"seq": r["seq"],
+                 "title": r["title"] or titles.get(r["seq"], ""),
+                 "role": r["role"],
+                 "roleLabel": panel.SEAT_LABEL.get(r["role"], r["role"]),
+                 "addedAt": r["added_at"],
+                 "invitedBy": r["inviter_name"] or r["inviter_username"] or ""}
+                for r in rows]})
+
         if path == "/register" and method == "POST":
             data = body()
             username = (data.get("username") or "").strip()
@@ -820,6 +842,28 @@ class Handler(BaseHTTPRequestHandler):
                 panel.audit(tx, acc["username"], "sudo_off")
             return self._json({"ok": True, "sudoUntil": 0})
 
+        if path == "/invite" and method == "POST":
+            data = body()
+            seq = int(data.get("seq") or 0)
+            action = (data.get("action") or "").strip()
+            seat = conn.execute(
+                "SELECT state FROM event_members WHERE seq=? AND account_id=?",
+                (seq, acc["id"])).fetchone()
+            if seat is None or seat["state"] != "pending":
+                raise model.ApiError("这条邀请已经不在等待中了", 404)
+            if action not in ("accept", "decline"):
+                raise model.ApiError("未知操作")
+            state = "active" if action == "accept" else "declined"
+            with panel.tx() as tx:
+                tx.execute(
+                    "UPDATE event_members SET state=?, state_at=?"
+                    " WHERE seq=? AND account_id=?",
+                    (state, time.time(), seq, acc["id"]))
+                panel.audit(tx, acc["username"],
+                            "event_member_accept" if action == "accept"
+                            else "event_member_decline", str(seq))
+            return self._json({"ok": True, "state": state})
+
         if path == "/password" and method == "POST":
             data = body()
             if not panel.verify_password(data.get("old") or "", acc["pass"]):
@@ -847,8 +891,9 @@ class Handler(BaseHTTPRequestHandler):
                 "SELECT e.*, m.role AS my_role, o.name AS owner_name"
                 " FROM events e"
                 " LEFT JOIN event_members m ON m.seq = e.seq AND m.account_id = ?"
+                "   AND m.state='active'"
                 " LEFT JOIN accounts o ON o.id = e.owner_id"
-                " WHERE e.archived_at=0"
+                " WHERE e.archived_at=0 AND m.seq IS NOT NULL"
                 " ORDER BY e.created_at", (acc["id"],)).fetchall()
             # the public base lives in an event database, not the panel one;
             # with a single event there is no ambiguity about which one
@@ -1441,6 +1486,106 @@ class Handler(BaseHTTPRequestHandler):
 
         # ---- everything below needs a seat on this activity ----
         me = self._require_console()
+
+        def need_owner():
+            if me.role != "owner":
+                raise model.ApiError("只有该活动的负责人能管理成员", 403)
+            return me
+
+        if path == "/api/admin/members" and method == "GET":
+            # the roster is the platform's page, and the owner's business
+            need_owner()
+            seq = db.current_event()
+            rows = panel.event_members(me.conn, seq)
+            return self._json({
+                "ok": True,
+                "members": [panel.seat_view(r) for r in rows],
+                "me": {"accountId": me.acc["id"], "role": me.role},
+                "seats": panel.open_seats(me.conn, seq),
+            })
+
+        if path == "/api/admin/members/search" and method == "GET":
+            need_owner()
+            q = (query.get("q") or [""])[0].strip()
+            if len(q) < 1:
+                return self._json({"ok": True, "accounts": []})
+            like = "%" + q + "%"
+            rows = me.conn.execute(
+                "SELECT id, username, name, role FROM accounts"
+                " WHERE status='active'"
+                "   AND (username LIKE ? OR name LIKE ?)"
+                "   AND id NOT IN (SELECT account_id FROM event_members WHERE seq=?)"
+                " ORDER BY CASE role WHEN 'owner' THEN 0 WHEN 'superadmin' THEN 1 ELSE 2 END,"
+                "          name, username LIMIT 8",
+                (like, like, db.current_event())).fetchall()
+            return self._json({"ok": True, "accounts": [
+                {"id": r["id"], "username": r["username"], "name": r["name"],
+                 "role": r["role"], "roleLabel": panel.ROLE_LABEL.get(r["role"], r["role"])}
+                for r in rows]})
+
+        if path == "/api/admin/member" and method == "POST":
+            self._check_csrf()
+            need_owner()
+            data = self._body()
+            seq = db.current_event()
+            account_id = int(data.get("accountId") or 0)
+            action = (data.get("action") or "").strip()
+            seat = me.conn.execute(
+                "SELECT * FROM event_members WHERE seq=? AND account_id=?",
+                (seq, account_id)).fetchone()
+            target = me.conn.execute("SELECT * FROM accounts WHERE id=?",
+                                     (account_id,)).fetchone()
+            now = time.time()
+            if action == "invite":
+                if target is None or target["status"] != "active":
+                    raise model.ApiError("这个账号现在不能加入活动", 404)
+                if seat is not None and seat["state"] == "active":
+                    raise model.ApiError("这个人已经在活动里了")
+                if seat is not None and seat["state"] == "pending":
+                    raise model.ApiError("已经邀请过了，等对方确认")
+                role = (seat["role"] if seat is not None and seat["role"] == "owner"
+                        else "member")
+                with panel.tx() as tx:
+                    tx.execute(
+                        "INSERT INTO event_members"
+                        " (seq, account_id, role, state, added_at, invited_by, state_at)"
+                        " VALUES (?,?,?,?,?,?,?)"
+                        " ON CONFLICT(seq, account_id) DO UPDATE SET"
+                        "   state='pending', invited_by=excluded.invited_by,"
+                        "   state_at=excluded.state_at",
+                        (seq, account_id, role, "pending", now, me.acc["id"], now))
+                    panel.audit(tx, me.acc["username"],
+                                "event_member_invite" if seat is None
+                                else "event_member_reinvite",
+                                target["username"], str(seq))
+                return self._json({"ok": True, "state": "pending"})
+            if action == "cancel":
+                if seat is None or seat["state"] != "pending":
+                    raise model.ApiError("这条邀请已经不在等待中了")
+                with panel.tx() as tx:
+                    tx.execute("DELETE FROM event_members WHERE seq=? AND account_id=?",
+                               (seq, account_id))
+                    panel.audit(tx, me.acc["username"], "event_member_cancel",
+                                target["username"] if target else str(account_id), str(seq))
+                return self._json({"ok": True, "state": "none"})
+            if action == "revoke":
+                if seat is None or seat["state"] != "active":
+                    raise model.ApiError("这个人现在不在活动里")
+                if account_id == me.acc["id"]:
+                    raise model.ApiError("不能把自己移出活动，请先转让负责人")
+                if seat["role"] == "owner" and panel.owners_of(me.conn, seq) <= 1:
+                    raise model.ApiError("这是活动唯一的负责人，不能移出")
+                with panel.tx() as tx:
+                    # the row stays: who was there and when they left is part of
+                    # the record, and re-inviting is a new fact, not an undo
+                    tx.execute(
+                        "UPDATE event_members SET state='revoked', state_at=?"
+                        " WHERE seq=? AND account_id=?", (now, seq, account_id))
+                    panel.audit(tx, me.acc["username"], "event_member_revoke",
+                                target["username"] if target else str(account_id), str(seq))
+                return self._json({"ok": True, "state": "revoked"})
+            raise model.ApiError("未知操作")
+
         if path == "/api/admin/console" and method == "GET":
             cfg = db.all_config(conn)
             kind_id = cfg.get("module") or cfg.get("kind") or "nwuca.lottery"

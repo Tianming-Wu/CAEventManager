@@ -461,7 +461,7 @@ def main():
         check("name wall stays hidden", screen.locator(".wall .w").count() == 0)
 
         # the toggle must bring it back
-        page.click('#tabs button[data-tab="settings"]')
+        page.click('#tabs button[data-tab="config"]')
         page.wait_for_timeout(500)
         page.click("label:has(#setScreenWall)")
         page.click("#saveSettingsBtn")
@@ -596,17 +596,40 @@ def main():
         shot(pboard, "18-board-phone")
 
         # ------------------------------------------------------------ settings
-        print("== settings / log ==")
-        page.click('#tabs button[data-tab="settings"]')
+        print("== 奖票设置 / 活动设置 / 日志 ==")
+        page.click('#tabs button[data-tab="config"]')
         page.wait_for_timeout(800)
-        check("settings QR rendered", page.locator("#qrHolder svg").count() == 1)
-        shot(page, "19-settings", full=True)
+        check("the module's own page still draws the QR",
+              page.locator("#qrHolder svg").count() == 1)
+        shot(page, "19-config", full=True)
+
+        # 活动设置 is the platform's page: members, and the activity itself
+        page.click('#tabs button[data-tab="settings"]')
+        page.wait_for_selector("#memberTable tbody tr", timeout=15000)
+        page.wait_for_timeout(400)
+        rows = page.eval_on_selector_all(
+            "#memberTable tbody tr",
+            "r => r.map(x => x.innerText.replace(/\\s+/g, ' ').trim())")
+        check("the roster lists the owner as 负责人",
+              len(rows) == 1 and "负责人" in rows[0], rows)
+        check("the activity card names the activity",
+              page.inner_text("#eventInfo").strip() != "", page.inner_text("#eventInfo"))
+        page.click("#memberInviteBtn")
+        page.wait_for_selector("#invQ", timeout=8000)
+        page.fill("#invQ", "no-such-account")
+        page.wait_for_timeout(600)
+        check("a search with no match says so",
+              "没有匹配的账号" in page.inner_text("#invHits"),
+              page.inner_text("#invHits"))
+        page.click("#invDone")
+        page.wait_for_timeout(300)
+        shot(page, "20-settings", full=True)
 
         page.click('#tabs button[data-tab="log"]')
         page.wait_for_timeout(800)
         check("audit log filled", page.locator("#logTable tbody tr").count() > 5,
               page.locator("#logTable tbody tr").count())
-        shot(page, "20-log")
+        shot(page, "21-log")
 
         # -------------------------------------------------- dark scheme -----
         print("== dark scheme ==")

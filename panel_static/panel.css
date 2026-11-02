@@ -511,33 +511,48 @@ button.nav-item {
 
 /* the password prompt: one narrow window, one thing to type */
 .overlay-card.narrow { width: min(404px, 100%); }
+/* no header bar - the mark and the name are the header, and 取消 is the way out */
+.overlay-card.narrow .overlay-head { display: none; }
+.overlay-card.narrow .overlay-body { padding: 26px 24px 20px; }
 .sudo-prompt { display: flex; flex-direction: column; }
 .sudo-prompt-mark {
   align-self: center;
   display: grid;
   place-items: center;
-  width: 46px;
-  height: 46px;
-  margin: 4px 0 14px;
+  width: 58px;
+  height: 58px;
+  margin: 2px 0 14px;
   border-radius: 50%;
   background: var(--accent-soft);
   color: var(--accent-strong);
 }
 .sudo-prompt-mark svg {
-  width: 26px;
-  height: 26px;
+  width: 34px;
+  height: 34px;
   fill: none;
   stroke: currentColor;
   stroke-width: 1.5;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
+.sudo-prompt-title {
+  margin: 0 0 10px;
+  text-align: center;
+  font-size: 1.05rem;
+}
 .sudo-prompt-note {
-  margin: 0 0 16px;
+  margin: 0 0 6px;
   text-align: center;
   color: var(--muted);
   font-size: .86rem;
   line-height: 1.6;
+}
+.sudo-prompt-action {
+  margin: 0 0 16px;
+  text-align: center;
+  font-size: .84rem;
+  color: var(--accent-strong);
+  font-weight: 600;
 }
 .sudo-prompt-label {
   margin-bottom: 6px;
@@ -633,6 +648,21 @@ button.nav-item {
   margin-left: auto;
 }
 .stack-title { margin: 0 0 8px; color: var(--muted); font-size: .82rem; font-weight: 600; }
+/* one invitation: what it is, and the two answers */
+.invite-request {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  margin-bottom: 8px;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+}
+.invite-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 260px; }
+.invite-text .page-sub { flex: 0 0 auto; }
+.invite-request .page-actions { flex: 0 0 auto; margin-left: auto; }
 .invite-stack { margin-bottom: 16px; }
 
 /* ---------- cards ---------- */
@@ -1093,21 +1123,57 @@ table.tbl td.wrap { white-space: normal; min-width: 12em; }
 #kindForm .field input[type="text"],
 #kindForm .field select,
 #kindForm .field input[type="number"] { max-width: 460px; }
-.kind-field { margin-bottom: 14px; }
+.field.kind-field { margin-bottom: 18px; }
 /* a required choice starts on "请选择" and reads as a placeholder, not an answer */
 select:invalid { color: var(--dim); }
 [data-show-when][hidden] { display: none !important; }
-.kind-field:last-child { margin-bottom: 0; }
+.field.kind-field:last-child { margin-bottom: 0; }
+/* `.field label` is a block with its own margins; a checkbox row is a label too,
+   so it needs to say so louder than that rule does */
+.field label.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 0;
+  cursor: pointer;
+}
 .check { display: flex; align-items: center; gap: 8px; cursor: pointer; }
 .check input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: 0 0 auto;
+  display: grid;
+  place-content: center;
   width: 18px;
   height: 18px;
   margin: 0;
-  accent-color: var(--accent);
+  border: 1.5px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface);
   cursor: pointer;
+  transition: background .12s ease, border-color .12s ease;
+}
+/* place-content centres this exactly: same distance from all four edges */
+.check input[type="checkbox"]::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  background: var(--accent-ink);
+  clip-path: polygon(13% 47%, 0 61%, 39% 100%, 100% 23%, 87% 9%, 38% 73%);
+  transform: scale(0);
+  transition: transform .12s ease;
+}
+.check input[type="checkbox"]:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.check input[type="checkbox"]:checked::before { transform: scale(1); }
+.check input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
-.invite-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.invite-request { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .invite-slot {
   flex: 0 0 auto;
   width: 52px;
@@ -1311,7 +1377,7 @@ select:invalid { color: var(--dim); }
 .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
 .grow { flex: 1 1 160px; min-width: 140px; }
 .field { margin-bottom: 0; }
-.field label { display: block; font-size: .78rem; color: var(--muted); margin-bottom: 4px; }
+.field label { display: block; font-size: .78rem; color: var(--muted); margin-bottom: 6px; }
 .hp {
   position: absolute;
   width: 1px;

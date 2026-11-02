@@ -180,14 +180,20 @@
   function openOverlay(kind, title, html) {
     overlayKind = kind;
     var card = $("#overlay").firstElementChild;
-    if (card) card.classList.toggle("narrow", kind === "sudo");
+    if (card) {
+      // the password prompt is its own thing: narrow, and with the title
+      // inside the body under the mark instead of a header bar with an x
+      card.classList.toggle("narrow", kind === "sudo");
+      if (kind === "sudo") card.setAttribute("aria-label", title);
+      else card.removeAttribute("aria-label");
+    }
     overlayOpener = document.activeElement;
     $("#overlayTitle").textContent = title;
     $("#overlayBody").innerHTML = html;
     $("#overlay").hidden = false;
     document.body.style.overflow = "hidden";
     var close = $("#overlayClose");
-    if (close) close.focus();
+    if (close && kind !== "sudo") close.focus();
   }
 
   function closeOverlay() {
@@ -370,14 +376,14 @@
     if (SUDO.asker) return SUDO.asker.promise;
     var cancel = null;
     var promise = new Promise(function (resolve, reject) {
-      // the dialog is about one thing, so it says which action opened it
-      var note = what
-        ? "「" + PX.esc(what) + "」需要再次输入密码确认身份"
-        : "再次输入密码确认身份，十分钟内不再询问";
+      // which action opened the dialog is the only thing worth naming here
+      var action = what ? "「" + PX.esc(what) + "」" : "";
       openOverlay("sudo", "sudo 模式",
         '<div class="sudo-prompt">' +
         '<span class="sudo-prompt-mark">' + shieldMarkup() + "</span>" +
-        '<p class="sudo-prompt-note">' + note + "</p>" +
+        '<h2 class="sudo-prompt-title">sudo 模式</h2>' +
+        '<p class="sudo-prompt-note">您正在进入 sudo 模式，十分钟内敏感操作将不需要认证</p>' +
+        (action ? '<p class="sudo-prompt-action">' + action + "</p>" : "") +
         '<label class="sudo-prompt-label" for="sudoPass">当前账号密码</label>' +
         '<input id="sudoPass" type="password" autocomplete="current-password" ' +
         'maxlength="128">' +
@@ -592,47 +598,63 @@
     }).catch(fail);
   }
 
-  function confirmRotate(seq) {
-    var e = S.events.filter(function (x) { return String(x.seq) === String(seq); })[0];
-    closeCardMenu();
-    openOverlay("rotate", "重置访问地址",
-      '<p class="page-sub">会生成一个新的 token，之前所有指向该活动的链接立即失效。'
-      + "</p>"
-      + (e ? '<p class="page-sub">活动：' + PX.esc(eventTitle(e)) + "</p>" : "")
+  // High-risk actions keep one light confirmation even while elevated: the
+  // password proves who is acting, not that this particular click was meant.
+  // While not elevated the password prompt is that confirmation, so this is
+  // skipped - typing it is already deliberate, and cancelling it leaves no
+  // trace because nothing ever reached the server.
+  function confirmHighRisk(title, note, label, danger, run) {
+    if (!sudoActive()) return run();
+    openOverlay("confirm", title,
+      '<p class="page-sub">' + note + "</p>"
       + '<div class="row" style="margin-top:18px;justify-content:flex-end">'
       + '<button class="btn" type="button" data-close-overlay="1">取消</button>'
-      + '<button class="btn primary" type="button" data-rotate-confirm="'
-      + seq + '">重新生成</button></div>');
+      + '<button class="btn ' + (danger ? "danger" : "primary") + '" type="button" '
+      + 'id="confirmGo">' + label + "</button></div>");
+    $("#confirmGo").addEventListener("click", function () {
+      closeOverlay();
+      run();
+    });
   }
 
   function rotateEvent(seq) {
-    apiSudo("/event/rotate", { method: "POST", body: { seq: Number(seq) } }, "重置访问地址")
-      .then(function () {
-        closeOverlay();
-        PX.toast("已生成新的访问地址");
-        return reloadAll();
-      })
-      .catch(fail);
-  }
-
-  function confirmArchive(seq) {
     var e = S.events.filter(function (x) { return String(x.seq) === String(seq); })[0];
     closeCardMenu();
-    openOverlay("archive", "存档活动",
-      '<p class="page-sub">存档后这个活动不再出现在列表里，它的链接也会失效。'
-      + "数据保留，不会被删除。</p>"
-      + (e ? '<p class="page-sub">存档：' + PX.esc(eventTitle(e)) + "</p>" : "")
-      + '<div class="row" style="margin-top:18px;justify-content:flex-end">'
-      + '<button class="btn" type="button" data-close-overlay="1">取消</button>'
-      + '<button class="btn danger" type="button" data-archive-confirm="' + seq + '">'
-      + "存档</button></div>");
+    confirmHighRisk("重置访问地址",
+      "会生成一个新的 token，之前所有指向该活动的链接立即失效。"
+      + (e ? "<br>活动：" + PX.esc(eventTitle(e)) : ""),
+      "重新生成", false,
+      function () {
+        apiSudo("/event/rotate", { method: "POST", body: { seq: Number(seq) } }, "重置访问地址")
+          .then(function () {
+            PX.toast("已生成新的访问地址");
+            return reloadAll();
+          })
+          .catch(fail);
+      });
   }
 
   function archiveEvent(seq) {
-    apiSudo("/event/archive", { method: "POST", body: { seq: Number(seq) } }, "存档活动")
+    var e = S.events.filter(function (x) { return String(x.seq) === String(seq); })[0];
+    closeCardMenu();
+    confirmHighRisk("存档活动",
+      "存档后这个活动不再出现在列表里，它的链接也会失效。数据保留，不会被删除。"
+      + (e ? "<br>存档：" + PX.esc(eventTitle(e)) : ""),
+      "存档", true,
+      function () {
+        apiSudo("/event/archive", { method: "POST", body: { seq: Number(seq) } }, "存档活动")
+          .then(function () {
+            PX.toast("已存档");
+            return reloadAll();
+          })
+          .catch(fail);
+      });
+  }
+
+  function decideInvite(seq, action) {
+    PX.api("/invite", { method: "POST", body: { seq: Number(seq), action: action } })
       .then(function () {
-        closeOverlay();
-        PX.toast("已存档");
+        PX.toast(action === "accept" ? "已加入活动" : "已拒绝邀请");
         return reloadAll();
       })
       .catch(fail);
@@ -879,15 +901,24 @@
   }
 
   function drawEvents() {
-    // UNWIRED(invites): 收到邀请后这里置顶显示；现在没有后端，永远走空分支。
     var stack = $("#inviteStack");
     if (S.invites.length) {
       stack.hidden = false;
-      $("#inviteList").innerHTML = S.invites.map(function (e) {
-        return eventCard(e, '<div class="event-meta">邀请你加入</div>');
+      $("#inviteList").innerHTML = S.invites.map(function (inv) {
+        return '<div class="invite-request">' +
+          '<div class="invite-text"><b>' + PX.esc(inv.title || "未命名活动") + "</b>" +
+          '<span class="page-sub">' +
+          PX.esc(inv.invitedBy ? inv.invitedBy + " 邀请你加入" : "邀请你加入") +
+          "</span></div>" +
+          '<div class="page-actions">' +
+          '<button class="btn sm" type="button" data-request="decline" data-seq="' +
+          inv.seq + '">拒绝</button>' +
+          '<button class="btn sm primary" type="button" data-request="accept" data-seq="' +
+          inv.seq + '">接受</button></div></div>';
       }).join("");
     } else {
       stack.hidden = true;
+      $("#inviteList").innerHTML = "";
     }
 
     var owned = ownedEvents();
@@ -1511,6 +1542,15 @@
     });
   }
 
+  function loadInvites() {
+    return PX.api("/invites").then(function (d) {
+      S.invites = d.invites || [];
+      // the badge lives in the sidebar and is painted with the identity, which
+      // happens before this list is known
+      $("#inviteBadge").hidden = S.invites.length === 0;
+    }).catch(function () { S.invites = []; });
+  }
+
   function loadEvents() {
     return PX.api("/events").then(function (d) { S.events = d.events || []; })
       .catch(function () { S.events = []; });
@@ -1533,7 +1573,7 @@
 
   function reloadAll() {
     return loadAccounts().then(function () {
-      return Promise.all([loadEvents(), loadAudit()]);
+      return Promise.all([loadEvents(), loadInvites(), loadAudit()]);
     }).then(function () {
       applyRoleVisibility();
       draw();
@@ -1640,17 +1680,15 @@
     if (banYes) return doBan(banYes.getAttribute("data-ban-confirm"));
 
     var rotateBtn = t.closest("[data-rotate]");
-    if (rotateBtn) return confirmRotate(rotateBtn.getAttribute("data-rotate"));
-
-    var rotateYes = t.closest("[data-rotate-confirm]");
-    if (rotateYes) return rotateEvent(rotateYes.getAttribute("data-rotate-confirm"));
+    if (rotateBtn) return rotateEvent(rotateBtn.getAttribute("data-rotate"));
 
     var archiveBtn = t.closest("[data-archive]");
-    if (archiveBtn) return confirmArchive(archiveBtn.getAttribute("data-archive"));
+    if (archiveBtn) return archiveEvent(archiveBtn.getAttribute("data-archive"));
 
-    var archiveYes = t.closest("[data-archive-confirm]");
-    if (archiveYes) {
-      return archiveEvent(archiveYes.getAttribute("data-archive-confirm"));
+    var requestBtn = t.closest("[data-request]");
+    if (requestBtn) {
+      return decideInvite(requestBtn.getAttribute("data-seq"),
+                          requestBtn.getAttribute("data-request"));
     }
 
     var renameBtn = t.closest("[data-rename]");

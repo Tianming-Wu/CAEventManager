@@ -854,3 +854,37 @@ textarea { resize: vertical; min-height: 120px; font-family: var(--mono); font-s
   white-space: nowrap;
   padding-right: 2px;
 }
+
+/* ---------- 活动设置：成员 ---------- */
+/* a seat that was revoked or declined stays on the list, greyed: the record of
+   who was there is part of the activity, not something to erase */
+.muted-row td { color: var(--dim); }
+.muted-row td b { color: var(--muted); font-weight: 600; }
+.kv {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 14px;
+  margin: 0;
+  font-size: .88rem;
+}
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; word-break: break-all; }
+
+.pick-list { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.pick {
+  appearance: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.pick:hover { border-color: var(--accent); background: var(--accent-soft); }

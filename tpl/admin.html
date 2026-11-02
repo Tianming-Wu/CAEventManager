@@ -241,8 +241,8 @@
     </div>
   </section>
 
-  <!-- ======================= 设置 ======================= -->
-  <section id="tab-settings" class="hidden">
+  <!-- =================== 奖票设置（活动模块） =================== -->
+  <section id="tab-config" class="hidden">
     <div class="grid-2">
       <div class="panel">
         <h2>基本</h2>
@@ -350,6 +350,37 @@
            style="padding:10px 22px;font-size:.95rem">下载数据</a>
         <a class="btn ghost sm" id="exportLink" href="#" target="_blank" rel="noopener">仅名单 CSV</a>
       </div>
+    </div>
+  </section>
+
+  <!-- =================== 活动设置（平台绘制） =================== -->
+  <section id="tab-settings" class="hidden">
+    <div class="panel">
+      <div class="row" style="margin-bottom:8px">
+        <h2 style="margin:0">成员</h2>
+        <div class="spacer"></div>
+        <button class="btn sm" id="memberInviteBtn">邀请成员</button>
+      </div>
+      <p class="panel-hint">
+        成员用主面板账号登录这个活动后台。被邀请的人要在自己的面板里确认一次才算加入。
+      </p>
+      <div class="tblwrap">
+        <table class="tbl" id="memberTable">
+          <thead><tr>
+            <th>成员</th><th>席位</th><th>状态</th><th>加入时间</th>
+            <th class="actions">操作</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>活动</h2>
+      <dl class="kv" id="eventInfo"></dl>
+      <p class="note" style="margin-top:10px">
+        活动名称、访问地址与存档在总控面板的活动卡片菜单里管理
+      </p>
     </div>
   </section>
 

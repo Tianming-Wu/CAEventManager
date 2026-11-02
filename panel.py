@@ -83,8 +83,10 @@ CREATE TABLE IF NOT EXISTS event_members (
     seq        INTEGER NOT NULL,
     account_id INTEGER NOT NULL,
     role       TEXT    NOT NULL DEFAULT 'member',   -- owner | member
-    state      TEXT    NOT NULL DEFAULT 'pending',  -- pending | active
+    state      TEXT    NOT NULL DEFAULT 'pending',  -- pending | active | revoked | declined
     added_at   REAL    NOT NULL,
+    invited_by INTEGER NOT NULL DEFAULT 0,          -- account id, 0 when unknown
+    state_at   REAL    NOT NULL DEFAULT 0,
     PRIMARY KEY (seq, account_id)
 );
 
@@ -171,6 +173,8 @@ LATE_COLUMNS = (
     ("accounts", "ban_reason", "TEXT NOT NULL DEFAULT ''"),
     ("sessions", "sudo_until", "REAL NOT NULL DEFAULT 0"),
     ("sessions", "unlock_until", "REAL NOT NULL DEFAULT 0"),
+    ("event_members", "invited_by", "INTEGER NOT NULL DEFAULT 0"),
+    ("event_members", "state_at", "REAL NOT NULL DEFAULT 0"),
 )
 
 
@@ -342,6 +346,11 @@ def touch_unlock(conn, token):
     return set_unlock(conn, token, True)
 
 
+SEAT_LABEL = {"owner": "负责人", "member": "参与者"}
+SEAT_STATE_LABEL = {"pending": "待确认", "active": "在场",
+                    "revoked": "已移出", "declined": "已拒绝"}
+
+
 def member_of(conn, seq, account_id):
     """This account's row on that event: role/state, or None if it is not on it."""
     if seq is None or account_id is None:
@@ -349,6 +358,68 @@ def member_of(conn, seq, account_id):
     return conn.execute(
         "SELECT role, state FROM event_members WHERE seq=? AND account_id=?",
         (int(seq), int(account_id))).fetchone()
+
+
+def event_members(conn, seq):
+    """Every seat on one event: those in place first, then pending, then history.
+
+    A revoked seat is never deleted - it is the trace of who was there, so the
+    list keeps it and the interface greys it out.
+    """
+    return conn.execute(
+        "SELECT m.*, a.username, a.name, a.avatar, a.avatar_at,"
+        "       i.name AS invited_by_name, i.username AS invited_by_username"
+        " FROM event_members m"
+        " JOIN accounts a ON a.id = m.account_id"
+        " LEFT JOIN accounts i ON i.id = m.invited_by"
+        " WHERE m.seq = ?"
+        " ORDER BY CASE m.state WHEN 'active' THEN 0 WHEN 'pending' THEN 1 ELSE 2 END,"
+        "          CASE m.role WHEN 'owner' THEN 0 ELSE 1 END, m.added_at",
+        (int(seq),)).fetchall()
+
+
+def seat_view(row):
+    return {
+        "accountId": row["account_id"],
+        "username": row["username"],
+        "name": row["name"],
+        "avatar": row["avatar"] or "",
+        "avatarAt": row["avatar_at"] or 0,
+        "role": row["role"],
+        "roleLabel": SEAT_LABEL.get(row["role"], row["role"]),
+        "state": row["state"],
+        "stateLabel": SEAT_STATE_LABEL.get(row["state"], row["state"]),
+        "addedAt": row["added_at"],
+        "stateAt": row["state_at"] or 0,
+        "invitedBy": row["invited_by_name"] or row["invited_by_username"] or "",
+    }
+
+
+def invites_for(conn, account_id):
+    """Invitations waiting on this account, newest first."""
+    return conn.execute(
+        "SELECT m.seq, m.role, m.added_at, e.title, e.token,"
+        "       i.name AS inviter_name, i.username AS inviter_username"
+        " FROM event_members m"
+        " JOIN events e ON e.seq = m.seq"
+        " LEFT JOIN accounts i ON i.id = m.invited_by"
+        " WHERE m.account_id = ? AND m.state = 'pending' AND e.archived_at = 0"
+        " ORDER BY m.added_at DESC", (int(account_id),)).fetchall()
+
+
+def open_seats(conn, seq):
+    """How many people are actually in the activity; the last one cannot leave."""
+    row = conn.execute(
+        "SELECT COUNT(*) AS n FROM event_members"
+        " WHERE seq=? AND state='active'", (int(seq),)).fetchone()
+    return int(row["n"] or 0)
+
+
+def owners_of(conn, seq):
+    row = conn.execute(
+        "SELECT COUNT(*) AS n FROM event_members"
+        " WHERE seq=? AND state='active' AND role='owner'", (int(seq),)).fetchone()
+    return int(row["n"] or 0)
 
 
 def audit(conn, actor, action, target=None, detail=None):

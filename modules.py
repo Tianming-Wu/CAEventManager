@@ -62,7 +62,7 @@ def _read_json(path):
 
 # The pages a kind may ask for.  Anything else is the platform's, not the module's,
 # so a module cannot invent a page the console has no section for.
-MODULE_PAGES = ("ops", "roster", "tickets", "draw")
+MODULE_PAGES = ("ops", "roster", "tickets", "draw", "config")
 PLATFORM_PAGES = (("settings", "\u6d3b\u52a8\u8bbe\u7f6e"), ("log", "\u65e5\u5fd7"))
 # The public pages the core can draw.  A module declares which of them it uses;
 # anything undeclared is a 404 for that activity.
@@ -79,6 +79,7 @@ PAGE_TITLE = {
     "roster": "\u540d\u5355",
     "tickets": "\u5956\u7968",
     "draw": "\u62bd\u5956",
+    "config": "\u5956\u7968\u8bbe\u7f6e",
 }
 
 

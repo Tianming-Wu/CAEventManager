@@ -13,6 +13,7 @@
     { "id": "ops", "title": "操作台" },
     { "id": "roster", "title": "名单" },
     { "id": "tickets", "title": "奖票" },
-    { "id": "draw", "title": "抽奖" }
+    { "id": "draw", "title": "抽奖" },
+    { "id": "config", "title": "奖票设置" }
   ]
 }

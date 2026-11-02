@@ -37,9 +37,11 @@ def session():
     return urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
 
 
-def call(opener, path, body=None, expect=200, method=None):
+def call(opener, path, body=None, expect=200, method=None,
+         marker="CAEventManager"):
+    """Talk to either surface: the console wants its own request marker."""
     data = json.dumps(body).encode() if body is not None else None
-    headers = dict(HEADER)
+    headers = {"X-Requested-With": marker}
     if data:
         headers["Content-Type"] = "application/json"
     req = urllib.request.Request(ROOT + path, data=data, headers=headers,
@@ -58,8 +60,9 @@ def call(opener, path, body=None, expect=200, method=None):
         return raw
 
 
-def post(opener, path, body=None, expect=200):
-    return call(opener, path, body if body is not None else {}, expect=expect, method="POST")
+def post(opener, path, body=None, expect=200, marker="CAEventManager"):
+    return call(opener, path, body if body is not None else {}, expect=expect,
+                method="POST", marker=marker)
 
 
 def check(name, cond, detail=""):
@@ -406,6 +409,61 @@ def main():
         check("a signed-in non-member is refused, not redirected",
               exc.code == 403 and "不是这个活动的成员".encode("utf-8") in refusal,
               exc.code)
+
+    print("== members: invite, accept, revoke ==")
+    base = "/" + ev["token"]
+    roster = call(owner, base + "/api/admin/members")
+    check("the owner can read the roster", roster and roster["members"], roster)
+    check("it starts with just the owner",
+          [m["username"] for m in roster["members"]] == ["owner"], roster["members"])
+    found = call(owner, base + "/api/admin/members/search?q=teach")
+    check("a search finds an account that is not in yet",
+          found and [a["username"] for a in found["accounts"]] == ["teacher"], found)
+    post(owner, base + "/api/admin/member",
+         {"accountId": teacher_id, "action": "invite"}, marker="lottery")
+    check("the invitation is waiting for them", True)
+    roster = call(owner, base + "/api/admin/members")
+    seat = [m for m in roster["members"] if m["username"] == "teacher"][0]
+    check("a pending seat is not a seat yet", seat["state"] == "pending", seat)
+    check("and it says who asked", seat["invitedBy"] == "站长", seat)
+    invites = call(teacher, "/api/panel/invites")
+    check("the invitee sees it in the panel",
+          invites and len(invites["invites"]) == 1, invites)
+    check("the activity is not on their list before accepting",
+          all(e["seq"] != ev["seq"] for e in call(teacher, "/api/panel/events")["events"]))
+    post(teacher, "/api/panel/invite", {"seq": ev["seq"], "action": "accept"})
+    check("accepting turns it into a seat", True)
+    check("now it is on their list",
+          any(e["seq"] == ev["seq"]
+              for e in call(teacher, "/api/panel/events")["events"]))
+    check("and the console opens for them",
+          call(teacher, base + "/api/admin/state") is not None)
+    post(teacher, base + "/api/admin/member",
+         {"accountId": teacher_id, "action": "revoke"}, expect=403,
+         marker="lottery")
+    check("a plain member cannot manage members", True)
+    post(owner, base + "/api/admin/member",
+         {"accountId": teacher_id, "action": "revoke"}, marker="lottery")
+    roster = call(owner, base + "/api/admin/members")
+    seat = [m for m in roster["members"] if m["username"] == "teacher"][0]
+    check("a revoked seat stays on the record", seat["state"] == "revoked", seat)
+    check("with the time it happened", seat["stateAt"] > 0, seat)
+    check("their console access ends",
+          call(teacher, base + "/api/admin/state", expect=403) is not None)
+    check("and the activity leaves their list",
+          all(e["seq"] != ev["seq"] for e in call(teacher, "/api/panel/events")["events"]))
+    post(owner, base + "/api/admin/member",
+         {"accountId": teacher_id, "action": "invite"}, marker="lottery")
+    check("a revoked seat can be invited again",
+          call(teacher, "/api/panel/invites")["invites"][0]["seq"] == ev["seq"])
+    post(teacher, "/api/panel/invite", {"seq": ev["seq"], "action": "decline"})
+    roster = call(owner, base + "/api/admin/members")
+    seat = [m for m in roster["members"] if m["username"] == "teacher"][0]
+    check("a decline is recorded too", seat["state"] == "declined", seat)
+    post(owner, base + "/api/admin/member",
+         {"accountId": owner_id, "action": "revoke"}, expect=400,
+         marker="lottery")
+    check("the owner cannot remove themselves", True)
 
     print("== archiving an activity ==")
     post(teacher, "/api/panel/event/archive", {"seq": ev2["seq"]}, expect=403)

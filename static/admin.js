@@ -14,6 +14,8 @@
     audit: [],
     draws: [],
     unlocked: false,
+    members: [],
+    seat: {},
     unlockUntil: 0,
     q: "",
     hits: [],
@@ -537,7 +539,7 @@
     renderFullTable();
     renderDraws();
     renderLog();
-    if (S.tab === "settings") renderSettings();
+    if (S.tab === "config") renderSettings();
     if (S.tab === "tickets") renderPlan();
   }
 
@@ -927,7 +929,8 @@
     $$("main > section").forEach(function (s) { s.classList.toggle("hidden", s.id !== "tab-" + name); });
     if (name === "ops") { $("#q").focus(); }
     if (name === "tickets") loadPlan();
-    if (name === "settings") renderSettings();
+    if (name === "config") renderSettings();
+    if (name === "settings") loadMembers();
     if (name === "log") load();
     return name;
   }
@@ -1134,6 +1137,144 @@
       .catch(bad);
   }
 
+  // ------------------------------------------------------------ 活动设置
+  function loadMembers() {
+    LT.api("/api/admin/members").then(function (d) {
+      S.members = d.members || [];
+      S.seat = d.me || {};
+      renderMembers();
+      renderEventInfo();
+    }).catch(function (e) {
+      if (e.status === 401) { location.href = LT.panelLoginUrl(); return; }
+      if (e.status === 403) {
+        $("#memberTable tbody").innerHTML =
+          '<tr><td colspan="5" class="empty">只有该活动的负责人能管理成员</td></tr>';
+        return;
+      }
+      bad(e);
+    });
+  }
+
+  function renderMembers() {
+    var body = $("#memberTable tbody");
+    if (!S.members || !S.members.length) {
+      body.innerHTML = '<tr><td colspan="5" class="empty">还没有成员</td></tr>';
+      return;
+    }
+    body.innerHTML = S.members.map(function (m) {
+      var gone = m.state === "revoked" || m.state === "declined";
+      var actions;
+      if (m.state === "active") {
+        actions = m.accountId === (S.seat || {}).accountId
+          ? '<span class="note">你自己</span>'
+          : '<button class="btn sm danger" data-member="revoke" data-acct="' +
+            m.accountId + '">移出</button>';
+      } else if (m.state === "pending") {
+        actions = '<button class="btn sm" data-member="cancel" data-acct="' +
+          m.accountId + '">取消邀请</button>';
+      } else {
+        actions = '<button class="btn sm" data-member="invite" data-acct="' +
+          m.accountId + '">重新邀请</button>';
+      }
+      return '<tr' + (gone ? ' class="muted-row"' : "") + '>' +
+        '<td><b>' + LT.esc(m.name || m.username) + '</b>' +
+        '<br><span class="note">' + LT.esc(m.username) + '</span></td>' +
+        '<td>' + LT.esc(m.roleLabel) + '</td>' +
+        '<td>' + LT.esc(m.stateLabel) +
+        (m.state === "pending" && m.invitedBy
+          ? '<br><span class="note">' + LT.esc(m.invitedBy) + ' 邀请</span>' : '') +
+        (gone && m.stateAt
+          ? '<br><span class="note">' + LT.fmtDateTime(m.stateAt) + '</span>' : '') +
+        '</td>' +
+        '<td class="mono">' + (m.addedAt ? LT.fmtDateTime(m.addedAt) : '—') + '</td>' +
+        '<td class="actions">' + actions + '</td></tr>';
+    }).join('');
+  }
+
+  function renderEventInfo() {
+    var cfg = S.config || {};
+    var live = (S.members || []).filter(function (m) {
+      return m.state === "active";
+    }).length;
+    var rows = [
+      ["名称", cfg.title || "—"],
+      ["在场成员", live + " 人"],
+      ["访问地址", S.publicBaseUrl || ""]
+    ];
+    $("#eventInfo").innerHTML = rows.map(function (r) {
+      return "<dt>" + LT.esc(r[0]) + "</dt><dd>" + LT.esc(r[1]) + "</dd>";
+    }).join("");
+  }
+
+  function memberAction(accountId, action) {
+    var who = (S.members || []).filter(function (m) {
+      return m.accountId === accountId;
+    })[0] || {};
+    var name = who.name || who.username || "这个人";
+    var ask = {
+      invite: { title: "邀请 " + name + "？",
+                html: "对方会在自己的面板里收到邀请，确认之后才能进这个活动后台。",
+                ok: "邀请", danger: false },
+      revoke: { title: "移出 " + name + "？",
+                html: "席位会变成「已移出」，姓名和加入时间留在名单里，随时可以重新邀请。",
+                ok: "移出", danger: true },
+      cancel: { title: "取消发给 " + name + " 的邀请？",
+                html: "对方还没确认，取消之后这条邀请就作废了。",
+                ok: "取消邀请", danger: true }
+    }[action];
+    if (!ask) return;
+    LT.confirm({ title: ask.title, html: ask.html, okText: ask.ok, danger: ask.danger })
+      .then(function (yes) {
+        if (!yes) return;
+        LT.api("/api/admin/member", {
+          method: "POST", body: { accountId: accountId, action: action }
+        }).then(function () {
+          ok({ invite: "已发出邀请", revoke: "已移出", cancel: "已取消邀请" }[action]);
+          loadMembers();
+        }).catch(bad);
+      });
+  }
+
+  function openInviteSearch() {
+    var back = LT.modal(
+      '<h2>邀请成员</h2>' +
+      '<div class="field"><label>按登录名或称呼搜索</label>' +
+      '<input id="invQ" type="text" autocomplete="off" autofocus></div>' +
+      '<div id="invHits" class="pick-list"></div>' +
+      '<div class="row" style="justify-content:flex-end;margin-top:12px">' +
+      '<button class="btn" id="invDone">关闭</button></div>');
+    $("#invDone").addEventListener("click", back.close);
+    var box = $("#invQ");
+    var timer = null;
+    box.addEventListener("input", function () {
+      clearTimeout(timer);
+      var q = box.value.trim();
+      if (!q) {
+        $("#invHits").innerHTML = "";
+        return;
+      }
+      timer = setTimeout(function () {
+        LT.api("/api/admin/members/search?q=" + encodeURIComponent(q))
+          .then(function (d) {
+            var hits = d.accounts || [];
+            $("#invHits").innerHTML = hits.length ? hits.map(function (a) {
+              return '<button class="pick" type="button" data-pick="' + a.id + '">' +
+                "<b>" + LT.esc(a.name || a.username) + "</b>" +
+                '<span class="note">' + LT.esc(a.username) + " · " +
+                LT.esc(a.roleLabel) + "</span></button>";
+            }).join("") : '<p class="note">没有匹配的账号</p>';
+          }).catch(bad);
+      }, 220);
+    });
+    box.focus();
+    $("#invHits").addEventListener("click", function (e) {
+      var btn = e.target.closest("[data-pick]");
+      if (!btn) return;
+      back.close();
+      memberAction(Number(btn.getAttribute("data-pick")), "invite");
+    });
+  }
+
   function bindSettings() {
     $("#saveSettingsBtn").addEventListener("click", saveSettings);
     $("#setPoolMode").addEventListener("change", function () {
@@ -1166,6 +1307,14 @@
     $("#phaseSigninBtn").addEventListener("click", function () { setPhase("signin"); });
     $("#phaseDrawBtn").addEventListener("click", function () { setPhase("draw"); });
     $("#shortlinkBtn").addEventListener("click", mintShortlink);
+    $("#memberInviteBtn").addEventListener("click", openInviteSearch);
+    $("#memberTable").addEventListener("click", function (e) {
+      var btn = e.target.closest("[data-member]");
+      if (!btn) return;
+      memberAction(Number(btn.getAttribute("data-acct")),
+                   btn.getAttribute("data-member"));
+    });
+
     $("#prizeAddBtn").addEventListener("click", function () {
       var list = collectPrizes().concat([{ name: "", count: 1, mode: "ticket" }]);
       S.config.prizes = list;

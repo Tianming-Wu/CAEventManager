@@ -692,13 +692,17 @@ def create_page(browser):
             page.wait_for_timeout(300)
             check("the menu offers 存档活动", page.locator("[data-archive]").count() == 1)
             page.click("[data-archive]")
-            page.wait_for_timeout(300)
-            check("archiving confirms first", page.locator("#overlay").is_visible())
-            page.click("[data-archive-confirm]")
-            page.wait_for_timeout(500)
-            # archiving is behind the password; it has to be typed in first
-            check("archiving then asks for the password",
+            page.wait_for_timeout(600)
+            # nothing is elevated, so the password prompt is the confirmation:
+            # typing it is deliberate, and cancelling it leaves no trace
+            check("archiving asks for the password straight away",
                   page.locator("#sudoPass").count() == 1)
+            entered = page.inner_text("#overlayBody")
+            check("and names the action", "存档活动" in entered, entered[:60])
+            check("the prompt has no header bar",
+                  page.evaluate("() => getComputedStyle("
+                                "document.querySelector('.overlay-card .overlay-head'))"
+                                ".display") == "none")
             enter_sudo(page)
             page.wait_for_timeout(900)
             left = page.evaluate("""() => Array.from(
@@ -745,8 +749,6 @@ def sudo_page(page):
     page.click(card)
     page.wait_for_timeout(250)
     page.click(".card-menu [data-rotate]")
-    page.wait_for_timeout(300)
-    page.click("#overlayBody [data-rotate-confirm]")
     page.wait_for_timeout(600)
     check("a sensitive action asks for the password",
           page.locator("#sudoPass").count() == 1)
@@ -762,9 +764,7 @@ def sudo_page(page):
     page.click(card)
     page.wait_for_timeout(250)
     page.click(".card-menu [data-rotate]")
-    page.wait_for_timeout(300)
-    page.click("#overlayBody [data-rotate-confirm]")
-    page.wait_for_timeout(500)
+    page.wait_for_timeout(600)
     page.fill("#sudoPass", "wrong-password")
     page.click("#sudoEnter")
     page.wait_for_timeout(700)
@@ -816,12 +816,14 @@ def sudo_page(page):
     check("no password prompt while elevated",
           page.locator("#sudoPass").count() == 0)
     page.click(".card-menu [data-archive]")
-    page.wait_for_timeout(250)
-    page.click("#overlayBody [data-archive-confirm]")
+    page.wait_for_timeout(400)
+    check("an elevated session still gets one light confirmation",
+          page.locator("#confirmGo").count() == 1)
+    check("and it does not ask for the password again",
+          page.locator("#sudoPass").count() == 0)
+    page.click("#confirmGo")
     page.wait_for_timeout(1000)
-    check("and the second action completes without asking",
-          page.locator("#sudoPass").count() == 0
-          and page.locator("#overlay").is_hidden())
+    check("the second action completes", page.locator("#overlay").is_hidden())
     left_now = page.evaluate("""() => Array.from(
         document.querySelectorAll('#ownedEvents .card-menu-btn'))
         .map(el => el.getAttribute('data-menu'))""")
@@ -1190,9 +1192,7 @@ def sudo_expiry(browser):
         page.click(card)
         page.wait_for_timeout(250)
         page.click(".card-menu [data-rotate]")
-        page.wait_for_timeout(250)
-        page.click("#overlayBody [data-rotate-confirm]")
-        page.wait_for_timeout(500)
+        page.wait_for_timeout(600)
         page.fill("#sudoPass", PASSWORD)
         page.click("#sudoEnter")
         page.wait_for_function(
@@ -1226,9 +1226,7 @@ def sudo_expiry(browser):
         page.click(card)
         page.wait_for_timeout(250)
         page.click(".card-menu [data-archive]")
-        page.wait_for_timeout(250)
-        page.click("#overlayBody [data-archive-confirm]")
-        page.wait_for_timeout(500)
+        page.wait_for_timeout(600)
         check("the password is asked for again", page.locator("#sudoPass").count() == 1)
         page.click("#sudoCancel")
         page.wait_for_timeout(200)

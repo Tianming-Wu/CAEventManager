@@ -93,9 +93,6 @@
       el.textContent = fallbackText;
     }
   }
-  function roleIfDistinct(me) {
-    return (me && me.name && me.name !== me.roleLabel) ? me.roleLabel : "";
-  }
 
   // The adopted first event has no owner recorded; treat it as the owner's.
   function isMine(e) {
@@ -282,17 +279,11 @@
     if (acct && !acct.getAttribute("title")) acct.setAttribute("title", "账户信息");
   }
 
+  // One place shows who you are: the card at the bottom of the sidebar.  The
+  // title bar is deliberately empty on that side, free for whatever comes next.
   function renderIdentity() {
     if (!S.me) return;
-    var name = displayName(S.me);
-    var sub = roleIfDistinct(S.me);
-    $("#acctName").textContent = name;
-    $("#acctRole").textContent = sub;
-    $("#acctRole").hidden = !sub;
-    paintAvatar($("#acctAvatar"), S.me, initialOf(S.me));
-    $("#acctBtn").title = name + (sub ? " · " + sub : "");
-
-    $("#sideName").textContent = name;
+    $("#sideName").textContent = displayName(S.me);
     paintAvatar($("#sideAvatar"), S.me, initialOf(S.me));
     var tag = $("#sideRole");
     tag.textContent = S.me.roleLabel;
@@ -582,13 +573,15 @@
     $("#allEventsTable tbody").innerHTML = S.events.length ? S.events.map(function (e) {
       return "<tr>" +
         "<td><b>" + PX.esc(eventTitle(e)) + "</b></td>" +
-        '<td class="mono" style="font-size:.78rem">' + PX.esc(e.id) + "</td>" +
+        '<td class="mono" style="font-size:.78rem" title="' + PX.esc(e.id) + '">' +
+        PX.esc(shortToken(e.id)) + "</td>" +
         "<td>" + PX.esc(e.owner || "—") + "</td>" +
         '<td class="mono">' + PX.when(e.createdAt) + "</td>" +
         '<td class="actions">' +
-        '<a class="btn sm" href="' + PX.esc(e.url) + '" target="_blank" rel="noopener">公示</a> ' +
-        '<a class="btn sm" href="' + PX.esc(e.screen) + '" target="_blank" rel="noopener">大屏</a> ' +
-        '<a class="btn sm primary" href="' + PX.esc(e.admin) + '" target="_blank" rel="noopener">后台</a>' +
+        // the public board, the projector page and the console are all reachable
+        // from inside an event; this list only needs the way in
+        '<a class="btn sm primary" href="' + PX.esc(e.admin) + '" target="_blank" ' +
+        'rel="noopener">管理</a>' +
         "</td></tr>";
     }).join("") : emptyRow(5, "还没有活动");
   }
@@ -957,13 +950,6 @@
     if (e.target.closest && e.target.closest("[data-nav]")) closePane();
   });
 
-  $("#acctBtn").addEventListener("click", function (e) {
-    e.stopPropagation();
-    var menu = $("#acctMenu");
-    var open = menu.hidden;
-    menu.hidden = !open;
-    $("#acctBtn").setAttribute("aria-expanded", open ? "true" : "false");
-  });
   document.addEventListener("click", function (e) {
     // The opener is also on the document, so exclude it: otherwise the menu is
     // closed by the same click that opened it.
@@ -972,11 +958,6 @@
                          e.target.closest("[data-menu]")))) {
       closeCardMenu();
     }
-    var menu = $("#acctMenu");
-    if (menu.hidden) return;
-    if (e.target.closest && e.target.closest(".acct-wrap")) return;
-    menu.hidden = true;
-    $("#acctBtn").setAttribute("aria-expanded", "false");
   });
 
   function logout(returnRoute) {
@@ -1077,11 +1058,6 @@
     if (e.key === "Escape") {
       if (cardMenuEl) return closeCardMenu();
       if (!$("#overlay").hidden) return closeOverlay();
-      if (!$("#acctMenu").hidden) {
-        $("#acctMenu").hidden = true;
-        $("#acctBtn").setAttribute("aria-expanded", "false");
-        return;
-      }
       closePane();
     }
     // keep Tab inside the dialog while it is open

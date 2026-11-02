@@ -177,13 +177,29 @@ def login_page(page):
 
 def shell_page(page):
     print("== the shell ==")
-    check("account name shown", page.locator("#acctName").inner_text().strip() != "")
-    corner = page.evaluate(
-        "() => document.getElementById('acctName').textContent + ' ' +"
-        " document.getElementById('acctRole').textContent")
-    check("the account role is shown in the corner", "站长" in corner, corner)
-    check("avatar shows one letter",
-          len(page.locator("#acctAvatar").inner_text().strip()) == 1)
+    check("the sidebar card shows a name",
+          page.locator("#sideName").inner_text().strip() != "",
+          page.locator("#sideName").inner_text())
+    check("the sidebar card shows the role",
+          "站长" in page.locator("#sideRole").inner_text(),
+          page.locator("#sideRole").inner_text())
+    avatar = page.evaluate("""() => {
+        const el = document.getElementById('sideAvatar');
+        return el.querySelector('img') ? 'picture' : el.textContent.trim();
+    }""")
+    check("the avatar is a picture or one letter",
+          avatar == "picture" or len(avatar) == 1, avatar)
+
+    print("== the title bar keeps its right side free ==")
+    bar = page.evaluate("""() => {
+        const title = document.querySelector('.titlebar');
+        const kids = Array.from(title.children).map(el => el.className);
+        return {kids: kids,
+                hasAccount: !!title.querySelector('.acct'),
+                text: title.innerText.replace(/\\s+/g, ' ').trim()};
+    }""")
+    check("no account card left in the title bar", not bar["hasAccount"], bar["kids"])
+    check("nothing personal stays up there", LOGIN not in bar["text"], bar["text"])
     nav = visible_nav(page)
     for item in ("overview", "events", "templates", "users", "all-events",
                  "server", "audit", "account", "appearance"):
@@ -213,29 +229,10 @@ def shell_page(page):
 
     print("== the login name is not on display ==")
     shown = page.evaluate(
-        "() => document.getElementById('acctName').textContent + '|' +"
-        " document.getElementById('sideName').textContent + '|' +"
-        " document.getElementById('acctBtn').title")
-    check("the corner and the card show a display name",
-          shown.replace("|", "").strip() != "", shown)
-    check("neither shows the login name", LOGIN not in shown, shown)
-
-    print("== the account card is invisible until hovered ==")
-    rest = page.evaluate("""() => {
-        const cs = getComputedStyle(document.getElementById('acctBtn'));
-        return {bg: cs.backgroundColor};
-    }""")
-    page.hover("#acctBtn")
-    page.wait_for_timeout(240)
-    hover = page.evaluate("""() => {
-        const cs = getComputedStyle(document.getElementById('acctBtn'));
-        return {bg: cs.backgroundColor, radius: cs.borderTopLeftRadius};
-    }""")
-    check("resting card has no fill",
-          rest["bg"] in ("rgba(0, 0, 0, 0)", "transparent"), rest)
-    check("hovered card shows a rounded fill",
-          hover["bg"] not in ("rgba(0, 0, 0, 0)", "transparent") and
-          hover["radius"] not in ("0px", ""), hover)
+        "() => document.getElementById('sideName').textContent + '|' +"
+        " document.querySelector('.nav-account').title")
+    check("the card shows a display name", shown.replace("|", "").strip() != "", shown)
+    check("it does not show the login name", LOGIN not in shown, shown)
 
 
 def routes_page(page):
@@ -410,8 +407,17 @@ def profile_page(page):
         timeout=20000)
     check("uploading an avatar shows the picture", page.evaluate(
         "() => document.querySelectorAll('#profileAvatar img').length === 1"))
-    check("the top corner picks it up too", page.evaluate(
-        "() => document.querySelectorAll('#acctAvatar img').length === 1"))
+    check("the sidebar card picks it up too", page.evaluate(
+        "() => document.querySelectorAll('#sideAvatar img').length === 1"))
+    check("and the sidebar image is scaled to its circle", page.evaluate("""() => {
+        const el = document.getElementById('sideAvatar');
+        const img = el.querySelector('img');
+        const r = img.getBoundingClientRect();
+        // the element has a 1px border, so the content box is 2px smaller
+        return Math.abs(r.width - el.clientWidth) < 2 &&
+               Math.abs(r.height - el.clientHeight) < 2 &&
+               getComputedStyle(img).objectFit === 'cover';
+    }"""))
     check("the remove button appears",
           page.locator("#avatarClear").is_visible())
 
@@ -427,11 +433,9 @@ def profile_page(page):
     page.fill("#pfName", "测试改动")
     page.click("#pfSave")
     page.wait_for_timeout(700)
-    check("the corner follows the new name",
-          page.locator("#acctName").inner_text().strip() == "测试改动",
-          page.locator("#acctName").inner_text())
-    check("the sidebar card follows too",
-          page.locator("#sideName").inner_text().strip() == "测试改动")
+    check("the sidebar card follows the new name",
+          page.locator("#sideName").inner_text().strip() == "测试改动",
+          page.locator("#sideName").inner_text())
     page.fill("#pfName", before)
     page.click("#pfSave")
     page.wait_for_timeout(700)
@@ -463,6 +467,48 @@ def write_png(path):
     with open(path, "wb") as fh:
         fh.write(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", head) +
                  chunk(b"IDAT", zlib.compress(row * 4)) + chunk(b"IEND", b""))
+
+
+def users_table(page):
+    print("== a table header must not move when the body empties ==")
+    page.goto(BASE + "/panel#/users")
+    page.wait_for_timeout(420)
+    full = page.evaluate(
+        "() => Array.from(document.querySelectorAll('#accountsTable th'))"
+        ".map(th => Math.round(th.getBoundingClientRect().width))")
+    page.fill("#userSearch", "zzz-no-such-account")
+    page.wait_for_timeout(320)
+    empty = page.evaluate(
+        "() => Array.from(document.querySelectorAll('#accountsTable th'))"
+        ".map(th => Math.round(th.getBoundingClientRect().width))")
+    check("the header is the same width either way", full == empty,
+          "%s vs %s" % (full, empty))
+    check("the empty state still explains itself",
+          "没有匹配" in page.locator("#accountsTable tbody").inner_text())
+    page.fill("#userSearch", "")
+    page.wait_for_timeout(260)
+
+
+def events_table(page):
+    print("== 活动管理 lists the way in, not every page ==")
+    page.goto(BASE + "/panel#/all-events")
+    page.wait_for_timeout(420)
+    links = page.evaluate("""() => Array.from(
+        document.querySelectorAll('#allEventsTable tbody tr'))
+        .map(tr => Array.from(tr.querySelectorAll('a'))
+            .map(a => a.textContent.trim()))""")
+    check("every row has exactly one link", links and all(len(r) == 1 for r in links),
+          links)
+    check("and it is 管理", links and all(r[0] == "管理" for r in links), links)
+    target = page.evaluate(
+        "() => document.querySelector('#allEventsTable tbody a').getAttribute('target')")
+    check("it opens in a new tab", target == "_blank", target)
+
+    print("== signing out lives on the account page ==")
+    page.goto(BASE + "/panel#/account")
+    page.wait_for_timeout(400)
+    check("the account page offers 退出登录",
+          page.locator("#logoutBtn").is_visible())
 
 
 def dialog_page(page):
@@ -763,6 +809,8 @@ def main():
                 group_page(page)
                 card_page(page)
                 profile_page(page)
+                users_table(page)
+                events_table(page)
                 dialog_page(page)
                 theme_page(page)
                 audit_page(page)

@@ -200,100 +200,6 @@ svg {
 }
 .hoststat-num { min-width: 3.1em; text-align: right; }
 
-/* ---------- account card ---------- */
-.acct-wrap { position: relative; }
-.acct {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 8px 6px 12px;
-  min-height: var(--tap);
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-  text-align: right;
-  /* hidden until hovered: only the text and the avatar are visible */
-  transition: background .14s ease, border-color .14s ease;
-}
-.acct:hover,
-.acct:focus-visible,
-.acct[aria-expanded="true"] {
-  background: var(--surface-2);
-  border-color: var(--line);
-  outline: none;
-}
-.acct-text { display: flex; flex-direction: column; line-height: 1.25; min-width: 0; }
-.acct-name {
-  font-size: .84rem;
-  font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 12em;
-}
-.acct-role { font-size: .72rem; color: var(--dim); }
-.avatar {
-  width: 30px;
-  height: 30px;
-  border-radius: 999px;
-  display: grid;
-  place-items: center;
-  overflow: hidden;
-  background: var(--accent-soft);
-  border: 1px solid var(--accent-line);
-  color: var(--accent-strong);
-  font-size: .8rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  flex: 0 0 auto;
-}
-.avatar img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-.avatar-lg {
-  width: 76px;
-  height: 76px;
-  font-size: 1.7rem;
-  border-width: 2px;
-}
-
-.acct-menu {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
-  min-width: 168px;
-  padding: 5px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow);
-  z-index: 40;
-  display: flex;
-  flex-direction: column;
-}
-.acct-menu button {
-  appearance: none;
-  background: transparent;
-  border: 0;
-  border-radius: 5px;
-  color: var(--text);
-  font: inherit;
-  font-size: .86rem;
-  text-align: left;
-  padding: 8px 10px;
-  min-height: 38px;
-  cursor: pointer;
-}
-.acct-menu button:hover { background: var(--surface-2); }
-.acct-menu button.danger { color: var(--danger); }
-.menu-sep { height: 1px; background: var(--line-soft); margin: 4px 2px; }
-
 /* ---------- navigation ---------- */
 .sidebar {
   grid-area: side;
@@ -325,6 +231,35 @@ svg {
 }
 .nav-sep { height: 1px; background: var(--line-soft); margin: 8px 10px; }
 .nav-foot-sep { height: 1px; background: var(--line-soft); margin: 8px 10px 10px; }
+
+/* round avatar, used by the sidebar card and the profile editor */
+.avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  color: var(--accent-strong);
+  font-size: .8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  flex: 0 0 auto;
+}
+.avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.avatar-lg {
+  width: 76px;
+  height: 76px;
+  font-size: 1.7rem;
+  border-width: 2px;
+}
 
 .nav-account {
   display: flex;
@@ -372,6 +307,12 @@ svg {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.nav-account-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 .nav-account .tag { font-size: .7rem; }
 
@@ -723,6 +664,32 @@ table.tbl th {
   z-index: 1;
 }
 table.tbl tbody tr:last-child td { border-bottom: 0; }
+/* Fixed layout keeps the header identical whether the body has rows or not;
+   without it a long empty-state cell redistributes every column. */
+table.tbl.fixed { table-layout: fixed; }
+table.tbl.fixed th,
+table.tbl.fixed td { overflow: hidden; text-overflow: ellipsis; }
+#accountsTable th:nth-child(1) { width: 18%; }
+#accountsTable th:nth-child(2) { width: 16%; }
+#accountsTable th:nth-child(3) { width: 13%; }
+#accountsTable th:nth-child(4) { width: 12%; }
+#accountsTable th:nth-child(5) { width: 20%; }
+#accountsTable th:nth-child(6) { width: 21%; }
+#pendingTable th:nth-child(1) { width: 18%; }
+#pendingTable th:nth-child(2) { width: 14%; }
+#pendingTable th:nth-child(3) { width: 32%; }
+#pendingTable th:nth-child(4) { width: 16%; }
+#pendingTable th:nth-child(5) { width: 20%; }
+#decidedTable th:nth-child(1) { width: 20%; }
+#decidedTable th:nth-child(2) { width: 18%; }
+#decidedTable th:nth-child(3) { width: 16%; }
+#decidedTable th:nth-child(4) { width: 20%; }
+#decidedTable th:nth-child(5) { width: 26%; }
+#allEventsTable th:nth-child(1) { width: 30%; }
+#allEventsTable th:nth-child(2) { width: 26%; }
+#allEventsTable th:nth-child(3) { width: 14%; }
+#allEventsTable th:nth-child(4) { width: 16%; }
+#allEventsTable th:nth-child(5) { width: 14%; }
 table.tbl tbody tr:hover { background: var(--surface-2); }
 table.tbl td.actions { text-align: right; }
 table.tbl td.wrap { white-space: normal; min-width: 12em; }

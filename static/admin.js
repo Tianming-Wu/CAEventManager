@@ -1051,7 +1051,7 @@
   // ------------------------------------------------------------------ settings
   function collectSettings() {
     return {
-      title: $("#setTitle").value.trim(),
+      // title is owned by the master panel now; sending it could overwrite it
       subtitle: $("#setSubtitle").value.trim(),
       public_base_url: $("#setBaseUrl").value.trim(),
       show_times: $("#setShowTimes").checked,

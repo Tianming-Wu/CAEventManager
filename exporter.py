@@ -9,7 +9,7 @@ it answers rather than by table:
     03-奖票明细.csv    每张票的号码、归属、来源、是否已作废
     04-抽奖记录.csv    按抽取顺序，含作废标记
     05-中奖汇总.csv    按人聚合：一个人中了哪些奖
-    06-操作日志.csv    谁在什么时候做了什么
+    06-操作日志.log    谁在什么时候做了什么（纯文本，给人看的）
 
 CSV carries a UTF-8 BOM so Excel opens Chinese without asking.
 """
@@ -174,7 +174,12 @@ def winners(conn, cfg):
 
 
 def audit_log(conn, cfg, limit=5000):
-    rows = [["时间", "动作", "对象", "内容"]]
+    """A plain text log, not a CSV.
+
+    The point of this sheet is to be read; opened in Excel a CSV forces column
+    resizing before anything is legible.
+    """
+    lines = []
     for r in conn.execute(
         "SELECT a.*, s.name FROM audit a LEFT JOIN students s ON s.id=a.student_id "
         "ORDER BY a.id LIMIT ?", (limit,)
@@ -182,8 +187,14 @@ def audit_log(conn, cfg, limit=5000):
         who = r["name"] or ""
         if r["kind"]:
             who = (who + " " + KIND_LABEL.get(r["kind"], r["kind"])).strip()
-        rows.append([_clock(cfg, r["ts"]), r["action"], who, r["detail"] or ""])
-    return _csv(rows)
+        bits = [_clock(cfg, r["ts"]) or "-", r["action"] or "-"]
+        if who:
+            bits.append(who)
+        line = "  ".join(bits)
+        if r["detail"]:
+            line += "  |  " + str(r["detail"])
+        lines.append(line)
+    return "\n".join(lines) + ("\n" if lines else "")
 
 
 def build(conn, cfg=None, students=None):
@@ -196,11 +207,13 @@ def build(conn, cfg=None, students=None):
         ("03-奖票明细.csv", tickets(conn, cfg)),
         ("04-抽奖记录.csv", draws(conn, cfg)),
         ("05-中奖汇总.csv", winners(conn, cfg)),
-        ("06-操作日志.csv", audit_log(conn, cfg)),
+        ("06-操作日志.log", audit_log(conn, cfg)),
     ]
     stamp = time.strftime("%Y%m%d-%H%M%S")
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for name, text in parts:
-            zf.writestr(name, text.encode("utf-8-sig"))
+            # only the CSV sheets carry a BOM; a .log should not
+            encoding = "utf-8-sig" if name.endswith(".csv") else "utf-8"
+            zf.writestr(name, text.encode(encoding))
     return "lottery-export-%s.zip" % stamp, buf.getvalue()

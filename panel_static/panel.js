@@ -142,6 +142,7 @@
       '<button class="card-menu-btn" type="button" data-menu="' + PX.esc(e.id) + '" ' +
       'aria-haspopup="menu" aria-label="更多操作">' + ICON_DOTS + "</button>" +
       "</div>" +
+      '<div class="event-meta">#' + PX.esc(String(e.seq)) + "</div>" +
       '<div class="event-token"><span class="token-label">token</span>' +
       '<code title="' + PX.esc(e.id) + '">' +
       PX.esc(shortToken(e.id)) + "</code>" +
@@ -216,6 +217,10 @@
     // Anything already on the card face - the token's copy button, the admin
     // link - is not repeated here; this menu is for the less common actions.
     menu.innerHTML =
+      (e.role === "owner"
+        ? '<button type="button" role="menuitem" data-rename="' + e.seq + '">' +
+          "重命名活动</button>"
+        : "") +
       '<button type="button" role="menuitem" data-copy="' + PX.esc(e.url) + '">' +
       "复制访问链接</button>" +
       // UNWIRED(templates): saving a template has no backend yet
@@ -241,6 +246,37 @@
     cardMenuEl = menu;
     var first = menu.querySelector("button:not([disabled])");
     if (first) first.focus();
+  }
+
+  function openRename(seq) {
+    var e = S.events.filter(function (x) { return String(x.seq) === String(seq); })[0];
+    if (!e) return;
+    closeCardMenu();
+    openOverlay("rename", "重命名活动",
+      '<div class="field"><label for="renameTitle">活动名称</label>' +
+      '<input id="renameTitle" type="text" maxlength="60" value="' +
+      PX.esc(e.title) + '"></div>' +
+      '<div class="row" style="margin-top:16px;justify-content:flex-end">' +
+      '<button class="btn" type="button" data-close-overlay="1">取消</button>' +
+      '<button class="btn primary" type="button" data-rename-save="' + e.seq + '">' +
+      "保存</button></div>");
+    var box = $("#renameTitle");
+    if (box) {
+      box.focus();
+      box.select();
+    }
+  }
+
+  function saveRename(seq) {
+    var box = $("#renameTitle");
+    var title = box ? box.value.trim() : "";
+    PX.api("/event/title", { method: "POST", body: { seq: Number(seq), title: title } })
+      .then(function () {
+        closeOverlay();
+        PX.toast("已重命名");
+        return reloadAll();
+      })
+      .catch(function (e) { PX.toast(PX.esc(e.message), true); });
   }
 
   function copyText(text, button) {
@@ -932,6 +968,12 @@
 
     var toggle = t.closest("[data-toggle]");
     if (toggle) return onGroupHead(toggle.getAttribute("data-toggle"));
+
+    var renameBtn = t.closest("[data-rename]");
+    if (renameBtn) return openRename(renameBtn.getAttribute("data-rename"));
+
+    var renameSave = t.closest("[data-rename-save]");
+    if (renameSave) return saveRename(renameSave.getAttribute("data-rename-save"));
 
     var menuBtn = t.closest("[data-menu]");
     if (menuBtn) {

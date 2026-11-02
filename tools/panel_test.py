@@ -281,6 +281,21 @@ def main():
     call(plain, "/api/panel/host", expect=403)
     check("a plain admin cannot read them", True)
 
+    print("== renaming an activity ==")
+    ev = call(owner, "/api/panel/events")["events"][0]
+    got = post(owner, "/api/panel/event/title",
+               {"seq": ev["seq"], "title": "改名测试"})
+    check("the event's owner can rename it", got and got["title"] == "改名测试", got)
+    check("the list follows",
+          call(owner, "/api/panel/events")["events"][0]["title"] == "改名测试")
+    post(teacher, "/api/panel/event/title",
+         {"seq": ev["seq"], "title": "不该成功"}, expect=403)
+    check("a platform admin who is not on the event cannot rename it", True)
+    # the permission check comes first on purpose: a non-member cannot tell a
+    # missing event from one they simply do not own
+    post(owner, "/api/panel/event/title", {"seq": 9999, "title": "x"}, expect=403)
+    check("a missing event looks like a forbidden one", True)
+
     print("== profile: display name and login name ==")
     me = call(member, "/api/panel/me")["me"]
     check("a display name is set", bool(me["name"]), me)

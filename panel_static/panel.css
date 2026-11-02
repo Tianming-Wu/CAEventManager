@@ -551,6 +551,13 @@ a.stat:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   overflow-wrap: anywhere;
 }
 .event-meta { font-size: .78rem; color: var(--dim); }
+/* the id line sits directly above the token */
+.event-token + .event-meta { margin-top: -4px; }
+.event-card > .event-meta:first-of-type {
+  color: var(--muted);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
 
 /* the token is for recognising a card, not for copying by hand */
 .event-token { display: flex; align-items: center; gap: 8px; min-width: 0; }
@@ -569,6 +576,15 @@ a.stat:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.event-grid > .empty {
+  grid-column: 1 / -1;
+  display: grid;
+  place-items: center;
+  min-height: 96px;
+  padding: 0;
+  text-align: center;
+  color: var(--dim);
 }
 .event-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: auto; }
 .event-actions .btn { flex: 1 1 auto; }

@@ -727,6 +727,33 @@ class Handler(BaseHTTPRequestHandler):
                 panel.audit(tx, acc["username"], "role_change", target["username"], role)
             return self._json({"ok": True, "role": role})
 
+        if path == "/event/title" and method == "POST":
+            # The name belongs to the event's top-level data, so only that
+            # event's owner may set it - a platform owner or superadmin who is
+            # not on the event does not count.
+            data = body()
+            seq = int(data.get("seq") or 0)
+            title = (data.get("title") or "").strip()
+            if len(title) > 60:
+                raise model.ApiError("\u6d3b\u52a8\u540d\u79f0\u6700\u957f 60 \u4e2a\u5b57")
+            mine = conn.execute(
+                "SELECT role FROM event_members WHERE seq=? AND account_id=?",
+                (seq, acc["id"])).fetchone()
+            if mine is None or mine["role"] != "owner":
+                raise model.ApiError("\u53ea\u6709\u8be5\u6d3b\u52a8\u7684\u8d1f\u8d23\u4eba\u80fd\u6539\u540d", 403)
+            row = conn.execute("SELECT token FROM events WHERE seq=?", (seq,)).fetchone()
+            if row is None:
+                raise model.ApiError("\u6d3b\u52a8\u4e0d\u5b58\u5728", 404)
+            with panel.tx() as tx:
+                tx.execute("UPDATE events SET title=? WHERE seq=?", (title, seq))
+                panel.audit(tx, acc["username"], "event_title", str(seq), title)
+            # the event pages read their heading from the event database
+            event_conn = db.connect()
+            with db.tx(event_conn):
+                db.set_config_raw(event_conn, "title", title)
+                db.audit(event_conn, "event_title", detail=title)
+            return self._json({"ok": True, "seq": seq, "title": title})
+
         if path == "/profile" and method == "POST":
             data = body()
             name = (data.get("name") or "").strip()

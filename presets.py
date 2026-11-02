@@ -85,7 +85,8 @@ def load_file(path, modules_by_id):
     return {
         "id": template_id,
         "name": str(meta.get("name") or template_id),
-        "note": str(meta.get("note") or meta.get("description") or ""),
+        "note": str(meta.get("note") or ""),
+        "description": str(meta.get("description") or ""),
         "title": str(meta.get("title") or ""),
         "module": module_id,
         "baseTemplate": base_template,
@@ -111,9 +112,10 @@ def file_presets(modules_by_id):
             if slug in seen:
                 return
             seen.add(slug)
-            out.append({"id": slug, "name": slug, "note": str(exc), "title": "",
-                        "module": "", "baseTemplate": "", "params": {},
-                        "builtin": True, "source": "broken"})
+            out.append({"id": slug, "name": slug, "note": str(exc),
+                        "description": "", "title": "", "module": "",
+                        "baseTemplate": "", "params": {}, "builtin": True,
+                        "source": "broken"})
             return
         if tpl["id"] in seen:
             return
@@ -153,19 +155,20 @@ def seed(conn, modules_by_id):
             conn.execute(
                 "INSERT INTO presets (slug, owner_id, name, note, module, params,"
                 " title, visibility, org_id, builtin, created_at, updated_at,"
-                " dep_module, dep_template, source)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " description, dep_module, dep_template, source)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (tpl["id"], 0, tpl["name"], tpl["note"], tpl["module"], params,
-                 tpl["title"], "public", 0, 1, now, now, tpl["module"],
-                 tpl["baseTemplate"], tpl.get("source") or "builtin"))
+                 tpl["title"], "public", 0, 1, now, now, tpl["description"],
+                 tpl["module"], tpl["baseTemplate"],
+                 tpl.get("source") or "builtin"))
         elif row["builtin"]:
             # a shipped preset keeps its identity but follows its file
             conn.execute(
                 "UPDATE presets SET name=?, note=?, module=?, params=?, title=?,"
-                " updated_at=?, dep_module=?, dep_template=?, source=?"
-                " WHERE id=?",
+                " updated_at=?, description=?, dep_module=?, dep_template=?,"
+                " source=? WHERE id=?",
                 (tpl["name"], tpl["note"], tpl["module"], params, tpl["title"],
-                 now, tpl["module"], tpl["baseTemplate"],
+                 now, tpl["description"], tpl["module"], tpl["baseTemplate"],
                  tpl.get("source") or "builtin", row["id"]))
 
 
@@ -192,12 +195,13 @@ def _view(row, modules_by_id, account_id):
         "id": row["slug"],
         "name": row["name"],
         "note": row["note"] or "",
+        "description": row["description"] or "",
         "module": module_id,
         "moduleName": (module or {}).get("name") or module_id,
         "moduleVersion": (module or {}).get("version") or "",
         "baseTemplate": row["dep_template"] or "",
         "source": row["source"] or ("builtin" if row["builtin"] else "user"),
-        "description": row["note"] or "",
+        "description": row["description"] or "",
         "title": row["title"] or "",
         "params": params,
         "builtin": bool(row["builtin"]),

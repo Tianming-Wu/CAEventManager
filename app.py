@@ -898,6 +898,34 @@ class Handler(BaseHTTPRequestHandler):
                                "accounts": [panel.view(r) for r in rows]})
 
         if path == "/events" and method == "GET":
+            archived = (query.get("archived") or ["0"])[0] in ("1", "true", "yes")
+            if archived:
+                # archived activities are history: paged, never all at once
+                try:
+                    offset = max(0, int((query.get("offset") or ["0"])[0]))
+                except ValueError:
+                    offset = 0
+                try:
+                    limit = min(50, max(1, int((query.get("limit") or ["20"])[0])))
+                except ValueError:
+                    limit = 20
+                total = conn.execute(
+                    "SELECT COUNT(*) AS n FROM events WHERE archived_at<>0").fetchone()["n"]
+                rows = conn.execute(
+                    "SELECT e.*, NULL AS my_role, o.name AS owner_name"
+                    " FROM events e"
+                    " LEFT JOIN accounts o ON o.id = e.owner_id"
+                    " WHERE e.archived_at<>0"
+                    " ORDER BY e.archived_at DESC LIMIT ? OFFSET ?",
+                    (limit, offset)).fetchall()
+                base = (LOCAL_CFG.get("public_base_prefix") or "").rstrip("/")
+                return self._json({
+                    "ok": True,
+                    "total": int(total or 0),
+                    "offset": offset,
+                    "limit": limit,
+                    "events": [panel.event_view(r, base, None) for r in rows],
+                })
             rows = conn.execute(
                 "SELECT e.*, m.role AS my_role, o.name AS owner_name"
                 " FROM events e"
@@ -1003,6 +1031,7 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError as exc:
                 raise model.ApiError(str(exc))
             note = (data.get("note") or "").strip()[:200]
+            description = (data.get("description") or "").strip()[:600]
             title = (data.get("title") or "").strip()[:60]
             slug = (data.get("id") or "").strip()
             now = time.time()
@@ -1018,17 +1047,17 @@ class Handler(BaseHTTPRequestHandler):
                     tx.execute(
                         "INSERT INTO presets (slug, owner_id, name, note, module,"
                         " params, title, visibility, org_id, builtin, created_at,"
-                        " updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                        " updated_at, description) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                         (slug, acc["id"], name, note, module_id,
                          json.dumps(params, ensure_ascii=False), title, visibility,
-                         0, 0, now, now))
+                         0, 0, now, now, description))
                     panel.audit(tx, acc["username"], "preset_create", slug, name)
                 else:
                     tx.execute(
                         "UPDATE presets SET name=?, note=?, params=?, title=?,"
-                        " visibility=?, updated_at=? WHERE id=?",
+                        " visibility=?, updated_at=?, description=? WHERE id=?",
                         (name, note, json.dumps(params, ensure_ascii=False), title,
-                         visibility, now, row["id"]))
+                         visibility, now, description, row["id"]))
                     panel.audit(tx, acc["username"], "preset_update", slug, name)
             return self._json({"ok": True, "id": slug})
 
@@ -1093,17 +1122,18 @@ class Handler(BaseHTTPRequestHandler):
             visibility = (data.get("visibility") or "private").strip()
             if visibility not in presets.VISIBILITY:
                 visibility = "private"
+            description = (data.get("description") or "").strip()[:600]
             now = time.time()
             with panel.tx() as tx:
                 slug = presets.new_slug(tx, acc["id"])
                 tx.execute(
                     "INSERT INTO presets (slug, owner_id, name, note, module, params,"
-                    " title, visibility, org_id, builtin, created_at, updated_at)"
-                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                    " title, visibility, org_id, builtin, created_at, updated_at,"
+                    " description) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (slug, acc["id"], name, (data.get("note") or "").strip()[:200],
                      module_id, json.dumps(params, ensure_ascii=False),
                      row["title"] or cfg.get("title") or "", visibility, 0, 0,
-                     now, now))
+                     now, now, description))
                 panel.audit(tx, acc["username"], "preset_from_event", slug,
                             str(seq))
             return self._json({"ok": True, "id": slug, "name": name})

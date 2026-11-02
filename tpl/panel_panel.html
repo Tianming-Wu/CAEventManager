@@ -315,17 +315,27 @@
           </div>
         </header>
 
-        <div class="card">
-          <div class="card-head"><h2>基础信息</h2></div>
-          <div class="field">
-            <label for="neTitle">名称 <span class="req">必填</span></label>
-            <input id="neTitle" type="text" maxlength="60" autocomplete="off"
-                   placeholder="例如：计算机杂谈沙龙">
+        <div class="create-split">
+          <div class="create-main">
+            <div class="card">
+              <div class="card-head"><h2>基础信息</h2></div>
+              <div class="field">
+                <label for="neTitle">名称 <span class="req">必填</span></label>
+                <input id="neTitle" type="text" maxlength="60" autocomplete="off"
+                       placeholder="例如：计算机杂谈沙龙">
+              </div>
+              <div class="field">
+                <label for="neNote">备注</label>
+                <input id="neNote" type="text" maxlength="200" autocomplete="off">
+              </div>
+            </div>
           </div>
-          <div class="field">
-            <label for="neNote">备注</label>
-            <input id="neNote" type="text" maxlength="200" autocomplete="off">
-          </div>
+          <aside class="create-side">
+            <div class="card">
+              <div class="card-head"><h2>预设</h2></div>
+              <div class="preset-info" id="presetInfo"></div>
+            </div>
+          </aside>
         </div>
 
         <div class="card">
@@ -449,6 +459,7 @@
         </div>
       </header>
       <div class="card">
+        <div class="card-head"><h2>当前活动</h2></div>
         <div class="tblwrap">
           <table class="tbl fixed" id="allEventsTable">
             <thead><tr>
@@ -456,6 +467,24 @@
             </tr></thead>
             <tbody></tbody>
           </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>归档的活动</h2>
+          <span class="hint" id="archivedCount"></span>
+        </div>
+        <div class="tblwrap">
+          <table class="tbl fixed" id="archivedTable">
+            <thead><tr>
+              <th>活动</th><th>负责人</th><th>归档时间</th><th>token</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="row" style="margin-top:10px;justify-content:flex-end">
+          <button class="btn sm" id="archivedMore" type="button" hidden>加载更多</button>
         </div>
       </div>
     </section>

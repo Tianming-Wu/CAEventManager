@@ -1805,3 +1805,44 @@ input:focus, textarea:focus, select:focus {
   -webkit-user-select: none;
   user-select: none;
 }
+
+/* ---------- create: form left, the preset's reach right ---------- */
+.create-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+@media (max-width: 1180px) {
+  .create-split { grid-template-columns: minmax(0, 1fr); }
+}
+.create-side .card { position: sticky; top: 0; }
+.preset-info { display: flex; flex-direction: column; gap: 10px; }
+.preset-info-name { font-weight: 650; font-size: 1rem; }
+.preset-info-text {
+  margin: 0;
+  color: var(--muted);
+  font-size: .86rem;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+.preset-info-note { margin: 0; color: var(--dim); font-size: .82rem; }
+.preset-info-meta {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: .76rem;
+  color: var(--dim);
+}
+
+/* a field that was required and left empty */
+.is-missing,
+.is-missing:focus {
+  border-color: var(--danger) !important;
+  box-shadow: 0 0 0 3px var(--danger-soft) !important;
+}
+
+/* a badge is a label, not something to copy */
+.req {
+  -webkit-user-select: none;
+  user-select: none;
+}

@@ -50,6 +50,10 @@
     openGroups: {},
     denied: null,
     templates: [],
+    archived: [],
+    archivedTotal: null,
+    archivedLoading: false,
+    currentFields: [],
     templateId: null,
     templateFilter: "",
     invited: []
@@ -73,6 +77,7 @@
     return !!r && myRank() >= rank(r.min);
   }
   function isOwner() { return !!S.me && S.me.role === "owner"; }
+  function isSuper() { return !!S.me && rank(S.me.role) >= rank("superadmin"); }
   function canAudit() { return allowed("audit"); }
   function canReview() { return allowed("approval-users"); }
 
@@ -192,7 +197,7 @@
     $("#overlayTitle").textContent = title;
     // the body is shared between dialogs: nothing may survive from the last one
     var body = $("#overlayBody");
-    body.removeAttribute("data-acct");
+    body.removeAttribute("data-acct-body");
     body.innerHTML = html;
     $("#overlay").hidden = false;
     document.body.style.overflow = "hidden";
@@ -997,7 +1002,10 @@
       S.visibilityOptions = d.visibility || [];
       var fav = S.templates.filter(function (p) { return p.fav; });
       var mine = S.templates.filter(function (p) { return p.mine && !p.builtin; });
-      var square = S.templates.filter(function (p) { return !p.fav; });
+      // the square is everything shared, whether or not it is also starred
+      var square = S.templates.filter(function (p) {
+        return p.builtin || p.visibility === "public" || p.visibility === "org";
+      });
       presetShelf("#presetFavorites", fav, "fav", "还没有收藏的预设");
       presetShelf("#presetMine", mine, "mine", "还没有创建的预设");
       presetShelf("#presetSquare", square, "square", "还没有可用的预设");
@@ -1015,7 +1023,10 @@
       '<div class="field"><label for="presetName">名称</label>' +
       '<input id="presetName" type="text" maxlength="40" value="' +
       PX.esc(p.name || "") + '"></div>' +
-      '<div class="field"><label for="presetNote">说明</label>' +
+      '<div class="field"><label for="presetDesc">能力说明</label>' +
+      '<textarea id="presetDesc" rows="3" maxlength="600">' +
+      PX.esc(p.description || "") + "</textarea></div>" +
+      '<div class="field"><label for="presetNote">备注</label>' +
       '<input id="presetNote" type="text" maxlength="200" value="' +
       PX.esc(p.note || "") + '"></div>' +
       '<div class="field"><label for="presetVis">可见性</label>' +
@@ -1033,6 +1044,7 @@
         id: p.id || "",
         name: $("#presetName").value.trim(),
         note: $("#presetNote").value.trim(),
+        description: $("#presetDesc").value.trim(),
         visibility: $("#presetVis").value,
         module: p.module || (S.templates[0] && S.templates[0].module) || "",
         params: p.params || {},
@@ -1296,6 +1308,60 @@
     else $("#kindGrid").innerHTML = renderKindTiles();
   }
 
+  // What this preset can do, next to the form that narrows it further.
+  function renderPresetInfo(tpl) {
+    var box = $("#presetInfo");
+    if (!box) return;
+    var rows = [];
+    rows.push('<div class="preset-info-name">' + PX.esc(tpl.name) + "</div>");
+    var tags = ['<span class="tag">' + PX.esc(tpl.moduleName || tpl.module) + "</span>"];
+    if (tpl.builtin) tags.push('<span class="tag">内置</span>');
+    if (tpl.visibilityLabel) {
+      tags.push('<span class="tag vis-' + PX.esc(tpl.visibility) + '">' +
+        PX.esc(tpl.visibilityLabel) + "</span>");
+    }
+    rows.push('<div class="preset-tags">' + tags.join("") + "</div>");
+    if (tpl.description) {
+      rows.push('<p class="preset-info-text">' + PX.esc(tpl.description) + "</p>");
+    }
+    if (tpl.note) {
+      rows.push('<p class="preset-info-note">' + PX.esc(tpl.note) + "</p>");
+    }
+    if (tpl.moduleVersion) {
+      rows.push('<p class="preset-info-meta">模块版本 ' +
+        PX.esc(tpl.moduleVersion) + "</p>");
+    }
+    box.innerHTML = rows.join("");
+  }
+
+  // Required fields that were left empty: mark them and put the cursor in the
+  // first one, instead of letting the server say no afterwards.
+  function markMissing(fields) {
+    var missing = [];
+    $$(".is-missing").forEach(function (el) { el.classList.remove("is-missing"); });
+    var title = $("#neTitle");
+    if (!title.value.trim()) {
+      title.classList.add("is-missing");
+      missing.push(title);
+    }
+    fields.forEach(function (f) {
+      if (!f.required) return;
+      var el = $('[data-kind-field="' + f.key + '"]');
+      if (!el || el.closest("[hidden]")) return;
+      var empty = el.type === "checkbox" ? false : !String(el.value || "").trim();
+      if (empty) {
+        el.classList.add("is-missing");
+        missing.push(el);
+      }
+    });
+    if (missing.length) {
+      missing[0].focus();
+      missing[0].scrollIntoView({ block: "center" });
+      return missing.length;
+    }
+    return 0;
+  }
+
   function renderKindTiles() {
     var q = S.templateFilter.trim().toLowerCase();
     var rows = S.templates.filter(function (t) {
@@ -1378,6 +1444,8 @@
     }).join("");
     $("#createErr").textContent = "";
     if (!$("#neTitle").value) $("#neTitle").value = tpl.title || "";
+    S.currentFields = kind.fields || [];
+    renderPresetInfo(tpl);
     renderInviteChips();
     bindShowWhen($("#kindFields"));
     S.dirty = false;
@@ -1526,9 +1594,9 @@
       params: collectKindParams(),
       members: S.invited.slice()
     };
-    if (!body.title) {
-      err.textContent = "\u8bf7\u586b\u5199\u6d3b\u52a8\u540d\u79f0";
-      $("#neTitle").focus();
+    var gaps = markMissing(S.currentFields || []);
+    if (gaps) {
+      err.textContent = "\u8fd8\u6709 " + gaps + " \u9879\u5fc5\u586b\u6ca1\u586b";
       return;
     }
     var btn = $("#kindCreate");
@@ -1626,10 +1694,61 @@
         ? '<div class="row" style="margin-top:16px">' + btns.join("") + "</div>"
         : '<p class="page-sub" style="margin-top:16px">这个账号没有可以执行的操作。</p>'));
     // afterMutation() re-opens this dialog with fresh data
-    $("#overlayBody").setAttribute("data-acct", String(a.id));
+    $("#overlayBody").setAttribute("data-acct-body", String(a.id));
+  }
+
+  // Archived activities are history: they load a page at a time, on request.
+  function loadArchived(reset) {
+    if (!isSuper()) return Promise.resolve();
+    if (S.archivedLoading) return Promise.resolve();
+    if (reset) {
+      S.archived = [];
+      S.archivedTotal = null;
+    } else if (S.archivedTotal !== null && S.archived.length >= S.archivedTotal) {
+      return Promise.resolve();
+    }
+    S.archivedLoading = true;
+    return PX.api("/events?archived=1&offset=" + S.archived.length + "&limit=20")
+      .then(function (d) {
+        S.archived = S.archived.concat(d.events || []);
+        S.archivedTotal = d.total || 0;
+      })
+      .catch(function (e) { PX.toast(PX.esc(e.message), true); })
+      .then(function () {
+        S.archivedLoading = false;
+        drawArchived();
+      });
+  }
+
+  function drawArchived() {
+    var body = $("#archivedTable tbody");
+    if (!body) return;
+    body.innerHTML = S.archived.length ? S.archived.map(function (e) {
+      return "<tr>" +
+        "<td><b>" + PX.esc(eventTitle(e)) + "</b></td>" +
+        "<td>" + PX.esc(e.ownerName || "—") + "</td>" +
+        '<td class="mono">' + PX.whenExact(e.archivedAt) + "</td>" +
+        '<td class="mono">' + PX.esc(shortToken(e.id)) + "</td></tr>";
+    }).join("") : emptyRow(4, S.archivedTotal === 0
+      ? "还没有归档的活动"
+      : "正在读取…");
+    var more = $("#archivedMore");
+    if (more) {
+      var left = (S.archivedTotal === null) ? 0 : S.archivedTotal - S.archived.length;
+      more.hidden = left <= 0;
+      more.textContent = left > 0 ? "再显示 " + Math.min(20, left) + " 条" : "加载更多";
+    }
+    var count = $("#archivedCount");
+    if (count) {
+      count.textContent = S.archivedTotal === null
+        ? "" : "共 " + S.archivedTotal + " 场";
+    }
   }
 
   function drawAllEvents() {
+    if (isSuper() && S.archivedTotal === null && !S.archivedLoading) {
+      loadArchived(true);
+    }
     $("#allEventsTable tbody").innerHTML = S.events.length ? S.events.map(function (e) {
       return "<tr>" +
         "<td><b>" + PX.esc(eventTitle(e)) + "</b></td>" +
@@ -1931,7 +2050,7 @@
   // keep an open account dialog in sync with the data behind it
   function afterMutation() {
     if ($("#overlay").hidden || overlayKind !== "account") return;
-    var id = Number($("#overlayBody").getAttribute("data-acct"));
+    var id = Number($("#overlayBody").getAttribute("data-acct-body"));
     if (id) openAccountOverlay(id);
     else closeOverlay();
   }
@@ -2236,6 +2355,7 @@
   }
   $("#newEventBtn").addEventListener("click", newEvent);
   $("#presetNewBtn").addEventListener("click", function () { presetDialog(null); });
+  $("#archivedMore").addEventListener("click", function () { loadArchived(false); });
   $("#presetImportBtn").addEventListener("click", function () {
     $("#presetImportFile").click();
   });

@@ -126,6 +126,7 @@ CREATE TABLE IF NOT EXISTS presets (
     builtin    INTEGER NOT NULL DEFAULT 0,
     created_at REAL    NOT NULL,
     updated_at REAL    NOT NULL,
+    description  TEXT  NOT NULL DEFAULT '',         -- what this preset can do
     dep_module   TEXT  NOT NULL DEFAULT '',         -- the boundary it needs
     dep_template TEXT  NOT NULL DEFAULT '',         -- the preset it derives from
     source       TEXT  NOT NULL DEFAULT ''          -- module | builtin | instance | user
@@ -216,6 +217,7 @@ LATE_COLUMNS = (
     ("sessions", "unlock_until", "REAL NOT NULL DEFAULT 0"),
     ("event_members", "invited_by", "INTEGER NOT NULL DEFAULT 0"),
     ("event_members", "state_at", "REAL NOT NULL DEFAULT 0"),
+    ("presets", "description", "TEXT NOT NULL DEFAULT ''"),
     ("presets", "dep_module", "TEXT NOT NULL DEFAULT ''"),
     ("presets", "dep_template", "TEXT NOT NULL DEFAULT ''"),
     ("presets", "source", "TEXT NOT NULL DEFAULT ''"),

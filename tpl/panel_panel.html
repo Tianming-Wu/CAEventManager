@@ -221,7 +221,7 @@
         <h1>我的活动</h1>
         <p class="page-sub">你参与和申请的活动</p>
         <div class="page-actions">
-          <button class="btn primary" id="newEventBtn">申请新活动</button>
+          <button class="btn primary" id="newEventBtn">创建活动</button>
         </div>
       </header>
 
@@ -238,6 +238,84 @@
       <div class="card">
         <div class="card-head"><h2>我参与的活动</h2></div>
         <div class="event-grid" id="joinedEvents"></div>
+      </div>
+    </section>
+
+    <!-- ====================================================== 创建活动 -->
+    <section class="page" data-page="new-event" hidden>
+
+      <div id="kindPicker">
+        <header class="page-head">
+          <h1>创建活动</h1>
+          <p class="page-sub">先选一种活动形式</p>
+        </header>
+        <div class="card">
+          <div class="card-head">
+            <div class="hp" aria-hidden="true">
+              <input type="text" name="username" autocomplete="username" tabindex="-1">
+              <input type="password" name="password" autocomplete="current-password" tabindex="-1">
+            </div>
+            <div class="searchbox">
+              <input class="search" id="kindSearch" type="search" name="kind_filter"
+                     placeholder="搜索活动形式" autocomplete="off" autocorrect="off"
+                     autocapitalize="off" spellcheck="false" data-form-type="other"
+                     aria-autocomplete="none" aria-label="搜索活动形式">
+              <button class="search-clear" id="kindSearchClear" type="button"
+                      aria-label="清空搜索" hidden>
+                <svg viewBox="0 0 20 20" aria-hidden="true">
+                  <path d="M6.6 6.6l6.8 6.8M13.4 6.6l-6.8 6.8"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+          <div class="tile-grid" id="kindGrid"></div>
+        </div>
+      </div>
+
+      <div id="kindForm" hidden>
+        <header class="page-head">
+          <h1 id="kindFormTitle">—</h1>
+          <p class="page-sub" id="kindFormSub"></p>
+          <div class="page-actions">
+            <button class="btn" id="kindBack" type="button">换一种形式</button>
+            <button class="btn primary" id="kindCreate" type="button">创建活动</button>
+          </div>
+        </header>
+
+        <div class="card">
+          <div class="card-head"><h2>基础信息</h2></div>
+          <div class="field">
+            <label for="neTitle">名称 <span class="req">必填</span></label>
+            <input id="neTitle" type="text" maxlength="60" autocomplete="off"
+                   placeholder="例如：计算机杂谈沙龙">
+          </div>
+          <div class="field">
+            <label for="neNote">备注</label>
+            <input id="neNote" type="text" maxlength="200" autocomplete="off">
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h2>成员</h2>
+            <span class="hint" id="inviteHint"></span>
+          </div>
+          <div class="invite-row">
+            <button class="invite-slot" id="invitePick" type="button"
+                    aria-label="快速邀请成员">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4.6v10.8M4.6 10h10.8"/></svg>
+            </button>
+            <div class="invite-chips" id="inviteChips"></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>活动设定</h2></div>
+          <div class="kind-fields" id="kindFields"></div>
+          <p class="hint">这些设定创建后不能更改</p>
+        </div>
+
+        <div class="err" id="createErr"></div>
       </div>
     </section>
 

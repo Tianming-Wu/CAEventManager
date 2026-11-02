@@ -26,6 +26,7 @@
     "all-events": { min: "superadmin" },
     "approval-users": { min: "superadmin", group: "approvals" },
     "approval-events": { min: "superadmin", group: "approvals" },
+    "new-event": { min: "admin" },
     "server": { min: "owner" },
     "audit": { min: "owner" },
     "account": { min: "admin" },
@@ -46,7 +47,11 @@
     hostTimer: null,
     userFilter: "",
     openGroups: {},
-    denied: null
+    denied: null,
+    kinds: [],
+    kindId: null,
+    kindFilter: "",
+    invited: []
   };
 
   var RAIL_QUERY = "(max-width: 1100px)";
@@ -394,7 +399,20 @@
   function routeFromHash() {
     var h = (location.hash || "").replace(/^#\/?/, "").split("?")[0];
     if (ALIAS[h]) h = ALIAS[h];
-    return ROUTES[h] ? h : null;
+    if (ROUTES[h]) {
+      S.kindId = null;
+      return h;
+    }
+    var cut = h.indexOf("/");
+    if (cut > 0) {
+      var head = h.slice(0, cut);
+      var tail = decodeURIComponent(h.slice(cut + 1)).replace(/\/$/, "");
+      if (head === "new-event" && ROUTES[head]) {
+        S.kindId = tail || null;
+        return head;
+      }
+    }
+    return null;
   }
 
   function go(route, replace) {
@@ -462,6 +480,7 @@
       case "overview": return drawOverview();
       case "events": return drawEvents();
       case "templates": return drawTemplates();
+      case "new-event": return drawNewEvent();
       case "users": return drawUsers();
       case "all-events": return drawAllEvents();
       case "approval-users": return drawApprovalUsers();
@@ -540,6 +559,185 @@
       return '<div class="tile"><b>' + PX.esc(p[0]) + "</b>" + PX.esc(p[1]) +
         '<span class="tag">未接入</span></div>';
     }).join("");
+  }
+
+  function loadKinds() {
+    if (S.kinds.length) return Promise.resolve();
+    return PX.api("/templates").then(function (d) { S.kinds = d.kinds || []; })
+      .catch(function () { S.kinds = []; });
+  }
+
+  function kindById(id) {
+    return S.kinds.filter(function (k) { return k.id === id; })[0];
+  }
+
+  function drawNewEvent() {
+    if (!S.kinds.length) {
+      // a direct link carries the kind in the hash, so the list may not be here
+      // yet; load it and draw again
+      loadKinds().then(drawNewEvent);
+      return;
+    }
+    var kind = S.kindId ? kindById(S.kindId) : null;
+    if (S.kindId && !kind) {
+      go("new-event", true);      // unknown kind: back to the picker
+      return;
+    }
+    $("#kindPicker").hidden = !!kind;
+    $("#kindForm").hidden = !kind;
+    if (kind) drawKindForm(kind);
+    else $("#kindGrid").innerHTML = renderKindTiles();
+  }
+
+  function renderKindTiles() {
+    var q = S.kindFilter.trim().toLowerCase();
+    var rows = S.kinds.filter(function (k) {
+      if (!q) return true;
+      return (k.name + " " + k.id + " " + (k.description || ""))
+        .toLowerCase().indexOf(q) >= 0;
+    });
+    if (!rows.length) {
+      return '<div class="empty">' + (S.kinds.length
+        ? "\u6ca1\u6709\u5339\u914d\u7684\u6d3b\u52a8\u5f62\u5f0f"
+        : "\u8fd8\u6ca1\u6709\u53ef\u7528\u7684\u6d3b\u52a8\u5f62\u5f0f") + "</div>";
+    }
+    return rows.map(function (k) {
+      var meta = [(k.builtin ? "\u5185\u7f6e" : "\u7528\u6237\u5bfc\u5165"),
+                  "v" + k.version].join(" \u00b7 ");
+      return '<button class="kind-tile' + (k.ok ? "" : " is-off") + '" type="button" ' +
+        (k.ok ? 'data-kind="' + PX.esc(k.id) + '"' : "disabled") + ">" +
+        '<span class="kind-name">' + PX.esc(k.name) + "</span>" +
+        '<span class="kind-meta">' + PX.esc(meta) + "</span>" +
+        (k.description ? '<span class="kind-desc">' + PX.esc(k.description) + "</span>" : "") +
+        (k.ok ? "" : '<span class="tag disabled">' + PX.esc(k.reason || "\u4e0d\u53ef\u7528") + "</span>") +
+        "</button>";
+    }).join("");
+  }
+
+  function drawKindForm(kind) {
+    $("#kindFormTitle").textContent = kind.name;
+    $("#kindFormSub").textContent = [kind.id, "v" + kind.version,
+                                     kind.builtin ? "\u5185\u7f6e" : "\u7528\u6237\u5bfc\u5165"]
+      .join(" \u00b7 ");
+    $("#kindFields").innerHTML = kind.fields.map(function (f) {
+      var id = "kf_" + f.key;
+      var attr = ' data-kind-field="' + PX.esc(f.key) + '"';
+      var head = '<label for="' + id + '">' + PX.esc(f.label) +
+        (f.required ? ' <span class="req">\u5fc5\u586b</span>' : "") + "</label>";
+      var help = f.help ? '<p class="hint">' + PX.esc(f.help) + "</p>" : "";
+      if (f.type === "bool") {
+        return '<div class="field kind-field"><label class="check">' +
+          '<input id="' + id + '" type="checkbox"' + attr +
+          (f.default ? " checked" : "") + "><span>" + PX.esc(f.label) + "</span></label>" +
+          help + "</div>";
+      }
+      if (f.type === "select") {
+        var opts = (f.options || []).map(function (o) {
+          var sel = (!f.required && String(f.default) === String(o.value)) ? " selected" : "";
+          return '<option value="' + PX.esc(o.value) + '"' + sel + ">" +
+            PX.esc(o.label || o.value) + "</option>";
+        }).join("");
+        return '<div class="field kind-field">' + head + '<select id="' + id + '"' + attr + ">" +
+          (f.required ? '<option value="">\u8bf7\u9009\u62e9</option>' : "") + opts +
+          "</select>" + help + "</div>";
+      }
+      if (f.type === "int") {
+        var hasDef = f.default !== undefined && f.default !== null;
+        return '<div class="field kind-field">' + head + '<input id="' + id + '" type="number"' +
+          attr + (hasDef ? ' value="' + PX.esc(String(f.default)) + '"' : "") +
+          (f.min !== undefined && f.min !== null ? ' min="' + f.min + '"' : "") +
+          (f.max !== undefined && f.max !== null ? ' max="' + f.max + '"' : "") +
+          ">" + help + "</div>";
+      }
+      var def = f.default;
+      return '<div class="field kind-field">' + head + '<input id="' + id + '" type="text"' +
+        attr + (def !== undefined && def !== null && def !== ""
+          ? ' value="' + PX.esc(String(def)) + '"' : "") + ">" + help + "</div>";
+    }).join("");
+    $("#createErr").textContent = "";
+    renderInviteChips();
+  }
+
+  function collectKindParams() {
+    var out = {};
+    $$("[data-kind-field]").forEach(function (el) {
+      var key = el.getAttribute("data-kind-field");
+      if (el.type === "checkbox") out[key] = el.checked;
+      else if (el.value !== "") out[key] = el.value;
+    });
+    return out;
+  }
+
+  function renderInviteChips() {
+    $("#inviteChips").innerHTML = S.invited.map(function (id) {
+      var a = S.accounts.filter(function (x) { return x.id === id; })[0];
+      if (!a) return "";
+      return '<span class="invite-chip">' + PX.esc(displayName(a)) +
+        '<button type="button" data-uninvite="' + a.id + '" aria-label="\u79fb\u9664">' +
+        "\u00d7</button></span>";
+    }).join("");
+    $("#inviteHint").textContent = S.invited.length
+      ? "\u5df2\u9009 " + S.invited.length + " \u4eba\uff0c\u521b\u5efa\u540e\u53d1\u51fa\u9080\u8bf7"
+      : "";
+  }
+
+  function openInvitePicker() {
+    var rows = S.accounts.filter(function (a) { return a.id !== (S.me && S.me.id); });
+    var html = rows.length
+      ? '<div class="pick-grid">' + rows.map(function (a) {
+        var on = S.invited.indexOf(a.id) >= 0;
+        var url = avatarUrl(a);
+        return '<button type="button" class="pick-tile' + (on ? " on" : "") +
+          '" data-invite="' + a.id + '">' +
+          '<span class="avatar">' + (url
+            ? '<img alt="" src="' + PX.esc(url) + '">'
+            : PX.esc(initialOf(a))) + "</span>" +
+          '<span class="pick-name">' + PX.esc(displayName(a)) + "</span>" +
+          '<span class="tag">' + PX.esc(a.roleLabel) + "</span></button>";
+      }).join("") + "</div>"
+      : '<div class="empty">\u9664\u4e86\u4f60\u81ea\u5df1\uff0c\u8fd8\u6ca1\u6709\u522b\u7684\u8d26\u53f7</div>';
+    // UNWIRED(groups): 分组一键邀请要等用户分组做出来
+    openOverlay("invite", "\u5feb\u901f\u9080\u8bf7", html +
+      '<div class="row" style="margin-top:16px;justify-content:flex-end">' +
+      '<button class="btn primary" type="button" data-close-overlay="1">\u5b8c\u6210</button>' +
+      "</div>");
+  }
+
+  function toggleInvite(id) {
+    var at = S.invited.indexOf(id);
+    if (at >= 0) S.invited.splice(at, 1);
+    else S.invited.push(id);
+    renderInviteChips();
+    var tile = $('[data-invite="' + id + '"]');
+    if (tile) tile.classList.toggle("on", at < 0);
+  }
+
+  function createEvent() {
+    var err = $("#createErr");
+    err.textContent = "";
+    var body = {
+      kind: S.kindId,
+      title: $("#neTitle").value.trim(),
+      note: $("#neNote").value.trim(),
+      params: collectKindParams(),
+      members: S.invited.slice()
+    };
+    if (!body.title) {
+      err.textContent = "\u8bf7\u586b\u5199\u6d3b\u52a8\u540d\u79f0";
+      $("#neTitle").focus();
+      return;
+    }
+    var btn = $("#kindCreate");
+    btn.disabled = true;
+    PX.api("/events/create", { method: "POST", body: body })
+      .then(function (d) {
+        PX.toast("\u5df2\u521b\u5efa");
+        location.href = d.event.admin;
+      })
+      .catch(function (e) {
+        err.textContent = e.message;
+        btn.disabled = false;
+      });
   }
 
   function drawUsers() {
@@ -970,6 +1168,15 @@
     var toggle = t.closest("[data-toggle]");
     if (toggle) return onGroupHead(toggle.getAttribute("data-toggle"));
 
+    var kindTile = t.closest("[data-kind]");
+    if (kindTile) return go("new-event/" + kindTile.getAttribute("data-kind"));
+
+    var invite = t.closest("[data-invite]");
+    if (invite) return toggleInvite(Number(invite.getAttribute("data-invite")));
+
+    var uninvite = t.closest("[data-uninvite]");
+    if (uninvite) return toggleInvite(Number(uninvite.getAttribute("data-uninvite")));
+
     var renameBtn = t.closest("[data-rename]");
     if (renameBtn) return openRename(renameBtn.getAttribute("data-rename"));
 
@@ -1060,6 +1267,22 @@
   $("#logoutBtn").addEventListener("click", function () { logout(""); });
   $("#switchAccount").addEventListener("click", confirmSwitchAccount);
 
+  function bindLiveSearch(boxSel, clearSel, onChange) {
+    var box = $(boxSel);
+    var clear = $(clearSel);
+    if (!box || !clear) return;
+    var sync = function () { clear.hidden = !box.value; };
+    box.addEventListener("input", function () { onChange(box.value); sync(); });
+    clear.addEventListener("click", function () {
+      box.value = "";
+      onChange("");
+      sync();
+      box.focus();
+    });
+    PX.guardAutofill(box, function () { box.value = ""; onChange(""); sync(); });
+    sync();
+  }
+
   function syncClearButton() {
     var box = $("#userSearch");
     var clear = $("#userSearchClear");
@@ -1127,12 +1350,24 @@
     reader.readAsDataURL(file);
   });
 
-  // UNWIRED(new-event): 新建活动还没有接口，先明确提示而不是装作能用。
   function newEvent() {
-    PX.toast("新建活动还没有接入，目前只能在服务端配置", true);
+    S.invited = [];
+    loadKinds().then(function () { go("new-event"); });
   }
   $("#newEventBtn").addEventListener("click", newEvent);
+  // 活动管理 is a superadmin view; creating from there uses the same flow
   $("#createEventBtn").addEventListener("click", newEvent);
+
+  $("#kindBack").addEventListener("click", function () {
+    S.invited = [];
+    go("new-event");
+  });
+  $("#kindCreate").addEventListener("click", createEvent);
+  $("#invitePick").addEventListener("click", openInvitePicker);
+  bindLiveSearch("#kindSearch", "#kindSearchClear", function (value) {
+    S.kindFilter = value;
+    if (!$("#kindPicker").hidden) $("#kindGrid").innerHTML = renderKindTiles();
+  });
 
   window.addEventListener("hashchange", onRoute);
 

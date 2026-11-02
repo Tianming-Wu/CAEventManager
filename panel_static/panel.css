@@ -829,6 +829,119 @@ table.tbl td.wrap { white-space: normal; min-width: 12em; }
 .tile b { display: block; color: var(--text); font-size: .88rem; margin-bottom: 2px; }
 .tile .tag { margin-top: 8px; }
 
+/* ---------- create an activity ---------- */
+.kind-tile {
+  appearance: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-height: 116px;
+  padding: 14px 16px;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.kind-tile:hover { border-color: var(--accent-line); background: var(--surface-2); }
+.kind-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.kind-tile.is-off { opacity: .55; cursor: not-allowed; }
+.kind-name { font-size: .96rem; font-weight: 650; }
+.kind-meta { font-size: .72rem; color: var(--dim); font-family: var(--mono); }
+.kind-desc { font-size: .8rem; color: var(--muted); line-height: 1.45; }
+
+.req {
+  font-size: .68rem;
+  font-weight: 600;
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+  border-radius: 999px;
+  padding: 1px 6px;
+  margin-left: 4px;
+}
+#kindForm .field input[type="text"],
+#kindForm .field select,
+#kindForm .field input[type="number"] { max-width: 460px; }
+.kind-field { margin-bottom: 14px; }
+.kind-field:last-child { margin-bottom: 0; }
+.check { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.check input { width: auto; margin: 0; }
+
+.invite-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.invite-slot {
+  flex: 0 0 auto;
+  width: 52px;
+  height: 52px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px dashed var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--dim);
+  cursor: pointer;
+}
+.invite-slot:hover { border-color: var(--accent); color: var(--accent-strong); background: var(--accent-soft); }
+.invite-slot svg { width: 18px; height: 18px; stroke-width: 1.8; }
+.invite-chips { display: flex; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.invite-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 4px 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  font-size: .82rem;
+}
+.invite-chip button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--dim);
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: .9rem;
+  line-height: 1;
+}
+.invite-chip button:hover { background: var(--surface-3); color: var(--text); }
+
+.pick-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 8px;
+}
+.pick-tile {
+  appearance: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 12px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  min-height: 44px;
+}
+.pick-tile:hover { background: var(--surface-2); }
+.pick-tile.on { border-color: var(--accent); background: var(--accent-soft); }
+.pick-tile .avatar { width: 40px; height: 40px; font-size: 1rem; }
+.pick-name {
+  font-size: .8rem;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ---------- segmented control ---------- */
 .seg {
   display: inline-flex;

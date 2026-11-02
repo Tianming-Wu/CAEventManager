@@ -36,6 +36,7 @@ import auth
 import checkin
 import db
 import exporter
+import kinds
 import localconfig
 import model
 import panel
@@ -732,6 +733,85 @@ class Handler(BaseHTTPRequestHandler):
                 panel.audit(tx, acc["username"], "role_change", target["username"], role)
             return self._json({"ok": True, "role": role})
 
+        if path == "/templates" and method == "GET":
+            return self._json({"ok": True, "version": VERSION,
+                               "kinds": kinds.all_kinds(VERSION, include_broken=True)})
+
+        if path == "/events/create" and method == "POST":
+            data = body()
+            kind = kinds.get((data.get("kind") or "").strip(), VERSION)
+            if kind is None:
+                raise model.ApiError("\u6ca1\u6709\u8fd9\u4e2a\u6d3b\u52a8\u5f62\u5f0f", 404)
+            if not kind["ok"]:
+                raise model.ApiError(kind["reason"] or "\u5f53\u524d\u7248\u672c\u4e0d\u652f\u6301\u8fd9\u4e2a\u6d3b\u52a8\u5f62\u5f0f")
+            title = (data.get("title") or "").strip()
+            if not title:
+                raise model.ApiError("\u8bf7\u586b\u5199\u6d3b\u52a8\u540d\u79f0")
+            if len(title) > 60:
+                raise model.ApiError("\u6d3b\u52a8\u540d\u79f0\u6700\u957f 60 \u4e2a\u5b57")
+            note = (data.get("note") or "").strip()[:200]
+            try:
+                params = kinds.coerce_params(kind, data.get("params") or {})
+            except ValueError as exc:
+                raise model.ApiError(str(exc))
+
+            invited = []
+            for raw in data.get("members") or []:
+                try:
+                    who = int(raw)
+                except (TypeError, ValueError):
+                    continue
+                if who != acc["id"]:
+                    invited.append(who)
+
+            token = localconfig.new_secret()
+            now = time.time()
+            with panel.tx() as tx:
+                cur = tx.execute(
+                    "INSERT INTO events (token, title, note, kind, params, owner_id,"
+                    " created_at) VALUES (?,?,?,?,?,?,?)",
+                    (token, title, note, kind["id"],
+                     json.dumps(params, ensure_ascii=False), acc["id"], now))
+                seq = cur.lastrowid
+                tx.execute(
+                    "INSERT OR REPLACE INTO event_members"
+                    " (seq, account_id, role, state, added_at) VALUES (?,?,?,?,?)",
+                    (seq, acc["id"], "owner", "active", now))
+                for who in invited:
+                    exists = tx.execute("SELECT 1 FROM accounts WHERE id=?",
+                                        (who,)).fetchone()
+                    if exists is None:
+                        continue
+                    tx.execute(
+                        "INSERT OR IGNORE INTO event_members"
+                        " (seq, account_id, role, state, added_at) VALUES (?,?,?,?,?)",
+                        (seq, who, "member", "pending", now))
+                panel.audit(tx, acc["username"], "event_create", str(seq), title)
+
+            # the activity gets its own database, seeded from the kind's defaults
+            db.set_current_event(seq)
+            db.init_db()
+            event_conn = db.connect()
+            prefix = (LOCAL_CFG.get("public_base_prefix") or "").rstrip("/")
+            with db.tx(event_conn):
+                db.set_config_raw(event_conn, "title", title)
+                # the new activity's own address, not the configured one
+                if prefix:
+                    db.set_config_raw(event_conn, "public_base_url",
+                                      prefix + "/" + token)
+                if note:
+                    db.set_config_raw(event_conn, "subtitle", note)
+                for key, val in params.items():
+                    db.set_config_raw(event_conn, key, val)
+                db.audit(event_conn, "event_create", detail="kind=%s" % kind["id"])
+
+            row = conn.execute(
+                "SELECT e.*, 'owner' AS my_role, ? AS owner_name FROM events e"
+                " WHERE e.seq=?", (acc["name"] or acc["username"], seq)).fetchone()
+            base = public_base_url(event_conn)
+            return self._json({"ok": True, "event": panel.event_view(row, base, "owner"),
+                               "invited": len(invited)})
+
         if path == "/event/title" and method == "POST":
             # The name belongs to the event's top-level data, so only that
             # event's owner may set it - a platform owner or superadmin who is
@@ -753,6 +833,7 @@ class Handler(BaseHTTPRequestHandler):
                 tx.execute("UPDATE events SET title=? WHERE seq=?", (title, seq))
                 panel.audit(tx, acc["username"], "event_title", str(seq), title)
             # the event pages read their heading from the event database
+            db.set_current_event(seq)
             event_conn = db.connect()
             with db.tx(event_conn):
                 db.set_config_raw(event_conn, "title", title)

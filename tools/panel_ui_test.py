@@ -292,7 +292,7 @@ def search_page(page):
     page.goto(BASE + "/panel#/users")
     page.wait_for_timeout(320)
     check("a hidden login-shaped honeypot sits before it",
-          page.locator(".hp input[name=username]").count() == 1)
+          page.locator(".hp input[name=username]").count() >= 1)
     # The native cross cannot be measured, so check that the rule which hides it
     # is actually shipped and that ours is a properly sized target.
     check("the native clear button is disabled in css", page.evaluate("""() => {
@@ -350,9 +350,15 @@ def card_page(page):
     check("the page has both headings",
           cards["headings"] == ["我创建的活动", "我参与的活动"],
           cards["headings"])
-    check("an event appears on exactly one side",
-          cards["owned"] + cards["joined"] <= 1 or
-          (cards["owned"] == 1 and cards["joined"] == 0), cards)
+    check("the creator sees their own activity on the left", cards["owned"] >= 1, cards)
+    both = page.evaluate("""() => {
+        const ids = (sel) => Array.from(document.querySelectorAll(sel + ' .event-token code'))
+            .map(el => el.getAttribute('title'));
+        const owned = ids('#ownedEvents');
+        const joined = ids('#joinedEvents');
+        return owned.filter(id => joined.indexOf(id) >= 0);
+    }""")
+    check("and no activity appears on both sides", not both, both)
 
     print("== the activity card ==")
     page.goto(BASE + "/panel#/events")
@@ -364,7 +370,7 @@ def card_page(page):
     }""")
     check("three cards fit across a page", cols == 3, cols)
     check("the token is shortened, not wrapped",
-          page.locator("#ownedEvents .event-token code").count() == 1)
+          page.locator("#ownedEvents .event-token code").count() >= 1)
     label = page.evaluate("""() => {
         const box = document.querySelector('#ownedEvents .event-token');
         const tag = box.querySelector('.token-label');
@@ -388,9 +394,11 @@ def card_page(page):
         return shown.length < full.length && full.startsWith(shown.slice(0, 4))
                && full.endsWith(shown.slice(-5)) && shown.indexOf('****') > 0;
     }"""))
-    check("one 管理面板 button, nothing else",
-          page.locator("#ownedEvents .event-actions a").count() == 1 and
-          page.locator("#ownedEvents .event-actions a").inner_text().strip() == "管理面板")
+    per_card = page.evaluate("""() => Array.from(
+        document.querySelectorAll('#ownedEvents .event-card')).map(card => Array.from(
+            card.querySelectorAll('.event-actions a')).map(a => a.textContent.trim()))""")
+    check("one 管理面板 button per card, nothing else",
+          all(row == ["管理面板"] for row in per_card), per_card)
 
     print("== the card menu ==")
     check("no menu until asked", page.locator(".card-menu").count() == 0)
@@ -612,6 +620,48 @@ def events_table(page):
     page.wait_for_timeout(400)
     check("the account page offers 退出登录",
           page.locator("#logoutBtn").is_visible())
+
+
+def create_page(browser):
+    print("== creating an activity from the console ==")
+    ctx, page = new_page(browser, 1440, 900)
+    try:
+        ui_login(page)
+        page.goto(BASE + "/panel#/events")
+        page.wait_for_timeout(420)
+        check("the button says 创建活动",
+              page.locator("#newEventBtn").inner_text().strip() == "创建活动")
+        page.click("#newEventBtn")
+        page.wait_for_timeout(700)
+        check("a kind picker appears", page.locator(".kind-tile").count() >= 1)
+        check("the built-in kind is offered", page.evaluate(
+            "() => !!document.querySelector('[data-kind=\\'nwuca.lottery\\']')"))
+        page.screenshot(path="tmp/ui/kind-picker.png")
+
+        page.click("[data-kind='nwuca.lottery']")
+        page.wait_for_timeout(600)
+        check("choosing one renders its form", page.locator("#neTitle").is_visible())
+        check("the schema drew its fields",
+              page.locator("[data-kind-field]").count() >= 3,
+              page.locator("[data-kind-field]").count())
+        check("a required field is marked",
+              page.locator(".kind-field .req, .field .req").count() >= 1)
+        page.screenshot(path="tmp/ui/kind-form.png")
+
+        print("== refusals happen in place ==")
+        page.fill("#neTitle", "")
+        page.click("#kindCreate")
+        page.wait_for_timeout(400)
+        check("a missing name is refused", page.locator("#createErr").inner_text().strip() != "")
+
+        print("== a real creation ==")
+        page.fill("#neTitle", "界面创建的活动")
+        page.select_option("#kf_pool_mode", "auto")
+        page.click("#kindCreate")
+        page.wait_for_url("**/admin", timeout=25000)
+        check("it opens the new activity's console", "/admin" in page.url, page.url)
+    finally:
+        ctx.close()
 
 
 def dialog_page(page):
@@ -912,6 +962,7 @@ def main():
                 title_row(page)
                 group_page(page)
                 card_page(page)
+                create_page(browser)
                 # profile_page edits the signed-in account, so it only runs on a
                 # throw-away instance
                 if WITH_ACCOUNTS:

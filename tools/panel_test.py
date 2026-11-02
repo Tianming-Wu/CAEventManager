@@ -281,6 +281,45 @@ def main():
     call(plain, "/api/panel/host", expect=403)
     check("a plain admin cannot read them", True)
 
+    print("== activity kinds ==")
+    kinds = call(owner, "/api/panel/templates")["kinds"]
+    ids = [k["id"] for k in kinds]
+    check("the built-in kind is listed", "nwuca.lottery" in ids, ids)
+    check("it reports compatibility",
+          all("ok" in k for k in kinds), kinds)
+    check("it declares its parameters",
+          any(k["id"] == "nwuca.lottery" and k["fields"] for k in kinds))
+
+    print("== creating an activity ==")
+    post(owner, "/api/panel/events/create",
+         {"kind": "nwuca.lottery", "title": "", "params": {"pool_mode": "auto"}},
+         expect=400)
+    check("a name is required", True)
+    post(owner, "/api/panel/events/create", {"kind": "nwuca.lottery", "title": "x"},
+         expect=400)
+    check("a required parameter cannot be left empty", True)
+    post(owner, "/api/panel/events/create",
+         {"kind": "nope.nope", "title": "x", "params": {"pool_mode": "auto"}},
+         expect=404)
+    check("an unknown kind is refused", True)
+
+    made = post(owner, "/api/panel/events/create", {
+        "kind": "nwuca.lottery", "title": "第二场",
+        "params": {"pool_mode": "auto", "allow_bonus": False}})
+    check("an activity can be created", made and made["ok"], made)
+    ev2 = made["event"]
+    check("it gets its own token and id",
+          ev2["seq"] != ev["seq"] and ev2["token"] not in ev["admin"], ev2)
+    check("its links use its own token", ev2["token"] in ev2["admin"], ev2["admin"])
+    check("the creator owns it", ev2["role"] == "owner", ev2)
+    listing = call(owner, "/api/panel/events")["events"]
+    check("both activities are listed", len(listing) == 2, listing)
+    check("the list is split by role",
+          sum(1 for e in listing if e["role"] == "owner") == 2, listing)
+    first = call(owner, "/api/panel/events")["events"]
+    check("a second activity does not disturb the first",
+          any(e["seq"] == ev["seq"] for e in first), first)
+
     print("== renaming an activity ==")
     ev = call(owner, "/api/panel/events")["events"][0]
     got = post(owner, "/api/panel/event/title",

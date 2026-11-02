@@ -1,0 +1,50 @@
+{
+  "comment": "创建时定下、之后不再更改的参数。key 与活动库的配置项同名，创建时直接写进去。",
+  "fields": [
+    {
+      "key": "pool_mode",
+      "label": "奖票池",
+      "type": "select",
+      "required": true,
+      "options": [
+        { "value": "auto", "label": "按到场人数自动伸缩" },
+        { "value": "fixed", "label": "固定数量" }
+      ],
+      "help": "自动伸缩：池子 = 到场人数 × 3 + 常数，永远不会不够发"
+    },
+    {
+      "key": "pool_size",
+      "label": "固定池子大小",
+      "type": "int",
+      "required": false,
+      "default": 200,
+      "min": 1,
+      "max": 5000,
+      "help": "只在选固定数量时使用"
+    },
+    {
+      "key": "allow_bonus",
+      "label": "按完成速度额外发票",
+      "type": "bool",
+      "required": false,
+      "default": true
+    },
+    {
+      "key": "person_draw_no_repeat",
+      "label": "特等奖不重复抽同一个人",
+      "type": "bool",
+      "required": false,
+      "default": false
+    },
+    {
+      "key": "nominal_guaranteed",
+      "label": "名义保底票数",
+      "type": "int",
+      "required": false,
+      "default": 180,
+      "min": 0,
+      "max": 5000,
+      "help": "只作展示，不影响发号"
+    }
+  ]
+}

@@ -157,6 +157,8 @@
     clearInterval(rollTimer);
     clearTimeout(hideTimer);
     overlay.classList.add("show");
+    overlay.classList.remove("batch");
+    codeEl.style.display = "";
     $("#dPrize").textContent = draw.prize || (person ? "特等奖" : "抽奖");
     codeEl.classList.toggle("names", person);
     codeEl.textContent = person ? (names[0] || "…") : LT.code(draw.code);
@@ -195,6 +197,62 @@
     clearInterval(rollTimer);
     clearTimeout(hideTimer);
     $("#overlay").classList.remove("show");
+    $("#overlay").classList.remove("batch");
+    $("#dCode").style.display = "";
+  }
+
+  // A prize drawn 「一次抽完」 arrives as one batch: roll once, then show the
+  // whole list together instead of playing one animation per winner.
+  function playBatch(batch) {
+    var overlay = $("#overlay");
+    var codeEl = $("#dCode");
+    var winnerEl = $("#dWinner");
+    var list = (batch.winners || []).slice();
+    if (!list.length) return;
+    var person = batch.mode === "person";
+    var showSid = !!(data.config && data.config.show_sid);
+    var names = (data.students || []).filter(function (s) { return s.progress > 0; })
+      .map(function (s) { return s.name; });
+    var pool = Math.max(1, (data.stats && data.stats.max_code) || (data.stats && data.stats.pool_size) || 200);
+    if (!person) {
+      // ticket numbers ascending: the audience reads the list like a roster
+      list.sort(function (a, b) { return (a.code || 0) - (b.code || 0); });
+    }
+
+    clearInterval(rollTimer);
+    clearTimeout(hideTimer);
+    overlay.classList.add("show");
+    overlay.classList.add("batch");
+    codeEl.style.display = "";
+    codeEl.classList.toggle("names", person);
+    codeEl.classList.add("rolling");
+    codeEl.textContent = person ? (names[0] || "…") : LT.code(1 + Math.floor(Math.random() * pool));
+    winnerEl.classList.remove("show");
+    winnerEl.innerHTML = "";
+    $("#dPrize").textContent = (batch.prize || "抽奖") + " · " + list.length + " 人";
+    $("#dHint").textContent = "抽取中…";
+
+    var startedAt = Date.now();
+    rollTimer = setInterval(function () {
+      codeEl.textContent = person
+        ? (names[Math.floor(Math.random() * Math.max(1, names.length))] || "…")
+        : LT.code(1 + Math.floor(Math.random() * pool));
+      if (Date.now() - startedAt > 1700) {
+        clearInterval(rollTimer);
+        codeEl.classList.remove("rolling");
+        codeEl.style.display = "none";
+        winnerEl.innerHTML = '<div class="draw-reveal">' + list.map(function (w) {
+          return '<div class="it">' +
+            (w.mode === "person" ? "" : '<span class="cd">' + LT.code(w.code) + "</span>") +
+            '<span class="nm">' + LT.esc(w.name || "?") + "</span>" +
+            (showSid && w.sid ? '<span class="sd">' + LT.esc(w.sid) + "</span>" : "") +
+            "</div>";
+        }).join("") + "</div>";
+        winnerEl.classList.add("show");
+        $("#dHint").textContent = "请上台领奖 · 点击任意处关闭";
+        hideTimer = setTimeout(closeOverlay, 20000);
+      }
+    }, 60);
   }
 
   // ---------------------------------------------------------------- render --
@@ -205,7 +263,11 @@
     renderQR();
     renderWall();
     var d = data.lastDraw;
-    if (d && lastSeq !== null && d.seq !== lastSeq) playDraw(d);
+    if (d && lastSeq !== null && d.seq !== lastSeq) {
+      var batch = data.lastBatch;
+      if (batch && batch.winners && batch.winners.length > 1) playBatch(batch);
+      else playDraw(d);
+    }
     if (d) lastSeq = d.seq;
     else if (lastSeq === null) lastSeq = 0;
   }

@@ -567,12 +567,53 @@ def main():
         screen.keyboard.press("Escape")
         screen.wait_for_timeout(600)
         check("overlay can be dismissed", screen.locator("#overlay.show").count() == 0)
-        check("both winners are still listed on screen",
-              screen.locator(".winners-strip .wstrip-item").count() == 2,
+        won = page.locator("#drawTable tbody tr").count()
+        check("every winner stays listed on screen",
+              screen.locator(".winners-strip .wstrip-item").count() == won,
               screen.locator(".winners-strip .wstrip-item").count())
         check("person winner is styled apart",
               screen.locator(".winners-strip .wstrip-item.person").count() == 1)
         shot(screen, "15c-screen-both-winners")
+
+        # --------------------------------------------------- 一次抽完 (batch)
+        print("== 一次抽完 ==")
+        row = page.locator("#prizeTable tbody tr").filter(has_text="二等奖").first
+        left = row.locator('[data-pace="batch"]')
+        check("每个奖品都有逐个/一次抽完的切换", left.count() == 1)
+        left.click()
+        page.wait_for_timeout(1000)
+        row = page.locator("#prizeTable tbody tr").filter(has_text="二等奖").first
+        cls = row.locator('[data-pace="batch"]').get_attribute("class") or ""
+        check("切到一次抽完后开关留在那一档", "on" in cls, cls)
+        check("按钮改成抽完",
+              row.locator("[data-draw]").inner_text().strip() == "抽完",
+              row.locator("[data-draw]").inner_text())
+        row.locator("[data-draw]").click()
+        page.wait_for_timeout(1800)
+        cells = page.locator("#drawResult .winner-grid .winner-cell")
+        check("一次抽完把该奖品名额抽满", cells.count() == 5, cells.count())
+        check("结果按整批展示",
+              "5 人" in page.locator("#drawResult .winner-head").inner_text(),
+              page.locator("#drawResult .winner-head").inner_text())
+        check("抽奖记录一次记满整批",
+              page.locator("#drawTable tbody tr").count() == won + 5,
+              page.locator("#drawTable tbody tr").count())
+        check("抽完的奖品锁定按钮",
+              page.locator("#prizeTable tbody tr").filter(has_text="二等奖")
+                  .first.locator("[data-draw]").is_disabled())
+        shot(page, "13c-batch-draw")
+
+        screen.wait_for_timeout(2200)
+        check("大屏为整批起一次动画",
+              screen.locator("#overlay.show").count() == 1)
+        screen.wait_for_timeout(2200)
+        check("大屏一次展示整批得主",
+              screen.locator("#overlay.show .draw-reveal .it").count() == 5,
+              screen.locator("#overlay.show .draw-reveal .it").count())
+        shot(screen, "15d-screen-batch")
+        screen.keyboard.press("Escape")
+        screen.wait_for_timeout(500)
+        won = page.locator("#drawTable tbody tr").count()
 
         # -------------------------------------------------------- public board
         print("== public board ==")
@@ -586,7 +627,7 @@ def main():
               "%s vs %s" % (board.locator(".card").count(), st["stats"]["participants"]))
         check("board hides staff and volunteers",
               board.locator(".card").count() < st["stats"]["total"])
-        check("board shows both winners", board.locator("#winnersBox .winner").count() == 2,
+        check("board lists every winner", board.locator("#winnersBox .winner").count() == won,
               board.locator("#winnersBox .winner").count())
         shot(board, "16-board", full=True)
 

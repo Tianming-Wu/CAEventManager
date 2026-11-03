@@ -315,13 +315,25 @@
   // Mirrors model.normalize_prizes(): a stored prize may still be a bare name.
   function normalizePrizes(list) {
     return (list || []).map(function (p) {
-      if (typeof p === "string") return { name: p, count: 1, mode: "ticket" };
+      if (typeof p === "string") return { name: p, count: 1, mode: "ticket", batch: false };
       return {
         name: (p && p.name) || "",
         count: Number(p && p.count) || 0,
-        mode: p && p.mode === "person" ? "person" : "ticket"
+        mode: p && p.mode === "person" ? "person" : "ticket",
+        batch: !!(p && p.batch)
       };
     }).filter(function (p) { return p.name; });
+  }
+
+  // 「逐个」 draws one winner per click; 「一次抽完」 draws the whole remaining
+  // quota of that prize in one go. Stored with the prize, so it survives a
+  // reload and both operators see the same choice.
+  function paceSwitch(index, oneShot) {
+    return '<div class="seg" role="group">' +
+      '<button type="button" class="seg-btn' + (oneShot ? "" : " on") +
+      '" data-pace="step" data-i="' + index + '">逐个</button>' +
+      '<button type="button" class="seg-btn' + (oneShot ? " on" : "") +
+      '" data-pace="batch" data-i="' + index + '">一次抽完</button></div>';
   }
 
   function renderPrizeList() {
@@ -329,7 +341,7 @@
     if (!body) return;
     var prizes = S.prizes || [];
     if (!prizes.length) {
-      body.innerHTML = '<tr><td colspan="5" class="empty">还没有配置奖品</td></tr>';
+      body.innerHTML = '<tr><td colspan="6" class="empty">还没有配置奖品</td></tr>';
       return;
     }
     body.innerHTML = prizes.map(function (p, i) {
@@ -337,15 +349,33 @@
       var blocked = p.mode === "ticket" && !S.config.finalized;
       var label = p.mode === "person" ? "均等" : "按票";
       var why = done ? "已抽完" : (blocked ? "需先结算奖票" : "");
+      var act = p.batch ? "抽完" : "抽";
       return "<tr" + (done ? ' class="done-row"' : "") + ">" +
         "<td><b>" + LT.esc(p.name) + "</b></td>" +
         '<td style="color:var(--muted)">' + label + "</td>" +
+        "<td>" + paceSwitch(i, p.batch) + "</td>" +
         '<td class="right left-n">' + p.drawn + "</td>" +
         '<td class="right left-n">' + p.remaining + " / " + p.count + "</td>" +
         '<td class="right"><button class="btn draw-btn ' + (done ? "" : "primary") +
         '" data-draw="' + i + '"' + (done || blocked ? " disabled" : "") +
-        ' title="' + why + '">抽</button></td></tr>';
+        ' title="' + why + '">' + act + "</button></td></tr>";
     }).join("");
+  }
+
+  function setPace(index, oneShot) {
+    var prizes = S.prizes || [];
+    if (!prizes[index] || !!prizes[index].batch === oneShot) return;
+    var payload = prizes.map(function (p, i) {
+      return {
+        name: p.name,
+        count: p.count,
+        mode: p.mode,
+        batch: i === index ? oneShot : !!p.batch
+      };
+    });
+    LT.api("/api/admin/settings", { method: "POST", body: { prizes: payload } })
+      .then(function () { return load(); })
+      .catch(bad);
   }
 
   function renderPrizeEditor() {
@@ -353,7 +383,7 @@
     if (!box) return;
     var prizes = normalizePrizes(S.config.prizes);
     box.innerHTML = prizes.map(function (p, i) {
-      return '<div class="prize-row" data-i="' + i + '">' +
+      return '<div class="prize-row" data-i="' + i + '" data-batch="' + (p.batch ? "1" : "0") + '">' +
         '<input class="p-name" type="text" value="' + LT.esc(p.name) + '" placeholder="奖品名称">' +
         '<input class="p-count" type="number" min="0" max="999" value="' + p.count + '">' +
         '<select class="p-mode">' +
@@ -808,6 +838,8 @@
       if (un) { undo(Number(t.getAttribute("data-id")), un); refocus(); return; }
       var dp = t.getAttribute && t.getAttribute("data-draw");
       if (dp) { drawPrize(Number(dp)); return; }
+      var pc = t.getAttribute && t.getAttribute("data-pace");
+      if (pc) { setPace(Number(t.getAttribute("data-i")), pc === "batch"); return; }
       var pd = t.getAttribute && t.getAttribute("data-prize-del");
       if (pd) {
         var kept = collectPrizes();
@@ -1069,19 +1101,44 @@
   }
 
   // ------------------------------------------------------------------ draw
+  function winnerRow(w) {
+    var tail = w.mode === "person"
+      ? '<span class="code" style="font-family:inherit">均等</span>'
+      : '<span class="code">#' + LT.code(w.code) + "</span>";
+    return '<div class="winner"><span class="prize">' + LT.esc(w.prize) + "</span>" +
+      '<span class="who">' + LT.esc(w.name) +
+      " <span style='color:var(--dim)'>" + LT.esc(w.sid) + "</span></span>" + tail + "</div>";
+  }
+
+  function renderDrawResult(list, stopped) {
+    var box = $("#drawResult");
+    if (!box) return;
+    var html;
+    if (list.length > 1) {
+      html = '<div class="winner-head">本次抽出 ' + list.length + " 人</div>" +
+        '<div class="winner-grid">' + list.map(function (w) {
+          return '<span class="winner-cell">' + LT.esc(w.name) +
+            (w.mode === "person" ? "" : ' <span class="tkt">' + LT.code(w.code) + "</span>") +
+            "</span>";
+        }).join("") + "</div>";
+    } else {
+      html = winnerRow(list[0]);
+    }
+    if (stopped) {
+      html += '<p class="note" style="margin-top:8px">只抽出 ' + list.length +
+        " 人：" + LT.esc(stopped) + "</p>";
+    }
+    box.innerHTML = html;
+  }
+
   function drawPrize(index) {
     var p = (S.prizes || [])[index];
     if (!p) return;
-    LT.api("/api/admin/draw", { method: "POST", body: { prize: p.name, mode: p.mode } })
+    var body = { prize: p.name, mode: p.mode };
+    if (p.batch) body.batch = true;
+    LT.api("/api/admin/draw", { method: "POST", body: body })
       .then(function (d) {
-        var w = d.draw;
-        var tail = w.mode === "person"
-          ? '<span class="code" style="font-family:inherit">均等</span>'
-          : '<span class="code">#' + LT.code(w.code) + "</span>";
-        $("#drawResult").innerHTML =
-          '<div class="winner"><span class="prize">' + LT.esc(w.prize) + "</span>" +
-          '<span class="who">' + LT.esc(w.name) +
-          " <span style='color:var(--dim)'>" + LT.esc(w.sid) + "</span></span>" + tail + "</div>";
+        renderDrawResult(d.draws || [d.draw], d.stopped);
         return load();
       })
       .catch(bad);
@@ -1136,7 +1193,8 @@
       return {
         name: $(".p-name", row).value.trim(),
         count: Math.max(0, Number($(".p-count", row).value) || 0),
-        mode: $(".p-mode", row).value
+        mode: $(".p-mode", row).value,
+        batch: row.getAttribute("data-batch") === "1"
       };
     }).filter(function (p) { return p.name; });
   }
@@ -1356,7 +1414,7 @@
     });
 
     $("#prizeAddBtn").addEventListener("click", function () {
-      var list = collectPrizes().concat([{ name: "", count: 1, mode: "ticket" }]);
+      var list = collectPrizes().concat([{ name: "", count: 1, mode: "ticket", batch: false }]);
       S.config.prizes = list;
       renderPrizeEditor();
       var inputs = $$("#prizeEditor .p-name");

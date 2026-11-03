@@ -30,6 +30,7 @@ import hashlib
 import io
 import random
 import time
+import uuid
 
 import db
 import expr
@@ -894,15 +895,16 @@ def reset_tickets(conn, actor="admin"):
 # draws
 # --------------------------------------------------------------------------- #
 def normalize_prizes(cfg):
-    """Prize list as dicts: {"name", "count", "mode"}.
+    """Prize list as dicts: {"name", "count", "mode", "batch"}.
 
     Accepts plain strings too (an older config listed just names), so a stored
-    config never has to be hand-migrated.
+    config never has to be hand-migrated.  ``batch`` marks a prize that is drawn
+    out in one go instead of one winner per click.
     """
     out = []
     for item in cfg.get("prizes") or []:
         if isinstance(item, str):
-            name, count, mode = item, 1, "ticket"
+            name, count, mode, batch = item, 1, "ticket", False
         elif isinstance(item, dict):
             name = str(item.get("name") or "").strip()
             try:
@@ -910,11 +912,12 @@ def normalize_prizes(cfg):
             except (TypeError, ValueError):
                 count = 1
             mode = item.get("mode") if item.get("mode") in ("ticket", "person") else "ticket"
+            batch = bool(item.get("batch"))
         else:
             continue
         if not name:
             continue
-        out.append({"name": name, "count": max(0, count), "mode": mode})
+        out.append({"name": name, "count": max(0, count), "mode": mode, "batch": batch})
     return out
 
 
@@ -968,7 +971,7 @@ def _winners(conn, where, args):
     }
 
 
-def draw_next(conn, prize="", actor="admin"):
+def draw_next(conn, prize="", actor="admin", batch=None):
     cfg = db.all_config(conn)
     if not cfg.get("finalized"):
         raise ApiError("请先结算奖票再抽奖", 409)
@@ -1002,8 +1005,9 @@ def draw_next(conn, prize="", actor="admin"):
     winner = live[code]
     seq = _next_seq(conn)
     conn.execute(
-        "INSERT INTO draws (seq, prize, mode, code, student_id, ts) VALUES (?,?,?,?,?,?)",
-        (seq, prize, "ticket", code, winner["student_id"], time.time()),
+        "INSERT INTO draws (seq, prize, mode, code, student_id, ts, batch) "
+        "VALUES (?,?,?,?,?,?,?)",
+        (seq, prize, "ticket", code, winner["student_id"], time.time(), batch),
     )
     db.audit(
         conn,
@@ -1021,10 +1025,11 @@ def draw_next(conn, prize="", actor="admin"):
         "student_id": winner["student_id"],
         "name": winner["name"],
         "sid": winner["sid"],
+        "batch": batch,
     }
 
 
-def draw_person(conn, prize="特等奖", actor="admin"):
+def draw_person(conn, prize="特等奖", actor="admin", batch=None):
     """Draw one *person* among those who showed up, all equally likely.
 
     Deliberately independent of the ticket draw: it consumes no ticket, a person
@@ -1051,8 +1056,9 @@ def draw_person(conn, prize="特等奖", actor="admin"):
     winner = random.SystemRandom().choice(sorted(candidates, key=lambda s: s["sid"]))
     seq = _next_seq(conn)
     conn.execute(
-        "INSERT INTO draws (seq, prize, mode, code, student_id, ts) VALUES (?,?,?,?,?,?)",
-        (seq, prize, "person", None, winner["id"], time.time()),
+        "INSERT INTO draws (seq, prize, mode, code, student_id, ts, batch) "
+        "VALUES (?,?,?,?,?,?,?)",
+        (seq, prize, "person", None, winner["id"], time.time(), batch),
     )
     db.audit(
         conn,
@@ -1072,7 +1078,39 @@ def draw_person(conn, prize="特等奖", actor="admin"):
         "name": winner["name"],
         "sid": winner["sid"],
         "candidates": len(candidates),
+        "batch": batch,
     }
+
+
+def draw_batch(conn, prize="", mode="ticket", actor="admin"):
+    """Draw every remaining quota of one prize in a single call.
+
+    The winners are picked one at a time through the ordinary single-draw path,
+    so tickets are still consumed one by one and both de-duplication rules still
+    apply between the winners of the same batch.  A batch that runs out of
+    material before the quota is filled keeps what it drew and reports why it
+    stopped.  All rows share one batch id, which is what the big screen needs in
+    order to reveal the list at once instead of one animation after another.
+    """
+    cfg = db.all_config(conn)
+    quota = _require_prize_quota(conn, cfg, prize, mode)
+    if quota is None:
+        raise ApiError("「%s」不在奖品清单里，无法一次抽完" % (prize or "这个奖"), 409)
+    want = quota["remaining"]
+    batch = uuid.uuid4().hex[:12]
+    draws, stopped = [], None
+    for _ in range(want):
+        try:
+            if mode == "person":
+                draws.append(draw_person(conn, prize, actor, batch=batch))
+            else:
+                draws.append(draw_next(conn, prize, actor, batch=batch))
+        except ApiError as exc:
+            stopped = exc.msg
+            break
+    if not draws:
+        raise ApiError(stopped or "没有可抽的了", 409)
+    return {"batch": batch, "draws": draws, "stopped": stopped}
 
 
 def _next_seq(conn):
@@ -1114,3 +1152,31 @@ def last_draw(conn):
         "WHERE d.voided_at IS NULL ORDER BY d.seq DESC LIMIT 1"
     ).fetchone()
     return dict(row) if row else None
+
+
+def batch_draws(conn, batch):
+    """Live winners of one batch, in the order they were drawn."""
+    if not batch:
+        return []
+    rows = conn.execute(
+        "SELECT d.*, s.name, s.sid FROM draws d LEFT JOIN students s ON s.id=d.student_id "
+        "WHERE d.batch=? AND d.voided_at IS NULL ORDER BY d.seq",
+        (batch,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def last_batch(conn):
+    """The newest batch, or None when it only ever held a single winner."""
+    last = last_draw(conn)
+    if not last or not last.get("batch"):
+        return None
+    rows = batch_draws(conn, last["batch"])
+    if len(rows) < 2:
+        return None
+    return {
+        "batch": last["batch"],
+        "prize": last["prize"],
+        "mode": last["mode"],
+        "winners": rows,
+    }

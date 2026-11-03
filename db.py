@@ -180,7 +180,8 @@ CREATE TABLE IF NOT EXISTS draws (
     code        INTEGER,
     student_id  INTEGER,
     ts          REAL    NOT NULL,
-    voided_at   REAL
+    voided_at   REAL,
+    batch       TEXT                                -- draws made by one click share it
 );
 
 CREATE TABLE IF NOT EXISTS config (
@@ -255,6 +256,8 @@ def init_db():
         cols = {row["name"] for row in conn.execute("PRAGMA table_info(draws)")}
         if "mode" not in cols:
             conn.execute("ALTER TABLE draws ADD COLUMN mode TEXT NOT NULL DEFAULT 'ticket'")
+        if "batch" not in cols:
+            conn.execute("ALTER TABLE draws ADD COLUMN batch TEXT")
         scols = {row["name"] for row in conn.execute("PRAGMA table_info(students)")}
         if "role" not in scols:
             conn.execute(

@@ -529,6 +529,19 @@ textarea { resize: vertical; min-height: 120px; font-family: var(--mono); font-s
 .winner .prize { color: var(--accent-strong); font-weight: 650; font-size: .84rem; min-width: 5em; }
 .winner .who { font-weight: 650; }
 .winner .code { margin-left: auto; font-family: var(--mono); color: var(--accent-strong); font-weight: 650; }
+/* a whole prize drawn in one go: the list replaces the single-winner line */
+.winner-head { font-size: .82rem; color: var(--muted); margin-bottom: 7px; }
+.winner-grid { display: flex; flex-wrap: wrap; gap: 7px; }
+.winner-cell {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 7px;
+  padding: 5px 10px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-sm);
+  font-weight: 650;
+}
 
 /* ==========================================================================
    big screen
@@ -720,6 +733,26 @@ textarea { resize: vertical; min-height: 120px; font-family: var(--mono); font-s
 .draw-winner .nm2 { color: var(--accent-strong); }
 .draw-winner .sid2 { color: var(--muted); font-size: .5em; font-family: var(--mono); }
 .draw-hint { color: var(--dim); font-size: clamp(.7rem, 1.05vw, .95rem); }
+/* a batch (「一次抽完」) reveals the whole winner list at once */
+.draw-reveal {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 1.5vh 1.1vw;
+  max-width: 92vw;
+}
+.draw-reveal .it {
+  display: flex;
+  align-items: baseline;
+  gap: .55vw;
+  padding: .7vh 1.1vw;
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+}
+.draw-reveal .cd { font-family: var(--mono); font-weight: 650; color: var(--muted); font-size: clamp(.85rem, 2vw, 2rem); }
+.draw-reveal .nm { font-weight: 700; color: var(--accent-strong); font-size: clamp(1.2rem, 3.2vw, 3.2rem); line-height: 1.15; }
+.draw-reveal .sd { font-family: var(--mono); color: var(--dim); font-size: clamp(.7rem, 1.2vw, 1.2rem); }
 
 /* ==========================================================================
    self check-in (mobile first)
@@ -831,9 +864,38 @@ textarea { resize: vertical; min-height: 120px; font-family: var(--mono); font-s
   font-size: .95rem;
   font-weight: 650;
 }
-.prize-table th:nth-child(n+2), .prize-table td:nth-child(n+2) { width: 5.5em; }
-.prize-table th:nth-child(4), .prize-table td:nth-child(4) { width: 6.5em; }
-.prize-table th:last-child, .prize-table td:last-child { width: 4em; }
+.prize-table th:nth-child(2), .prize-table td:nth-child(2) { width: 5.5em; }
+.prize-table th:nth-child(3), .prize-table td:nth-child(3) { width: 11em; }
+.prize-table th:nth-child(4), .prize-table td:nth-child(4),
+.prize-table th:nth-child(5), .prize-table td:nth-child(5) { width: 6.5em; }
+.prize-table th:last-child, .prize-table td:last-child { width: 4.5em; }
+
+/* two-valued switch: one click, no dropdown */
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--surface-2);
+}
+.seg-btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: .78rem;
+  padding: 4px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.seg-btn + .seg-btn { border-left: 1px solid var(--line); }
+.seg-btn:hover { color: var(--text); }
+.seg-btn.on {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-weight: 650;
+}
 
 @media (max-width: 640px) {
   .topbar { padding: 8px 12px; gap: 8px; }

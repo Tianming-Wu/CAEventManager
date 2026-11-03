@@ -1916,6 +1916,7 @@ class Handler(BaseHTTPRequestHandler):
                 "stats": st,
                 "students": [student_public(conn, s, cfg) for s in students],
                 "lastDraw": model.last_draw(conn),
+                "lastBatch": model.last_batch(conn),
                 "winners": [d for d in model.draw_history(conn, 100) if not d["voided_at"]],
                 "serverTime": time.time(),
             }
@@ -2426,14 +2427,27 @@ class Handler(BaseHTTPRequestHandler):
             self._check_csrf()
             data = self._body()
             mode = (data.get("mode") or "ticket").lower()
+            if mode not in ("ticket", "person"):
+                raise model.ApiError("未知的抽取模式: %s" % mode)
+            prize = data.get("prize") or ("特等奖" if mode == "person" else "")
             with db.tx(conn):
-                if mode == "person":
-                    res = model.draw_person(conn, data.get("prize") or "特等奖")
-                elif mode == "ticket":
-                    res = model.draw_next(conn, data.get("prize") or "")
+                if data.get("batch"):
+                    # one click for the whole remaining quota of the prize
+                    res = model.draw_batch(conn, prize, mode)
+                    out = {
+                        "ok": True,
+                        "draw": res["draws"][-1],
+                        "draws": res["draws"],
+                        "batch": res["batch"],
+                        "stopped": res["stopped"],
+                    }
                 else:
-                    raise model.ApiError("未知的抽取模式: %s" % mode)
-            return self._json({"ok": True, "draw": res})
+                    if mode == "person":
+                        res = model.draw_person(conn, prize)
+                    else:
+                        res = model.draw_next(conn, prize)
+                    out = {"ok": True, "draw": res, "draws": [res]}
+            return self._json(out)
 
         if path == "/api/admin/draw_void" and method == "POST":
             self._check_csrf()

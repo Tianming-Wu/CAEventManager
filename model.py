@@ -935,6 +935,28 @@ def _require_prize_quota(conn, cfg, prize, mode):
     return None  # not configured: allowed (ad-hoc prize)
 
 
+# De-duplication has two independent axes:
+#   inside  - one person cannot take the same prize twice
+#   across  - one person cannot take two different prizes
+# A prize drawn *by person* (rather than by ticket) only ever follows the first:
+# it is a draw among those present, so it is not part of the ticket prizes'
+# mutual exclusion, and winning it neither blocks nor is blocked by them.
+def draw_rules(cfg):
+    inside = cfg.get("draw_unique_inside")
+    if inside is None:
+        inside = cfg.get("person_draw_no_repeat", True)
+    return {"inside": bool(inside),
+            "across": bool(cfg.get("draw_unique_across", False))}
+
+
+def _winners(conn, where, args):
+    return {
+        r["student_id"]
+        for r in conn.execute(
+            "SELECT student_id FROM draws WHERE voided_at IS NULL AND " + where, args)
+    }
+
+
 def draw_next(conn, prize="", actor="admin"):
     cfg = db.all_config(conn)
     if not cfg.get("finalized"):
@@ -953,7 +975,16 @@ def draw_next(conn, prize="", actor="admin"):
         )
     }
     pool = [c for c in live if c not in used]
+    rules = draw_rules(cfg)
+    if rules["inside"] and prize:
+        taken = _winners(conn, "prize=?", (prize,))
+        pool = [c for c in pool if live[c]["student_id"] not in taken]
+    if rules["across"]:
+        taken = _winners(conn, "mode='ticket' AND prize<>?", (prize,))
+        pool = [c for c in pool if live[c]["student_id"] not in taken]
     if not pool:
+        if rules["inside"] or rules["across"]:
+            raise ApiError("没有可抽的奖票了（剩下的票属于已经中过奖的人）", 409)
         raise ApiError("没有可抽的奖票了", 409)
     _require_prize_quota(conn, cfg, prize, "ticket")
     code = random.SystemRandom().choice(sorted(pool))
@@ -994,16 +1025,14 @@ def draw_person(conn, prize="特等奖", actor="admin"):
     if not present:
         raise ApiError("还没有人签到,无法抽取", 409)
 
-    if db.get_config(conn, "person_draw_no_repeat", True):
-        already = {
-            r["student_id"]
-            for r in conn.execute(
-                "SELECT student_id FROM draws WHERE voided_at IS NULL AND mode='person'"
-            )
-        }
+    rules = draw_rules(db.all_config(conn))
+    if rules["inside"]:
+        # only this prize: a by-person draw sits outside the ticket prizes'
+        # mutual exclusion, in both directions
+        already = _winners(conn, "prize=?", (prize,))
         candidates = [s for s in present if s["id"] not in already]
         if not candidates:
-            raise ApiError("所有到场的人都已经抽到过人级奖项了", 409)
+            raise ApiError("到场的人都已经拿过「%s」了" % (prize or "这个奖"), 409)
     else:
         candidates = present
 

@@ -2322,6 +2322,8 @@ class Handler(BaseHTTPRequestHandler):
                 "show_sid": bool,
                 "allow_bonus": bool,
                 "person_draw_no_repeat": bool,
+                "draw_unique_inside": bool,
+                "draw_unique_across": bool,
                 "self_checkin": bool,
                 "screen_show_wall": bool,
                 "prizes": list,

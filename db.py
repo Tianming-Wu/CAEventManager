@@ -110,7 +110,11 @@ DEFAULT_CONFIG = {
         {"name": "特等奖", "count": 1, "mode": "person"},
     ],
     "allow_bonus": True,
-    "person_draw_no_repeat": True,  # a person cannot win twice from person draws
+    # de-duplication, two independent axes: inside one prize, and across prizes.
+    # by-person prizes only follow the first (see model.draw_rules)
+    "draw_unique_inside": True,
+    "draw_unique_across": False,
+    "person_draw_no_repeat": True,  # older key, read when the new one is absent
     "screen_phase": "signin",       # signin | draw - drives what the big screen shows
     "screen_show_wall": False,      # the per-person name grid; off by default
     # short-lived /s/<code> alias, for machines where nobody can paste the

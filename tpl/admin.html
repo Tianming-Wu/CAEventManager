@@ -312,6 +312,17 @@
             <input type="checkbox" id="setAllowBonus"><span class="track"></span>启用速度奖励分配
           </label>
         </div>
+        <div class="row" style="margin-top:8px">
+          <label class="switch" style="cursor:pointer">
+            <input type="checkbox" id="setUniqueInside"><span class="track"></span>同一个奖不重复同一个人
+          </label>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <label class="switch" style="cursor:pointer">
+            <input type="checkbox" id="setUniqueAcross"><span class="track"></span>一个人不能同时拿两个奖
+          </label>
+        </div>
+        <p class="note">按人抽取的奖（如特等奖）只受前一条约束。</p>
         <div class="row" style="margin-top:12px">
           <button class="btn primary" id="saveSettingsBtn">保存设置</button>
           <span class="note" id="settingsNote"></span>

@@ -496,6 +496,8 @@
     $("#setBonusConstant").value = c.bonus_constant;
     $("#setBeta").value = c.beta;
     $("#setAllowBonus").checked = c.allow_bonus !== false;
+    $("#setUniqueInside").checked = c.draw_unique_inside !== false;
+    $("#setUniqueAcross").checked = c.draw_unique_across === true;
     renderPrizeEditor();
     $("#exportLink").href = LT.PREFIX + "/api/admin/export.csv";
     $("#exportZipLink").href = LT.PREFIX + "/api/admin/export.zip";
@@ -1104,7 +1106,9 @@
       pool_expr: $("#setPoolExpr").value.trim(),
       bonus_constant: Number($("#setBonusConstant").value),
       beta: Number($("#setBeta").value),
-      allow_bonus: $("#setAllowBonus").checked
+      allow_bonus: $("#setAllowBonus").checked,
+      draw_unique_inside: $("#setUniqueInside").checked,
+      draw_unique_across: $("#setUniqueAcross").checked
     };
   }
 

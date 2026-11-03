@@ -25,13 +25,14 @@ import json
 import mimetypes
 import os
 import platform
+import re
 import secrets
 import socket
 import sys
 import time
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, quote
 
 import auth
 import bus
@@ -42,6 +43,7 @@ import exporter
 import modules
 import presets
 import localconfig
+import lists
 import model
 import panel
 
@@ -475,6 +477,32 @@ def _scope_of(revs, scope):
     if not scope:
         return revs
     return {k: v for k, v in revs.items() if k == scope}
+
+
+def _attachment_header(filename):
+    """A download name that survives a Chinese filename.
+
+    HTTP headers are latin-1, so the readable name goes in ``filename*`` (RFC
+    5987) and the plain ``filename`` stays as an ASCII fallback for old clients.
+    """
+    plain = re.sub(r"[^A-Za-z0-9._-]+", "_", filename) or "download"
+    return ("Content-Disposition",
+            'attachment; filename="%s"; filename*=UTF-8\'\'%s'
+            % (plain, quote(filename, safe="")))
+
+
+def _roster_viewable(acc, row):
+    """Who may open a roster: its creator, an admin, or anyone when it is shared.
+
+    Visibility only decides "can this be seen".  Being allowed to change it is a
+    separate question (``lists.can_manage``), and everyone else's rosters stay
+    read-only in the panel.
+    """
+    if row is None or acc is None:
+        return False
+    if acc["role"] in ("owner", "superadmin"):
+        return True
+    return row["owner_id"] == acc["id"] or row["visibility"] != "private"
 
 
 def _int_arg(query, name, default, low, high):
@@ -1800,6 +1828,187 @@ class Handler(BaseHTTPRequestHandler):
             need("owner")
             return self._json({"ok": True, "host": host_stats()})
 
+        # ---- 名单：与活动并列的一层，存在自己的库里 ----
+        def roster_owner_names(ids):
+            ids = [int(i) for i in ids if i]
+            if not ids:
+                return {}
+            rows = conn.execute(
+                "SELECT id, name, username FROM accounts WHERE id IN (%s)"
+                % ",".join("?" * len(ids)), ids)
+            return {r["id"]: (r["name"] or r["username"]) for r in rows}
+
+        def open_roster(rid, write=False):
+            """The roster row, after checking this account may look at it."""
+            row = lists.roster(lists.connect(), rid)
+            if row is None:
+                raise model.ApiError("没有这份名单", 404)
+            if write:
+                if not lists.can_manage(acc, row):
+                    raise model.ApiError("只有这份名单的创建者能修改", 403)
+            elif not _roster_viewable(acc, row):
+                raise model.ApiError("无权查看这份名单", 403)
+            return row
+
+        if path == "/rosters" and method == "GET":
+            q = (query.get("q") or [""])[0].strip()
+            scope = (query.get("scope") or ["mine"])[0]
+            offset = _int_arg(query, "offset", 0, 0, 100000)
+            limit = _int_arg(query, "limit", 30, 1, 100)
+            res = lists.list_rosters(lists.connect(), acc, q,
+                                     "all" if scope == "all" else "mine",
+                                     offset, limit)
+            names = roster_owner_names([r["ownerId"] for r in res["rosters"]])
+            for r in res["rosters"]:
+                r["ownerName"] = names.get(r["ownerId"], "")
+            return self._json({"ok": True, **res})
+
+        if path == "/roster" and method == "GET":
+            rid = _int_arg(query, "id", 0, 0, 1000000)
+            row = open_roster(rid)
+            lx = lists.connect()
+            counts = lists.roster_counts(lx, [rid])
+            view = lists.roster_view(row, counts.get(rid, 0), acc)
+            view["ownerName"] = roster_owner_names([row["owner_id"]]).get(
+                row["owner_id"], "")
+            return self._json({"ok": True, "roster": view})
+
+        if path == "/roster/entries" and method == "GET":
+            rid = _int_arg(query, "id", 0, 0, 1000000)
+            open_roster(rid)
+            q = (query.get("q") or [""])[0].strip()
+            offset = _int_arg(query, "offset", 0, 0, 1000000)
+            limit = _int_arg(query, "limit", 100, 1, 200)
+            res = lists.entries_page(lists.connect(), rid, q, offset, limit)
+            return self._json({"ok": True, **res})
+
+        if path == "/roster/create" and method == "POST":
+            data = body()
+            with lists.tx() as lx:
+                rid = lists.create_roster(
+                    lx, acc["id"], data.get("name"), data.get("note"),
+                    data.get("visibility") or "private")
+            with panel.tx() as tx:
+                panel.audit(tx, acc["username"], "roster_create", str(rid),
+                            (data.get("name") or "").strip())
+            return self._json({"ok": True, "id": rid})
+
+        if path == "/roster/update" and method == "POST":
+            data = body()
+            rid = int(data.get("id") or 0)
+            open_roster(rid, write=True)
+            with lists.tx() as lx:
+                lists.update_roster(
+                    lx, rid,
+                    name=data.get("name"), note=data.get("note"),
+                    visibility=data.get("visibility"))
+            with panel.tx() as tx:
+                panel.audit(tx, acc["username"], "roster_update", str(rid),
+                            json.dumps({k: data.get(k) for k in
+                                        ("name", "visibility") if k in data},
+                                       ensure_ascii=False))
+            return self._json({"ok": True})
+
+        if path == "/roster/delete" and method == "POST":
+            data = body()
+            rid = int(data.get("id") or 0)
+            row = open_roster(rid, write=True)
+            with lists.tx() as lx:
+                lists.delete_roster(lx, rid)
+            with panel.tx() as tx:
+                panel.audit(tx, acc["username"], "roster_delete", str(rid),
+                            row["name"])
+            return self._json({"ok": True})
+
+        if path == "/roster/entry" and method == "POST":
+            data = body()
+            rid = int(data.get("id") or 0)
+            open_roster(rid, write=True)
+            with lists.tx() as lx:
+                person_id, created = lists.upsert_person(
+                    lx, data.get("sid"), data.get("name"), data.get("grp") or "")
+                lists.add_entry(lx, rid, person_id, data.get("tag"),
+                                data.get("note"), "manual")
+            with panel.tx() as tx:
+                panel.audit(tx, acc["username"], "roster_entry", str(rid),
+                            "%s %s%s" % (data.get("sid"), data.get("name"),
+                                         "" if created else "（已有人员记录）"))
+            return self._json({"ok": True, "personId": person_id})
+
+        if path == "/roster/entry/drop" and method == "POST":
+            data = body()
+            rid = int(data.get("id") or 0)
+            pid = int(data.get("personId") or 0)
+            open_roster(rid, write=True)
+            row = lists.entry(lists.connect(), rid, pid)
+            if row is None:
+                raise model.ApiError("这份名单里没有这个人", 404)
+            with lists.tx() as lx:
+                lists.drop_entry(lx, rid, pid)
+            with panel.tx() as tx:
+                panel.audit(tx, acc["username"], "roster_entry_drop", str(rid),
+                            "%s %s" % (row["sid"], row["name"]))
+            return self._json({"ok": True})
+
+        if path == "/roster/entry/state" and method == "POST":
+            data = body()
+            rid = int(data.get("id") or 0)
+            pid = int(data.get("personId") or 0)
+            state = data.get("state") or "active"
+            if state not in lists.ENTRY_STATE:
+                raise model.ApiError("状态只能是在职或已退出")
+            open_roster(rid, write=True)
+            with lists.tx() as lx:
+                lx.execute(
+                    "UPDATE roster_entries SET state=? WHERE roster_id=? AND person_id=?",
+                    (state, rid, pid))
+                lists.touch(lx, rid)
+            return self._json({"ok": True})
+
+        if path == "/roster/import" and method == "POST":
+            data = body()
+            text = data.get("text") or ""
+            rid = int(data.get("id") or 0)
+            created_new = False
+            if rid:
+                open_roster(rid, write=True)
+            else:
+                name = (data.get("name") or "").strip()
+                if not name:
+                    raise model.ApiError("请填写新名单的名称")
+                with lists.tx() as lx:
+                    rid = lists.create_roster(lx, acc["id"], name,
+                                              data.get("note"),
+                                              data.get("visibility") or "private")
+                created_new = True
+            with lists.tx() as lx:
+                res = lists.import_text(lx, rid, text)
+            with panel.tx() as tx:
+                panel.audit(tx, acc["username"], "roster_import", str(rid),
+                            "新增 %d 人，名单内已有 %d 人，新增人员记录 %d 条，无法读取 %d 行"
+                            % (res["added"], res["unchanged"], res["newPeople"],
+                               res["failed"]))
+            return self._json({"ok": True, "id": rid, "created": created_new, **res})
+
+        if path == "/roster/export.csv" and method == "GET":
+            rid = _int_arg(query, "id", 0, 0, 1000000)
+            row = open_roster(rid)
+            rows = lists.export_rows(lists.connect(), rid)
+            buf = io.StringIO()
+            writer = csv.writer(buf, lineterminator="\r\n")
+            for line in rows:
+                writer.writerow(line)
+            name = re.sub(r'[\\/:*?"<>|]+', "_", row["name"] or "roster")
+            return self._send(
+                200, "\ufeff" + buf.getvalue(),
+                "text/csv; charset=utf-8",
+                headers=[_attachment_header(name + ".csv")])
+
+        if path == "/people/search" and method == "GET":
+            q = (query.get("q") or [""])[0].strip()
+            return self._json({"ok": True,
+                               "people": lists.search_people(lists.connect(), q)})
+
         if path == "/audit" and method == "GET":
             need("superadmin", "owner")
             q = (query.get("q") or [""])[0].strip()
@@ -2624,6 +2833,7 @@ def main():
     ensure_public_url(conn)
     panel.init_db()
     panel.bootstrap(LOCAL_CFG, event_token_hint=SECRET, log=log)
+    lists.init_db()
     # the built-in presets live in templates/*.json; the table is what the app
     # reads, so they are copied in on every start
     with panel.tx() as tx:

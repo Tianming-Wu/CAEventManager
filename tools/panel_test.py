@@ -682,6 +682,84 @@ def main():
     check("the old file is gone from disk",
           not os.path.exists(os.path.join(data_dir, "avatars", name)))
 
+    print("== 名单：人员、名单、合并导入 ==")
+    made = post(owner, "/api/panel/roster/create",
+                {"name": "动漫社 2026 秋", "note": "社团成员", "visibility": "private"})
+    roster_id = (made or {}).get("id")
+    check("a roster can be created", bool(roster_id), made)
+    csv_text = "学号,姓名,班级\n20240101,高勇,计科2401\n20240102,曾萍静,计科2402\n"
+    res = post(owner, "/api/panel/roster/import", {"id": roster_id, "text": csv_text})
+    check("import adds the rows", res and res["added"] == 2, res)
+    res = post(owner, "/api/panel/roster/import", {"id": roster_id, "text": csv_text})
+    check("importing the same file again changes nothing",
+          res and res["added"] == 0 and res["unchanged"] == 2, res)
+    made2 = post(owner, "/api/panel/roster/import",
+                 {"name": "秋日祭报名", "text": "学号\t姓名\n20240101\t高勇\n"})
+    check("importing without an id makes the roster",
+          made2 and made2["created"] and made2["added"] == 1, made2)
+    other_id = (made2 or {}).get("id")
+    check("the same person is one row in the platform",
+          call(owner, "/api/panel/people/search?q=%E9%AB%98%E5%8B%87")["people"]
+          != [], "search by name finds the person")
+
+    rows = call(owner, "/api/panel/roster/entries?id=%d" % roster_id)
+    check("the roster lists its members", rows and rows["total"] == 2, rows)
+    found = call(owner, "/api/panel/roster/entries?id=%d&q=pingjing" % roster_id)
+    check("members are searchable by pinyin",
+          found and found["total"] == 1 and found["entries"][0]["sid"] == "20240102",
+          found)
+
+    added = post(owner, "/api/panel/roster/entry",
+                 {"id": roster_id, "sid": "20240103", "name": "马平", "grp": "计科2401"})
+    check("a person can be added by hand", added and added["personId"], added)
+    post(owner, "/api/panel/roster/entry/state",
+         {"id": roster_id, "personId": added["personId"], "state": "left"})
+    one = [e for e in call(owner, "/api/panel/roster/entries?id=%d" % roster_id)["entries"]
+           if e["personId"] == added["personId"]][0]
+    check("a member can be marked as left", one["state"] == "left", one)
+    post(owner, "/api/panel/roster/entry/drop",
+         {"id": roster_id, "personId": added["personId"]})
+    check("a member can be removed",
+          call(owner, "/api/panel/roster/entries?id=%d" % roster_id)["total"] == 2)
+
+    sheet = call(owner, "/api/panel/roster/export.csv?id=%d" % roster_id)
+    check("the roster exports as csv",
+          isinstance(sheet, bytes) and sheet.startswith(b"\xef\xbb\xbf")
+          and "学号".encode() in sheet and "高勇".encode() in sheet,
+          (sheet or b"")[:40])
+
+    print("== 名单：看得见 ≠ 改得动 ==")
+    helper = session()
+    post(anon, "/api/panel/register", {"username": "alice", "name": "王同学",
+                                       "password": "alice-pass-1"})
+    alice_id = [a for a in call(owner, "/api/panel/accounts")["accounts"]
+                if a["username"] == "alice"][0]["id"]
+    post(owner, "/api/panel/account/decide", {"id": alice_id, "action": "approve"})
+    post(helper, "/api/panel/login", {"username": "alice", "password": "alice-pass-1"})
+    check("someone else's private roster is not listed",
+          call(helper, "/api/panel/rosters?scope=all")["total"] == 0)
+    call(helper, "/api/panel/roster?id=%d" % roster_id, expect=403)
+    check("and it cannot be opened", True)
+    post(owner, "/api/panel/roster/update",
+         {"id": roster_id, "visibility": "public"})
+    opened = call(helper, "/api/panel/roster?id=%d" % roster_id)
+    check("a public roster can be opened by others", opened and opened["ok"], opened)
+    check("but it is read-only for them", opened["roster"]["editable"] is False,
+          opened["roster"])
+    post(helper, "/api/panel/roster/update",
+         {"id": roster_id, "name": "改个名"}, expect=403)
+    check("and cannot be changed", True)
+    post(helper, "/api/panel/roster/entry",
+         {"id": roster_id, "sid": "20240199", "name": "路人"}, expect=403)
+    check("nor added to", True)
+    check("the owner still sees it",
+          call(owner, "/api/panel/rosters?scope=mine")["total"] == 2)
+    allseen = call(teacher, "/api/panel/rosters?scope=all")
+    check("a superadmin can count every roster", allseen["total"] >= 2, allseen["total"])
+    left = [r for r in allseen["rosters"] if r["id"] == roster_id][0]
+    check("an admin's view of someone else's roster is read-only",
+          left["editable"] is False, left)
+
     print("== event pages still reachable ==")
     token = events[0]["id"]
     board = call(anon, "/%s/api/board" % token)

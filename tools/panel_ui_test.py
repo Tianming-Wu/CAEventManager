@@ -246,10 +246,78 @@ def shell_page(page):
     check("it does not show the login name", LOGIN not in shown, shown)
 
 
+def roster_page(page):
+    print("== 我的名单 ==")
+    page.goto(BASE + "/panel#/rosters")
+    page.wait_for_timeout(600)
+    check("名单 has its own nav entry",
+          page.locator('[data-nav="rosters"]').count() == 1)
+    check("the list says it is empty",
+          "还没有名单" in page.inner_text("#rosterTable tbody"),
+          page.inner_text("#rosterTable tbody"))
+
+    page.click("#rosterNewBtn")
+    page.wait_for_selector("#rosterName", timeout=8000)
+    page.fill("#rosterName", "UI 测试名单")
+    page.fill("#rosterNote", "自动化创建")
+    page.click("#rosterSave")
+    page.wait_for_timeout(1000)
+    check("creating a roster opens it",
+          "UI 测试名单" in page.inner_text('.page[data-page="roster"]:not([hidden]) h1'),
+          page.inner_text('.page[data-page="roster"]:not([hidden]) h1'))
+
+    page.fill("#rosterAddSid", "20249001")
+    page.fill("#rosterAddName", "测试甲")
+    page.fill("#rosterAddGrp", "计科2401")
+    page.click("#rosterAddBtn")
+    page.wait_for_timeout(900)
+    check("a person can be added from the page",
+          "20249001" in page.inner_text("#rosterEntryTable tbody"),
+          page.inner_text("#rosterEntryTable tbody"))
+
+    page.fill("#rosterEntrySearch", "ceshi")
+    page.wait_for_timeout(800)
+    check("the member search matches pinyin",
+          page.locator("#rosterEntryTable tbody tr").count() >= 1,
+          page.locator("#rosterEntryTable tbody tr").count())
+    page.fill("#rosterEntrySearch", "")
+    page.wait_for_timeout(800)
+
+    page.set_input_files("#rosterMergeFile", {
+        "name": "members.csv", "mimeType": "text/csv",
+        "buffer": "学号,姓名,班级\n20249002,测试乙,计科2402\n".encode("utf-8")})
+    page.wait_for_timeout(1500)
+    check("merging a file adds its rows",
+          "20249002" in page.inner_text("#rosterEntryTable tbody"),
+          page.inner_text("#rosterEntryTable tbody"))
+
+    shot_page = page
+    with page.expect_download(timeout=15000) as caught:
+        page.click("#rosterExportBtn")
+    downloaded = caught.value
+    check("the roster downloads as csv",
+          downloaded.suggested_filename.endswith(".csv"),
+          downloaded.suggested_filename)
+
+    page.click("#rosterEditBtn")
+    page.wait_for_selector("#rosterVis", timeout=8000)
+    page.select_option("#rosterVis", "public")
+    page.click("#rosterSave")
+    page.wait_for_timeout(900)
+    check("the visibility can be changed",
+          "公开" in page.inner_text("#rosterSub"), page.inner_text("#rosterSub"))
+
+    page.click("#rosterBack")
+    page.wait_for_timeout(800)
+    body = page.inner_text("#rosterTable tbody")
+    check("the list shows it with its member count", "UI 测试名单" in body and "2" in body, body)
+
+
 def routes_page(page):
     print("== every route renders its own page ==")
     for route, expect in [
-            ("overview", "总览"), ("events", "我的活动"), ("templates", "预设管理"),
+            ("overview", "总览"), ("events", "我的活动"), ("rosters", "我的名单"),
+            ("templates", "预设管理"),
             ("users", "用户管理"), ("all-events", "活动管理"),
             ("approval-users", "注册申请"), ("approval-events", "活动申请"),
             ("modules", "模块管理"), ("server", "服务器管理"), ("audit", "审计日志"),
@@ -1253,6 +1321,7 @@ def main():
                 routes_page(page)
                 title_row(page)
                 group_page(page)
+                roster_page(page)
                 card_page(page)
                 create_page(browser)
                 # profile_page edits the signed-in account, so it only runs on a

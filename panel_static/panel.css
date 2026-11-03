@@ -949,6 +949,8 @@ table.tbl.fixed td { overflow: hidden; text-overflow: ellipsis; }
 table.tbl tbody tr:hover { background: var(--surface-2); }
 table.tbl td.actions { text-align: right; }
 table.tbl td.wrap { white-space: normal; min-width: 12em; }
+/* a row that is history rather than current data (a member who has left) */
+table.tbl tr.is-muted td { color: var(--dim); }
 .empty { color: var(--dim); font-size: .85rem; padding: 14px 4px; text-align: center; }
 
 /* ---------- profile ---------- */

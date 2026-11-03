@@ -21,6 +21,8 @@
   var ROUTES = {
     "overview": { min: "admin" },
     "events": { min: "admin" },
+    "rosters": { min: "admin", group: "lists" },
+    "roster": { min: "admin", group: "lists" },
     "templates": { min: "admin" },
     "users": { min: "superadmin" },
     "all-events": { min: "superadmin" },
@@ -56,7 +58,18 @@
     currentFields: [],
     templateId: null,
     templateFilter: "",
-    invited: []
+    invited: [],
+    // 名单：列表与当前打开的那一份
+    rosters: [],
+    rosterTotal: null,
+    rosterScope: "mine",
+    rosterFilter: "",
+    rosterId: 0,
+    roster: null,
+    rosterEntries: [],
+    entryTotal: null,
+    entryFilter: "",
+    rosterImportName: ""
   };
 
   var RAIL_QUERY = "(max-width: 1100px)";
@@ -780,6 +793,319 @@
     $("#menuBtn").setAttribute("aria-expanded", "false");
   }
 
+  /* --------------------------------------------------------------- 名单 --- */
+  /* 名单与活动并列：名单是人的集合，活动是名单的一次使用。名单存在自己的库里，
+   * 这里只管"谁看得见、谁能改"和成员本身；报名（让名单自己长出来的入口）另起一块。
+   * 看得见 ≠ 改得动：别人的名单可以打开，但按钮只在创建者那边出现。 */
+  var ROSTER_PAGE = 30;
+  var ENTRY_PAGE = 100;
+
+  function loadRosters(more) {
+    if (more) {
+      if (S.rosterTotal !== null && S.rosters.length >= S.rosterTotal) {
+        return Promise.resolve();
+      }
+    } else {
+      S.rosters = [];
+      S.rosterTotal = null;
+    }
+    var parts = ["/rosters?scope=" + (S.rosterScope || "mine"),
+                 "offset=" + (more ? S.rosters.length : 0),
+                 "limit=" + ROSTER_PAGE];
+    if (S.rosterFilter) parts.push("q=" + encodeURIComponent(S.rosterFilter));
+    return PX.api(parts.join("&"))
+      .then(function (d) {
+        S.rosters = (more ? S.rosters : []).concat(d.rosters || []);
+        S.rosterTotal = d.total || 0;
+      })
+      .catch(function (e) { PX.toast(PX.esc(e.message), true); });
+  }
+
+  function drawRosters() {
+    var body = $("#rosterTable tbody");
+    if (!body) return;
+    var rows = S.rosters || [];
+    body.innerHTML = rows.length ? rows.map(function (r) {
+      return "<tr>" +
+        '<td><a href="#/roster/' + r.id + '"><b>' + PX.esc(r.name) + "</b></a>" +
+        (r.note ? '<div class="hint">' + PX.esc(r.note) + "</div>" : "") +
+        (r.mine ? "" : '<div class="hint">' + PX.esc(r.ownerName || "—") + " 的名单</div>") +
+        "</td>" +
+        '<td class="right num">' + r.members + "</td>" +
+        "<td>" + PX.esc(r.visibilityLabel) + "</td>" +
+        '<td class="mono">' + PX.when(r.updatedAt) + "</td>" +
+        '<td class="actions"><button class="btn sm" type="button" data-open-roster="' +
+        r.id + '">打开</button></td></tr>';
+    }).join("") : emptyRow(5, S.rosterTotal === 0
+      ? "还没有名单，先新建一份或者导入一份"
+      : "正在读取…");
+
+    var count = $("#rosterCount");
+    if (count) {
+      count.textContent = S.rosterTotal === null ? "" : "共 " + S.rosterTotal + " 份";
+    }
+    var more = $("#rosterMore");
+    if (more) {
+      var left = (S.rosterTotal === null) ? 0 : S.rosterTotal - rows.length;
+      more.hidden = left <= 0;
+      more.textContent = left > 0 ? "再显示 " + Math.min(ROSTER_PAGE, left) + " 份" : "";
+    }
+    var box = $("#rosterScopeBox");
+    if (box) {
+      box.hidden = !isSuper();
+      Array.prototype.forEach.call(box.querySelectorAll("[data-scope]"), function (b) {
+        b.classList.toggle("primary", b.getAttribute("data-scope") === (S.rosterScope || "mine"));
+      });
+    }
+    var readOnly = S.rosterScope === "all";
+    var newBtn = $("#rosterNewBtn");
+    if (newBtn) newBtn.hidden = readOnly;
+    var importBtn = $("#rosterImportBtn");
+    if (importBtn) importBtn.hidden = readOnly;
+  }
+
+  function loadRoster(id) {
+    return PX.api("/roster?id=" + id)
+      .then(function (d) {
+        S.roster = d.roster;
+      })
+      .catch(function (e) {
+        PX.toast(PX.esc(e.message), true);
+        S.roster = null;
+      });
+  }
+
+  function loadEntries(more) {
+    if (!S.roster) return Promise.resolve();
+    if (more) {
+      if (S.entryTotal !== null && S.rosterEntries.length >= S.entryTotal) {
+        return Promise.resolve();
+      }
+    } else {
+      S.rosterEntries = [];
+      S.entryTotal = null;
+    }
+    var parts = ["/roster/entries?id=" + S.roster.id,
+                 "offset=" + (more ? S.rosterEntries.length : 0),
+                 "limit=" + ENTRY_PAGE];
+    if (S.entryFilter) parts.push("q=" + encodeURIComponent(S.entryFilter));
+    return PX.api(parts.join("&"))
+      .then(function (d) {
+        S.rosterEntries = (more ? S.rosterEntries : []).concat(d.entries || []);
+        S.entryTotal = d.total || 0;
+      })
+      .catch(function (e) { PX.toast(PX.esc(e.message), true); });
+  }
+
+  function drawRoster() {
+    var r = S.roster;
+    var head = $("#rosterTitle");
+    if (!r) {
+      if (head) head.textContent = "名单";
+      var sub = $("#rosterSub");
+      if (sub) sub.textContent = "这份名单打不开";
+      if ($("#rosterEntryTable tbody")) $("#rosterEntryTable tbody").innerHTML = "";
+      return;
+    }
+    head.textContent = r.name;
+    $("#rosterSub").textContent = (r.note ? r.note + " · " : "") +
+      "创建者 " + (r.ownerName || "—") + " · " + r.visibilityLabel +
+      (r.visibility === "org" ? "（组织尚未建立，暂按公开处理）" : "");
+    document.title = r.name + " · CAEventManager";
+    $("#rosterReadOnly").hidden = !!r.editable;
+    $("#rosterAddRow").hidden = !r.editable;
+    $("#rosterMergeBtn").hidden = !r.editable;
+    $("#rosterEditBtn").hidden = !r.editable;
+    $("#rosterMemberCount").textContent = (S.entryTotal === null ? "" : "共 " + S.entryTotal + " 人") +
+      (S.entryFilter ? "（已筛选）" : "");
+    drawEntries();
+  }
+
+  function drawEntries() {
+    var body = $("#rosterEntryTable tbody");
+    if (!body) return;
+    var rows = S.rosterEntries || [];
+    var editable = !!(S.roster && S.roster.editable);
+    body.innerHTML = rows.length ? rows.map(function (e) {
+      var gone = e.state === "left";
+      return "<tr" + (gone ? ' class="is-muted"' : "") + ">" +
+        '<td class="mono">' + PX.esc(e.sid) + "</td>" +
+        "<td><b>" + PX.esc(e.name) + "</b>" +
+        (e.note ? '<div class="hint">' + PX.esc(e.note) + "</div>" : "") + "</td>" +
+        "<td>" + PX.esc(e.grp || "—") + "</td>" +
+        "<td>" + PX.esc(e.tag || "—") + "</td>" +
+        "<td>" + PX.esc(e.sourceLabel) + "</td>" +
+        "<td>" + PX.esc(e.stateLabel) + "</td>" +
+        '<td class="actions">' + (editable
+          ? '<button class="btn sm" type="button" data-entry-state="' + e.personId +
+            '" data-entry-to="' + (gone ? "active" : "left") + '">' +
+            (gone ? "恢复" : "标为退出") + "</button>" +
+            '<button class="btn sm danger" type="button" data-entry-drop="' +
+            e.personId + '">移出</button>'
+          : '<span class="hint">只读</span>') + "</td></tr>";
+    }).join("") : emptyRow(7, S.entryTotal === 0
+      ? "这份名单还没有人"
+      : "没有匹配的成员");
+    var more = $("#rosterEntryMore");
+    if (more) {
+      var left = (S.entryTotal === null) ? 0 : S.entryTotal - rows.length;
+      more.hidden = left <= 0;
+      more.textContent = left > 0 ? "再显示 " + Math.min(ENTRY_PAGE, left) + " 人" : "";
+    }
+    var count = $("#rosterMemberCount");
+    if (count && S.roster) {
+      count.textContent = (S.entryTotal === null ? "" : "共 " + S.entryTotal + " 人") +
+        (S.entryFilter ? "（已筛选）" : "");
+    }
+  }
+
+  function rosterDialog(row) {
+    var r = row || {};
+    openOverlay("roster", row ? "名单设置" : "新建名单",
+      '<div class="field"><label for="rosterName">名称</label>' +
+      '<input id="rosterName" type="text" maxlength="60" value="' +
+      PX.esc(r.name || "") + '" placeholder="例如 2026 秋 动漫社成员"></div>' +
+      '<div class="field"><label for="rosterNote">说明</label>' +
+      '<input id="rosterNote" type="text" maxlength="200" value="' +
+      PX.esc(r.note || "") + '" placeholder="可选"></div>' +
+      '<div class="field"><label for="rosterVis">可见性</label>' +
+      '<select id="rosterVis">' +
+      '<option value="private"' + ((r.visibility || "private") === "private" ? " selected" : "") +
+      ">私有（只有你能看见）</option>" +
+      '<option value="public"' + (r.visibility === "public" ? " selected" : "") +
+      ">公开（所有登录账号可见）</option>" +
+      '<option value="org"' + (r.visibility === "org" ? " selected" : "") +
+      ">组织公开（组织建立前等同公开）</option></select></div>" +
+      '<div class="row" style="margin-top:18px;justify-content:flex-end">' +
+      '<button class="btn" type="button" data-close-overlay="1">取消</button>' +
+      (row ? '<button class="btn danger" type="button" id="rosterDelete">删除名单</button>' : "") +
+      '<button class="btn primary" type="button" id="rosterSave">保存</button></div>');
+    $("#rosterName").focus();
+    $("#rosterSave").addEventListener("click", function () {
+      var payload = {
+        name: $("#rosterName").value.trim(),
+        note: $("#rosterNote").value.trim(),
+        visibility: $("#rosterVis").value
+      };
+      if (!payload.name) { PX.toast("请填写名单名称", true); return; }
+      var req;
+      if (row) {
+        payload.id = row.id;
+        req = PX.api("/roster/update", { method: "POST", body: payload });
+      } else {
+        req = PX.api("/roster/create", { method: "POST", body: payload })
+          .then(function (d) { return d.id; });
+      }
+      req.then(function (out) {
+        closeOverlay();
+        PX.toast(row ? "已保存" : "已创建名单");
+        if (row) {
+          return loadRoster(row.id).then(drawRoster);
+        }
+        location.hash = "#/roster/" + out;
+      }).catch(function (e) { PX.toast(PX.esc(e.message), true); });
+    });
+    var del = $("#rosterDelete");
+    if (del) {
+      del.addEventListener("click", function () {
+        if (!window.confirm("删除「" + r.name + "」？名单里的人会一起删掉，人员记录保留。")) return;
+        PX.api("/roster/delete", { method: "POST", body: { id: r.id } })
+          .then(function () {
+            closeOverlay();
+            PX.toast("已删除");
+            S.roster = null;
+            location.hash = "#/rosters";
+          })
+          .catch(function (e) { PX.toast(PX.esc(e.message), true); });
+      });
+    }
+  }
+
+  /* 导入有两条路：列表页新建一份，或名单里合并进这份。走的是同一个接口。 */
+  function rosterImportDialog() {
+    openOverlay("roster-import", "导入名单",
+      '<div class="field"><label for="rosterImportNameInput">名单名称</label>' +
+      '<input id="rosterImportNameInput" type="text" maxlength="60" ' +
+      'placeholder="例如 2026 秋 动漫社成员"></div>' +
+      '<p class="note" style="margin-top:10px">支持 CSV / TSV。第一行可以是表头' +
+      '（学号、姓名、班级、分组、备注），没有表头时按「学号,姓名,班级」读取。</p>' +
+      '<div class="row" style="margin-top:16px;justify-content:flex-end">' +
+      '<button class="btn" type="button" data-close-overlay="1">取消</button>' +
+      '<button class="btn primary" type="button" id="rosterImportPick">选择文件</button></div>');
+    $("#rosterImportNameInput").focus();
+    $("#rosterImportPick").addEventListener("click", function () {
+      var name = $("#rosterImportNameInput").value.trim();
+      if (!name) { PX.toast("请填写名单名称", true); return; }
+      S.rosterImportName = name;
+      closeOverlay();
+      $("#rosterImportFile").click();
+    });
+  }
+
+  function importRoster(file, rosterId) {
+    var reader = new FileReader();
+    reader.onload = function () {
+      var text = String(reader.result || "");
+      if (!text.trim()) { PX.toast("这个文件是空的", true); return; }
+      var body = { text: text };
+      if (rosterId) {
+        body.id = rosterId;
+      } else {
+        body.name = S.rosterImportName ||
+          (file.name || "").replace(/\.[^.]+$/, "") || "导入的名单";
+      }
+      PX.api("/roster/import", { method: "POST", body: body })
+        .then(function (d) {
+          PX.toast("导入完成：新增 " + d.added + " 人，名单内已有 " + d.unchanged +
+                   " 人" + (d.failed ? "，无法读取 " + d.failed + " 行" : ""));
+          if (rosterId) return loadRoster(rosterId).then(function () {
+            return loadEntries(false);
+          }).then(drawRoster);
+          location.hash = "#/roster/" + d.id;
+        })
+        .catch(function (e) { PX.toast(PX.esc(e.message), true); });
+    };
+    reader.onerror = function () { PX.toast("读不了这个文件", true); };
+    reader.readAsText(file, "utf-8");
+  }
+
+  function addRosterEntry() {
+    if (!S.roster) return;
+    var sid = $("#rosterAddSid").value.trim();
+    var name = $("#rosterAddName").value.trim();
+    if (!sid || !name) { PX.toast("学号和姓名都要填", true); return; }
+    PX.api("/roster/entry", {
+      method: "POST",
+      body: {
+        id: S.roster.id, sid: sid, name: name,
+        grp: $("#rosterAddGrp").value.trim(),
+        tag: $("#rosterAddTag").value.trim()
+      }
+    }).then(function () {
+      ["#rosterAddSid", "#rosterAddName", "#rosterAddGrp", "#rosterAddTag"]
+        .forEach(function (sel) { $(sel).value = ""; });
+      $("#rosterAddSid").focus();
+      return loadRoster(S.roster.id).then(function () {
+        return loadEntries(false);
+      }).then(drawRoster);
+    }).catch(function (e) { PX.toast(PX.esc(e.message), true); });
+  }
+
+  function rosterEntryAction(what, personId, state) {
+    if (!S.roster) return;
+    var req = what === "drop"
+      ? PX.api("/roster/entry/drop", { method: "POST", body: { id: S.roster.id, personId: personId } })
+      : PX.api("/roster/entry/state", {
+          method: "POST",
+          body: { id: S.roster.id, personId: personId, state: state }
+        });
+    req.then(function () {
+      return loadRoster(S.roster.id).then(function () {
+        return loadEntries(false);
+      }).then(drawRoster);
+    }).catch(function (e) { PX.toast(PX.esc(e.message), true); });
+  }
+
   /* ----------------------------------------------------------------- router */
   function routeFromHash() {
     var h = (location.hash || "").replace(/^#\/?/, "").split("?")[0];
@@ -794,6 +1120,10 @@
       var tail = decodeURIComponent(h.slice(cut + 1)).replace(/\/$/, "");
       if (head === "new-event" && ROUTES[head]) {
         S.templateId = tail || null;
+        return head;
+      }
+      if (head === "roster" && ROUTES[head]) {
+        S.rosterId = Number(tail) || 0;
         return head;
       }
     }
@@ -867,6 +1197,19 @@
     syncSudo();
     if (wanted === "server" || wanted === "overview") refreshHost();
     if (wanted === "audit" && canAudit() && !S.audit.length) loadAudit().then(draw);
+    if (wanted === "rosters") {
+      S.rosterScope = S.rosterScope || "mine";
+      loadRosters(false).then(drawRosters);
+    }
+    if (wanted === "roster") {
+      if (!S.rosterId) {
+        location.hash = "#/rosters";
+        return;
+      }
+      loadRoster(S.rosterId)
+        .then(function () { return loadEntries(false); })
+        .then(drawRoster);
+    }
   }
 
   /* ------------------------------------------------------------------ pages */
@@ -874,6 +1217,8 @@
     switch (S.route) {
       case "overview": return drawOverview();
       case "events": return drawEvents();
+      case "rosters": return drawRosters();
+      case "roster": return drawRoster();
       case "templates": return drawTemplates();
       case "new-event": return drawNewEvent();
       case "users": return drawUsers();
@@ -2447,6 +2792,76 @@
   });
   // 活动管理 is a superadmin view; creating from there uses the same flow
   $("#createEventBtn").addEventListener("click", newEvent);
+
+  /* ---- 名单 ---- */
+  $("#rosterNewBtn").addEventListener("click", function () { rosterDialog(null); });
+  $("#rosterImportBtn").addEventListener("click", rosterImportDialog);
+  $("#rosterImportFile").addEventListener("change", function (e) {
+    var file = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (file) importRoster(file, 0);
+  });
+  $("#rosterMergeBtn").addEventListener("click", function () {
+    if (S.roster) $("#rosterMergeFile").click();
+  });
+  $("#rosterMergeFile").addEventListener("change", function (e) {
+    var file = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (file && S.roster) importRoster(file, S.roster.id);
+  });
+  $("#rosterExportBtn").addEventListener("click", function () {
+    if (!S.roster) return;
+    location.href = PX.PREFIX + "/api/panel/roster/export.csv?id=" + S.roster.id;
+  });
+  $("#rosterEditBtn").addEventListener("click", function () {
+    if (S.roster) rosterDialog(S.roster);
+  });
+  $("#rosterAddBtn").addEventListener("click", addRosterEntry);
+  ["#rosterAddSid", "#rosterAddName", "#rosterAddGrp", "#rosterAddTag"]
+    .forEach(function (sel) {
+      $(sel).addEventListener("keydown", function (e) {
+        if (e.key === "Enter") { e.preventDefault(); addRosterEntry(); }
+      });
+    });
+  $("#rosterMore").addEventListener("click", function () {
+    loadRosters(true).then(drawRosters);
+  });
+  $("#rosterEntryMore").addEventListener("click", function () {
+    loadEntries(true).then(drawEntries);
+  });
+  var scopeBox = $("#rosterScopeBox");
+  if (scopeBox) {
+    scopeBox.addEventListener("click", function (e) {
+      var btn = e.target.closest ? e.target.closest("[data-scope]") : null;
+      if (!btn) return;
+      S.rosterScope = btn.getAttribute("data-scope");
+      loadRosters(false).then(drawRosters);
+    });
+  }
+  $("#rosterTable").addEventListener("click", function (e) {
+    var btn = e.target.closest ? e.target.closest("[data-open-roster]") : null;
+    if (!btn) return;
+    location.hash = "#/roster/" + btn.getAttribute("data-open-roster");
+  });
+  $("#rosterEntryTable").addEventListener("click", function (e) {
+    var t = e.target.closest ? e.target.closest("[data-entry-drop],[data-entry-state]") : null;
+    if (!t) return;
+    var drop = t.getAttribute("data-entry-drop");
+    if (drop) {
+      rosterEntryAction("drop", Number(drop));
+      return;
+    }
+    rosterEntryAction("state", Number(t.getAttribute("data-entry-state")),
+                      t.getAttribute("data-entry-to"));
+  });
+  bindLiveSearch("#rosterSearch", "#rosterSearchClear", function (value) {
+    S.rosterFilter = value;
+    loadRosters(false).then(drawRosters);
+  });
+  bindLiveSearch("#rosterEntrySearch", "#rosterEntrySearchClear", function (value) {
+    S.entryFilter = value;
+    loadEntries(false).then(function () { drawRoster(); });
+  });
 
   $("#kindBack").addEventListener("click", function () {
     if (S.dirty) return askDraftChoice("new-event");

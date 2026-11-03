@@ -398,6 +398,26 @@ class SudoRequired(model.ApiError):
 DEFERRED_CONFLICT_ROUTES = ("/account/decide", "/event/archive", "/module/toggle",
                             "/preset/favorite", "/preset/delete")
 
+# The console is where several staff work at once, so the objects are small:
+# one student is one object.  Two volunteers registering two different people
+# have nothing to disagree about.
+CONSOLE_TARGETS = (
+    ("/api/admin/mark", "student_id", "student:%s"),
+    ("/api/admin/undo", "student_id", "student:%s"),
+    ("/api/admin/set_time", "student_id", "student:%s"),
+    ("/api/admin/student", "id", "student:%s"),
+    ("/api/admin/student_delete", "id", "student:%s"),
+    ("/api/admin/import", None, "roster"),
+    ("/api/admin/reset_tickets", None, "draw"),
+    ("/api/admin/settings", None, "settings"),
+    ("/api/admin/phase", None, "settings"),
+    ("/api/admin/finalize", None, "draw"),
+    ("/api/admin/unfinalize", None, "draw"),
+    ("/api/admin/draw", None, "draw"),
+    ("/api/admin/draw_void", None, "draw"),
+    ("/api/admin/member", None, "members"),
+)
+
 WRITE_TARGETS = (
     # (route, field holding the id, scope template)
     ("/account/decide", "id", "account:%s"),
@@ -414,6 +434,20 @@ WRITE_TARGETS = (
     ("/preset/favorite", "id", "preset:%s"),
     ("/module/toggle", "id", "module:%s"),
 )
+
+
+def console_target(path, data, seq):
+    """Which object a console write touches, named within its activity."""
+    for route, field, template in CONSOLE_TARGETS:
+        if path != route:
+            continue
+        if field is None:
+            return "event:%s:%s" % (seq, template % ())
+        raw = (data or {}).get(field)
+        if raw in (None, ""):
+            return None
+        return "event:%s:%s" % (seq, template % raw)
+    return None
 
 
 def write_target(path, data):
@@ -514,7 +548,7 @@ class Handler(BaseHTTPRequestHandler):
                 bus.bump(self._scope)
             if getattr(self, "_target", None):
                 bus.bump(self._target)
-        if isinstance(obj, dict) and "revs" not in obj and self.path.startswith("/api/panel"):
+        if isinstance(obj, dict) and "revs" not in obj:
             obj = dict(obj, revs=bus.snapshot())
         self._send(status, json.dumps(obj, ensure_ascii=False, default=str), headers=headers)
 
@@ -527,6 +561,28 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", "0")
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
+
+    def _peek(self):
+        """The request body, read for routing decisions only."""
+        raw = getattr(self, "_raw_body", b"") or b""
+        try:
+            data = json.loads(raw.decode("utf-8")) if raw else {}
+        except Exception:
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def _base_rev(self, target):
+        raw = self.headers.get("X-Rev-Map") or ""
+        try:
+            known = json.loads(raw) if raw else {}
+        except ValueError:
+            return None
+        if not isinstance(known, dict) or target not in known:
+            return None
+        try:
+            return int(known[target])
+        except (TypeError, ValueError):
+            return None
 
     def _stream(self):
         """Server-sent events: the panel says when something changed.
@@ -1958,6 +2014,17 @@ class Handler(BaseHTTPRequestHandler):
 
         # ---- everything below needs a seat on this activity ----
         me = self._require_console()
+        self._target = console_target(path, self._peek(), db.current_event()) \
+            if method == "POST" else None
+        self._stale = False
+        if self._target:
+            base = self._base_rev(self._target)
+            if base is not None and base < bus.revision(self._target):
+                self._stale = True
+                # marking is append-only: someone else's other fact about the
+                # same person is not a disagreement, so those merge
+                if path not in ("/api/admin/mark", "/api/admin/undo"):
+                    raise Conflict("另一位工作人员刚刚改过这一项，本次更改没有生效")
 
         def need_owner():
             if me.role != "owner":
@@ -2057,6 +2124,9 @@ class Handler(BaseHTTPRequestHandler):
                                 target["username"] if target else str(account_id), str(seq))
                 return self._json({"ok": True, "state": "revoked"})
             raise model.ApiError("未知操作")
+
+        if path == "/api/admin/stream" and method == "GET":
+            return self._stream()
 
         if path == "/api/admin/console" and method == "GET":
             cfg = db.all_config(conn)

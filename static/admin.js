@@ -114,7 +114,17 @@
 
   // ------------------------------------------------------------------ toasts
   function ok(html) { LT.toast(html, false); }
-  function bad(err) { LT.toast(LT.esc(err && err.message ? err.message : String(err)), true, 4200); }
+  function bad(err) {
+    // a refused write is a disagreement with another operator, not a failure to
+    // hide: say so, then show the state the server actually has
+    var conflict = LT.conflictMsg(err);
+    if (conflict) {
+      LT.toast(conflict, true, 5200);
+      load().catch(function () {});
+      return;
+    }
+    LT.toast(LT.esc(err && err.message ? err.message : String(err)), true, 4200);
+  }
 
   // ------------------------------------------------------------------ render
   function renderHead() {
@@ -1337,6 +1347,18 @@
       var who = $("#whoami");
       if (who && d.authed) who.textContent = d.user + (d.role === "owner" ? " · 负责人" : "");
     }).catch(function () { /* the state call reports a dead session first */ });
+
+    // another operator's writes arrive through the stream; the poll stays as a
+    // fallback for a stream that cannot connect
+    LT.watch(function (revs, before) {
+      if (!before || JSON.stringify(revs) === JSON.stringify(before)) return;
+      if (document.hidden) return;
+      var el = document.activeElement;
+      var editing = el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) && el.id !== "q";
+      if (editing) return;
+      clearTimeout(S.remoteTimer);
+      S.remoteTimer = setTimeout(function () { load().catch(function () {}); }, 300);
+    });
 
     // keep the unlock countdown honest, and quietly resync every 15s
     setInterval(renderUnlock, 1000);

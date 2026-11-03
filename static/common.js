@@ -12,6 +12,11 @@
 
   var PREFIX = prefix();
 
+  // What this browser has seen, per object.  A write carries it so the server can
+  // tell a real disagreement from two people working on different things.
+  var revs = {};
+  var watchers = [];
+
   // The activity's own address has the panel one level above it.  The console
   // has no login of its own any more: it sends people to the panel and comes
   // back here, which is what makes one account work on both surfaces.
@@ -25,9 +30,11 @@
 
   function api(path, options) {
     options = options || {};
+    var headers = { "X-Requested-With": "lottery" };
+    if (Object.keys(revs).length) headers["X-Rev-Map"] = JSON.stringify(revs);
     var init = {
       method: options.method || "GET",
-      headers: { "X-Requested-With": "lottery" },
+      headers: headers,
       credentials: "same-origin",
       cache: "no-store"
     };
@@ -39,6 +46,7 @@
       return res.text().then(function (text) {
         var data = null;
         try { data = text ? JSON.parse(text) : {}; } catch (e) { data = { ok: false, error: text || "响应无法解析" }; }
+        if (data && data.revs) revs = data.revs;
         if (!res.ok || data.ok === false) {
           var err = new Error(data && data.error ? data.error : "HTTP " + res.status);
           err.status = res.status;
@@ -183,10 +191,48 @@
     return out.slice(0, limit || 10).map(function (p) { return p[1]; });
   }
 
+  // The console hears about other people's writes instead of waiting for a poll.
+  function watch(handler) {
+    watchers.push(handler);
+    if (typeof window.EventSource !== "function") return;
+    var source = null;
+    var open = function () {
+      if (source) return;
+      source = new EventSource(PREFIX + "/api/admin/stream");
+      source.onmessage = function (event) {
+        var data;
+        try { data = JSON.parse(event.data); } catch (e) { return; }
+        if (!data || !data.revs) return;
+        var before = revs;
+        revs = data.revs;
+        watchers.forEach(function (fn) {
+          try { fn(data.revs, before); } catch (e) { /* one bad watcher */ }
+        });
+      };
+      source.onerror = function () {
+        if (source && source.readyState === 2) {
+          source = null;
+          setTimeout(open, 4000);
+        }
+      };
+    };
+    open();
+  }
+
+  function conflictMsg(err) {
+    if (err && err.data && err.data.conflict) {
+      return "另一位工作人员刚刚改过这一项，本次更改没有生效";
+    }
+    return "";
+  }
+
   var KIND_LABEL = { checkin: "签到", task1: "任务一", task2: "任务二", bonus: "速度奖励" };
 
   window.LT = {
     PREFIX: PREFIX,
+    watch: watch,
+    revs: function () { return revs; },
+    conflictMsg: conflictMsg,
     PANEL: PANEL,
     panelLoginUrl: panelLoginUrl,
     api: api,

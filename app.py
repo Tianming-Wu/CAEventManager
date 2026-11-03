@@ -1842,18 +1842,18 @@ class Handler(BaseHTTPRequestHandler):
             """The roster row, after checking this account may look at it."""
             row = lists.roster(lists.connect(), rid)
             if row is None:
-                raise model.ApiError("没有这份名单", 404)
+                raise model.ApiError("名单不存在", 404)
             if write:
                 if not lists.writable(lists.connect(), acc, "roster", row):
-                    raise model.ApiError("你没有这份名单的写入权限", 403)
+                    raise model.ApiError("没有该名单的写入权限", 403)
             elif not _roster_viewable(acc, row):
-                raise model.ApiError("无权查看这份名单", 403)
+                raise model.ApiError("无权查看该名单", 403)
             return row
 
         def need_roster_owner(row):
             """Destructive things (rename, delete, who may write) stay with the owner."""
             if row is None or row["owner_id"] != acc["id"]:
-                raise model.ApiError("只有这份名单的拥有者能做这件事", 403)
+                raise model.ApiError("仅拥有者可执行该操作", 403)
             return row
 
         if path == "/roster/ask" and method == "POST":
@@ -1861,11 +1861,8 @@ class Handler(BaseHTTPRequestHandler):
             data = body()
             rid = int(data.get("id") or 0)
             long_row = open_roster(rid)
-            lx = lists.connect()
-            mode = long_row["grant_mode"] or "auto"
-            level = "write" if mode == "auto" else "pending"
             with lists.tx() as lx:
-                lists.set_grant(lx, "roster", rid, acc["id"], level, "ask")
+                level = lists.apply_for_write(lx, "roster", long_row, acc["id"])
             with panel.tx() as tx:
                 panel.audit(tx, acc["username"],
                             "roster_ask" if level == "pending" else "roster_grant",
@@ -1883,9 +1880,9 @@ class Handler(BaseHTTPRequestHandler):
                 "SELECT * FROM accounts WHERE lower(username)=lower(?)",
                 (who,)).fetchone()
             if target is None:
-                raise model.ApiError("没有这个账号", 404)
+                raise model.ApiError("账号不存在", 404)
             if target["id"] == row["owner_id"]:
-                raise model.ApiError("你自己就是拥有者")
+                raise model.ApiError("你已是该名单的拥有者")
             with lists.tx() as lx:
                 lists.set_grant(lx, "roster", rid, target["id"], "write", "invite")
             with panel.tx() as tx:
@@ -1896,7 +1893,10 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/roster/grant/decide" and method == "POST":
             data = body()
             rid = int(data.get("id") or 0)
-            row = need_roster_owner(open_roster(rid, write=True))
+            row = open_roster(rid, write=True)
+            perms = lists.grant_summary(lists.connect(), acc, "roster", row)
+            if not perms["canApprove"]:
+                raise model.ApiError("该名单的写入申请仅拥有者可审批", 403)
             who = int(data.get("accountId") or 0)
             action = (data.get("action") or "").strip()
             if action not in ("approve", "reject"):
@@ -1918,9 +1918,9 @@ class Handler(BaseHTTPRequestHandler):
             row = need_roster_owner(open_roster(rid, write=True))
             who = int(data.get("accountId") or 0)
             if who == row["owner_id"]:
-                raise model.ApiError("拥有者不能移除自己的写入权限")
+                raise model.ApiError("无法移除拥有者自身的写入权限")
             with lists.tx() as lx:
-                lists.drop_grant(lx, "roster", rid, who)
+                lists.revoke_grant(lx, "roster", rid, who)
             with panel.tx() as tx:
                 panel.audit(tx, acc["username"], "roster_grant_revoke", str(rid),
                             str(who))
@@ -1931,9 +1931,9 @@ class Handler(BaseHTTPRequestHandler):
             scope = (query.get("scope") or ["mine"])[0]
             offset = _int_arg(query, "offset", 0, 0, 100000)
             limit = _int_arg(query, "limit", 30, 1, 100)
-            res = lists.list_rosters(lists.connect(), acc, q,
-                                     "all" if scope == "all" else "mine",
-                                     offset, limit)
+            if scope not in ("joined", "mine", "all"):
+                scope = "joined"
+            res = lists.list_rosters(lists.connect(), acc, q, scope, offset, limit)
             names = roster_owner_names([r["ownerId"] for r in res["rosters"]])
             for r in res["rosters"]:
                 r["ownerName"] = names.get(r["ownerId"], "")
@@ -1969,7 +1969,8 @@ class Handler(BaseHTTPRequestHandler):
                 rid = lists.create_roster(
                     lx, acc["id"], data.get("name"), data.get("note"),
                     data.get("visibility") or "private",
-                    data.get("grant_mode") or "auto")
+                    data.get("grant_mode") or "auto",
+                    data.get("approve_mode") or "owner")
             with panel.tx() as tx:
                 panel.audit(tx, acc["username"], "roster_create", str(rid),
                             (data.get("name") or "").strip())
@@ -1984,11 +1985,13 @@ class Handler(BaseHTTPRequestHandler):
                     lx, rid,
                     name=data.get("name"), note=data.get("note"),
                     visibility=data.get("visibility"),
-                    grant_mode=data.get("grant_mode"))
+                    grant_mode=data.get("grant_mode"),
+                    approve_mode=data.get("approve_mode"))
             with panel.tx() as tx:
                 panel.audit(tx, acc["username"], "roster_update", str(rid),
                             json.dumps({k: data.get(k) for k in
-                                        ("name", "visibility", "grant_mode")
+                                        ("name", "visibility", "grant_mode",
+                                         "approve_mode")
                                         if k in data}, ensure_ascii=False))
             return self._json({"ok": True})
 
@@ -2026,7 +2029,7 @@ class Handler(BaseHTTPRequestHandler):
             open_roster(rid, write=True)
             row = lists.entry(lists.connect(), rid, pid)
             if row is None:
-                raise model.ApiError("这份名单里没有这个人", 404)
+                raise model.ApiError("该名单中没有此人", 404)
             with lists.tx() as lx:
                 lists.drop_entry(lx, rid, pid)
             with panel.tx() as tx:
@@ -2040,7 +2043,7 @@ class Handler(BaseHTTPRequestHandler):
             pid = int(data.get("personId") or 0)
             state = data.get("state") or "active"
             if state not in lists.ENTRY_STATE:
-                raise model.ApiError("状态只能是在职或已退出")
+                raise model.ApiError("状态只能是在册或已退出")
             open_roster(rid, write=True)
             with lists.tx() as lx:
                 lx.execute(
@@ -2087,6 +2090,22 @@ class Handler(BaseHTTPRequestHandler):
                 200, "\ufeff" + buf.getvalue(),
                 "text/csv; charset=utf-8",
                 headers=[_attachment_header(name + ".csv")])
+
+        if path == "/list_approvals" and method == "GET":
+            # 写入申请的统一入口：普通账号也用得上，所以和超管的
+            # 活跃审批分开两条路由，鉴权各管各的
+            lx = lists.connect()
+            pending = lists.pending_approvals(lx, acc)
+            asks = lists.my_asks(lx, acc)
+            ids = {p["accountId"] for p in pending} | {a["ownerId"] for a in asks}
+            names = roster_owner_names(ids)
+            for p in pending:
+                p["name"] = p["name"] or ""
+                p["accountName"] = names.get(p["accountId"], "")
+            for a in asks:
+                a["ownerName"] = names.get(a["ownerId"], "")
+            return self._json({"ok": True, "pending": pending, "asks": asks,
+                               "count": len(pending)})
 
         if path == "/people/search" and method == "GET":
             q = (query.get("q") or [""])[0].strip()

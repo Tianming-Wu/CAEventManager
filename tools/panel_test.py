@@ -763,8 +763,8 @@ def main():
           asked and asked["level"] == "write", asked)
     again = call(helper, "/api/panel/roster?id=%d" % roster_id)["roster"]
     check("the applicant can now write", again["editable"] is True, again)
-    check("and the roster shows up under 我的名单",
-          call(helper, "/api/panel/rosters?scope=mine")["total"] == 1)
+    check("and the roster shows up under 我参与的",
+          call(helper, "/api/panel/rosters?scope=joined")["total"] == 1)
     added_by_other = post(helper, "/api/panel/roster/entry",
                           {"id": roster_id, "sid": "20240104", "name": "徐静",
                            "dept": "计算机学院"})
@@ -784,6 +784,22 @@ def main():
     post(helper, "/api/panel/roster/entry",
          {"id": roster_id, "sid": "20240105", "name": "又一个人"}, expect=403)
     check("a revoked account loses the write right", True)
+
+    print("== 名单：被移出过的人要重新走审批 ==")
+    # auto 模式下也一样：被拥有者移出过，再申请就得等确认，否则移除毫无意义
+    again = post(helper, "/api/panel/roster/ask", {"id": roster_id})
+    check("a removed account cannot walk back in on an auto roster",
+          again and again["level"] == "pending", again)
+    queue = call(helper, "/api/panel/list_approvals")
+    check("the applicant sees the request it is waiting on",
+          [a["id"] for a in queue["asks"]] == [roster_id], queue["asks"])
+    post(owner, "/api/panel/roster/grant/decide",
+         {"id": roster_id, "accountId": alice_id, "action": "approve"})
+    check("approving it lets the person back in",
+          (lambda r: r["editable"] is True)(
+              call(helper, "/api/panel/roster?id=%d" % roster_id)["roster"]))
+    post(owner, "/api/panel/roster/grant/revoke",
+         {"id": roster_id, "accountId": alice_id})
 
     print("== 名单：申请需要确认时 ==")
     post(owner, "/api/panel/roster/update",
@@ -817,6 +833,55 @@ def main():
                               {"id": other_id, "visibility": "private"})
     post(helper, "/api/panel/roster/ask", {"id": other_id}, expect=403)
     check("a private roster cannot be applied to", True)
+
+    print("== 名单：可写的人也能审批（拥有者点头之后） ==")
+    bob = session()
+    post(anon, "/api/panel/register", {"username": "bob", "name": "赵同学",
+                                       "password": "bob-pass-1"})
+    bob_id = [a for a in call(owner, "/api/panel/accounts")["accounts"]
+              if a["username"] == "bob"][0]["id"]
+    post(owner, "/api/panel/account/decide", {"id": bob_id, "action": "approve"})
+    post(bob, "/api/panel/login", {"username": "bob", "password": "bob-pass-1"})
+    post(owner, "/api/panel/roster/grant",
+         {"id": roster_id, "username": "bob"})
+    post(owner, "/api/panel/roster/update",
+         {"id": roster_id, "grant_mode": "confirm"})
+    # alice still holds write from the invitation: take it away so there is a
+    # request for bob to look at
+    post(owner, "/api/panel/roster/grant/revoke",
+         {"id": roster_id, "accountId": alice_id})
+    post(helper, "/api/panel/roster/ask", {"id": roster_id})
+    post(bob, "/api/panel/roster/grant/decide",
+         {"id": roster_id, "accountId": alice_id, "action": "approve"}, expect=403)
+    check("by default only the owner approves", True)
+    post(owner, "/api/panel/roster/update",
+         {"id": roster_id, "approve_mode": "editors"})
+    mine = call(bob, "/api/panel/list_approvals")
+    check("a writer sees the request once the owner allows it",
+          [p["accountId"] for p in mine["pending"]] == [alice_id], mine["pending"])
+    post(bob, "/api/panel/roster/grant/decide",
+         {"id": roster_id, "accountId": alice_id, "action": "approve"})
+    check("and can approve it",
+          (lambda r: r["editable"] is True)(
+              call(helper, "/api/panel/roster?id=%d" % roster_id)["roster"]))
+    outsider = call(teacher, "/api/panel/list_approvals")
+    check("someone with no seat sees an empty queue",
+          outsider["pending"] == [] and outsider["asks"] == [], outsider)
+
+    print("== 名单：三个范围 ==")
+    check("我参与的 covers what I own",
+          call(owner, "/api/panel/rosters?scope=joined")["total"] >= 2)
+    check("我创建的 is only mine",
+          all(r["ownerId"] == owner_id
+              for r in call(owner, "/api/panel/rosters?scope=mine")["rosters"]))
+    check("我参与的 includes the ones granted to me",
+          call(helper, "/api/panel/rosters?scope=joined")["total"] >= 1)
+    check("但是 我创建的 不含别人的",
+          call(helper, "/api/panel/rosters?scope=mine")["total"] == 0)
+    check("全部名单 is what the visibility allows",
+          # 只有一份是公开的，另一份是私有的
+          call(helper, "/api/panel/rosters?scope=all")["total"] == 1,
+          call(helper, "/api/panel/rosters?scope=all"))
 
     allseen = call(teacher, "/api/panel/rosters?scope=all")
     check("a superadmin can count every roster", allseen["total"] >= 2, allseen["total"])

@@ -112,6 +112,11 @@
             <a class="nav-item nav-sub-item" href="#/rosters" data-nav="rosters">
               <span class="nav-text">我的名单</span>
             </a>
+            <a class="nav-item nav-sub-item" href="#/write-approvals"
+               data-nav="write-approvals">
+              <span class="nav-text">写入审批</span>
+              <span class="nav-badge count" id="writeBadge" hidden>0</span>
+            </a>
           </div>
         </div>
       </div>
@@ -416,7 +421,7 @@
     <section class="page" data-page="rosters" hidden>
       <header class="page-head">
         <h1>我的名单</h1>
-        <p class="page-sub">社团成员、选手名单这类可以反复用的名单</p>
+        <p class="page-sub">可重复使用的成员名单，例如社团成员、参赛选手</p>
         <div class="page-actions">
           <button class="btn" id="rosterImportBtn" type="button">导入名单</button>
           <button class="btn primary" id="rosterNewBtn" type="button">新建名单</button>
@@ -425,12 +430,12 @@
 
       <div class="card">
         <div class="card-head">
-          <h2>名单</h2>
-          <span class="hint" id="rosterCount"></span>
-          <div class="row" id="rosterScopeBox" hidden>
-            <button class="btn sm" type="button" data-scope="mine">我创建的</button>
-            <button class="btn sm" type="button" data-scope="all">全部名单</button>
+          <div class="pills" id="rosterScopeBox" role="tablist">
+            <button class="pill" type="button" role="tab" data-scope="joined">我参与的</button>
+            <button class="pill" type="button" role="tab" data-scope="mine">我创建的</button>
+            <button class="pill" type="button" role="tab" data-scope="all">全部名单</button>
           </div>
+          <span class="hint" id="rosterCount"></span>
           <div class="searchbox">
             <input class="search" id="rosterSearch" type="search" placeholder="搜索名单名称"
                    autocomplete="off" spellcheck="false" aria-label="搜索名单">
@@ -459,6 +464,44 @@
              accept=".csv,.tsv,.txt,text/csv,text/plain">
     </section>
 
+    <!-- ====================================================== 写入审批 -->
+    <section class="page" data-page="write-approvals" hidden>
+      <header class="page-head">
+        <h1>写入审批</h1>
+        <p class="page-sub">他人对名单写入权限的申请集中在此处理</p>
+        <div class="page-actions">
+          <a class="btn" href="#/write-approvals" id="approvalsBack" hidden>返回</a>
+        </div>
+      </header>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>待我审批</h2>
+          <span class="hint" id="approvalsCount"></span>
+        </div>
+        <div class="tblwrap">
+          <table class="tbl fixed" id="approvalsTable">
+            <thead><tr>
+              <th>名单</th><th>申请的人</th><th>申请时间</th><th class="actions">操作</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2>我发出的申请</h2></div>
+        <div class="tblwrap">
+          <table class="tbl fixed" id="myAsksTable">
+            <thead><tr>
+              <th>名单</th><th>拥有者</th><th>申请时间</th><th class="actions">操作</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
     <!-- ====================================================== 名单内容 -->
     <section class="page" data-page="roster" hidden>
       <header class="page-head">
@@ -466,14 +509,15 @@
         <p class="page-sub" id="rosterSub">—</p>
         <div class="page-actions">
           <a class="btn" href="#/rosters" id="rosterBack">返回列表</a>
-          <button class="btn" id="rosterMergeBtn" type="button">导入合并</button>
+          <button class="btn" id="rosterMergeBtn" type="button">导入成员</button>
           <button class="btn" id="rosterExportBtn" type="button">导出</button>
           <button class="btn" id="rosterEditBtn" type="button">设置</button>
         </div>
       </header>
+      <p class="note" id="rosterAskNote" hidden></p>
 
       <div class="card" id="rosterReadOnly" hidden>
-        <p class="note">这份名单不是你的，只能查看。要改内容得先申请写入权限。</p>
+        <p class="note">这份名单不属于你，仅可查看。修改内容需先取得写入权限。</p>
       </div>
 
       <div class="card" id="rosterShare">

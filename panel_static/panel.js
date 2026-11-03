@@ -23,6 +23,7 @@
     "events": { min: "admin" },
     "rosters": { min: "admin", group: "lists" },
     "roster": { min: "admin", group: "lists" },
+    "write-approvals": { min: "admin", group: "lists" },
     "templates": { min: "admin" },
     "users": { min: "superadmin" },
     "all-events": { min: "superadmin" },
@@ -62,14 +63,18 @@
     // 名单：列表与当前打开的那一份
     rosters: [],
     rosterTotal: null,
-    rosterScope: "mine",
+    rosterScope: "joined",
     rosterFilter: "",
     rosterId: 0,
     roster: null,
     rosterEntries: [],
     entryTotal: null,
     entryFilter: "",
-    rosterImportName: ""
+    rosterImportName: "",
+    approvals: [],
+    myAsks: [],
+    approvalsCount: 0,
+    backTo: null          // 从别的页面跳进审批中心时，返回哪里
   };
 
   var RAIL_QUERY = "(max-width: 1100px)";
@@ -829,7 +834,8 @@
       return "<tr>" +
         '<td><a href="#/roster/' + r.id + '"><b>' + PX.esc(r.name) + "</b></a>" +
         (r.note ? '<div class="hint">' + PX.esc(r.note) + "</div>" : "") +
-        (r.mine ? "" : '<div class="hint">' + PX.esc(r.ownerName || "—") + " 的名单</div>") +
+        (r.mine ? "" : '<div class="hint">由 ' + PX.esc(r.ownerName || "—") +
+          " 创建 · 当前权限：" + PX.esc(r.levelLabel) + "</div>") +
         "</td>" +
         '<td class="right num">' + r.members + "</td>" +
         "<td>" + PX.esc(r.visibilityLabel) + "</td>" +
@@ -837,7 +843,7 @@
         '<td class="actions"><button class="btn sm" type="button" data-open-roster="' +
         r.id + '">打开</button></td></tr>';
     }).join("") : emptyRow(5, S.rosterTotal === 0
-      ? "还没有名单，先新建一份或者导入一份"
+      ? "还没有名单"
       : "正在读取…");
 
     var count = $("#rosterCount");
@@ -852,16 +858,12 @@
     }
     var box = $("#rosterScopeBox");
     if (box) {
-      box.hidden = !isSuper();
       Array.prototype.forEach.call(box.querySelectorAll("[data-scope]"), function (b) {
-        b.classList.toggle("primary", b.getAttribute("data-scope") === (S.rosterScope || "mine"));
+        var on = b.getAttribute("data-scope") === (S.rosterScope || "joined");
+        b.classList.toggle("on", on);
+        b.setAttribute("aria-selected", on ? "true" : "false");
       });
     }
-    var readOnly = S.rosterScope === "all";
-    var newBtn = $("#rosterNewBtn");
-    if (newBtn) newBtn.hidden = readOnly;
-    var importBtn = $("#rosterImportBtn");
-    if (importBtn) importBtn.hidden = readOnly;
   }
 
   function loadRoster(id) {
@@ -909,8 +911,9 @@
     }
     head.textContent = r.name;
     $("#rosterSub").textContent = (r.note ? r.note + " · " : "") +
-      "拥有者 " + (r.ownerName || "—") + " · " + r.visibilityLabel + " · 你是" +
-      r.levelLabel +
+      (r.owner ? "拥有者：你" : "拥有者 " + (r.ownerName || "—")) +
+      " · " + r.visibilityLabel +
+      (r.owner ? "" : " · 当前权限：" + r.levelLabel) +
       (r.visibility === "org" ? "（组织尚未建立，暂按公开处理）" : "");
     document.title = r.name + " · CAEventManager";
     $("#rosterReadOnly").hidden = !!r.editable;
@@ -919,6 +922,11 @@
     $("#rosterEditBtn").hidden = !r.owner;
     $("#rosterMemberCount").textContent = (S.entryTotal === null ? "" : "共 " + S.entryTotal + " 人") +
       (S.entryFilter ? "（已筛选）" : "");
+    var note = $("#rosterAskNote");
+    if (note) {
+      note.textContent = r.askNote || "";
+      note.hidden = !r.askNote;
+    }
     drawSharing();
     drawEntries();
   }
@@ -941,24 +949,29 @@
           e.accountId + '" aria-label="移除写入权限">×</button>' : "") + "</span>";
     });
     if (!(r.editors || []).length) {
-      html += '<span class="hint">除了拥有者还没有别人</span>';
+      html += '<span class="hint">除拥有者外暂无其他账号</span>';
     }
     html += "</div>";
-    if (r.owner) {
+    if (r.editable) {
       html += '<div class="row" style="gap:8px">' +
-        '<input class="search" id="rosterGrantWho" type="text" ' +
-        'placeholder="按登录名邀请" autocomplete="off" style="max-width:220px">' +
-        '<button class="btn sm" type="button" id="rosterGrantBtn">邀请写入</button></div>';
+        (r.owner
+          ? '<input class="search" id="rosterGrantWho" type="text" ' +
+            'placeholder="登录名" autocomplete="off" style="max-width:220px">' +
+            '<button class="btn sm" type="button" id="rosterGrantBtn">授予写入权限</button>'
+          : "") +
+        '<a class="btn sm" href="#/write-approvals?back=' +
+        encodeURIComponent("/roster/" + r.id) + '">写入审批</a></div>';
     } else if (r.canAsk) {
       html += '<div class="row"><button class="btn primary" type="button" ' +
         'id="rosterAskBtn">申请写入权限</button>' +
         '<span class="hint">' +
-        (r.grantMode === "auto" ? "申请后立即生效" : "需要拥有者确认后才生效") +
+        (r.askNote ? "重新申请需拥有者确认"
+          : (r.grantMode === "auto" ? "申请后立即生效" : "需要拥有者确认后才生效")) +
         "</span></div>";
     } else if (r.level === "pending") {
-      html += '<p class="note">已申请，等待拥有者确认。</p>';
+      html += '<p class="note">已提交申请，等待确认。</p>';
     }
-    if (r.owner && (r.pending || []).length) {
+    if (r.canApprove && (r.pending || []).length) {
       html += '<div style="margin-top:12px"><p class="hint">待确认的申请</p>' +
         r.pending.map(function (e) {
           return '<div class="row" style="gap:8px;margin-top:6px">' +
@@ -985,7 +998,8 @@
   function rosterAsk() {
     PX.api("/roster/ask", { method: "POST", body: { id: S.roster.id } })
       .then(function (d) {
-        PX.toast(d.level === "write" ? "你已可以修改这份名单" : "已申请，等待拥有者确认");
+        PX.toast(d.level === "write" ? "已获得写入权限" : "已提交申请，等待确认");
+        loadApprovals();
         return loadRoster(S.roster.id).then(function () {
           return loadEntries(false);
         }).then(drawRoster);
@@ -1037,7 +1051,7 @@
             e.personId + '">移出</button>'
           : '<span class="hint">只读</span>') + "</td></tr>";
     }).join("") : emptyRow(8, S.entryTotal === 0
-      ? "这份名单还没有人"
+      ? "还没有成员"
       : "没有匹配的成员");
     var more = $("#rosterEntryMore");
     if (more) {
@@ -1052,6 +1066,70 @@
     }
   }
 
+  /* ------------------------------------------------------------------ 写入审批 --- */
+  /* 一个统一入口：别人申请写你的名单，都在这里。普通账号也用得上，所以它和
+   * 超管那份「活跃审批」是两条独立的路由，鉴权各自管各自的。
+   * 从名单页跳过来时会带上 ?back=，那就给一个返回键；直接点侧栏进来则没有。 */
+  function loadApprovals() {
+    return PX.api("/list_approvals")
+      .then(function (d) {
+        S.approvals = d.pending || [];
+        S.myAsks = d.asks || [];
+        S.approvalsCount = d.count || 0;
+        renderApprovalBadge();
+      })
+      .catch(function (e) { PX.toast(PX.esc(e.message), true); });
+  }
+
+  function renderApprovalBadge() {
+    var badge = $("#writeBadge");
+    if (!badge) return;
+    badge.textContent = S.approvalsCount;
+    badge.hidden = !S.approvalsCount;
+  }
+
+  function drawApprovals() {
+    var back = $("#approvalsBack");
+    if (back) {
+      back.hidden = !S.backTo;
+      if (S.backTo) back.setAttribute("href", "#" + S.backTo);
+    }
+    $("#approvalsCount").textContent = S.approvalsCount
+      ? "共 " + S.approvalsCount + " 条" : "";
+    $("#approvalsTable tbody").innerHTML = S.approvals.length
+      ? S.approvals.map(function (a) {
+          return "<tr>" +
+            "<td><b>" + PX.esc(a.name) + "</b></td>" +
+            "<td>" + PX.esc(a.accountName || ("#" + a.accountId)) + "</td>" +
+            '<td class="mono">' + PX.whenExact(a.askedAt) + "</td>" +
+            '<td class="actions">' +
+            '<button class="btn sm primary" type="button" data-approve="' +
+            a.id + '" data-approve-acct="' + a.accountId + '">同意</button>' +
+            '<button class="btn sm" type="button" data-reject="' + a.id +
+            '" data-approve-acct="' + a.accountId + '">拒绝</button></td></tr>';
+        }).join("")
+      : emptyRow(4, "暂无待审批的申请");
+    $("#myAsksTable tbody").innerHTML = S.myAsks.length
+      ? S.myAsks.map(function (a) {
+          return "<tr>" +
+            "<td><b>" + PX.esc(a.name) + "</b></td>" +
+            "<td>" + PX.esc(a.ownerName || "—") + "</td>" +
+            '<td class="mono">' + PX.whenExact(a.askedAt) + "</td>" +
+            '<td class="actions"><span class="hint">等待确认</span></td></tr>';
+        }).join("")
+      : emptyRow(4, "暂无等待确认的申请");
+  }
+
+  function decideApproval(rid, accountId, action) {
+    PX.api("/roster/grant/decide", {
+      method: "POST",
+      body: { id: rid, accountId: accountId, action: action }
+    }).then(function () {
+      PX.toast(action === "approve" ? "已同意" : "已拒绝");
+      return loadApprovals().then(drawApprovals);
+    }).catch(function (e) { PX.toast(PX.esc(e.message), true); });
+  }
+
   function rosterDialog(row) {
     var r = row || {};
     openOverlay("roster", row ? "名单设置" : "新建名单",
@@ -1064,18 +1142,24 @@
       '<div class="field"><label for="rosterVis">可见性</label>' +
       '<select id="rosterVis">' +
       '<option value="private"' + ((r.visibility || "private") === "private" ? " selected" : "") +
-      ">私有（只有你能看见）</option>" +
+      ">私有（仅拥有者可见）</option>" +
       '<option value="public"' + (r.visibility === "public" ? " selected" : "") +
       ">公开（所有登录账号可见）</option>" +
       '<option value="org"' + (r.visibility === "org" ? " selected" : "") +
       ">组织公开（组织建立前等同公开）</option></select></div>" +
       (row && row.owner === false ? "" :
-        '<div class="field"><label for="rosterGrantMode">拿到写入权限的人</label>' +
+        '<div class="field"><label for="rosterGrantMode">他人申请写入时</label>' +
         '<select id="rosterGrantMode">' +
         '<option value="auto"' + ((r.grantMode || "auto") === "auto" ? " selected" : "") +
         ">申请即生效</option>" +
         '<option value="confirm"' + (r.grantMode === "confirm" ? " selected" : "") +
-        ">需要我确认</option></select></div>") +
+        ">需要我确认</option></select></div>" +
+        '<div class="field"><label for="rosterApproveMode">审批人</label>' +
+        '<select id="rosterApproveMode">' +
+        '<option value="owner"' + ((r.approveMode || "owner") === "owner" ? " selected" : "") +
+        ">仅拥有者</option>" +
+        '<option value="editors"' + (r.approveMode === "editors" ? " selected" : "") +
+        ">拥有者与可写成员</option></select></div>") +
       '<div class="row" style="margin-top:18px;justify-content:flex-end">' +
       '<button class="btn" type="button" data-close-overlay="1">取消</button>' +
       (row ? '<button class="btn danger" type="button" id="rosterDelete">删除名单</button>' : "") +
@@ -1089,6 +1173,8 @@
       };
       var mode = $("#rosterGrantMode");
       if (mode) payload.grant_mode = mode.value;
+      var approver = $("#rosterApproveMode");
+      if (approver) payload.approve_mode = approver.value;
       if (!payload.name) { PX.toast("请填写名单名称", true); return; }
       var req;
       if (row) {
@@ -1129,8 +1215,8 @@
       '<div class="field"><label for="rosterImportNameInput">名单名称</label>' +
       '<input id="rosterImportNameInput" type="text" maxlength="60" ' +
       'placeholder="例如 2026 秋 动漫社成员"></div>' +
-      '<p class="note" style="margin-top:10px">支持 CSV / TSV。第一行可以是表头' +
-      '（学号、姓名、班级、分组、备注），没有表头时按「学号,姓名,班级」读取。</p>' +
+      '<p class="note" style="margin-top:10px">支持 CSV 与 TSV。首行为表头时可识别' +
+      '学号、姓名、院系、班级、分组、备注；无表头时按「学号,姓名,班级」读取。</p>' +
       '<div class="row" style="margin-top:16px;justify-content:flex-end">' +
       '<button class="btn" type="button" data-close-overlay="1">取消</button>' +
       '<button class="btn primary" type="button" id="rosterImportPick">选择文件</button></div>');
@@ -1148,7 +1234,7 @@
     var reader = new FileReader();
     reader.onload = function () {
       var text = String(reader.result || "");
-      if (!text.trim()) { PX.toast("这个文件是空的", true); return; }
+      if (!text.trim()) { PX.toast("文件为空", true); return; }
       var body = { text: text };
       if (rosterId) {
         body.id = rosterId;
@@ -1167,7 +1253,7 @@
         })
         .catch(function (e) { PX.toast(PX.esc(e.message), true); });
     };
-    reader.onerror = function () { PX.toast("读不了这个文件", true); };
+    reader.onerror = function () { PX.toast("无法读取该文件", true); };
     reader.readAsText(file, "utf-8");
   }
 
@@ -1175,7 +1261,7 @@
     if (!S.roster) return;
     var sid = $("#rosterAddSid").value.trim();
     var name = $("#rosterAddName").value.trim();
-    if (!sid || !name) { PX.toast("学号和姓名都要填", true); return; }
+    if (!sid || !name) { PX.toast("学号与姓名均为必填", true); return; }
     PX.api("/roster/entry", {
       method: "POST",
       body: {
@@ -1210,6 +1296,19 @@
   }
 
   /* ----------------------------------------------------------------- router */
+  function hashQuery() {
+    var raw = (location.hash || "").replace(/^#\/?/, "");
+    var at = raw.indexOf("?");
+    var out = {};
+    if (at < 0) return out;
+    raw.slice(at + 1).split("&").forEach(function (pair) {
+      if (!pair) return;
+      var kv = pair.split("=");
+      out[decodeURIComponent(kv[0])] = decodeURIComponent(kv[1] || "");
+    });
+    return out;
+  }
+
   function routeFromHash() {
     var h = (location.hash || "").replace(/^#\/?/, "").split("?")[0];
     if (ALIAS[h]) h = ALIAS[h];
@@ -1301,8 +1400,14 @@
     if (wanted === "server" || wanted === "overview") refreshHost();
     if (wanted === "audit" && canAudit() && !S.audit.length) loadAudit().then(draw);
     if (wanted === "rosters") {
-      S.rosterScope = S.rosterScope || "mine";
+      S.rosterScope = S.rosterScope || "joined";
       loadRosters(false).then(drawRosters);
+    }
+    if (wanted === "write-approvals") {
+      S.backTo = hashQuery().back || null;
+      loadApprovals().then(drawApprovals);
+    } else {
+      S.backTo = null;
     }
     if (wanted === "roster") {
       if (!S.rosterId) {
@@ -1322,6 +1427,7 @@
       case "events": return drawEvents();
       case "rosters": return drawRosters();
       case "roster": return drawRoster();
+      case "write-approvals": return drawApprovals();
       case "templates": return drawTemplates();
       case "new-event": return drawNewEvent();
       case "users": return drawUsers();
@@ -1528,7 +1634,7 @@
       }
       sendPreset(raw, false);
     };
-    reader.onerror = function () { PX.toast("读不了这个文件", true); };
+    reader.onerror = function () { PX.toast("无法读取该文件", true); };
     reader.readAsText(file, "utf-8");
   }
 
@@ -2874,7 +2980,7 @@
     reader.onload = function () {
       sendAvatar({ data: String(reader.result) }, "头像已更新");
     };
-    reader.onerror = function () { PX.toast("读不了这个文件", true); };
+    reader.onerror = function () { PX.toast("无法读取该文件", true); };
     reader.readAsDataURL(file);
   });
 
@@ -2937,7 +3043,10 @@
     scopeBox.addEventListener("click", function (e) {
       var btn = e.target.closest ? e.target.closest("[data-scope]") : null;
       if (!btn) return;
-      S.rosterScope = btn.getAttribute("data-scope");
+      var next = btn.getAttribute("data-scope");
+      if (next === S.rosterScope) return;
+      S.rosterScope = next;
+      drawRosters();
       loadRosters(false).then(drawRosters);
     });
   }
@@ -2946,6 +3055,16 @@
     if (!btn) return;
     location.hash = "#/roster/" + btn.getAttribute("data-open-roster");
   });
+  $("#approvalsTable").addEventListener("click", function (e) {
+    var t = e.target.closest ? e.target.closest("[data-approve],[data-reject]") : null;
+    if (!t) return;
+    var acct = Number(t.getAttribute("data-approve-acct"));
+    if (t.getAttribute("data-approve")) {
+      decideApproval(Number(t.getAttribute("data-approve")), acct, "approve");
+      return;
+    }
+    decideApproval(Number(t.getAttribute("data-reject")), acct, "reject");
+  });
   $("#rosterShareBody").addEventListener("click", function (e) {
     var t = e.target.closest ?
       e.target.closest("[data-revoke],[data-ask-ok],[data-ask-no],#rosterAskBtn,#rosterGrantBtn") : null;
@@ -2953,7 +3072,7 @@
     if (t.id === "rosterAskBtn") { rosterAsk(); return; }
     if (t.id === "rosterGrantBtn") {
       var who = $("#rosterGrantWho").value.trim();
-      if (!who) { PX.toast("请填写对方的登录名", true); return; }
+      if (!who) { PX.toast("请填写登录名", true); return; }
       rosterGrant(who);
       return;
     }
@@ -3071,6 +3190,7 @@
       // a reload keeps an elevation that has not run out yet
       setSudo(d.sudoUntil, d.now);
       return reloadAll().then(function () {
+        loadApprovals();
         startHostPolling();
         onRoute();
         // a real readiness signal: tests used to poll the placeholder text

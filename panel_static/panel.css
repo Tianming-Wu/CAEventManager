@@ -1505,6 +1505,42 @@ input:focus, textarea:focus, select:focus {
 }
 .tag-x:hover { opacity: 1; color: var(--danger); }
 
+/* ---------- pills: a row of mutually exclusive views ---------- */
+#rosterTable th:nth-child(1), #rosterTable td:nth-child(1) { width: 38%; }
+#rosterTable th:nth-child(2), #rosterTable td:nth-child(2) { width: 10%; }
+#rosterTable th:nth-child(3), #rosterTable td:nth-child(3) { width: 14%; }
+#rosterTable th:nth-child(4), #rosterTable td:nth-child(4) { width: 24%; }
+#rosterTable th:nth-child(5), #rosterTable td:nth-child(5) { width: 14%; }
+#approvalsTable th:nth-child(1), #approvalsTable td:nth-child(1),
+#myAsksTable th:nth-child(1), #myAsksTable td:nth-child(1) { width: 40%; }
+#approvalsTable th:nth-child(2), #approvalsTable td:nth-child(2),
+#myAsksTable th:nth-child(2), #myAsksTable td:nth-child(2) { width: 24%; }
+#approvalsTable th:nth-child(3), #approvalsTable td:nth-child(3),
+#myAsksTable th:nth-child(3), #myAsksTable td:nth-child(3) { width: 22%; }
+#approvalsTable th:nth-child(4), #approvalsTable td:nth-child(4),
+#myAsksTable th:nth-child(4), #myAsksTable td:nth-child(4) { width: 14%; }
+
+.pills { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.pill {
+  appearance: none;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 4px 13px;
+  font: inherit;
+  font-size: .8rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.pill:hover { color: var(--text); }
+.pill.on {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+  color: var(--accent-strong);
+  font-weight: 650;
+}
+
 .toast {
   position: fixed;
   left: 50%;

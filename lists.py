@@ -29,7 +29,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 VISIBILITY = ("private", "public", "org")
 VIS_LABEL = {"private": "私有", "public": "公开", "org": "组织公开"}
 ENTRY_STATE = ("active", "left")
-STATE_LABEL = {"active": "在职", "left": "已退出"}
+STATE_LABEL = {"active": "在册", "left": "已退出"}
 SOURCE_LABEL = {"import": "导入", "manual": "手工", "signup": "报名", "event": "活动"}
 
 SCHEMA = """
@@ -89,11 +89,16 @@ CREATE TABLE IF NOT EXISTS grants (
 LATE_COLUMNS = (
     ("people", "dept", "TEXT NOT NULL DEFAULT ''"),
     ("rosters", "grant_mode", "TEXT NOT NULL DEFAULT 'auto'"),
+    ("rosters", "approve_mode", "TEXT NOT NULL DEFAULT 'owner'"),
 )
 
 GRANT_MODES = ("auto", "confirm")
+# 谁能批写入申请：只有拥有者，或拥有者让可写的人也来批
+APPROVE_MODES = ("owner", "editors")
+APPROVE_MODE_LABEL = {"owner": "只有我", "editors": "可写的人也可以"}
 GRANT_MODE_LABEL = {"auto": "申请即生效", "confirm": "需要我确认"}
-LEVEL_LABEL = {"owner": "拥有者", "write": "可写", "pending": "待确认", "read": "只读"}
+LEVEL_LABEL = {"owner": "拥有者", "write": "可写", "pending": "待确认",
+               "revoked": "已移出", "read": "只读"}
 
 _local = threading.local()
 _write_lock = threading.Lock()
@@ -202,7 +207,7 @@ def person(conn, person_id):
 # rosters
 # --------------------------------------------------------------------------- #
 def create_roster(conn, owner_id, name, note="", visibility="private",
-                  grant_mode="auto"):
+                  grant_mode="auto", approve_mode="owner"):
     name = (name or "").strip()
     if not name:
         raise model.ApiError("请填写名单名称")
@@ -212,18 +217,21 @@ def create_roster(conn, owner_id, name, note="", visibility="private",
         visibility = "private"
     if grant_mode not in GRANT_MODES:
         grant_mode = "auto"
+    if approve_mode not in APPROVE_MODES:
+        approve_mode = "owner"
     now = time.time()
     cur = conn.execute(
         "INSERT INTO rosters (name, note, owner_id, visibility, grant_mode,"
-        " created_at, updated_at) VALUES (?,?,?,?,?,?,?)",
-        (name, (note or "")[:200], owner_id, visibility, grant_mode, now, now),
+        " approve_mode, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)",
+        (name, (note or "")[:200], owner_id, visibility, grant_mode,
+         approve_mode, now, now),
     )
     return cur.lastrowid
 
 
 def update_roster(conn, roster_id, **fields):
     sets, vals = [], []
-    for key in ("name", "note", "visibility", "grant_mode"):
+    for key in ("name", "note", "visibility", "grant_mode", "approve_mode"):
         if key not in fields or fields[key] is None:
             continue
         value = fields[key]
@@ -239,6 +247,9 @@ def update_roster(conn, roster_id, **fields):
         elif key == "grant_mode":
             if value not in GRANT_MODES:
                 raise model.ApiError("写入权限只能是申请即生效或需要确认")
+        elif key == "approve_mode":
+            if value not in APPROVE_MODES:
+                raise model.ApiError("审批人只能是拥有者或可写的人")
         else:
             value = str(value)[:200]
         sets.append("%s=?" % key)
@@ -289,7 +300,7 @@ def visible_condition(acc, alias="r"):
 
 
 def grant_level(conn, kind, object_id, account_id):
-    """owner | write | pending | read for one account on one object."""
+    """owner | write | pending | revoked | read for one account on one object."""
     row = conn.execute(
         "SELECT level FROM grants WHERE object_kind=? AND object_id=? AND account_id=?",
         (kind, object_id, account_id)).fetchone()
@@ -315,10 +326,34 @@ def set_grant(conn, kind, object_id, account_id, level, source="ask"):
         (kind, object_id, account_id, level, source, time.time()))
 
 
+def revoke_grant(conn, kind, object_id, account_id):
+    """Taking write access back leaves a scar, not a hole.
+
+    The row stays as ``revoked`` so the next application is not waved through by
+    an ``auto`` roster: being removed on purpose has to mean something, otherwise
+    the person just clicks 申请 again and is back inside.
+    """
+    set_grant(conn, kind, object_id, account_id, "revoked", "revoke")
+
+
 def drop_grant(conn, kind, object_id, account_id):
     conn.execute(
         "DELETE FROM grants WHERE object_kind=? AND object_id=? AND account_id=?",
         (kind, object_id, account_id))
+
+
+def apply_for_write(conn, kind, row, account_id):
+    """A request to write: immediate on ``auto``, queued on ``confirm``.
+
+    Whatever the mode, someone who was removed once always lands in the queue.
+    """
+    previous = grant_level(conn, kind, row["id"], account_id)
+    if previous == "write":
+        return "write"
+    mode = row["grant_mode"] if "grant_mode" in row.keys() else "auto"
+    level = "write" if (mode == "auto" and previous != "revoked") else "pending"
+    set_grant(conn, kind, row["id"], account_id, level, "ask")
+    return level
 
 
 def grant_summary(conn, acc, kind, row):
@@ -326,19 +361,30 @@ def grant_summary(conn, acc, kind, row):
     if acc is None or row is None:
         return {"level": "read", "levelLabel": LEVEL_LABEL["read"],
                 "editable": False, "owner": False, "canAsk": False,
-                "grantMode": "auto", "grantModeLabel": GRANT_MODE_LABEL["auto"]}
+                "canApprove": False, "askNote": "",
+                "grantMode": "auto", "grantModeLabel": GRANT_MODE_LABEL["auto"],
+                "approveMode": "owner",
+                "approveModeLabel": APPROVE_MODE_LABEL["owner"]}
     owner = row["owner_id"] == acc["id"]
     level = "owner" if owner else grant_level(conn, kind, row["id"], acc["id"])
     mode = row["grant_mode"] if "grant_mode" in row.keys() else "auto"
+    approve = row["approve_mode"] if "approve_mode" in row.keys() else "owner"
     visible = level != "read" or row_visible(acc, row)
+    can_write = owner or level == "write"
     return {
         "level": level,
         "levelLabel": LEVEL_LABEL.get(level, level),
         "owner": owner,
-        "editable": owner or level == "write",
-        "canAsk": (not owner) and level != "write" and visible,
+        "editable": can_write,
+        "canAsk": (not owner) and level not in ("write", "pending") and visible,
+        # 申请由谁批：拥有者，或者拥有者点头让可写的人也来批
+        "canApprove": owner or (approve == "editors" and level == "write"),
+        "askNote": "你曾被移出这份名单，重新申请需拥有者确认"
+                   if level == "revoked" else "",
         "grantMode": mode,
         "grantModeLabel": GRANT_MODE_LABEL.get(mode, mode),
+        "approveMode": approve,
+        "approveModeLabel": APPROVE_MODE_LABEL.get(approve, approve),
     }
 
 
@@ -360,13 +406,16 @@ def writable(conn, acc, kind, row):
     return bool(grant_summary(conn, acc, kind, row)["editable"])
 
 
-def list_rosters(conn, acc, q="", scope="mine", offset=0, limit=50):
+def list_rosters(conn, acc, q="", scope="joined", offset=0, limit=50):
     where, args = [], []
-    if scope == "mine":
-        # 我创建的，以及别人把写入权给我的
+    if scope == "joined":
+        # 我参与的 = 我创建的 + 别人把写入权给我的
         where.append("(r.owner_id=? OR r.id IN (SELECT object_id FROM grants"
                      " WHERE object_kind='roster' AND account_id=? AND level='write'))")
         args += [acc["id"], acc["id"]]
+    elif scope == "mine":
+        where.append("r.owner_id=?")
+        args.append(acc["id"])
     else:
         cond, extra = visible_condition(acc)
         if cond:
@@ -398,8 +447,12 @@ def roster_view(row, members=0, acc=None, conn=None):
         "editable": can_manage(acc, row),
         "owner": can_manage(acc, row),
         "canAsk": False,
+        "canApprove": can_manage(acc, row),
+        "askNote": "",
         "grantMode": "auto",
         "grantModeLabel": GRANT_MODE_LABEL["auto"],
+        "approveMode": "owner",
+        "approveModeLabel": APPROVE_MODE_LABEL["owner"],
     }
     return {
         "id": row["id"],
@@ -417,9 +470,46 @@ def roster_view(row, members=0, acc=None, conn=None):
         "level": perms["level"],
         "levelLabel": perms["levelLabel"],
         "canAsk": perms["canAsk"],
+        "canApprove": perms["canApprove"],
+        "askNote": perms["askNote"],
         "grantMode": perms["grantMode"],
         "grantModeLabel": perms["grantModeLabel"],
+        "approveMode": perms["approveMode"],
+        "approveModeLabel": perms["approveModeLabel"],
     }
+
+
+def pending_approvals(conn, acc):
+    """写入申请里这个人能处理的那些：他拥有的对象，或可写且被授权审批的对象。"""
+    if acc is None:
+        return []
+    rows = conn.execute(
+        "SELECT g.object_kind, g.object_id, g.account_id, g.added_at,"
+        "       r.name, r.owner_id, r.approve_mode"
+        " FROM grants g JOIN rosters r ON r.id = g.object_id"
+        " WHERE g.object_kind='roster' AND g.level='pending'"
+        "   AND (r.owner_id = ?"
+        "        OR (r.approve_mode='editors' AND EXISTS ("
+        "            SELECT 1 FROM grants w WHERE w.object_kind='roster'"
+        "              AND w.object_id=r.id AND w.account_id=? AND w.level='write')))"
+        " ORDER BY g.added_at",
+        (acc["id"], acc["id"])).fetchall()
+    return [{"kind": r["object_kind"], "id": r["object_id"], "name": r["name"],
+             "accountId": r["account_id"], "askedAt": r["added_at"]}
+            for r in rows]
+
+
+def my_asks(conn, acc):
+    """我发出、还在等别人点头的申请。"""
+    if acc is None:
+        return []
+    rows = conn.execute(
+        "SELECT g.object_kind, g.object_id, g.added_at, r.name, r.owner_id"
+        " FROM grants g JOIN rosters r ON r.id = g.object_id"
+        " WHERE g.object_kind='roster' AND g.level='pending' AND g.account_id=?"
+        " ORDER BY g.added_at DESC", (acc["id"],)).fetchall()
+    return [{"kind": r["object_kind"], "id": r["object_id"], "name": r["name"],
+             "ownerId": r["owner_id"], "askedAt": r["added_at"]} for r in rows]
 
 
 # --------------------------------------------------------------------------- #

@@ -255,6 +255,24 @@ def roster_page(page):
     check("the list says it is empty",
           "还没有名单" in page.inner_text("#rosterTable tbody"),
           page.inner_text("#rosterTable tbody"))
+    pills = page.locator("#rosterScopeBox .pill")
+    check("three scopes are offered", pills.count() == 3, pills.count())
+    check("我参与的 is the default", "on" in (pills.first.get_attribute("class") or ""),
+          pills.first.get_attribute("class"))
+    check("the pills are capsule shaped", page.evaluate(
+        """() => {
+        const b = document.querySelector('#rosterScopeBox .pill');
+        return getComputedStyle(b).borderTopLeftRadius;
+      }""").startswith("999"), page.evaluate(
+        "() => getComputedStyle(document.querySelector('#rosterScopeBox .pill'))"
+        ".borderTopLeftRadius"))
+    check("the pills sit on the left of the card head", page.evaluate(
+        """() => {
+        const pills = document.querySelector('#rosterScopeBox');
+        const head = pills.closest('.card-head');
+        return Math.round(pills.getBoundingClientRect().left -
+                          head.getBoundingClientRect().left) < 40;
+      }"""))
 
     page.click("#rosterNewBtn")
     page.wait_for_selector("#rosterName", timeout=8000)
@@ -268,7 +286,7 @@ def roster_page(page):
 
     check("the owner is listed as the only writer",
           "拥有者" in page.inner_text("#rosterShareBody") and
-          "还没有别人" in page.inner_text("#rosterShareBody"),
+          "除拥有者外暂无其他账号" in page.inner_text("#rosterShareBody"),
           page.inner_text("#rosterShareBody"))
 
     page.fill("#rosterAddSid", "20249001")
@@ -321,6 +339,29 @@ def roster_page(page):
           "需要我确认" in page.inner_text("#rosterShareHint"),
           page.inner_text("#rosterShareHint"))
 
+    page.click('#rosterShareBody a.btn')
+    page.wait_for_timeout(900)
+    check("the roster links to the approval centre",
+          page.locator('.page[data-page="write-approvals"]').is_visible())
+    check("arriving from a page shows a way back",
+          page.locator("#approvalsBack").is_visible())
+    page.click("#approvalsBack")
+    page.wait_for_timeout(900)
+    check("and it returns to where it came from",
+          page.locator('.page[data-page="roster"]').is_visible())
+    page.goto(BASE + "/panel#/write-approvals")
+    page.wait_for_timeout(900)
+    check("opened directly, the centre has no back button",
+          page.locator("#approvalsBack").is_hidden())
+    check("the centre explains both lists",
+          "暂无待审批的申请" in page.inner_text("#approvalsTable tbody")
+          or page.locator("#approvalsTable tbody tr").count() >= 1,
+          page.inner_text("#approvalsTable tbody"))
+
+    page.goto(BASE + "/panel#/rosters")
+    page.wait_for_timeout(900)
+    page.click("[data-open-roster]")
+    page.wait_for_timeout(900)
     page.click("#rosterBack")
     page.wait_for_timeout(800)
     body = page.inner_text("#rosterTable tbody")

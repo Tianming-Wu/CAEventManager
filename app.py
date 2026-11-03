@@ -393,6 +393,48 @@ class SudoRequired(model.ApiError):
         super().__init__("该操作需要 sudo 模式", 403)
 
 
+# Routes whose handler can tell that the requested state is already the truth.
+# They get to answer "already done" instead of "conflict".
+DEFERRED_CONFLICT_ROUTES = ("/account/decide", "/event/archive", "/module/toggle",
+                            "/preset/favorite", "/preset/delete")
+
+WRITE_TARGETS = (
+    # (route, field holding the id, scope template)
+    ("/account/decide", "id", "account:%s"),
+    ("/account/role", "id", "account:%s"),
+    ("/profile", None, "account:self"),
+    ("/avatar", None, "account:self"),
+    ("/password", None, "account:self"),
+    ("/event/title", "seq", "event:%s"),
+    ("/event/rotate", "seq", "event:%s"),
+    ("/event/archive", "seq", "event:%s"),
+    ("/event/member", "seq", "event:%s:members"),
+    ("/preset", "id", "preset:%s"),
+    ("/preset/delete", "id", "preset:%s"),
+    ("/preset/favorite", "id", "preset:%s"),
+    ("/module/toggle", "id", "module:%s"),
+)
+
+
+def write_target(path, data):
+    """Which object a panel write touches; no target means nothing to compare.
+
+    A conflict is only ever about one object.  Two administrators working on
+    different accounts, or on an account and an activity, have nothing to
+    disagree about, however busy the panel is.
+    """
+    for route, field, template in WRITE_TARGETS:
+        if path != route:
+            continue
+        if field is None:
+            return template % ()
+        raw = (data or {}).get(field)
+        if raw in (None, ""):
+            return None
+        return template % raw
+    return None
+
+
 def _int_arg(query, name, default, low, high):
     try:
         value = int((query.get(name) or [str(default)])[0])
@@ -467,8 +509,11 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
 
     def _json(self, obj, status=200, headers=None):
-        if self.command == "POST" and status == 200 and self._scope:
-            bus.bump(self._scope)
+        if self.command == "POST" and status == 200:
+            if self._scope:
+                bus.bump(self._scope)
+            if getattr(self, "_target", None):
+                bus.bump(self._target)
         if isinstance(obj, dict) and "revs" not in obj and self.path.startswith("/api/panel"):
             obj = dict(obj, revs=bus.snapshot())
         self._send(status, json.dumps(obj, ensure_ascii=False, default=str), headers=headers)
@@ -766,6 +811,14 @@ class Handler(BaseHTTPRequestHandler):
                 raise model.ApiError("缺少请求标记", 403)
             return self._body()
 
+        def peek():
+            raw = getattr(self, "_raw_body", b"") or b""
+            try:
+                data = json.loads(raw.decode("utf-8")) if raw else {}
+            except Exception:
+                return {}
+            return data if isinstance(data, dict) else {}
+
         if path == "/stream" and method == "GET":
             acc = panel.session_account(conn, self._panel_token())
             if acc is None:
@@ -885,13 +938,32 @@ class Handler(BaseHTTPRequestHandler):
         if acc is None:
             raise model.ApiError("未登录或登录已过期", 401)
 
-        # First write wins: a change built on a revision that has since moved on
-        # was made without seeing what the other session did, so it is refused
-        # rather than silently overwriting it.
-        if method == "POST":
-            base = self.headers.get("X-Base-Rev") or ""
-            if base.isdigit() and int(base) < bus.revision("panel"):
-                raise Conflict("另一个会话已经改过这里，本次更改没有生效")
+        # A conflict is only ever about the object this write touches: a change
+        # to the same thing that the client has not seen yet.  Everything else
+        # merges, however many sessions are open.
+        target = write_target(path, peek()) if method == "POST" else None
+        self._target = target
+        self._stale = False
+        if target:
+            raw = self.headers.get("X-Rev-Map") or ""
+            try:
+                known = json.loads(raw) if raw else {}
+            except ValueError:
+                known = {}
+            if isinstance(known, dict) and target in known:
+                try:
+                    base = int(known[target])
+                except (TypeError, ValueError):
+                    base = None
+                if base is not None and base < bus.revision(target):
+                    self._stale = True
+                    if path not in DEFERRED_CONFLICT_ROUTES:
+                        raise Conflict("另一个会话刚刚改过这一项，本次更改没有生效")
+
+        def refuse_stale():
+            """Called by a route that knows whether it would change anything."""
+            if self._stale:
+                raise Conflict("另一个会话刚刚改过这一项，本次更改没有生效")
 
         def need(*roles):
             if roles and acc["role"] not in roles:
@@ -1063,6 +1135,11 @@ class Handler(BaseHTTPRequestHandler):
             reason = (data.get("reason") or "").strip()[:120]
             if action == "ban" and not reason:
                 raise model.ApiError("封禁需要写明原因")
+            if target["status"] == status:
+                # somebody already put it there: the same intent twice is not a
+                # conflict, and the first decision keeps its time and author
+                return self._json({"ok": True, "status": status, "already": True})
+            refuse_stale()
             # Locking someone out is the one account decision that cannot be
             # undone by the other side, so it asks for the password again.
             if action in ("ban", "disable"):
@@ -1248,6 +1325,10 @@ class Handler(BaseHTTPRequestHandler):
             if module_id not in known:
                 raise model.ApiError("没有这个模块", 404)
             on = bool(data.get("enabled", True))
+            current = module_id not in panel.disabled_modules(conn)
+            if current == on:
+                return self._json({"ok": True, "enabled": on, "already": True})
+            refuse_stale()
             with panel.tx() as tx:
                 panel.set_module_enabled(tx, module_id, on, acc["username"])
                 panel.audit(tx, acc["username"],
@@ -1472,7 +1553,9 @@ class Handler(BaseHTTPRequestHandler):
             if row is None:
                 raise model.ApiError("\u6d3b\u52a8\u4e0d\u5b58\u5728", 404)
             if row["archived_at"]:
-                return self._json({"ok": True, "seq": seq, "archived": True})
+                return self._json({"ok": True, "seq": seq, "archived": True,
+                                   "already": True})
+            refuse_stale()
             with panel.tx() as tx:
                 tx.execute("UPDATE events SET archived_at=? WHERE seq=?",
                            (time.time(), seq))

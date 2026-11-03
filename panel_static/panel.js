@@ -489,7 +489,7 @@
   function fail(e) {
     if (e && e.silent) return;
     if (e && e.data && e.data.conflict) {
-      PX.notice("另一个会话已经改过这里，本次更改没有生效", "warn");
+      PX.notice("另一个会话刚刚改过这一项，本次更改没有生效", "warn");
       reloadAll().catch(function () {});
       return;
     }

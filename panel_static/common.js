@@ -17,7 +17,9 @@
   function api(path, options) {
     options = options || {};
     var headers = { "X-Requested-With": "CAEventManager" };
-    if (revs.panel !== undefined) headers["X-Base-Rev"] = String(revs.panel);
+    // what this session has seen, per object; the server compares only the
+    // object the request touches, so unrelated writes never block each other
+    if (Object.keys(revs).length) headers["X-Rev-Map"] = JSON.stringify(revs);
     var init = {
       method: options.method || "GET",
       headers: headers,

@@ -388,10 +388,15 @@
 
     <div class="panel">
       <h2>活动</h2>
-      <dl class="kv" id="eventInfo"></dl>
-      <p class="note" style="margin-top:10px">
-        活动名称、访问地址与存档在总控面板的活动卡片菜单里管理
-      </p>
+      <div class="field" style="max-width:420px">
+        <label for="eventName">名称</label>
+        <input id="eventName" type="text" maxlength="60" autocomplete="off">
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button class="btn primary" id="eventNameSave" type="button">保存名称</button>
+        <span class="note" id="eventNameNote"></span>
+      </div>
+      <dl class="kv" id="eventInfo" style="margin-top:14px"></dl>
     </div>
   </section>
 

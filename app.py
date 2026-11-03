@@ -2031,6 +2031,26 @@ class Handler(BaseHTTPRequestHandler):
                 raise model.ApiError("只有该活动的负责人能管理成员", 403)
             return me
 
+        if path == "/api/admin/event_info" and method == "POST":
+            # the activity's own information is edited where it is displayed:
+            # the platform's 活动设置 page, by the activity's owner
+            if me.role != "owner":
+                raise model.ApiError("只有该活动的负责人能改活动名称", 403)
+            data = self._body()
+            title = (data.get("title") or "").strip()
+            if not title:
+                raise model.ApiError("名称不能为空")
+            if len(title) > 60:
+                raise model.ApiError("活动名称最长 60 个字")
+            seq = db.current_event()
+            with panel.tx() as tx:
+                tx.execute("UPDATE events SET title=? WHERE seq=?", (title, seq))
+                panel.audit(tx, me.acc["username"], "event_title", str(seq), title)
+            with db.tx(conn):
+                db.set_config_raw(conn, "title", title)
+                db.audit(conn, "event_title", detail=title, actor=me.name)
+            return self._json({"ok": True, "title": title})
+
         if path == "/api/admin/members" and method == "GET":
             # the roster is the platform's page, and the owner's business
             need_owner()

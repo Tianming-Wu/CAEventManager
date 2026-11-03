@@ -140,7 +140,8 @@
     if (S.unlocked) html.push('<span class="chip" style="border-color:#6b2020;color:#ffb4b4">修改已解锁</span>');
     $("#headStats").innerHTML = html.join("");
     $("#brandTitle").textContent = S.config.title || "抽奖";
-    $("#nRoster").textContent = st.total;
+    var badge = $("#nRoster");
+    if (badge) badge.textContent = st.total;
     document.title = "后台 · " + (S.config.title || "抽奖");
   }
 
@@ -929,6 +930,8 @@
           btn.classList.add("active");
         }
       });
+      var badge = $("#nRoster");
+      if (badge) badge.textContent = (S.students || []).length;
       if (first) showTab(first.id);
     }).catch(function () {
       nav.textContent = "";
@@ -1210,14 +1213,36 @@
     var live = (S.members || []).filter(function (m) {
       return m.state === "active";
     }).length;
+    var name = $("#eventName");
+    if (name && document.activeElement !== name) name.value = cfg.title || "";
     var rows = [
-      ["名称", cfg.title || "—"],
       ["在场成员", live + " 人"],
       ["访问地址", S.publicBaseUrl || ""]
     ];
     $("#eventInfo").innerHTML = rows.map(function (r) {
       return "<dt>" + LT.esc(r[0]) + "</dt><dd>" + LT.esc(r[1]) + "</dd>";
     }).join("");
+  }
+
+  function saveEventName() {
+    var box = $("#eventName");
+    var note = $("#eventNameNote");
+    var title = box ? box.value.trim() : "";
+    if (!title) {
+      if (note) note.textContent = "名称不能为空";
+      return;
+    }
+    LT.api("/api/admin/event_info", { method: "POST", body: { title: title } })
+      .then(function (d) {
+        S.config.title = d.title;
+        if (note) note.textContent = "已保存";
+        renderHead();
+        renderEventInfo();
+        load().catch(function () {});
+      })
+      .catch(function (e) {
+        if (note) note.textContent = LT.conflictMsg(e) || (e && e.message) || "保存失败";
+      });
   }
 
   function memberAction(accountId, action) {
@@ -1322,6 +1347,7 @@
     $("#phaseDrawBtn").addEventListener("click", function () { setPhase("draw"); });
     $("#shortlinkBtn").addEventListener("click", mintShortlink);
     $("#memberInviteBtn").addEventListener("click", openInviteSearch);
+    $("#eventNameSave").addEventListener("click", saveEventName);
     $("#memberTable").addEventListener("click", function (e) {
       var btn = e.target.closest("[data-member]");
       if (!btn) return;

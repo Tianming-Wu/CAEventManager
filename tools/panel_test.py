@@ -746,6 +746,8 @@ def main():
     check("a public roster can be opened by others", opened and opened["ok"], opened)
     check("but it is read-only for them", opened["roster"]["editable"] is False,
           opened["roster"])
+    check("and it offers to ask for write access",
+          opened["roster"]["canAsk"] is True, opened["roster"])
     post(helper, "/api/panel/roster/update",
          {"id": roster_id, "name": "改个名"}, expect=403)
     check("and cannot be changed", True)
@@ -754,6 +756,68 @@ def main():
     check("nor added to", True)
     check("the owner still sees it",
           call(owner, "/api/panel/rosters?scope=mine")["total"] == 2)
+
+    print("== 名单：申请写入权限 ==")
+    asked = post(helper, "/api/panel/roster/ask", {"id": roster_id})
+    check("申请立刻生效 when the roster says so",
+          asked and asked["level"] == "write", asked)
+    again = call(helper, "/api/panel/roster?id=%d" % roster_id)["roster"]
+    check("the applicant can now write", again["editable"] is True, again)
+    check("and the roster shows up under 我的名单",
+          call(helper, "/api/panel/rosters?scope=mine")["total"] == 1)
+    added_by_other = post(helper, "/api/panel/roster/entry",
+                          {"id": roster_id, "sid": "20240104", "name": "徐静",
+                           "dept": "计算机学院"})
+    check("the granted account can add people", bool(added_by_other), added_by_other)
+    found = [e for e in call(owner, "/api/panel/roster/entries?id=%d" % roster_id)["entries"]
+             if e["sid"] == "20240104"]
+    check("院系 is stored next to the class", found and found[0]["dept"] == "计算机学院",
+          found)
+    post(helper, "/api/panel/roster/delete", {"id": roster_id}, expect=403)
+    check("deleting stays with the owner", True)
+    editors = [e for e in call(owner, "/api/panel/roster?id=%d" % roster_id)
+               ["roster"]["editors"]]
+    check("the owner sees who may write",
+          [e["accountId"] for e in editors] == [alice_id], editors)
+    post(owner, "/api/panel/roster/grant/revoke",
+         {"id": roster_id, "accountId": alice_id})
+    post(helper, "/api/panel/roster/entry",
+         {"id": roster_id, "sid": "20240105", "name": "又一个人"}, expect=403)
+    check("a revoked account loses the write right", True)
+
+    print("== 名单：申请需要确认时 ==")
+    post(owner, "/api/panel/roster/update",
+         {"id": roster_id, "grant_mode": "confirm"})
+    pending = post(helper, "/api/panel/roster/ask", {"id": roster_id})
+    check("the application waits for the owner", pending and pending["level"] == "pending",
+          pending)
+    post(helper, "/api/panel/roster/entry",
+         {"id": roster_id, "sid": "20240106", "name": "还没批"}, expect=403)
+    check("and gives no write access yet", True)
+    row = call(owner, "/api/panel/roster?id=%d" % roster_id)["roster"]
+    check("the owner sees the pending request",
+          [p["accountId"] for p in row["pending"]] == [alice_id], row["pending"])
+    post(owner, "/api/panel/roster/grant/decide",
+         {"id": roster_id, "accountId": alice_id, "action": "approve"})
+    post(helper, "/api/panel/roster/entry",
+         {"id": roster_id, "sid": "20240106", "name": "批了"}, )
+    check("after approval the write goes through", True)
+    post(owner, "/api/panel/roster/grant/revoke",
+         {"id": roster_id, "accountId": alice_id})
+    invited = post(owner, "/api/panel/roster/grant",
+                   {"id": roster_id, "username": "alice"})
+    check("the owner can invite by login name", invited and invited["ok"], invited)
+    post(helper, "/api/panel/roster/entry",
+         {"id": roster_id, "sid": "20240107", "name": "被邀请"})
+    check("an invited account can write right away", True)
+    post(owner, "/api/panel/roster/grant",
+         {"id": roster_id, "username": "no-such-user"}, expect=404)
+    check("inviting an unknown account is refused", True)
+    private_cannot_ask = post(owner, "/api/panel/roster/update",
+                              {"id": other_id, "visibility": "private"})
+    post(helper, "/api/panel/roster/ask", {"id": other_id}, expect=403)
+    check("a private roster cannot be applied to", True)
+
     allseen = call(teacher, "/api/panel/rosters?scope=all")
     check("a superadmin can count every roster", allseen["total"] >= 2, allseen["total"])
     left = [r for r in allseen["rosters"] if r["id"] == roster_id][0]

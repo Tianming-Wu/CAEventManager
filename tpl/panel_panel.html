@@ -473,7 +473,15 @@
       </header>
 
       <div class="card" id="rosterReadOnly" hidden>
-        <p class="note">这份名单不是你的，只能查看。修改权限只属于创建者。</p>
+        <p class="note">这份名单不是你的，只能查看。要改内容得先申请写入权限。</p>
+      </div>
+
+      <div class="card" id="rosterShare">
+        <div class="card-head">
+          <h2>写入权限</h2>
+          <span class="hint" id="rosterShareHint"></span>
+        </div>
+        <div id="rosterShareBody"></div>
       </div>
 
       <div class="card">
@@ -494,20 +502,22 @@
         </div>
         <div class="row" id="rosterAddRow" style="margin-bottom:12px">
           <input class="search" id="rosterAddSid" type="text" placeholder="学号"
-                 autocomplete="off" style="max-width:170px">
+                 autocomplete="off" style="max-width:150px">
           <input class="search" id="rosterAddName" type="text" placeholder="姓名"
-                 autocomplete="off" style="max-width:150px">
+                 autocomplete="off" style="max-width:130px">
+          <input class="search" id="rosterAddDept" type="text" placeholder="院系（可选）"
+                 autocomplete="off" style="max-width:170px">
           <input class="search" id="rosterAddGrp" type="text" placeholder="班级（可选）"
-                 autocomplete="off" style="max-width:190px">
+                 autocomplete="off" style="max-width:170px">
           <input class="search" id="rosterAddTag" type="text" placeholder="分组（可选）"
-                 autocomplete="off" style="max-width:150px">
+                 autocomplete="off" style="max-width:140px">
           <button class="btn primary" id="rosterAddBtn" type="button">加入名单</button>
         </div>
         <div class="tblwrap">
           <table class="tbl fixed" id="rosterEntryTable">
             <thead><tr>
-              <th>学号</th><th>姓名</th><th>班级</th><th>分组</th><th>来源</th>
-              <th>状态</th><th class="actions">操作</th>
+              <th>学号</th><th>姓名</th><th>院系</th><th>班级</th><th>分组</th>
+              <th>来源</th><th>状态</th><th class="actions">操作</th>
             </tr></thead>
             <tbody></tbody>
           </table>

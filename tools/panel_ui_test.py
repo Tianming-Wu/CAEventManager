@@ -266,14 +266,22 @@ def roster_page(page):
           "UI 测试名单" in page.inner_text('.page[data-page="roster"]:not([hidden]) h1'),
           page.inner_text('.page[data-page="roster"]:not([hidden]) h1'))
 
+    check("the owner is listed as the only writer",
+          "拥有者" in page.inner_text("#rosterShareBody") and
+          "还没有别人" in page.inner_text("#rosterShareBody"),
+          page.inner_text("#rosterShareBody"))
+
     page.fill("#rosterAddSid", "20249001")
     page.fill("#rosterAddName", "测试甲")
+    page.fill("#rosterAddDept", "计算机学院")
     page.fill("#rosterAddGrp", "计科2401")
     page.click("#rosterAddBtn")
     page.wait_for_timeout(900)
     check("a person can be added from the page",
           "20249001" in page.inner_text("#rosterEntryTable tbody"),
           page.inner_text("#rosterEntryTable tbody"))
+    check("院系 is its own column",
+          "计算机学院" in page.inner_text("#rosterEntryTable tbody"))
 
     page.fill("#rosterEntrySearch", "ceshi")
     page.wait_for_timeout(800)
@@ -301,11 +309,17 @@ def roster_page(page):
 
     page.click("#rosterEditBtn")
     page.wait_for_selector("#rosterVis", timeout=8000)
+    check("the dialog decides how write access is granted",
+          page.locator("#rosterGrantMode").count() == 1)
     page.select_option("#rosterVis", "public")
+    page.select_option("#rosterGrantMode", "confirm")
     page.click("#rosterSave")
     page.wait_for_timeout(900)
     check("the visibility can be changed",
           "公开" in page.inner_text("#rosterSub"), page.inner_text("#rosterSub"))
+    check("the write-in mode is remembered",
+          "需要我确认" in page.inner_text("#rosterShareHint"),
+          page.inner_text("#rosterShareHint"))
 
     page.click("#rosterBack")
     page.wait_for_timeout(800)

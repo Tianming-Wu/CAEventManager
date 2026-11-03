@@ -1491,6 +1491,19 @@ input:focus, textarea:focus, select:focus {
 .tag.superadmin { border-color: var(--accent-line); color: var(--accent-strong); }
 .tag.pending { border-color: var(--accent-line); background: var(--accent-soft); color: var(--accent-strong); }
 .tag.disabled, .tag.rejected { border-color: var(--danger-line); background: var(--danger-soft); color: var(--danger); }
+/* the × inside a 写入权限 tag: a target big enough to hit, not a tiny glyph */
+.tag-x {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: 1;
+  padding: 2px 0 2px 4px;
+  cursor: pointer;
+  opacity: .6;
+}
+.tag-x:hover { opacity: 1; color: var(--danger); }
 
 .toast {
   position: fixed;

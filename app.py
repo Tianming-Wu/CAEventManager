@@ -1844,11 +1844,87 @@ class Handler(BaseHTTPRequestHandler):
             if row is None:
                 raise model.ApiError("没有这份名单", 404)
             if write:
-                if not lists.can_manage(acc, row):
-                    raise model.ApiError("只有这份名单的创建者能修改", 403)
+                if not lists.writable(lists.connect(), acc, "roster", row):
+                    raise model.ApiError("你没有这份名单的写入权限", 403)
             elif not _roster_viewable(acc, row):
                 raise model.ApiError("无权查看这份名单", 403)
             return row
+
+        def need_roster_owner(row):
+            """Destructive things (rename, delete, who may write) stay with the owner."""
+            if row is None or row["owner_id"] != acc["id"]:
+                raise model.ApiError("只有这份名单的拥有者能做这件事", 403)
+            return row
+
+        if path == "/roster/ask" and method == "POST":
+            # 看得见就能申请写入；私有名单没有这一条路，只能等拥有者邀请
+            data = body()
+            rid = int(data.get("id") or 0)
+            long_row = open_roster(rid)
+            lx = lists.connect()
+            mode = long_row["grant_mode"] or "auto"
+            level = "write" if mode == "auto" else "pending"
+            with lists.tx() as lx:
+                lists.set_grant(lx, "roster", rid, acc["id"], level, "ask")
+            with panel.tx() as tx:
+                panel.audit(tx, acc["username"],
+                            "roster_ask" if level == "pending" else "roster_grant",
+                            str(rid), long_row["name"])
+            return self._json({"ok": True, "level": level,
+                               "levelLabel": lists.LEVEL_LABEL[level]})
+
+        if path == "/roster/grant" and method == "POST":
+            # 拥有者直接把人加进写入名单：私有名单只有这一条路
+            data = body()
+            rid = int(data.get("id") or 0)
+            row = need_roster_owner(open_roster(rid, write=True))
+            who = (data.get("username") or "").strip()
+            target = conn.execute(
+                "SELECT * FROM accounts WHERE lower(username)=lower(?)",
+                (who,)).fetchone()
+            if target is None:
+                raise model.ApiError("没有这个账号", 404)
+            if target["id"] == row["owner_id"]:
+                raise model.ApiError("你自己就是拥有者")
+            with lists.tx() as lx:
+                lists.set_grant(lx, "roster", rid, target["id"], "write", "invite")
+            with panel.tx() as tx:
+                panel.audit(tx, acc["username"], "roster_grant", str(rid),
+                            "邀请 %s 写入" % target["username"])
+            return self._json({"ok": True})
+
+        if path == "/roster/grant/decide" and method == "POST":
+            data = body()
+            rid = int(data.get("id") or 0)
+            row = need_roster_owner(open_roster(rid, write=True))
+            who = int(data.get("accountId") or 0)
+            action = (data.get("action") or "").strip()
+            if action not in ("approve", "reject"):
+                raise model.ApiError("未知操作")
+            with lists.tx() as lx:
+                if action == "approve":
+                    lists.set_grant(lx, "roster", rid, who, "write", "ask")
+                else:
+                    lists.drop_grant(lx, "roster", rid, who)
+            with panel.tx() as tx:
+                panel.audit(tx, acc["username"],
+                            "roster_ask_approve" if action == "approve"
+                            else "roster_ask_reject", str(rid), str(who))
+            return self._json({"ok": True})
+
+        if path == "/roster/grant/revoke" and method == "POST":
+            data = body()
+            rid = int(data.get("id") or 0)
+            row = need_roster_owner(open_roster(rid, write=True))
+            who = int(data.get("accountId") or 0)
+            if who == row["owner_id"]:
+                raise model.ApiError("拥有者不能移除自己的写入权限")
+            with lists.tx() as lx:
+                lists.drop_grant(lx, "roster", rid, who)
+            with panel.tx() as tx:
+                panel.audit(tx, acc["username"], "roster_grant_revoke", str(rid),
+                            str(who))
+            return self._json({"ok": True})
 
         if path == "/rosters" and method == "GET":
             q = (query.get("q") or [""])[0].strip()
@@ -1862,15 +1938,20 @@ class Handler(BaseHTTPRequestHandler):
             for r in res["rosters"]:
                 r["ownerName"] = names.get(r["ownerId"], "")
             return self._json({"ok": True, **res})
-
         if path == "/roster" and method == "GET":
             rid = _int_arg(query, "id", 0, 0, 1000000)
             row = open_roster(rid)
             lx = lists.connect()
             counts = lists.roster_counts(lx, [rid])
-            view = lists.roster_view(row, counts.get(rid, 0), acc)
+            view = lists.roster_view(row, counts.get(rid, 0), acc, lx)
             view["ownerName"] = roster_owner_names([row["owner_id"]]).get(
                 row["owner_id"], "")
+            editors = lists.grants_of(lx, "roster", rid)
+            names = roster_owner_names([e["accountId"] for e in editors])
+            for e in editors:
+                e["name"] = names.get(e["accountId"], "")
+            view["editors"] = [e for e in editors if e["level"] == "write"]
+            view["pending"] = [e for e in editors if e["level"] == "pending"]
             return self._json({"ok": True, "roster": view})
 
         if path == "/roster/entries" and method == "GET":
@@ -1887,7 +1968,8 @@ class Handler(BaseHTTPRequestHandler):
             with lists.tx() as lx:
                 rid = lists.create_roster(
                     lx, acc["id"], data.get("name"), data.get("note"),
-                    data.get("visibility") or "private")
+                    data.get("visibility") or "private",
+                    data.get("grant_mode") or "auto")
             with panel.tx() as tx:
                 panel.audit(tx, acc["username"], "roster_create", str(rid),
                             (data.get("name") or "").strip())
@@ -1901,18 +1983,19 @@ class Handler(BaseHTTPRequestHandler):
                 lists.update_roster(
                     lx, rid,
                     name=data.get("name"), note=data.get("note"),
-                    visibility=data.get("visibility"))
+                    visibility=data.get("visibility"),
+                    grant_mode=data.get("grant_mode"))
             with panel.tx() as tx:
                 panel.audit(tx, acc["username"], "roster_update", str(rid),
                             json.dumps({k: data.get(k) for k in
-                                        ("name", "visibility") if k in data},
-                                       ensure_ascii=False))
+                                        ("name", "visibility", "grant_mode")
+                                        if k in data}, ensure_ascii=False))
             return self._json({"ok": True})
 
         if path == "/roster/delete" and method == "POST":
             data = body()
             rid = int(data.get("id") or 0)
-            row = open_roster(rid, write=True)
+            row = need_roster_owner(open_roster(rid, write=True))
             with lists.tx() as lx:
                 lists.delete_roster(lx, rid)
             with panel.tx() as tx:
@@ -1926,7 +2009,8 @@ class Handler(BaseHTTPRequestHandler):
             open_roster(rid, write=True)
             with lists.tx() as lx:
                 person_id, created = lists.upsert_person(
-                    lx, data.get("sid"), data.get("name"), data.get("grp") or "")
+                    lx, data.get("sid"), data.get("name"),
+                    data.get("grp") or "", dept=data.get("dept") or "")
                 lists.add_entry(lx, rid, person_id, data.get("tag"),
                                 data.get("note"), "manual")
             with panel.tx() as tx:

@@ -909,16 +909,108 @@
     }
     head.textContent = r.name;
     $("#rosterSub").textContent = (r.note ? r.note + " · " : "") +
-      "创建者 " + (r.ownerName || "—") + " · " + r.visibilityLabel +
+      "拥有者 " + (r.ownerName || "—") + " · " + r.visibilityLabel + " · 你是" +
+      r.levelLabel +
       (r.visibility === "org" ? "（组织尚未建立，暂按公开处理）" : "");
     document.title = r.name + " · CAEventManager";
     $("#rosterReadOnly").hidden = !!r.editable;
     $("#rosterAddRow").hidden = !r.editable;
     $("#rosterMergeBtn").hidden = !r.editable;
-    $("#rosterEditBtn").hidden = !r.editable;
+    $("#rosterEditBtn").hidden = !r.owner;
     $("#rosterMemberCount").textContent = (S.entryTotal === null ? "" : "共 " + S.entryTotal + " 人") +
       (S.entryFilter ? "（已筛选）" : "");
+    drawSharing();
     drawEntries();
+  }
+
+  /* 写入权限：拥有者可以邀请与移除，看得见的人可以申请。
+   * 名单设置里的"写入权限模式"决定申请是立刻生效还是要拥有者点头。 */
+  function drawSharing() {
+    var box = $("#rosterShareBody");
+    var hint = $("#rosterShareHint");
+    var r = S.roster;
+    if (!box || !r) return;
+    if (hint) {
+      hint.textContent = r.owner ? "模式：" + r.grantModeLabel : "";
+    }
+    var html = '<div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:10px">' +
+      '<span class="tag owner">拥有者 ' + PX.esc(r.ownerName || "—") + "</span>";
+    (r.editors || []).forEach(function (e) {
+      html += '<span class="tag">' + PX.esc(e.name || ("#" + e.accountId)) +
+        (r.owner ? ' <button class="tag-x" type="button" data-revoke="' +
+          e.accountId + '" aria-label="移除写入权限">×</button>' : "") + "</span>";
+    });
+    if (!(r.editors || []).length) {
+      html += '<span class="hint">除了拥有者还没有别人</span>';
+    }
+    html += "</div>";
+    if (r.owner) {
+      html += '<div class="row" style="gap:8px">' +
+        '<input class="search" id="rosterGrantWho" type="text" ' +
+        'placeholder="按登录名邀请" autocomplete="off" style="max-width:220px">' +
+        '<button class="btn sm" type="button" id="rosterGrantBtn">邀请写入</button></div>';
+    } else if (r.canAsk) {
+      html += '<div class="row"><button class="btn primary" type="button" ' +
+        'id="rosterAskBtn">申请写入权限</button>' +
+        '<span class="hint">' +
+        (r.grantMode === "auto" ? "申请后立即生效" : "需要拥有者确认后才生效") +
+        "</span></div>";
+    } else if (r.level === "pending") {
+      html += '<p class="note">已申请，等待拥有者确认。</p>';
+    }
+    if (r.owner && (r.pending || []).length) {
+      html += '<div style="margin-top:12px"><p class="hint">待确认的申请</p>' +
+        r.pending.map(function (e) {
+          return '<div class="row" style="gap:8px;margin-top:6px">' +
+            "<span>" + PX.esc(e.name || ("#" + e.accountId)) + "</span>" +
+            '<button class="btn sm primary" type="button" data-ask-ok="' +
+            e.accountId + '">同意</button>' +
+            '<button class="btn sm" type="button" data-ask-no="' +
+            e.accountId + '">拒绝</button></div>';
+        }).join("") + "</div>";
+    }
+    box.innerHTML = html;
+  }
+
+  function rosterGrant(who) {
+    PX.api("/roster/grant", { method: "POST",
+      body: { id: S.roster.id, username: who } })
+      .then(function () {
+        PX.toast("已授予写入权限");
+        return loadRoster(S.roster.id).then(drawRoster);
+      })
+      .catch(function (e) { PX.toast(PX.esc(e.message), true); });
+  }
+
+  function rosterAsk() {
+    PX.api("/roster/ask", { method: "POST", body: { id: S.roster.id } })
+      .then(function (d) {
+        PX.toast(d.level === "write" ? "你已可以修改这份名单" : "已申请，等待拥有者确认");
+        return loadRoster(S.roster.id).then(function () {
+          return loadEntries(false);
+        }).then(drawRoster);
+      })
+      .catch(function (e) { PX.toast(PX.esc(e.message), true); });
+  }
+
+  function rosterDecide(accountId, action) {
+    PX.api("/roster/grant/decide", { method: "POST",
+      body: { id: S.roster.id, accountId: accountId, action: action } })
+      .then(function () {
+        PX.toast(action === "approve" ? "已同意" : "已拒绝");
+        return loadRoster(S.roster.id).then(drawRoster);
+      })
+      .catch(function (e) { PX.toast(PX.esc(e.message), true); });
+  }
+
+  function rosterRevoke(accountId) {
+    PX.api("/roster/grant/revoke", { method: "POST",
+      body: { id: S.roster.id, accountId: accountId } })
+      .then(function () {
+        PX.toast("已移除写入权限");
+        return loadRoster(S.roster.id).then(drawRoster);
+      })
+      .catch(function (e) { PX.toast(PX.esc(e.message), true); });
   }
 
   function drawEntries() {
@@ -932,6 +1024,7 @@
         '<td class="mono">' + PX.esc(e.sid) + "</td>" +
         "<td><b>" + PX.esc(e.name) + "</b>" +
         (e.note ? '<div class="hint">' + PX.esc(e.note) + "</div>" : "") + "</td>" +
+        "<td>" + PX.esc(e.dept || "—") + "</td>" +
         "<td>" + PX.esc(e.grp || "—") + "</td>" +
         "<td>" + PX.esc(e.tag || "—") + "</td>" +
         "<td>" + PX.esc(e.sourceLabel) + "</td>" +
@@ -943,7 +1036,7 @@
             '<button class="btn sm danger" type="button" data-entry-drop="' +
             e.personId + '">移出</button>'
           : '<span class="hint">只读</span>') + "</td></tr>";
-    }).join("") : emptyRow(7, S.entryTotal === 0
+    }).join("") : emptyRow(8, S.entryTotal === 0
       ? "这份名单还没有人"
       : "没有匹配的成员");
     var more = $("#rosterEntryMore");
@@ -976,6 +1069,13 @@
       ">公开（所有登录账号可见）</option>" +
       '<option value="org"' + (r.visibility === "org" ? " selected" : "") +
       ">组织公开（组织建立前等同公开）</option></select></div>" +
+      (row && row.owner === false ? "" :
+        '<div class="field"><label for="rosterGrantMode">拿到写入权限的人</label>' +
+        '<select id="rosterGrantMode">' +
+        '<option value="auto"' + ((r.grantMode || "auto") === "auto" ? " selected" : "") +
+        ">申请即生效</option>" +
+        '<option value="confirm"' + (r.grantMode === "confirm" ? " selected" : "") +
+        ">需要我确认</option></select></div>") +
       '<div class="row" style="margin-top:18px;justify-content:flex-end">' +
       '<button class="btn" type="button" data-close-overlay="1">取消</button>' +
       (row ? '<button class="btn danger" type="button" id="rosterDelete">删除名单</button>' : "") +
@@ -987,6 +1087,8 @@
         note: $("#rosterNote").value.trim(),
         visibility: $("#rosterVis").value
       };
+      var mode = $("#rosterGrantMode");
+      if (mode) payload.grant_mode = mode.value;
       if (!payload.name) { PX.toast("请填写名单名称", true); return; }
       var req;
       if (row) {
@@ -1078,12 +1180,13 @@
       method: "POST",
       body: {
         id: S.roster.id, sid: sid, name: name,
+        dept: $("#rosterAddDept").value.trim(),
         grp: $("#rosterAddGrp").value.trim(),
         tag: $("#rosterAddTag").value.trim()
       }
     }).then(function () {
-      ["#rosterAddSid", "#rosterAddName", "#rosterAddGrp", "#rosterAddTag"]
-        .forEach(function (sel) { $(sel).value = ""; });
+      ["#rosterAddSid", "#rosterAddName", "#rosterAddDept", "#rosterAddGrp",
+       "#rosterAddTag"].forEach(function (sel) { $(sel).value = ""; });
       $("#rosterAddSid").focus();
       return loadRoster(S.roster.id).then(function () {
         return loadEntries(false);
@@ -2842,6 +2945,24 @@
     var btn = e.target.closest ? e.target.closest("[data-open-roster]") : null;
     if (!btn) return;
     location.hash = "#/roster/" + btn.getAttribute("data-open-roster");
+  });
+  $("#rosterShareBody").addEventListener("click", function (e) {
+    var t = e.target.closest ?
+      e.target.closest("[data-revoke],[data-ask-ok],[data-ask-no],#rosterAskBtn,#rosterGrantBtn") : null;
+    if (!t) return;
+    if (t.id === "rosterAskBtn") { rosterAsk(); return; }
+    if (t.id === "rosterGrantBtn") {
+      var who = $("#rosterGrantWho").value.trim();
+      if (!who) { PX.toast("请填写对方的登录名", true); return; }
+      rosterGrant(who);
+      return;
+    }
+    var ok = t.getAttribute("data-ask-ok");
+    if (ok) { rosterDecide(Number(ok), "approve"); return; }
+    var no = t.getAttribute("data-ask-no");
+    if (no) { rosterDecide(Number(no), "reject"); return; }
+    var rev = t.getAttribute("data-revoke");
+    if (rev) { rosterRevoke(Number(rev)); return; }
   });
   $("#rosterEntryTable").addEventListener("click", function (e) {
     var t = e.target.closest ? e.target.closest("[data-entry-drop],[data-entry-state]") : null;

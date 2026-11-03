@@ -549,86 +549,86 @@
         </div>
       </div>
 
-      <div class="grid-2">
-        <div class="card">
-          <div class="card-head"><h2>基本信息</h2></div>
-          <div class="field"><label for="signupName">名称</label>
-            <input id="signupName" type="text" maxlength="60"></div>
-          <div class="field"><label for="signupNote">说明</label>
-            <input id="signupNote" type="text" maxlength="300"
-                   placeholder="显示在报名页标题下方"></div>
-          <div class="field"><label for="signupState">开放状态</label>
-            <select id="signupState">
-              <option value="open">开放</option>
-              <option value="closed">关闭</option>
-            </select></div>
+      <div class="cols-2">
+        <div class="col">
+          <div class="card">
+            <div class="card-head"><h2>基本信息</h2></div>
+            <div class="field"><label for="signupName">名称</label>
+              <input id="signupName" type="text" maxlength="60"></div>
+            <div class="field"><label for="signupNote">说明</label>
+              <input id="signupNote" type="text" maxlength="300"
+                     placeholder="显示在报名页标题下方"></div>
+            <div class="field"><label for="signupState">开放状态</label>
+              <select id="signupState">
+                <option value="open">开放</option>
+                <option value="closed">关闭</option>
+              </select></div>
+          </div>
+
+          <div class="card" id="signupTimeCard">
+            <div class="card-head">
+              <h2>时间</h2>
+              <label class="switch" title="限定起止时间">
+                <input type="checkbox" id="signupTimeOn" aria-label="限定起止时间">
+                <span class="track"></span>
+              </label>
+            </div>
+            <div class="field"><label for="signupOpens">开始时间</label>
+              <input id="signupOpens" type="datetime-local">
+              <p class="hint">留空表示不设下界</p></div>
+            <div class="field"><label for="signupCloses">结束时间</label>
+              <input id="signupCloses" type="datetime-local">
+              <p class="hint">留空表示不设上界</p></div>
+          </div>
         </div>
 
-        <div class="card">
-          <div class="card-head"><h2>视觉效果</h2><span class="hint">报名页的样子</span></div>
-          <div class="row" style="gap:12px;align-items:flex-end">
-            <div class="field" style="flex:1 1 160px">
-              <label for="signupTheme">主题</label>
-              <select id="signupTheme">
-                <option value="plain">素色</option>
-                <option value="warm">暖色</option>
-                <option value="cool">冷色</option>
-                <option value="dark">暗色</option>
-              </select>
+        <div class="col">
+          <div class="card">
+            <div class="card-head"><h2>视觉效果</h2><span class="hint">报名页的样子</span></div>
+            <div class="row" style="gap:12px;align-items:flex-end">
+              <div class="field" style="flex:1 1 160px">
+                <label for="signupTheme">主题</label>
+                <select id="signupTheme">
+                  <option value="plain">素色</option>
+                  <option value="warm">暖色</option>
+                  <option value="cool">冷色</option>
+                  <option value="dark">暗色</option>
+                </select>
+              </div>
+              <div class="field" style="flex:0 0 130px">
+                <label for="signupAccent">主色</label>
+                <input id="signupAccent" type="color" value="#b45309">
+              </div>
             </div>
-            <div class="field" style="flex:0 0 130px">
-              <label for="signupAccent">主色</label>
-              <input id="signupAccent" type="color" value="#b45309">
+            <div class="preview-wrap" style="margin-top:14px">
+              <div class="preview-page" id="signupPreview">
+                <div class="pv-brand">CAEVENTMANAGER</div>
+                <h3 id="pvTitle">报名</h3>
+                <p id="pvNote">说明</p>
+                <div class="pv-field">学号</div>
+                <div class="pv-field">姓名</div>
+                <div class="pv-field" id="pvExtra">院系</div>
+                <div class="pv-btn" id="pvBtn">提交报名</div>
+              </div>
             </div>
           </div>
-          <div class="preview-wrap" style="margin-top:14px">
-            <div class="preview-page" id="signupPreview">
-              <div class="pv-brand">CAEVENTMANAGER</div>
-              <h3 id="pvTitle">报名</h3>
-              <p id="pvNote">说明</p>
-              <div class="pv-field">学号</div>
-              <div class="pv-field">姓名</div>
-              <div class="pv-field" id="pvExtra">院系</div>
-              <div class="pv-btn" id="pvBtn">提交报名</div>
-            </div>
-          </div>
-        </div>
-      </div>
 
-      <div class="grid-2">
-        <div class="card" id="signupTimeCard">
-          <div class="card-head">
-            <h2>时间</h2>
-            <label class="switch">
-              <input type="checkbox" id="signupTimeOn">
-              <span class="track"></span>
-              <span class="switch-text">限定起止时间</span>
-            </label>
+          <div class="card" id="signupCapCard">
+            <div class="card-head">
+              <h2>名额</h2>
+              <label class="switch" title="限制人数">
+                <input type="checkbox" id="signupCapOn" aria-label="限制人数">
+                <span class="track"></span>
+              </label>
+            </div>
+            <div class="field"><label for="signupCap">名额上限</label>
+              <input id="signupCap" type="number" min="1" max="9999"></div>
+            <div class="field"><label for="signupSelfEdit">报名后修改</label>
+              <select id="signupSelfEdit">
+                <option value="off">不允许，信息有误需联系负责人</option>
+                <option value="on">允许本人更新已提交的信息</option>
+              </select></div>
           </div>
-          <div class="field"><label for="signupOpens">开始时间</label>
-            <input id="signupOpens" type="datetime-local">
-            <p class="hint">留空表示不设下界</p></div>
-          <div class="field"><label for="signupCloses">结束时间</label>
-            <input id="signupCloses" type="datetime-local">
-            <p class="hint">留空表示不设上界</p></div>
-        </div>
-
-        <div class="card" id="signupCapCard">
-          <div class="card-head">
-            <h2>名额</h2>
-            <label class="switch">
-              <input type="checkbox" id="signupCapOn">
-              <span class="track"></span>
-              <span class="switch-text">限制人数</span>
-            </label>
-          </div>
-          <div class="field"><label for="signupCap">名额上限</label>
-            <input id="signupCap" type="number" min="1" max="9999"></div>
-          <div class="field"><label for="signupSelfEdit">报名后修改</label>
-            <select id="signupSelfEdit">
-              <option value="off">不允许，信息有误需联系负责人</option>
-              <option value="on">允许本人更新已提交的信息</option>
-            </select></div>
         </div>
       </div>
 

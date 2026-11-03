@@ -389,10 +389,44 @@ def signup_page(page, browser):
           page.locator("#signupUrl").evaluate("el => el.tagName") == "DIV")
     check("a QR code is drawn next to it",
           page.locator("#signupQr svg").count() == 1)
-    check("both two-column rows are laid out", page.evaluate(
-        """() => document.querySelectorAll('.page[data-page="signup"] .grid-2').length""") == 2)
+    layout = page.evaluate(
+        """() => {
+        const box = document.querySelector('.page[data-page="signup"] .cols-2');
+        if (!box) return null;
+        const cols = [...box.querySelectorAll(':scope > .col')];
+        const bottoms = cols.map(c => {
+          const cards = [...c.querySelectorAll(':scope > .card')];
+          return Math.round(cards[cards.length - 1].getBoundingClientRect().bottom);
+        });
+        const cards = [...box.querySelectorAll(':scope > .col > .card')]
+          .map(c => ({id: c.id || c.querySelector('h2').textContent,
+                      top: Math.round(c.getBoundingClientRect().top)}));
+        return {cols: cols.length,
+                flow: getComputedStyle(box).flexDirection,
+                gap: Math.max(...bottoms) - Math.min(...bottoms),
+                cards: cards};
+      }""")
+    check("two independent columns", layout and layout["cols"] == 2, layout)
+    check("the two columns end on one line",
+          layout and layout["gap"] <= 2, layout)
+    check("the短 column starts the next card right under itself", layout and (
+        # 左列第二张卡片紧跟在第一张后面，而不是等到右列第一张结束
+        [c for c in layout["cards"] if c["id"] == "signupTimeCard"][0]["top"]
+        < [c for c in layout["cards"] if c["id"] == "signupCapCard"][0]["top"]),
+        layout["cards"] if layout else None)
 
     # 时间与名额各自一个开关
+    check("the switch carries no visible text",
+          page.inner_text("#signupTimeCard .card-head").strip() == "时间",
+          page.inner_text("#signupTimeCard .card-head"))
+    check("an off card is dimmed as a whole", page.evaluate(
+        """() => {
+        const head = document.querySelector('#signupCapCard .card-head h2');
+        const field = document.querySelector('#signupCapCard .field');
+        return getComputedStyle(field).opacity !== '1' ||
+               getComputedStyle(head).color !== getComputedStyle(
+                 document.querySelector('#signupTimeCard .card-head h2')).color;
+      }"""))
     check("time starts switched off", not page.locator("#signupTimeOn").is_checked())
     check("capacity starts switched off", not page.locator("#signupCapOn").is_checked())
     page.click('#signupCapCard .switch')       # 开关本体是视觉隐藏的 checkbox
@@ -418,6 +452,10 @@ def signup_page(page, browser):
     page.wait_for_timeout(1000)
     check("a valid window is saved", "进行中" in page.inner_text("#signupSub"),
           page.inner_text("#signupSub"))
+
+    check("the time card is not dimmed once its switch is on", page.evaluate(
+        """() => !document.querySelector('#signupTimeCard')
+                   .classList.contains('is-off')"""))
 
     # 收集字段的两个复选框
     check("built-in fields are checkboxes",

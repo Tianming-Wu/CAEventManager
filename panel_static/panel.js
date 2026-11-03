@@ -80,6 +80,7 @@
     signupEntries: [],
     signupEntryTotal: null,
     signupEntryFilter: "",
+    signupDirty: false,     // 表单被改过：后台刷新不要覆盖它
     approvals: [],
     myAsks: [],
     approvalsCount: 0,
@@ -1131,7 +1132,10 @@
 
   function loadSignup(id) {
     return PX.api("/signup?id=" + id)
-      .then(function (d) { S.signup = d.signup; })
+      .then(function (d) {
+        S.signup = d.signup;
+        S.signupDirty = false;
+      })
       .catch(function (e) {
         PX.toast(PX.esc(e.message), true);
         S.signup = null;
@@ -1285,6 +1289,14 @@
     $("#signupOpenBtn").setAttribute("href", r.url || "#");
     drawQr(r.url);
 
+    // 后台的刷新只更新只读的那部分；正在填的表单由操作者说了算
+    if (S.signupDirty) {
+      $("#signupEntryCount").textContent = S.signupEntryTotal === null
+        ? "" : "共 " + S.signupEntryTotal + " 条";
+      drawSignupEntries();
+      return;
+    }
+
     $("#signupName").value = r.title || "";
     $("#signupNote").value = r.note || "";
     $("#signupState").value = r.state || "open";
@@ -1306,6 +1318,7 @@
     $("#collectGrp").checked = collect.indexOf("grp") >= 0;
 
     toggleCardState("#signupCapCard", !!r.capacity);
+    toggleCardState("#signupTimeCard", hasTime);
 
     $("#signupEntryCount").textContent = S.signupEntryTotal === null
       ? "" : "共 " + S.signupEntryTotal + " 条";
@@ -1385,6 +1398,7 @@
     PX.api("/signup/update", { method: "POST", body: body })
       .then(function () {
         PX.toast("已保存");
+        S.signupDirty = false;
         return loadSignup(S.signup.id).then(drawSignup);
       })
       .catch(function (e) { PX.toast(PX.esc(e.message), true); });
@@ -3450,6 +3464,15 @@
   $("#signupMore").addEventListener("click", function () {
     loadSignups(true).then(drawSignups);
   });
+  (function bindSignupDirty() {
+    var form = document.querySelector('.page[data-page="signup"]');
+    if (!form) return;
+    ["input", "change"].forEach(function (evt) {
+      form.addEventListener(evt, function (e) {
+        if (e.target && e.target.tagName !== "BUTTON") S.signupDirty = true;
+      });
+    });
+  })();
   $("#signupSaveBtn").addEventListener("click", saveSignup);
   $("#signupBack").addEventListener("click", function () {
     location.hash = "#/signups";
@@ -3518,8 +3541,7 @@
     el.addEventListener("change", drawThemePreview);
   });
   $("#signupTimeOn").addEventListener("change", function () {
-    var on = this.checked;
-    ["#signupOpens", "#signupCloses"].forEach(function (sel) { $(sel).disabled = !on; });
+    toggleCardState("#signupTimeCard", this.checked);
   });
   $("#signupCapOn").addEventListener("change", function () {
     toggleCardState("#signupCapCard", this.checked);

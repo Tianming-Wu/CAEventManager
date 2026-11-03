@@ -1563,16 +1563,35 @@ input[type="color"] {
   box-shadow: 0 1px 3px rgba(30, 20, 8, .22);
   transition: transform .18s;
 }
+/* 暗色下 --surface-3 与卡片底色太接近，开关的关态要自己发亮一点 */
+html[data-theme="dark"] .switch .track {
+  background: #565049;
+  border-color: #7b736a;
+}
+html[data-theme="dark"] .switch .track::after { background: #f3efe9; }
 .switch input:checked + .track { background: var(--accent); border-color: var(--accent); }
 .switch input:checked + .track::after { transform: translateX(18px); }
 .switch input:focus-visible + .track { outline: 2px solid var(--accent-line); outline-offset: 2px; }
 .switch input:disabled + .track { opacity: .5; }
 .switch .switch-text { font-size: .8rem; color: var(--muted); }
-/* a card whose功能 is switched off greys its inputs but keeps them readable */
-.card.is-off .field input, .card.is-off .field select, .card.is-off .field textarea {
-  color: var(--dim);
-  background: var(--surface-2);
+/* a card whose feature is switched off dims as a whole -- title included --
+   while the switch itself stays fully legible, because that is how you turn it back on */
+.card.is-off { background: var(--surface-2); }
+.card.is-off > .card-head h2 { color: var(--dim); }
+.card.is-off > .field,
+.card.is-off > .row,
+.card.is-off > p.hint,
+.card.is-off > p.note {
+  opacity: .45;
+  transition: opacity .18s;
 }
+.card.is-off .field input,
+.card.is-off .field select,
+.card.is-off .field textarea {
+  color: var(--dim);
+  background: var(--surface);
+}
+.card.is-off .switch .track { opacity: .9; }
 
 /* ---------- a link you can select, copy and print as a QR ---------- */
 .link-card { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; }
@@ -1992,6 +2011,28 @@ input[type="color"] {
 .btn {
   -webkit-user-select: none;
   user-select: none;
+}
+
+/* ---------- two independent columns ----------
+   卡片按列各自往下排，不做横向对齐：左列短就在左列结束，
+   两个列的最下面一张卡片拉平到同一高度，接住下面的整宽卡片。 */
+.cols-2 {
+  display: flex;
+  gap: 16px;
+  align-items: stretch;
+}
+.cols-2 > .col {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.cols-2 > .col > .card { margin: 0; }
+.cols-2 > .col > .card:last-child { flex: 1 1 auto; }
+@media (max-width: 860px) {
+  .cols-2 { flex-direction: column; }
+  .cols-2 > .col > .card:last-child { flex: 0 0 auto; }
 }
 
 /* ---------- two cards side by side ---------- */

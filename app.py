@@ -2173,6 +2173,9 @@ class Handler(BaseHTTPRequestHandler):
                     data.get("kind"),
                     actor="admin",
                     at=data.get("at"),
+                    # out of order only while the console is unlocked, and the
+                    # audit line then says so
+                    allow_skip=me.unlocked(),
                 )
             stu = model.snapshot(conn, db.all_config(conn))
             cur = next((s for s in stu if s["id"] == int(data.get("student_id"))), None)

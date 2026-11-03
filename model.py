@@ -211,8 +211,15 @@ def _marks(conn):
     return out
 
 
-def mark(conn, student_id, kind, actor="admin", at=None, source="admin"):
-    """Mark one step complete.  Idempotent: marking twice keeps the first time."""
+def mark(conn, student_id, kind, actor="admin", at=None, source="admin",
+         allow_skip=False):
+    """Mark one step complete.  Idempotent: marking twice keeps the first time.
+
+    ``allow_skip`` is the live-event escape hatch: with the console unlocked an
+    operator may mark a later step first.  The step is recorded normally but the
+    audit line says it was out of order, so the deviation is in the record and in
+    the exported log rather than silently invisible.
+    """
     if kind not in db.KINDS:
         raise ApiError("未知的任务类型: %s" % kind)
     stu = _get_student(conn, student_id)
@@ -225,10 +232,16 @@ def mark(conn, student_id, kind, actor="admin", at=None, source="admin"):
             "%s只记录到场，不参与任务登记" % ROLE_LABEL.get(stu["role"] or "staff", "工作人员"), 409
         )
     need = {"checkin": None, "task1": "checkin", "task2": "task1"}[kind]
+    skipped = None
     if need and need not in marks:
-        raise ApiError(
-            "需要先完成「%s」才能标记「%s」" % (db.KIND_LABEL[need], db.KIND_LABEL[kind]), 409
-        )
+        if not allow_skip:
+            raise ApiError(
+                "需要先完成「%s」才能标记「%s」"
+                % (db.KIND_LABEL[need], db.KIND_LABEL[kind]), 409
+            )
+        skipped = [k for k in db.KINDS
+                   if k != kind and k not in marks
+                   and db.KINDS.index(k) < db.KINDS.index(kind)]
     if kind in marks:
         return {
             "already": True,
@@ -242,16 +255,14 @@ def mark(conn, student_id, kind, actor="admin", at=None, source="admin"):
         (student_id, kind, ts, source, actor),
     )
     code = assign_ticket(conn, student_id, kind) if participant else None
-    db.audit(
-        conn,
-        "mark",
-        student_id,
-        kind,
-        "%s %s%s" % (stu["name"], db.KIND_LABEL[kind],
-                     (" -> #%03d" % code) if code else " (不计奖票)"),
-        actor,
-    )
-    return {"already": False, "done_at": ts, "code": code}
+    detail = "%s %s%s" % (stu["name"], db.KIND_LABEL[kind],
+                          (" -> #%03d" % code) if code else " (不计奖票)")
+    if skipped:
+        detail += "（越序：未完成 %s）" % "、".join(
+            db.KIND_LABEL[k] for k in skipped)
+    db.audit(conn, "mark", student_id, kind, detail, actor)
+    return {"already": False, "done_at": ts, "code": code,
+            "out_of_order": bool(skipped)}
 
 
 def _live_code(conn, student_id, kind):

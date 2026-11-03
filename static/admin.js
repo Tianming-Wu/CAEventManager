@@ -513,23 +513,30 @@
       .catch(bad);
   }
 
+  // A reload arrives after every write and every other session's change.  While
+  // the operator is editing the settings form it must not overwrite what they
+  // typed: the fields are only re-read from the server once they save.
+  var formTouched = false;
+
   function renderSettings() {
     var c = S.config;
-    $("#setTitle").value = c.title || "";
-    $("#setSubtitle").value = c.subtitle || "";
-    $("#setBaseUrl").value = S.publicBaseUrl || c.public_base_url || "";
-    $("#setShowTimes").checked = !!c.show_times;
-    $("#setShowSid").checked = !!c.show_sid;
-    $("#setScreenWall").checked = !!c.screen_show_wall;
-    $("#setPoolMode").value = c.pool_mode || "auto";
-    $("#setPool").value = c.pool_size;
-    $("#setPoolExpr").value = c.pool_expr || "";
-    $("#setBonusConstant").value = c.bonus_constant;
-    $("#setBeta").value = c.beta;
-    $("#setAllowBonus").checked = c.allow_bonus !== false;
-    $("#setUniqueInside").checked = c.draw_unique_inside !== false;
-    $("#setUniqueAcross").checked = c.draw_unique_across === true;
-    renderPrizeEditor();
+    if (!formTouched) {
+      $("#setTitle").value = c.title || "";
+      $("#setSubtitle").value = c.subtitle || "";
+      $("#setBaseUrl").value = S.publicBaseUrl || c.public_base_url || "";
+      $("#setShowTimes").checked = !!c.show_times;
+      $("#setShowSid").checked = !!c.show_sid;
+      $("#setScreenWall").checked = !!c.screen_show_wall;
+      $("#setPoolMode").value = c.pool_mode || "auto";
+      $("#setPool").value = c.pool_size;
+      $("#setPoolExpr").value = c.pool_expr || "";
+      $("#setBonusConstant").value = c.bonus_constant;
+      $("#setBeta").value = c.beta;
+      $("#setAllowBonus").checked = c.allow_bonus !== false;
+      $("#setUniqueInside").checked = c.draw_unique_inside !== false;
+      $("#setUniqueAcross").checked = c.draw_unique_across === true;
+      renderPrizeEditor();
+    }
     $("#exportLink").href = LT.PREFIX + "/api/admin/export.csv";
     $("#exportZipLink").href = LT.PREFIX + "/api/admin/export.zip";
     $("#secretUrl").textContent = S.publicBaseUrl + "/";
@@ -1173,9 +1180,11 @@
   }
 
   function saveSettings() {
-    LT.api("/api/admin/settings", { method: "POST", body: collectSettings() })
+    var body = collectSettings();
+    LT.api("/api/admin/settings", { method: "POST", body: body })
       .then(function (d) {
         S.config = d.config;
+        formTouched = false;   // what was typed is now what the server holds
         return load();
       })
       .then(function () {
@@ -1380,6 +1389,15 @@
     });
     $("#setBonusConstant").addEventListener("input", updatePoolPreview);
     $("#savePrizesBtn").addEventListener("click", savePrizes);
+    // Anything typed or toggled here outranks a reload from another session.
+    var tab = $("#tab-config");
+    if (tab) {
+      ["input", "change"].forEach(function (evt) {
+        tab.addEventListener(evt, function (e) {
+          if (e.target && e.target.tagName !== "BUTTON") formTouched = true;
+        });
+      });
+    }
   }
 
   // ------------------------------------------------------------------ boot

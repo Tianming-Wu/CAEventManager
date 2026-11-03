@@ -192,13 +192,23 @@
   }
 
   // The console hears about other people's writes instead of waiting for a poll.
-  function watch(handler) {
+  // The public pages use the same bus through ``/api/stream``, which only speaks
+  // about the activity being watched; ``onState`` reports whether the stream is
+  // live, so a page can fall back to polling when it is not.
+  function watch(handler, options) {
+    options = options || {};
     watchers.push(handler);
-    if (typeof window.EventSource !== "function") return;
+    var state = options.onState || function () {};
+    var path = options.stream || "/api/admin/stream";
+    if (typeof window.EventSource !== "function") {
+      state(false);
+      return;
+    }
     var source = null;
     var open = function () {
       if (source) return;
-      source = new EventSource(PREFIX + "/api/admin/stream");
+      source = new EventSource(PREFIX + path);
+      source.onopen = function () { state(true); };
       source.onmessage = function (event) {
         var data;
         try { data = JSON.parse(event.data); } catch (e) { return; }
@@ -210,6 +220,7 @@
         });
       };
       source.onerror = function () {
+        state(false);
         if (source && source.readyState === 2) {
           source = null;
           setTimeout(open, 4000);

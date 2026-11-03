@@ -5,6 +5,8 @@
   var $ = function (s) { return document.querySelector(s); };
   var data = null;
   var filter = "";
+  var etag = "";          // last board version, so a re-read can be a 304
+  var streamed = false;   // the event stream is live, so polling is a recheck
 
   function statCard(cls, value, label) {
     return '<div class="stat ' + cls + '"><b>' + value + "</b><span>" + label + "</span></div>";
@@ -92,9 +94,16 @@
   }
 
   function load() {
-    return fetch(LT.PREFIX + "/api/board", { cache: "no-store" })
-      .then(function (r) { return r.json(); })
-      .then(function (d) { data = d; render(); })
+    var headers = {};
+    if (etag) headers["If-None-Match"] = etag;
+    return fetch(LT.PREFIX + "/api/board", { cache: "no-store", headers: headers })
+      .then(function (r) {
+        if (r.status === 304) return null;
+        var tag = r.headers.get("ETag");
+        if (tag) etag = tag;
+        return r.json();
+      })
+      .then(function (d) { if (d) { data = d; render(); } })
       .catch(function () {});
   }
 
@@ -117,8 +126,27 @@
     find.addEventListener("input", function (e) { if (e.isTrusted) touched = true; });
     [300, 1200, 2600].forEach(function (ms) { setTimeout(scrub, ms); });
     window.addEventListener("load", scrub);
+    // changes arrive over the server's event stream; the 5 s poll is the fallback
+    LT.watch(function () {
+      if (!document.hidden) load();
+    }, {
+      stream: "/api/stream",
+      onState: function (live) {
+        streamed = live;
+        document.documentElement.dataset.stream = live ? "live" : "poll";
+      }
+    });
+    document.addEventListener("visibilitychange", function () {
+      if (!document.hidden) load();
+    });
     load();
-    setInterval(function () { if (!document.hidden) load(); }, 5000);
+    var ticks = 0;
+    setInterval(function () {
+      if (document.hidden) return;
+      ticks += 1;
+      if (streamed && ticks % 6) return;  // a recheck every 30 s is enough
+      load();
+    }, 5000);
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);

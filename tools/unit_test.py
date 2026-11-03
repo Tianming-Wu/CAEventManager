@@ -358,6 +358,16 @@ def main():
           app.panel.classify("/T" + "x" * 32 + "/panel", ("T" + "x" * 32,))[0] == "event",
           app.panel.classify("/T" + "x" * 32 + "/panel", ("T" + "x" * 32,)))
 
+    print("== a stream only hears about its own activity ==")
+    revs = {"panel": 3, "event:1": 7, "event:1:members": 2, "event:2": 5}
+    check("the whole map goes to the panel",
+          app._scope_of(revs, None) == revs)
+    check("one activity's own scope is all a projector gets",
+          app._scope_of(revs, "event:1") == {"event:1": 7},
+          app._scope_of(revs, "event:1"))
+    check("another activity's writes are dropped",
+          app._scope_of(revs, "event:9") == {}, app._scope_of(revs, "event:9"))
+
     print()
     if problems:
         print("FAILED %d check(s):" % len(problems))

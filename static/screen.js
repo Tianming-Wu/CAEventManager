@@ -13,6 +13,8 @@
   var tokenTimer = null;
   var MAX_WINNERS = 14;   // keep the strip from eating the name wall
   var forceSignin = null; // null = follow the server phase; true/false = local override (Q)
+  var etag = "";          // last board version, so a re-read can be a 304
+  var streamed = false;   // the event stream is live, so polling is a recheck
 
   function boardUrl() {
     var cfg = (data && data.config) || {};
@@ -157,7 +159,6 @@
     clearInterval(rollTimer);
     clearTimeout(hideTimer);
     overlay.classList.add("show");
-    overlay.classList.remove("batch");
     codeEl.style.display = "";
     $("#dPrize").textContent = draw.prize || (person ? "特等奖" : "抽奖");
     codeEl.classList.toggle("names", person);
@@ -197,7 +198,6 @@
     clearInterval(rollTimer);
     clearTimeout(hideTimer);
     $("#overlay").classList.remove("show");
-    $("#overlay").classList.remove("batch");
     $("#dCode").style.display = "";
   }
 
@@ -222,7 +222,6 @@
     clearInterval(rollTimer);
     clearTimeout(hideTimer);
     overlay.classList.add("show");
-    overlay.classList.add("batch");
     codeEl.style.display = "";
     codeEl.classList.toggle("names", person);
     codeEl.classList.add("rolling");
@@ -273,12 +272,21 @@
   }
 
   function load() {
-    return fetch(LT.PREFIX + "/api/board", { cache: "no-store" })
-      .then(function (r) { return r.json(); })
-      .then(function (d) { data = d; render(); })
+    var headers = {};
+    if (etag) headers["If-None-Match"] = etag;
+    return fetch(LT.PREFIX + "/api/board", { cache: "no-store", headers: headers })
+      .then(function (r) {
+        if (r.status === 304) return null;
+        var tag = r.headers.get("ETag");
+        if (tag) etag = tag;
+        return r.json();
+      })
+      .then(function (d) { if (d) { data = d; render(); } })
       .catch(function () {});
   }
 
+  // The screen is driven by the server's event stream; the 1.5 s poll stays as
+  // the fallback for when that stream cannot be opened or keeps dropping.
   function boot() {
     $("#overlay").addEventListener("click", closeOverlay);
     document.addEventListener("keydown", function (e) {
@@ -289,8 +297,28 @@
         if (data) { applyLayout(); renderQR(); }
       }
     });
+    LT.watch(function () {
+      if (!document.hidden) load();
+    }, {
+      stream: "/api/stream",
+      onState: function (live) {
+        streamed = live;
+        document.documentElement.dataset.stream = live ? "live" : "poll";
+      }
+    });
+    document.addEventListener("visibilitychange", function () {
+      if (!document.hidden) load();
+    });
     load();
-    setInterval(function () { if (!document.hidden) load(); }, 1500);
+    var ticks = 0;
+    setInterval(function () {
+      if (document.hidden) return;
+      ticks += 1;
+      // with the stream live, one read every 30 s is enough to notice a missed
+      // event; with it down the page is back to polling
+      if (streamed && ticks % 20) return;
+      load();
+    }, 1500);
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);

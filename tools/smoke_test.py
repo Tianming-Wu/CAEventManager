@@ -492,6 +492,30 @@ def main():
     post("/api/admin/phase", {"phase": "nonsense"}, expect=400)
     check("invalid phase rejected", True)
 
+    print("== the projector reads cheaply, and hears about changes ==")
+    board_req = urllib.request.Request(BASE + "/api/board")
+    with opener.open(board_req, timeout=20) as res:
+        tag = res.headers.get("ETag")
+        full = res.read()
+    check("the board carries an ETag", bool(tag), tag)
+    again = urllib.request.Request(BASE + "/api/board", headers={"If-None-Match": tag})
+    try:
+        with opener.open(again, timeout=20) as res:
+            status, body = res.status, res.read()
+    except urllib.error.HTTPError as exc:
+        status, body = exc.code, exc.read()
+    check("an unchanged board answers 304", status == 304, status)
+    check("and re-sends nothing", not body and len(full) > 500, (len(body), len(full)))
+
+    stream = opener.open(BASE + "/api/stream", timeout=20)
+    check("the event stream speaks text/event-stream",
+          "text/event-stream" in (stream.headers.get("Content-Type") or ""),
+          stream.headers.get("Content-Type"))
+    first = stream.readline().decode("utf-8").strip()
+    check("it opens with the current revision map",
+          first.startswith("data: ") and "revs" in first, first)
+    stream.close()
+
     print()
     if failures:
         print("FAILED %d check(s):" % len(failures))

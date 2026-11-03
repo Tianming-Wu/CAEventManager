@@ -339,6 +339,9 @@ def main():
         screen.set_viewport_size({"width": 1920, "height": 1080})
         screen.goto(BASE + "/screen", wait_until="networkidle")
         screen.wait_for_timeout(1600)
+        check("the screen listens to the event stream",
+              screen.get_attribute("html", "data-stream") == "live",
+              screen.get_attribute("html", "data-stream"))
         check("name wall is hidden by default",
               screen.locator(".wall .w").count() == 0,
               screen.locator(".wall .w").count())

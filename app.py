@@ -19,6 +19,7 @@ Run:  python3 app.py [--host 0.0.0.0] [--port 8931]
 import argparse
 import base64
 import csv
+import hashlib
 import io
 import json
 import mimetypes
@@ -469,6 +470,13 @@ def write_target(path, data):
     return None
 
 
+def _scope_of(revs, scope):
+    """The part of a revision map one stream cares about (all of it by default)."""
+    if not scope:
+        return revs
+    return {k: v for k, v in revs.items() if k == scope}
+
+
 def _int_arg(query, name, default, low, high):
     try:
         value = int((query.get(name) or [str(default)])[0])
@@ -555,6 +563,28 @@ class Handler(BaseHTTPRequestHandler):
     def _err(self, msg, status=400):
         self._json({"ok": False, "error": msg}, status)
 
+    def _json_cached(self, obj):
+        """A read-only body a client may re-ask for cheaply.
+
+        The projector and the public board are the pages that poll hardest, so
+        an unchanged answer is a 304 rather than the whole roster again.  The
+        clock is left out of the comparison: it moves every second and would
+        make every revalidation look different.
+        """
+        if "revs" not in obj:
+            obj = dict(obj, revs=bus.snapshot())
+        stable = {k: v for k, v in obj.items() if k != "serverTime"}
+        stamp = json.dumps(stable, ensure_ascii=False, sort_keys=True, default=str)
+        etag = '"%s"' % hashlib.sha1(stamp.encode("utf-8")).hexdigest()[:16]
+        if self.headers.get("If-None-Match") == etag:
+            self.send_response(304)
+            self.send_header("ETag", etag)
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            return
+        body = json.dumps(obj, ensure_ascii=False, default=str)
+        self._send(200, body, "application/json; charset=utf-8", headers=[("ETag", etag)])
+
     def _redirect(self, location):
         self.send_response(302)
         self.send_header("Location", location or "/")
@@ -584,11 +614,15 @@ class Handler(BaseHTTPRequestHandler):
         except (TypeError, ValueError):
             return None
 
-    def _stream(self):
+    def _stream(self, scope=None):
         """Server-sent events: the panel says when something changed.
 
         A stream that drops only delays the notice - the next event carries the
         whole revision map, so a client cannot end up behind after a gap.
+
+        ``scope`` narrows what is worth sending: a projector watching one
+        activity should not be woken by another activity's writes, so those
+        changes are noticed and dropped instead of forwarded.
         """
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
@@ -598,9 +632,9 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         bus.watch_enter()
         try:
-            seen = {}
-            self._sse({"revs": bus.snapshot()})
             seen = bus.snapshot()
+            sent = _scope_of(seen, scope)
+            self._sse({"revs": sent})
             self.wfile.flush()
             while True:
                 revs = bus.wait_for_change(seen, timeout=25.0)
@@ -609,7 +643,11 @@ class Handler(BaseHTTPRequestHandler):
                     self.wfile.flush()
                     continue
                 seen = revs
-                self._sse({"revs": revs})
+                mine = _scope_of(revs, scope)
+                if mine == sent:
+                    continue  # somebody else's activity moved
+                sent = mine
+                self._sse({"revs": mine})
                 self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError, OSError):
             pass
@@ -1920,7 +1958,12 @@ class Handler(BaseHTTPRequestHandler):
                 "winners": [d for d in model.draw_history(conn, 100) if not d["voided_at"]],
                 "serverTime": time.time(),
             }
-            return self._json(payload)
+            return self._json_cached(payload)
+
+        if path == "/api/stream" and method == "GET":
+            # Public like the board: a projector and a phone showing the same
+            # activity hear about changes instead of polling for them.
+            return self._stream(scope="event:%s" % db.current_event())
 
         if path == "/api/screen/token" and method == "GET":
             # Public on purpose: the projector machine should not need a login.

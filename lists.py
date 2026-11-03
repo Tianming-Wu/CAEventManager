@@ -86,7 +86,10 @@ CREATE TABLE IF NOT EXISTS signups (
     opens_at         REAL    NOT NULL DEFAULT 0,   -- 0 = 立即开始
     closes_at        REAL    NOT NULL DEFAULT 0,   -- 0 = 不设截止
     capacity         INTEGER NOT NULL DEFAULT 0,   -- 0 = 不限名额
-    dedup            TEXT    NOT NULL DEFAULT 'skip',   -- skip | update
+    dedup            TEXT    NOT NULL DEFAULT 'skip',   -- 旧列，不再使用
+    self_edit        TEXT    NOT NULL DEFAULT 'off',    -- 报名后能否自己改：off | on
+    collect          TEXT    NOT NULL DEFAULT '["dept","grp"]',  -- 内置字段收哪些
+    theme            TEXT    NOT NULL DEFAULT '{}',     -- 报名页外观
     fields           TEXT    NOT NULL DEFAULT '[]',     -- 自定义字段（JSON）
     state            TEXT    NOT NULL DEFAULT 'open',   -- open | closed
     visibility       TEXT    NOT NULL DEFAULT 'private',
@@ -128,13 +131,22 @@ CREATE TABLE IF NOT EXISTS grants (
 # 后加的列：init_db() 见到就补，老库不用手工迁移
 LATE_COLUMNS = (
     ("people", "dept", "TEXT NOT NULL DEFAULT ''"),
+    ("signups", "self_edit", "TEXT NOT NULL DEFAULT 'off'"),
+    ("signups", "collect", "TEXT NOT NULL DEFAULT '[\"dept\",\"grp\"]'"),
+    ("signups", "theme", "TEXT NOT NULL DEFAULT '{}'"),
     ("rosters", "grant_mode", "TEXT NOT NULL DEFAULT 'auto'"),
     ("rosters", "approve_mode", "TEXT NOT NULL DEFAULT 'owner'"),
 )
 
 GRANT_MODES = ("auto", "confirm")
 SIGNUP_STATES = ("open", "closed")
-DEDUP_MODES = ("skip", "update")
+# 报名后能不能自己改信息：on 可以改，off 只能联系负责人
+SELF_EDIT = ("off", "on")
+# 公开页的内置字段：学号与姓名固定有，这两项可选
+BUILTIN_FIELDS = ("dept", "grp")
+BUILTIN_LABEL = {"dept": "院系", "grp": "班级"}
+THEME_PRESETS = ("plain", "warm", "cool", "dark")
+THEME_LABEL = {"plain": "素色", "warm": "暖色", "cool": "冷色", "dark": "暗色"}
 # 自定义字段能存到哪里：人员属性、名单条目，或者只留在这次报名里
 FIELD_TYPES = ("text", "textarea", "number", "select", "date")
 FIELD_INTO = ("", "person.dept", "person.grp", "roster.tag", "roster.note")
@@ -794,6 +806,50 @@ def _fields_of(row):
         return []
 
 
+def normalize_collect(raw):
+    """公开页收哪几个内置字段；顺序固定，未知值丢掉。"""
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw or "[]")
+        except (ValueError, TypeError):
+            raw = []
+    picked = [f for f in (raw or []) if f in BUILTIN_FIELDS]
+    return [f for f in BUILTIN_FIELDS if f in picked]
+
+
+def normalize_theme(raw):
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw or "{}")
+        except (ValueError, TypeError):
+            raw = {}
+    raw = raw if isinstance(raw, dict) else {}
+    preset = raw.get("preset") if raw.get("preset") in THEME_PRESETS else "plain"
+    accent = str(raw.get("accent") or "").strip()
+    if accent and not (accent.startswith("#") and len(accent) in (4, 7)):
+        accent = ""
+    return {"preset": preset, "accent": accent}
+
+
+def _collect_of(row):
+    try:
+        return normalize_collect(json.loads(row["collect"] or "[]"))
+    except (ValueError, TypeError):
+        return list(BUILTIN_FIELDS)
+
+
+def _theme_of(row):
+    try:
+        return normalize_theme(json.loads(row["theme"] or "{}"))
+    except (ValueError, TypeError):
+        return normalize_theme({})
+
+
+def check_window(opens_at, closes_at):
+    if opens_at and closes_at and opens_at >= closes_at:
+        raise model.ApiError("开始时间必须早于结束时间")
+
+
 def create_signup(conn, owner_id, data):
     title = (data.get("title") or "").strip()
     if not title:
@@ -803,17 +859,21 @@ def create_signup(conn, owner_id, data):
     roster_id = int(data.get("roster_id") or 0)
     if not roster_id or roster(conn, roster_id) is None:
         raise model.ApiError("请选择报名写入的名单")
+    opens_at = float(data.get("opens_at") or 0)
+    closes_at = float(data.get("closes_at") or 0)
+    check_window(opens_at, closes_at)
     now = time.time()
     cur = conn.execute(
         "INSERT INTO signups (token, title, note, owner_id, roster_id,"
-        " filter_roster_id, opens_at, closes_at, capacity, dedup, fields,"
-        " state, visibility, created_at, updated_at)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        " filter_roster_id, opens_at, closes_at, capacity, self_edit, collect,"
+        " theme, fields, state, visibility, created_at, updated_at)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (new_token(), title, (data.get("note") or "").strip()[:300], owner_id,
          roster_id, int(data.get("filter_roster_id") or 0),
-         float(data.get("opens_at") or 0), float(data.get("closes_at") or 0),
-         max(0, int(data.get("capacity") or 0)),
-         data.get("dedup") if data.get("dedup") in DEDUP_MODES else "skip",
+         opens_at, closes_at, max(0, int(data.get("capacity") or 0)),
+         data.get("self_edit") if data.get("self_edit") in SELF_EDIT else "off",
+         json.dumps(normalize_collect(data.get("collect") or list(BUILTIN_FIELDS))),
+         json.dumps(normalize_theme(data.get("theme")), ensure_ascii=False),
          json.dumps(normalize_fields(data.get("fields")), ensure_ascii=False),
          "open", data.get("visibility") if data.get("visibility") in VISIBILITY
          else "private", now, now),
@@ -840,14 +900,21 @@ def update_signup(conn, signup_id, data):
         put("title", title)
     if "note" in data:
         put("note", (data.get("note") or "").strip()[:300])
-    if "opens_at" in data:
-        put("opens_at", float(data.get("opens_at") or 0))
-    if "closes_at" in data:
-        put("closes_at", float(data.get("closes_at") or 0))
+    if "opens_at" in data or "closes_at" in data:
+        opens_at = float(data.get("opens_at", row["opens_at"]) or 0)
+        closes_at = float(data.get("closes_at", row["closes_at"]) or 0)
+        check_window(opens_at, closes_at)
+        put("opens_at", opens_at)
+        put("closes_at", closes_at)
     if "capacity" in data:
         put("capacity", max(0, int(data.get("capacity") or 0)))
-    if "dedup" in data:
-        put("dedup", data.get("dedup") if data.get("dedup") in DEDUP_MODES else "skip")
+    if "self_edit" in data:
+        put("self_edit", data.get("self_edit") if data.get("self_edit") in SELF_EDIT
+            else "off")
+    if "collect" in data:
+        put("collect", json.dumps(normalize_collect(data.get("collect"))))
+    if "theme" in data:
+        put("theme", json.dumps(normalize_theme(data.get("theme")), ensure_ascii=False))
     if "state" in data:
         put("state", data.get("state") if data.get("state") in SIGNUP_STATES else "open")
     if "visibility" in data and data.get("visibility") in VISIBILITY:
@@ -920,7 +987,9 @@ def signup_view(conn, row, count=0, acc=None):
         "opensAt": row["opens_at"],
         "closesAt": row["closes_at"],
         "capacity": row["capacity"],
-        "dedup": row["dedup"],
+        "selfEdit": row["self_edit"] if "self_edit" in row.keys() else "off",
+        "collect": _collect_of(row),
+        "theme": _theme_of(row),
         "entries": int(count or 0),
         "fields": _fields_of(row),
         "state": row["state"],
@@ -1077,16 +1146,37 @@ def submit_signup(conn, row, form, ip=""):
     existing = conn.execute(
         "SELECT * FROM signup_entries WHERE signup_id=? AND person_id=?",
         (row["id"], person_id)).fetchone()
-    if existing is not None and row["dedup"] != "update":
-        return {"ok": True, "duplicate": True, "ts": existing["ts"],
-                "name": existing["name"], "count": count}
-
     payload = json.dumps(answers, ensure_ascii=False)
     if existing is not None:
+        was = {"name": existing["name"], "dept": existing["dept"],
+               "grp": existing["grp"],
+               "answers": existing["answers"] or "{}"}
+        try:
+            was_answers = json.loads(was["answers"])
+        except (ValueError, TypeError):
+            was_answers = {}
+        now_state = {"name": name, "dept": dept, "grp": grp, "answers": answers}
+        same = (now_state["name"] == was["name"]
+                and now_state["dept"] == was["dept"]
+                and now_state["grp"] == was["grp"]
+                and was_answers == answers)
+        if same:
+            return {"ok": True, "state": "same", "ts": existing["ts"],
+                    "name": existing["name"], "count": count}
+        # 信息不一致：能不能自己改，由这条报名自己的设置说了算
+        if row["self_edit"] != "on":
+            raise model.ApiError(
+                "您已经报过名，但信息不一致。如果之前的信息有误，请联系负责人", 409)
+        if not form.get("update"):
+            return {"ok": True, "state": "differs", "ts": existing["ts"],
+                    "count": count,
+                    "current": {"name": was["name"], "dept": was["dept"],
+                                "grp": was["grp"], "answers": was_answers}}
         conn.execute(
             "UPDATE signup_entries SET name=?, dept=?, grp=?, answers=?, ip=?"
             " WHERE signup_id=? AND person_id=?",
             (name, dept, grp, payload, ip, row["id"], person_id))
+        state = "updated"
     else:
         conn.execute(
             "INSERT INTO signup_entries (signup_id, person_id, sid, name, dept,"
@@ -1096,7 +1186,8 @@ def submit_signup(conn, row, form, ip=""):
     add_entry(conn, row["roster_id"], person_id, into("roster.tag"),
               into("roster.note"), "signup")
     conn.execute("UPDATE signups SET updated_at=? WHERE id=?", (now, row["id"]))
-    return {"ok": True, "duplicate": False, "ts": existing["ts"] if existing else now,
+    return {"ok": True, "state": state if existing is not None else "new",
+            "ts": existing["ts"] if existing is not None else now,
             "count": signup_counts(conn, [row["id"]]).get(row["id"], 0)}
 
 

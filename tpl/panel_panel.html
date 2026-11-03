@@ -507,33 +507,57 @@
     <!-- ====================================================== 报名详情 -->
     <section class="page" data-page="signup" hidden>
       <header class="page-head">
-        <h1 id="signupTitle">报名</h1>
+        <div class="head-title">
+          <button class="icon-btn crumb-back" id="signupBack" type="button"
+                  aria-label="回到我的报名" title="回到我的报名">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12 5l-5 5 5 5"/></svg>
+          </button>
+          <h1 class="crumb-title">
+            <a class="crumb" href="#/signups">我的报名</a>
+            <span class="crumb-sep" aria-hidden="true">›</span>
+            <span id="signupTitle">报名</span>
+          </h1>
+        </div>
         <p class="page-sub" id="signupSub">—</p>
         <div class="page-actions">
-          <a class="btn" href="#/signups" id="signupBack">返回列表</a>
           <button class="btn" id="signupExportBtn" type="button">导出报名表</button>
-          <button class="btn" id="signupSaveBtn" type="button">保存设置</button>
+          <button class="btn primary" id="signupSaveBtn" type="button">保存设置</button>
         </div>
       </header>
 
       <div class="card">
         <div class="card-head"><h2>公开链接</h2></div>
-        <div class="row" style="gap:8px;flex-wrap:wrap">
-          <input class="search" id="signupUrl" type="text" readonly style="flex:1 1 320px">
-          <button class="btn" id="signupCopyBtn" type="button">复制</button>
-          <a class="btn" id="signupOpenBtn" target="_blank" rel="noopener">打开报名页</a>
+        <div class="link-card">
+          <div class="link-main">
+            <p class="hint">发到群里即可报名，无需登录</p>
+            <div class="link-url" id="signupUrl">—</div>
+            <div class="row" style="gap:8px">
+              <button class="btn" id="signupCopyBtn" type="button">
+                <svg viewBox="0 0 20 20" aria-hidden="true" style="width:15px;height:15px">
+                  <rect x="7" y="7" width="9" height="9" rx="1.6"/>
+                  <path d="M13 7V4.6A1.6 1.6 0 0 0 11.4 3H4.6A1.6 1.6 0 0 0 3 4.6v6.8A1.6 1.6 0 0 0 4.6 13H7"/>
+                </svg>
+                复制链接
+              </button>
+              <a class="btn" id="signupOpenBtn" target="_blank" rel="noopener">在新标签页打开</a>
+            </div>
+          </div>
+          <div class="qr-side">
+            <div id="signupQr"></div>
+            <button class="btn sm" id="signupQrSave" type="button">下载二维码</button>
+          </div>
         </div>
       </div>
 
       <div class="grid-2">
         <div class="card">
-          <div class="card-head"><h2>基本</h2></div>
+          <div class="card-head"><h2>基本信息</h2></div>
           <div class="field"><label for="signupName">名称</label>
             <input id="signupName" type="text" maxlength="60"></div>
           <div class="field"><label for="signupNote">说明</label>
             <input id="signupNote" type="text" maxlength="300"
                    placeholder="显示在报名页标题下方"></div>
-          <div class="field"><label for="signupState">状态</label>
+          <div class="field"><label for="signupState">开放状态</label>
             <select id="signupState">
               <option value="open">开放</option>
               <option value="closed">关闭</option>
@@ -541,27 +565,82 @@
         </div>
 
         <div class="card">
-          <div class="card-head"><h2>时间与名额</h2></div>
+          <div class="card-head"><h2>视觉效果</h2><span class="hint">报名页的样子</span></div>
+          <div class="row" style="gap:12px;align-items:flex-end">
+            <div class="field" style="flex:1 1 160px">
+              <label for="signupTheme">主题</label>
+              <select id="signupTheme">
+                <option value="plain">素色</option>
+                <option value="warm">暖色</option>
+                <option value="cool">冷色</option>
+                <option value="dark">暗色</option>
+              </select>
+            </div>
+            <div class="field" style="flex:0 0 130px">
+              <label for="signupAccent">主色</label>
+              <input id="signupAccent" type="color" value="#b45309">
+            </div>
+          </div>
+          <div class="preview-wrap" style="margin-top:14px">
+            <div class="preview-page" id="signupPreview">
+              <div class="pv-brand">CAEVENTMANAGER</div>
+              <h3 id="pvTitle">报名</h3>
+              <p id="pvNote">说明</p>
+              <div class="pv-field">学号</div>
+              <div class="pv-field">姓名</div>
+              <div class="pv-field" id="pvExtra">院系</div>
+              <div class="pv-btn" id="pvBtn">提交报名</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="card" id="signupTimeCard">
+          <div class="card-head">
+            <h2>时间</h2>
+            <label class="switch">
+              <input type="checkbox" id="signupTimeOn">
+              <span class="track"></span>
+              <span class="switch-text">限定起止时间</span>
+            </label>
+          </div>
           <div class="field"><label for="signupOpens">开始时间</label>
-            <input id="signupOpens" type="datetime-local"></div>
+            <input id="signupOpens" type="datetime-local">
+            <p class="hint">留空表示不设下界</p></div>
           <div class="field"><label for="signupCloses">结束时间</label>
-            <input id="signupCloses" type="datetime-local"></div>
+            <input id="signupCloses" type="datetime-local">
+            <p class="hint">留空表示不设上界</p></div>
+        </div>
+
+        <div class="card" id="signupCapCard">
+          <div class="card-head">
+            <h2>名额</h2>
+            <label class="switch">
+              <input type="checkbox" id="signupCapOn">
+              <span class="track"></span>
+              <span class="switch-text">限制人数</span>
+            </label>
+          </div>
           <div class="field"><label for="signupCap">名额上限</label>
-            <input id="signupCap" type="number" min="0" max="9999">
-            <p class="hint">0 表示不限名额</p></div>
-          <div class="field"><label for="signupDedup">重复提交</label>
-            <select id="signupDedup">
-              <option value="skip">保留第一次，提示已报过名</option>
-              <option value="update">用新提交更新班级与备注</option>
+            <input id="signupCap" type="number" min="1" max="9999"></div>
+          <div class="field"><label for="signupSelfEdit">报名后修改</label>
+            <select id="signupSelfEdit">
+              <option value="off">不允许，信息有误需联系负责人</option>
+              <option value="on">允许本人更新已提交的信息</option>
             </select></div>
         </div>
       </div>
 
       <div class="card">
         <div class="card-head">
-          <h2>报名字段</h2>
-          <span class="hint">学号与姓名固定必填，不需要列在这里</span>
+          <h2>收集字段</h2>
+          <span class="hint">学号与姓名固定必填</span>
           <button class="btn sm" id="fieldAddBtn" type="button">新增字段</button>
+        </div>
+        <div class="row" style="gap:16px;margin-bottom:14px">
+          <label class="check"><input type="checkbox" id="collectDept"> 收集院系</label>
+          <label class="check"><input type="checkbox" id="collectGrp"> 收集班级</label>
         </div>
         <div id="fieldEditor"></div>
       </div>
@@ -635,10 +714,19 @@
     <!-- ====================================================== 名单内容 -->
     <section class="page" data-page="roster" hidden>
       <header class="page-head">
-        <h1 id="rosterTitle">名单</h1>
+        <div class="head-title">
+          <button class="icon-btn crumb-back" id="rosterBack" type="button"
+                  aria-label="回到我的名单" title="回到我的名单">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12 5l-5 5 5 5"/></svg>
+          </button>
+          <h1 class="crumb-title">
+            <a class="crumb" href="#/rosters">我的名单</a>
+            <span class="crumb-sep" aria-hidden="true">›</span>
+            <span id="rosterTitle">名单</span>
+          </h1>
+        </div>
         <p class="page-sub" id="rosterSub">—</p>
         <div class="page-actions">
-          <a class="btn" href="#/rosters" id="rosterBack">返回列表</a>
           <button class="btn" id="rosterMergeBtn" type="button">导入成员</button>
           <button class="btn" id="rosterExportBtn" type="button">导出</button>
           <button class="btn" id="rosterEditBtn" type="button">设置</button>
@@ -1062,6 +1150,7 @@
   </div>
 </div>
 
+<script src="panel_static/qrcode.js"></script>
 <script src="panel_static/common.js"></script>
 <script src="panel_static/panel.js"></script>
 </body>

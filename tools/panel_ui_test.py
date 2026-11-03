@@ -368,6 +368,127 @@ def roster_page(page):
     check("the list shows it with its member count", "UI 测试名单" in body and "2" in body, body)
 
 
+def signup_page(page, browser):
+    print("== 报名 ==")
+    page.goto(BASE + "/panel#/signups")
+    page.wait_for_timeout(600)
+    check("the list starts empty",
+          "还没有报名" in page.inner_text("#signupTable tbody"),
+          page.inner_text("#signupTable tbody"))
+
+    page.click("#signupNewBtn")
+    page.wait_for_selector("#signupNewName", timeout=8000)
+    page.fill("#signupNewName", "UI 报名")
+    page.click("#signupNewGo")
+    page.wait_for_timeout(1400)
+    check("creating a signup opens it",
+          "UI 报名" in page.inner_text("#signupTitle"), page.inner_text("#signupTitle"))
+    check("the page carries a breadcrumb back to the list",
+          page.locator('.page[data-page="signup"] .crumb[href="#/signups"]').count() == 1)
+    check("the public link is selectable text, not an input",
+          page.locator("#signupUrl").evaluate("el => el.tagName") == "DIV")
+    check("a QR code is drawn next to it",
+          page.locator("#signupQr svg").count() == 1)
+    check("both two-column rows are laid out", page.evaluate(
+        """() => document.querySelectorAll('.page[data-page="signup"] .grid-2').length""") == 2)
+
+    # 时间与名额各自一个开关
+    check("time starts switched off", not page.locator("#signupTimeOn").is_checked())
+    check("capacity starts switched off", not page.locator("#signupCapOn").is_checked())
+    page.click('#signupCapCard .switch')       # 开关本体是视觉隐藏的 checkbox
+
+    page.fill("#signupCap", "5")
+    page.click("#signupSaveBtn")
+    page.wait_for_timeout(1000)
+    check("the switch turns the limit on",
+          "0 / 5" in page.inner_text("#signupSub"), page.inner_text("#signupSub"))
+
+    # 开始晚于结束要被拦下
+    page.click('#signupTimeCard .switch')
+    page.fill("#signupOpens", "2026-12-02T10:00")
+    page.fill("#signupCloses", "2026-12-01T10:00")
+    page.click("#signupSaveBtn")
+    page.wait_for_timeout(700)
+    check("a start after the end is refused",
+          "开始时间必须早于结束时间" in page.inner_text(".toast, body"),
+          page.inner_text(".toast, body")[:60])
+    page.fill("#signupOpens", "2026-11-01T10:00")
+    page.fill("#signupCloses", "2026-12-03T10:00")
+    page.click("#signupSaveBtn")
+    page.wait_for_timeout(1000)
+    check("a valid window is saved", "进行中" in page.inner_text("#signupSub"),
+          page.inner_text("#signupSub"))
+
+    # 收集字段的两个复选框
+    check("built-in fields are checkboxes",
+          page.locator("#collectDept").count() == 1 and page.locator("#collectGrp").count() == 1)
+    page.click('label:has(#collectGrp)')
+    page.click("#signupSaveBtn")
+    page.wait_for_timeout(900)
+
+    # 视觉效果：主题与预览
+    page.select_option("#signupTheme", "cool")
+    page.wait_for_timeout(300)
+    check("the preview follows the theme", page.evaluate(
+        """() => getComputedStyle(document.querySelector('#signupPreview'))
+                 .backgroundColor""") != "rgba(0, 0, 0, 0)")
+    page.click("#signupSaveBtn")
+    page.wait_for_timeout(900)
+
+    # 公开页走一遍：重复提交的三种情形
+    token = page.evaluate(
+        "() => document.querySelector('#signupUrl').textContent").rsplit("/", 1)[-1]
+    guest = browser.new_context(viewport={"width": 430, "height": 900}, locale="zh-CN")
+    pub = guest.new_page()
+    pub.goto(BASE + "/join/" + token, wait_until="networkidle")
+    pub.wait_for_timeout(900)
+    check("the public page asks for the student id",
+          pub.locator("#sid").count() == 1)
+    check("班级 is not collected after unchecking it",
+          pub.locator("#grp").count() == 0)
+    pub.fill("#sid", "20249001")
+    pub.fill("#name", "测试甲")
+    pub.click("#go")
+    pub.wait_for_timeout(1000)
+    check("the first submission succeeds",
+          "报名成功" in pub.inner_text("#body"), pub.inner_text("#body")[:80])
+
+    pub.goto(BASE + "/join/" + token, wait_until="networkidle")
+    pub.wait_for_timeout(800)
+    pub.fill("#sid", "20249001")
+    pub.fill("#name", "测试甲")
+    pub.click("#go")
+    pub.wait_for_timeout(1000)
+    check("the same answers say already registered",
+          "您已经报过名" in pub.inner_text("#body"), pub.inner_text("#body")[:80])
+
+    pub.goto(BASE + "/join/" + token, wait_until="networkidle")
+    pub.wait_for_timeout(800)
+    pub.fill("#sid", "20249001")
+    pub.fill("#name", "测试乙")
+    pub.click("#go")
+    pub.wait_for_timeout(1000)
+    check("different answers are refused while self-edit is off",
+          "联系负责人" in pub.inner_text("#err"), pub.inner_text("#err")[:80])
+
+    page.select_option("#signupSelfEdit", "on")
+    page.click("#signupSaveBtn")
+    page.wait_for_timeout(900)
+    pub.goto(BASE + "/join/" + token, wait_until="networkidle")
+    pub.wait_for_timeout(800)
+    pub.fill("#sid", "20249001")
+    pub.fill("#name", "测试乙")
+    pub.click("#go")
+    pub.wait_for_timeout(1000)
+    check("with self-edit on the page offers an update",
+          "您希望更新信息吗" in pub.inner_text("#body"), pub.inner_text("#body")[:80])
+    pub.click("#doUpdate")
+    pub.wait_for_timeout(1100)
+    check("confirming updates the record",
+          "信息已更新" in pub.inner_text("#body"), pub.inner_text("#body")[:80])
+    guest.close()
+
+
 def routes_page(page):
     print("== every route renders its own page ==")
     for route, expect in [
@@ -1378,6 +1499,7 @@ def main():
                 title_row(page)
                 group_page(page)
                 roster_page(page)
+                signup_page(page, browser)
                 card_page(page)
                 create_page(browser)
                 # profile_page edits the signed-in account, so it only runs on a

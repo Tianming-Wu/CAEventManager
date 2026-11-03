@@ -949,10 +949,31 @@ def main():
     check("a field marked 写入院系 arrives there",
           member and member[0]["dept"] == "英语系", member)
 
-    code, res = submit({"sid": "20240201", "name": "新同学",
-                        "answers": {"f1": "不住", "f2": ""}})
-    check("a second submission is recognised as a duplicate",
-          code == 200 and res["duplicate"] is True, (code, res))
+    code, res = submit({"sid": "20240201", "name": "新同学", "dept": "外语学院",
+                        "answers": {"f1": "住", "f2": "英语系"}})
+    check("the same answers again are recognised as already registered",
+          code == 200 and res["state"] == "same", (code, res))
+    code, res = submit({"sid": "20240201", "name": "新同学", "dept": "外语学院",
+                        "answers": {"f1": "不住", "f2": "英语系"}})
+    check("different answers are refused while self-edit is off",
+          code == 409 and "联系负责人" in res.get("error", ""), (code, res))
+    post(owner, "/api/panel/signup/update", {"id": signup_id, "self_edit": "on"})
+    code, res = submit({"sid": "20240201", "name": "新同学", "dept": "外语学院",
+                        "answers": {"f1": "不住", "f2": "英语系"}})
+    check("with self-edit on, a difference asks first",
+          code == 200 and res["state"] == "differs", (code, res))
+    code, res = submit({"sid": "20240201", "name": "新同学", "dept": "外语学院",
+                        "answers": {"f1": "不住", "f2": "英语系"}, "update": True})
+    check("confirming the update overwrites the record",
+          code == 200 and res["state"] == "updated", (code, res))
+    row = [e for e in call(owner, "/api/panel/signup/entries?id=%d" % signup_id)["entries"]
+           if e["sid"] == "20240201"][0]
+    check("the stored answers are the new ones",
+          row["answers"]["f1"] == "不住", row["answers"])
+    member = [e for e in call(owner, "/api/panel/roster/entries?id=%d" % roster_id)["entries"]
+              if e["sid"] == "20240201"][0]
+    check("the roster entry follows the update", member["note"] == "不住", member)
+    post(owner, "/api/panel/signup/update", {"id": signup_id, "self_edit": "off"})
     code, res = submit({"sid": "20240202", "name": "另一个人",
                         "answers": {"f1": "住"}})
     check("a second person is accepted", code == 200 and res["count"] == 2, (code, res))
@@ -983,10 +1004,31 @@ def main():
                         "answers": {"f1": "住"}})
     check("a member of that roster gets in", code == 200, (code, res))
 
+    print("== 报名：收集字段与时间校验 ==")
+    state = json.loads(anon3.open(ROOT + "/join/" + token + "/api/state",
+                                  timeout=20).read())
+    check("both built-in fields are collected by default",
+          state["signup"]["collect"] == ["dept", "grp"], state["signup"]["collect"])
+    post(owner, "/api/panel/signup/update",
+         {"id": signup_id, "collect": ["dept"]})
+    state = json.loads(anon3.open(ROOT + "/join/" + token + "/api/state",
+                                  timeout=20).read())
+    check("a built-in field can be turned off",
+          state["signup"]["collect"] == ["dept"], state["signup"]["collect"])
+    post(owner, "/api/panel/signup/update", {"id": signup_id, "collect": ["dept", "grp"]})
+    post(owner, "/api/panel/signup/update",
+         {"id": signup_id, "opens_at": 2000, "closes_at": 1000}, expect=400)
+    check("a start after the end is refused", True)
+    post(owner, "/api/panel/signup/update",
+         {"id": signup_id, "opens_at": 1000, "closes_at": 2000})
+    check("an empty end is allowed",
+          call(owner, "/api/panel/signup?id=%d" % signup_id)["signup"]["closesAt"] == 2000)
+
     print("== 报名：时间窗与关闭 ==")
     future = time.time() + 3600
     post(owner, "/api/panel/signup/update",
-         {"id": signup_id, "filter_roster_id": 0, "opens_at": future})
+         {"id": signup_id, "filter_roster_id": 0, "opens_at": future,
+          "closes_at": 0})
     code, res = submit({"sid": "20240210", "name": "太早了", "answers": {"f1": "住"}})
     check("before the start it refuses",
           code == 409 and "尚未开始" in res.get("error", ""), (code, res))

@@ -1205,31 +1205,113 @@
       : '<p class="hint">还没有自定义字段</p>';
   }
 
+  // ---- 主题：报名页只换这几个值，管理侧的预览也跟着变 ----
+  var THEMES = {
+    plain: { bg: "#ffffff", text: "#1c1917", muted: "#8b837b", line: "#ddd7cf",
+             surface: "#ffffff" },
+    warm: { bg: "#fff8f0", text: "#3b2a1a", muted: "#9a8570", line: "#ecdcc8",
+            surface: "#fffdfa" },
+    cool: { bg: "#f3f7fb", text: "#1b2733", muted: "#6d8398", line: "#d5e2ee",
+            surface: "#ffffff" },
+    dark: { bg: "#1b1a18", text: "#f3efe9", muted: "#a49b90", line: "#3a3632",
+            surface: "#20201e" }
+  };
+
+  function drawThemePreview() {
+    var page = $("#signupPreview");
+    if (!page) return;
+    var preset = THEMES[$("#signupTheme").value] || THEMES.plain;
+    var accent = $("#signupAccent").value || "#b45309";
+    page.style.setProperty("--preview-bg", preset.bg);
+    page.style.setProperty("--preview-text", preset.text);
+    page.style.setProperty("--preview-muted", preset.muted);
+    page.style.setProperty("--preview-line", preset.line);
+    page.style.setProperty("--preview-surface", preset.surface);
+    page.style.setProperty("--preview-accent", accent);
+    page.style.background = preset.bg;
+    $("#pvTitle").textContent = $("#signupName").value.trim() || "报名";
+    $("#pvTitle").style.color = preset.text;
+    $("#pvNote").textContent = $("#signupNote").value.trim() || "报名说明";
+    var builtin = [];
+    if ($("#collectDept").checked) builtin.push("院系");
+    if ($("#collectGrp").checked) builtin.push("班级");
+    var extra = collectFields().map(function (f) { return f.label; });
+    $("#pvExtra").textContent = builtin.concat(extra).join("、") || "没有任何附加字段";
+    $("#pvExtra").style.display = (builtin.length + extra.length) ? "" : "none";
+    $("#pvBtn").textContent = "提交报名";
+  }
+
+  function drawQr(url) {
+    var holder = $("#signupQr");
+    if (!holder) return;
+    holder.innerHTML = "";
+    if (!url) return;
+    try {
+      var qr = qrcode(0, "M");
+      qr.addData(url);
+      qr.make();
+      holder.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 1, scalable: true });
+    } catch (e) {
+      holder.innerHTML = '<span class="hint">二维码生成失败</span>';
+    }
+  }
+
+  function toggleCardState(cardId, on) {
+    var card = $(cardId);
+    if (!card) return;
+    card.classList.toggle("is-off", !on);
+    Array.prototype.forEach.call(
+      card.querySelectorAll(".field input, .field select"), function (el) {
+        el.disabled = !on;
+      });
+  }
+
   function drawSignup() {
     var r = S.signup;
     var head = $("#signupTitle");
+    if (!head) return;
     if (!r) {
-      if (head) head.textContent = "报名";
+      head.textContent = "报名";
       return;
     }
     head.textContent = r.title;
     $("#signupSub").textContent = r.statusLabel + " · 已报 " + r.entries +
-      (r.capacity ? " / " + r.capacity : "") + " 人 · 写入名单 " + (r.rosterName || "—") +
+      (r.capacity ? " / " + r.capacity : "") + " 人 · 写入名单 " +
+      (r.rosterName || "—") +
       (r.filterRosterName ? " · 限 " + r.filterRosterName + " 内成员" : "");
     document.title = r.title + " · CAEventManager";
-    $("#signupUrl").value = r.url || "";
+
+    $("#signupUrl").textContent = r.url || "—";
     $("#signupOpenBtn").setAttribute("href", r.url || "#");
+    drawQr(r.url);
+
     $("#signupName").value = r.title || "";
     $("#signupNote").value = r.note || "";
     $("#signupState").value = r.state || "open";
+
+    var theme = r.theme || {};
+    $("#signupTheme").value = theme.preset || "plain";
+    $("#signupAccent").value = theme.accent || "#b45309";
+
+    // 时间：有任一端就当作"启用了时间限制"
+    var hasTime = !!(r.opensAt || r.closesAt);
+    $("#signupTimeOn").checked = hasTime;
     $("#signupOpens").value = toLocalInput(r.opensAt);
     $("#signupCloses").value = toLocalInput(r.closesAt);
-    $("#signupCap").value = r.capacity || 0;
-    $("#signupDedup").value = r.dedup || "skip";
+    $("#signupCapOn").checked = !!r.capacity;
+    $("#signupCap").value = r.capacity || 1;
+    $("#signupSelfEdit").value = r.selfEdit || "off";
+    var collect = r.collect || [];
+    $("#collectDept").checked = collect.indexOf("dept") >= 0;
+    $("#collectGrp").checked = collect.indexOf("grp") >= 0;
+
+    toggleCardState("#signupCapCard", !!r.capacity);
+
     $("#signupEntryCount").textContent = S.signupEntryTotal === null
       ? "" : "共 " + S.signupEntryTotal + " 条";
     drawFieldEditor();
     drawSignupEntries();
+    drawThemePreview();
   }
 
   function drawSignupEntries() {
@@ -1276,15 +1358,28 @@
 
   function saveSignup() {
     if (!S.signup) return;
+    var timeOn = $("#signupTimeOn").checked;
+    var opens = timeOn ? fromLocalInput($("#signupOpens").value) : 0;
+    var closes = timeOn ? fromLocalInput($("#signupCloses").value) : 0;
+    if (opens && closes && opens >= closes) {
+      PX.toast("开始时间必须早于结束时间", true);
+      return;
+    }
+    var capOn = $("#signupCapOn").checked;
+    var collect = [];
+    if ($("#collectDept").checked) collect.push("dept");
+    if ($("#collectGrp").checked) collect.push("grp");
     var body = {
       id: S.signup.id,
       title: $("#signupName").value.trim(),
       note: $("#signupNote").value.trim(),
       state: $("#signupState").value,
-      opens_at: fromLocalInput($("#signupOpens").value),
-      closes_at: fromLocalInput($("#signupCloses").value),
-      capacity: Number($("#signupCap").value) || 0,
-      dedup: $("#signupDedup").value,
+      opens_at: opens,
+      closes_at: closes,
+      capacity: capOn ? (Number($("#signupCap").value) || 0) : 0,
+      self_edit: $("#signupSelfEdit").value,
+      collect: collect,
+      theme: { preset: $("#signupTheme").value, accent: $("#signupAccent").value },
       fields: collectFields()
     };
     PX.api("/signup/update", { method: "POST", body: body })
@@ -3356,15 +3451,79 @@
     loadSignups(true).then(drawSignups);
   });
   $("#signupSaveBtn").addEventListener("click", saveSignup);
+  $("#signupBack").addEventListener("click", function () {
+    location.hash = "#/signups";
+  });
+  $("#rosterBack").addEventListener("click", function () {
+    location.hash = "#/rosters";
+  });
   $("#signupCopyBtn").addEventListener("click", function () {
-    var box = $("#signupUrl");
-    box.select();
-    try {
-      document.execCommand("copy");
-      PX.toast("链接已复制");
-    } catch (e) {
-      PX.toast("复制失败，请手动选择", true);
+    var text = $("#signupUrl").textContent || "";
+    var done = function () { PX.toast("链接已复制"); };
+    var failed = function () { PX.toast("复制失败，请手动选择", true); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done).catch(function () {
+        // 退回老办法：选中文本再复制
+        try {
+          var range = document.createRange();
+          range.selectNodeContents($("#signupUrl"));
+          var sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(range);
+          document.execCommand("copy");
+          done();
+        } catch (e) { failed(); }
+      });
+      return;
     }
+    try {
+      var r2 = document.createRange();
+      r2.selectNodeContents($("#signupUrl"));
+      var s2 = window.getSelection();
+      s2.removeAllRanges();
+      s2.addRange(r2);
+      document.execCommand("copy");
+      done();
+    } catch (e) { failed(); }
+  });
+  $("#signupQrSave").addEventListener("click", function () {
+    var holder = $("#signupQr");
+    var svg = holder ? holder.querySelector("svg") : null;
+    if (!svg) { PX.toast("二维码还没有生成", true); return; }
+    // 画到画布上再导出 PNG，直接存 SVG 有些看图软件打不开
+    var text = new XMLSerializer().serializeToString(svg);
+    var img = new Image();
+    img.onload = function () {
+      var size = 720;
+      var canvas = document.createElement("canvas");
+      canvas.width = size;
+      canvas.height = size;
+      var ctx = canvas.getContext("2d");
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, size, size);
+      ctx.drawImage(img, 0, 0, size, size);
+      var link = document.createElement("a");
+      link.href = canvas.toDataURL("image/png");
+      link.download = (($("#signupName").value.trim() || "signup") + "-二维码.png");
+      link.click();
+    };
+    img.onerror = function () { PX.toast("导出二维码失败", true); };
+    img.src = "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(text)));
+  });
+  ["#signupTheme", "#signupAccent", "#signupName", "#signupNote",
+   "#collectDept", "#collectGrp"].forEach(function (sel) {
+    var el = $(sel);
+    if (!el) return;
+    el.addEventListener("input", drawThemePreview);
+    el.addEventListener("change", drawThemePreview);
+  });
+  $("#signupTimeOn").addEventListener("change", function () {
+    var on = this.checked;
+    ["#signupOpens", "#signupCloses"].forEach(function (sel) { $(sel).disabled = !on; });
+  });
+  $("#signupCapOn").addEventListener("change", function () {
+    toggleCardState("#signupCapCard", this.checked);
+    if (this.checked && !Number($("#signupCap").value)) $("#signupCap").value = 1;
   });
   $("#signupExportBtn").addEventListener("click", function () {
     if (!S.signup) return;
@@ -3378,6 +3537,7 @@
     var fields = collectFields().concat([{ label: "", type: "text", into: "", required: false }]);
     S.signup.fields = fields;
     drawFieldEditor();
+    drawThemePreview();
     var inputs = $$("#fieldEditor .f-label");
     if (inputs.length) inputs[inputs.length - 1].focus();
   });
@@ -3388,6 +3548,7 @@
     kept.splice(Number(btn.getAttribute("data-field-del")), 1);
     S.signup.fields = kept;
     drawFieldEditor();
+    drawThemePreview();
   });
   bindLiveSearch("#signupSearch", "#signupSearchClear", function (value) {
     S.signupFilter = value;

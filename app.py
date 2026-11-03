@@ -900,7 +900,8 @@ class Handler(BaseHTTPRequestHandler):
                 "ok": True,
                 "signup": {k: view[k] for k in (
                     "title", "note", "status", "statusLabel", "capacity",
-                    "opensAt", "closesAt", "entries", "fields")},
+                    "opensAt", "closesAt", "entries", "fields", "selfEdit",
+                    "collect", "theme")},
                 "rosterName": target["name"] if target else "",
                 "limited": bool(row["filter_roster_id"]),
             })
@@ -925,6 +926,9 @@ class Handler(BaseHTTPRequestHandler):
             if ".." in rel:
                 return self._err("bad path", 400)
             full = os.path.join(panel.PANEL_STATIC, rel)
+            if not os.path.isfile(full):
+                # 活动页那几件通用件（二维码库）借给面板用，避免同一份文件抄两遍
+                full = os.path.join(TPL_DIR, "..", "static", rel)
             if not os.path.isfile(full):
                 return self._err("not found", 404)
             with open(full, "rb") as fh:

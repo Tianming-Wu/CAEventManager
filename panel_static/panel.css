@@ -1440,7 +1440,8 @@ select:invalid { color: var(--dim); }
 .search:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 
 input[type="text"], input[type="password"], input[type="search"],
-input[type="number"], input[type="url"], textarea, select {
+input[type="number"], input[type="url"], input[type="date"], input[type="time"],
+input[type="datetime-local"], input[type="color"], textarea, select {
   font-family: inherit;
   font-size: .9rem;
   color: var(--text);
@@ -1469,9 +1470,41 @@ input:focus, textarea:focus, select:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
+/* the platform's own date and time widgets: keep our border, drop their chrome */
+input[type="date"], input[type="time"], input[type="datetime-local"] {
+  appearance: none;
+  -webkit-appearance: none;
+  min-height: 38px;
+}
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="time"]::-webkit-calendar-picker-indicator,
+input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+  opacity: .45;
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 2px;
+}
+input[type="date"]::-webkit-calendar-picker-indicator:hover,
+input[type="time"]::-webkit-calendar-picker-indicator:hover,
+input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover {
+  opacity: .8;
+}
+html[data-theme="dark"] input[type="date"]::-webkit-calendar-picker-indicator,
+html[data-theme="dark"] input[type="time"]::-webkit-calendar-picker-indicator,
+html[data-theme="dark"] input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+  opacity: .55;
+}
+input[type="color"] {
+  padding: 3px;
+  height: 38px;
+  cursor: pointer;
+}
+
 @media (pointer: coarse) {
   input[type="text"], input[type="password"], input[type="search"],
-  input[type="number"], input[type="url"], textarea, select {
+  input[type="number"], input[type="url"], input[type="date"], input[type="time"],
+  input[type="datetime-local"], textarea, select {
     min-height: var(--tap);
     font-size: 16px;      /* below 16px iOS zooms the page on focus */
   }
@@ -1504,6 +1537,109 @@ input:focus, textarea:focus, select:focus {
   opacity: .6;
 }
 .tag-x:hover { opacity: 1; color: var(--danger); }
+
+/* ---------- switch: one card's worth of功能 on or off ---------- */
+.switch { display: inline-flex; align-items: center; gap: 9px; cursor: pointer; }
+.switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+.switch .track {
+  position: relative;
+  width: 44px;
+  height: 26px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  border: 1px solid var(--line);
+  transition: background .18s, border-color .18s;
+  flex: none;
+}
+.switch .track::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: 0 1px 3px rgba(30, 20, 8, .22);
+  transition: transform .18s;
+}
+.switch input:checked + .track { background: var(--accent); border-color: var(--accent); }
+.switch input:checked + .track::after { transform: translateX(18px); }
+.switch input:focus-visible + .track { outline: 2px solid var(--accent-line); outline-offset: 2px; }
+.switch input:disabled + .track { opacity: .5; }
+.switch .switch-text { font-size: .8rem; color: var(--muted); }
+/* a card whose功能 is switched off greys its inputs but keeps them readable */
+.card.is-off .field input, .card.is-off .field select, .card.is-off .field textarea {
+  color: var(--dim);
+  background: var(--surface-2);
+}
+
+/* ---------- a link you can select, copy and print as a QR ---------- */
+.link-card { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; }
+.link-main { flex: 1 1 320px; min-width: 260px; }
+.link-url {
+  font-family: var(--mono);
+  font-size: .84rem;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 9px 11px;
+  word-break: break-all;
+  user-select: all;
+  margin: 10px 0 12px;
+}
+#signupQr {
+  width: 168px;
+  height: 168px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 6px;
+}
+#signupQr svg { width: 100%; height: 100%; display: block; }
+.qr-side { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+
+/* ---------- the signup page preview ---------- */
+.preview-wrap {
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px;
+}
+.preview-page {
+  background: var(--preview-bg, #ffffff);
+  border-radius: 12px;
+  padding: 16px 14px;
+  border: 1px solid var(--line-soft);
+  box-shadow: 0 6px 18px rgba(40, 28, 12, .08);
+  max-width: 300px;
+  margin: 0 auto;
+}
+.preview-page .pv-brand { font-size: .62rem; letter-spacing: .12em; color: var(--preview-muted, #8b837b); }
+.preview-page h3 { margin: 6px 0 4px; font-size: 1rem; color: var(--preview-text, #1c1917); }
+.preview-page p { margin: 0 0 10px; font-size: .74rem; color: var(--preview-muted, #8b837b); }
+.preview-page .pv-field {
+  border: 1px solid var(--preview-line, #ddd7cf);
+  border-radius: 8px;
+  padding: 7px 9px;
+  font-size: .74rem;
+  color: var(--preview-muted, #8b837b);
+  margin-bottom: 8px;
+  background: var(--preview-surface, #ffffff);
+}
+.preview-page .pv-btn {
+  background: var(--preview-accent, #b45309);
+  color: #fff;
+  border-radius: 8px;
+  padding: 9px;
+  text-align: center;
+  font-size: .8rem;
+  font-weight: 650;
+}
 
 /* ---------- pills: a row of mutually exclusive views ---------- */
 #rosterTable th:nth-child(1), #rosterTable td:nth-child(1) { width: 38%; }
@@ -1856,6 +1992,17 @@ input:focus, textarea:focus, select:focus {
 .btn {
   -webkit-user-select: none;
   user-select: none;
+}
+
+/* ---------- two cards side by side ---------- */
+.grid-2 {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+@media (max-width: 1080px) {
+  .grid-2 { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* ---------- create: form left, the preset's reach right ---------- */

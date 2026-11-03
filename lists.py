@@ -17,7 +17,9 @@
 
 import csv
 import io
+import json
 import os
+import secrets
 import sqlite3
 import threading
 import time
@@ -72,6 +74,44 @@ CREATE TABLE IF NOT EXISTS roster_entries (
 );
 CREATE INDEX IF NOT EXISTS roster_entries_person ON roster_entries(person_id);
 
+-- 报名实例：一个公开链接 + 时间窗 + 往哪份名单里写
+CREATE TABLE IF NOT EXISTS signups (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    token            TEXT    NOT NULL UNIQUE,
+    title            TEXT    NOT NULL,
+    note             TEXT    NOT NULL DEFAULT '',
+    owner_id         INTEGER NOT NULL,
+    roster_id        INTEGER NOT NULL,
+    filter_roster_id INTEGER NOT NULL DEFAULT 0,   -- 0 = 不限制会员
+    opens_at         REAL    NOT NULL DEFAULT 0,   -- 0 = 立即开始
+    closes_at        REAL    NOT NULL DEFAULT 0,   -- 0 = 不设截止
+    capacity         INTEGER NOT NULL DEFAULT 0,   -- 0 = 不限名额
+    dedup            TEXT    NOT NULL DEFAULT 'skip',   -- skip | update
+    fields           TEXT    NOT NULL DEFAULT '[]',     -- 自定义字段（JSON）
+    state            TEXT    NOT NULL DEFAULT 'open',   -- open | closed
+    visibility       TEXT    NOT NULL DEFAULT 'private',
+    grant_mode       TEXT    NOT NULL DEFAULT 'auto',
+    approve_mode     TEXT    NOT NULL DEFAULT 'owner',
+    created_at       REAL    NOT NULL,
+    updated_at       REAL    NOT NULL
+);
+
+-- 报名提交：一次一行，保留提交当时的原样
+CREATE TABLE IF NOT EXISTS signup_entries (
+    signup_id INTEGER NOT NULL,
+    person_id INTEGER NOT NULL,
+    sid       TEXT    NOT NULL,
+    name      TEXT    NOT NULL,
+    dept      TEXT    NOT NULL DEFAULT '',
+    grp       TEXT    NOT NULL DEFAULT '',
+    note      TEXT    NOT NULL DEFAULT '',
+    answers   TEXT    NOT NULL DEFAULT '{}',
+    ts        REAL    NOT NULL,
+    ip        TEXT    NOT NULL DEFAULT '',
+    state     TEXT    NOT NULL DEFAULT 'accepted',
+    PRIMARY KEY (signup_id, person_id)
+);
+
 -- 谁能写一份名单/一个报名：拥有者之外的写入权都在这里，
 -- 一条记录一个人，level=write 立即生效，level=pending 是等拥有者点头的申请。
 CREATE TABLE IF NOT EXISTS grants (
@@ -93,6 +133,18 @@ LATE_COLUMNS = (
 )
 
 GRANT_MODES = ("auto", "confirm")
+SIGNUP_STATES = ("open", "closed")
+DEDUP_MODES = ("skip", "update")
+# 自定义字段能存到哪里：人员属性、名单条目，或者只留在这次报名里
+FIELD_TYPES = ("text", "textarea", "number", "select", "date")
+FIELD_INTO = ("", "person.dept", "person.grp", "roster.tag", "roster.note")
+FIELD_TYPE_LABEL = {"text": "单行文本", "textarea": "多行文本", "number": "数字",
+                    "select": "单选", "date": "日期"}
+FIELD_INTO_LABEL = {"": "只留在本次报名", "person.dept": "写入学号对应的院系",
+                    "person.grp": "写入班级", "roster.tag": "写成名单里的分组",
+                    "roster.note": "写成名单里的备注"}
+STATUS_LABEL = {"closed": "已关闭", "upcoming": "未开始", "open": "进行中",
+                "full": "已满", "ended": "已结束", "archived": "已结束"}
 # 谁能批写入申请：只有拥有者，或拥有者让可写的人也来批
 APPROVE_MODES = ("owner", "editors")
 APPROVE_MODE_LABEL = {"owner": "只有我", "editors": "可写的人也可以"}
@@ -700,3 +752,365 @@ def search_people(conn, q, limit=20):
         (like, like, like, like, limit)).fetchall()
     return [{"id": r["id"], "sid": r["sid"], "name": r["name"],
              "dept": r["dept"], "grp": r["grp"]} for r in rows]
+
+
+# --------------------------------------------------------------------------- #
+# signups
+# --------------------------------------------------------------------------- #
+def normalize_fields(raw):
+    """自定义字段的定义；学号与姓名永远在，不进这份清单。"""
+    out = []
+    for item in raw or []:
+        if not isinstance(item, dict):
+            continue
+        label = str(item.get("label") or "").strip()[:40]
+        if not label:
+            continue
+        key = str(item.get("key") or "").strip()
+        if not key:
+            key = "f%d" % (len(out) + 1)
+        key = "".join(ch for ch in key if ch.isalnum() or ch in "_-")[:24] or "f%d" % (len(out) + 1)
+        kind = item.get("type") if item.get("type") in FIELD_TYPES else "text"
+        into = item.get("into") if item.get("into") in FIELD_INTO else ""
+        options = [str(o).strip()[:40] for o in (item.get("options") or []) if str(o).strip()]
+        if kind == "select" and not options:
+            kind = "text"
+        out.append({"key": key, "label": label, "type": kind,
+                    "required": bool(item.get("required")),
+                    "options": options, "into": into,
+                    "typeLabel": FIELD_TYPE_LABEL[kind],
+                    "intoLabel": FIELD_INTO_LABEL[into]})
+    return out[:12]
+
+
+def new_token():
+    return secrets.token_urlsafe(24)
+
+
+def _fields_of(row):
+    try:
+        return normalize_fields(json.loads(row["fields"] or "[]"))
+    except (ValueError, TypeError):
+        return []
+
+
+def create_signup(conn, owner_id, data):
+    title = (data.get("title") or "").strip()
+    if not title:
+        raise model.ApiError("请填写报名名称")
+    if len(title) > 60:
+        raise model.ApiError("报名名称最长 60 个字")
+    roster_id = int(data.get("roster_id") or 0)
+    if not roster_id or roster(conn, roster_id) is None:
+        raise model.ApiError("请选择报名写入的名单")
+    now = time.time()
+    cur = conn.execute(
+        "INSERT INTO signups (token, title, note, owner_id, roster_id,"
+        " filter_roster_id, opens_at, closes_at, capacity, dedup, fields,"
+        " state, visibility, created_at, updated_at)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (new_token(), title, (data.get("note") or "").strip()[:300], owner_id,
+         roster_id, int(data.get("filter_roster_id") or 0),
+         float(data.get("opens_at") or 0), float(data.get("closes_at") or 0),
+         max(0, int(data.get("capacity") or 0)),
+         data.get("dedup") if data.get("dedup") in DEDUP_MODES else "skip",
+         json.dumps(normalize_fields(data.get("fields")), ensure_ascii=False),
+         "open", data.get("visibility") if data.get("visibility") in VISIBILITY
+         else "private", now, now),
+    )
+    return cur.lastrowid
+
+
+def update_signup(conn, signup_id, data):
+    row = signup(conn, signup_id)
+    if row is None:
+        raise model.ApiError("报名不存在", 404)
+    sets, vals = [], []
+
+    def put(key, value):
+        sets.append("%s=?" % key)
+        vals.append(value)
+
+    if "title" in data:
+        title = (data.get("title") or "").strip()
+        if not title:
+            raise model.ApiError("请填写报名名称")
+        if len(title) > 60:
+            raise model.ApiError("报名名称最长 60 个字")
+        put("title", title)
+    if "note" in data:
+        put("note", (data.get("note") or "").strip()[:300])
+    if "opens_at" in data:
+        put("opens_at", float(data.get("opens_at") or 0))
+    if "closes_at" in data:
+        put("closes_at", float(data.get("closes_at") or 0))
+    if "capacity" in data:
+        put("capacity", max(0, int(data.get("capacity") or 0)))
+    if "dedup" in data:
+        put("dedup", data.get("dedup") if data.get("dedup") in DEDUP_MODES else "skip")
+    if "state" in data:
+        put("state", data.get("state") if data.get("state") in SIGNUP_STATES else "open")
+    if "visibility" in data and data.get("visibility") in VISIBILITY:
+        put("visibility", data.get("visibility"))
+    if "filter_roster_id" in data:
+        put("filter_roster_id", int(data.get("filter_roster_id") or 0))
+    if "fields" in data:
+        put("fields", json.dumps(normalize_fields(data.get("fields")),
+                                 ensure_ascii=False))
+    if not sets:
+        return
+    put("updated_at", time.time())
+    conn.execute("UPDATE signups SET %s WHERE id=?" % ",".join(sets),
+                 vals + [signup_id])
+
+
+def signup(conn, signup_id):
+    return conn.execute("SELECT * FROM signups WHERE id=?", (signup_id,)).fetchone()
+
+
+def signup_by_token(conn, token):
+    return conn.execute("SELECT * FROM signups WHERE token=?", (token,)).fetchone()
+
+
+def delete_signup(conn, signup_id):
+    conn.execute("DELETE FROM signup_entries WHERE signup_id=?", (signup_id,))
+    conn.execute("DELETE FROM signups WHERE id=?", (signup_id,))
+
+
+def signup_counts(conn, ids=None):
+    sql = "SELECT signup_id, COUNT(*) AS n FROM signup_entries"
+    args = []
+    if ids is not None:
+        if not ids:
+            return {}
+        sql += " WHERE signup_id IN (%s)" % ",".join("?" * len(ids))
+        args = list(ids)
+    sql += " GROUP BY signup_id"
+    return {r["signup_id"]: r["n"] for r in conn.execute(sql, args)}
+
+
+def signup_status(row, count, now=None):
+    now = time.time() if now is None else now
+    if row["state"] == "closed":
+        return "closed"
+    if row["opens_at"] and now < row["opens_at"]:
+        return "upcoming"
+    if row["closes_at"] and now > row["closes_at"]:
+        return "ended"
+    if row["capacity"] and count >= row["capacity"]:
+        return "full"
+    return "open"
+
+
+def signup_view(conn, row, count=0, acc=None):
+    status = signup_status(row, count)
+    roster_row = roster(conn, row["roster_id"])
+    filter_row = roster(conn, row["filter_roster_id"]) if row["filter_roster_id"] else None
+    owner = bool(acc) and row["owner_id"] == acc["id"]
+    return {
+        "id": row["id"],
+        "token": row["token"],
+        "title": row["title"],
+        "note": row["note"],
+        "ownerId": row["owner_id"],
+        "rosterId": row["roster_id"],
+        "rosterName": roster_row["name"] if roster_row else "",
+        "filterRosterId": row["filter_roster_id"],
+        "filterRosterName": filter_row["name"] if filter_row else "",
+        "opensAt": row["opens_at"],
+        "closesAt": row["closes_at"],
+        "capacity": row["capacity"],
+        "dedup": row["dedup"],
+        "entries": int(count or 0),
+        "fields": _fields_of(row),
+        "state": row["state"],
+        "status": status,
+        "statusLabel": STATUS_LABEL.get(status, status),
+        "visibility": row["visibility"],
+        "visibilityLabel": VIS_LABEL.get(row["visibility"], row["visibility"]),
+        "createdAt": row["created_at"],
+        "updatedAt": row["updated_at"],
+        "owner": owner,
+        "editable": owner,
+    }
+
+
+def list_signups(conn, acc, q="", scope="joined", offset=0, limit=30):
+    where, args = [], []
+    if scope == "mine":
+        where.append("s.owner_id=?")
+        args.append(acc["id"])
+    elif scope == "joined":
+        where.append("s.owner_id=?")
+        args.append(acc["id"])
+    else:
+        cond, extra = visible_condition(acc, "s")
+        if cond:
+            where.append(cond)
+            args += extra
+    if q:
+        where.append("(s.title LIKE ? OR s.note LIKE ?)")
+        args += ["%" + q + "%"] * 2
+    clause = (" WHERE " + " AND ".join(where)) if where else ""
+    total = conn.execute(
+        "SELECT COUNT(*) AS n FROM signups s" + clause, args).fetchone()["n"]
+    rows = conn.execute(
+        "SELECT s.* FROM signups s" + clause +
+        " ORDER BY s.updated_at DESC LIMIT ? OFFSET ?",
+        args + [limit, offset]).fetchall()
+    counts = signup_counts(conn, [r["id"] for r in rows])
+    return {"total": int(total or 0), "offset": offset, "limit": limit,
+            "signups": [signup_view(conn, r, counts.get(r["id"], 0), acc)
+                        for r in rows]}
+
+
+def signup_entries_page(conn, signup_id, q="", offset=0, limit=100):
+    where, args = ["signup_id=?"], [signup_id]
+    if q:
+        like = "%" + q.strip().lower() + "%"
+        where.append("(lower(sid) LIKE ? OR name LIKE ?)")
+        args += [like, like]
+    clause = " AND ".join(where)
+    total = conn.execute("SELECT COUNT(*) AS n FROM signup_entries WHERE " + clause,
+                         args).fetchone()["n"]
+    rows = conn.execute(
+        "SELECT * FROM signup_entries WHERE " + clause +
+        " ORDER BY ts LIMIT ? OFFSET ?", args + [limit, offset]).fetchall()
+    return {"total": int(total or 0), "offset": offset, "limit": limit,
+            "entries": [signup_entry_view(r) for r in rows]}
+
+
+def signup_entry_view(row):
+    try:
+        answers = json.loads(row["answers"] or "{}")
+    except (ValueError, TypeError):
+        answers = {}
+    return {
+        "personId": row["person_id"],
+        "sid": row["sid"],
+        "name": row["name"],
+        "dept": row["dept"],
+        "grp": row["grp"],
+        "note": row["note"],
+        "answers": answers,
+        "ts": row["ts"],
+        "state": row["state"],
+    }
+
+
+def _norm(text):
+    return "".join(str(text or "").split()).lower()
+
+
+def _coerce_field(field, raw):
+    value = raw
+    if field["type"] == "number":
+        if value in (None, ""):
+            return ""
+        try:
+            return str(float(value))
+        except (TypeError, ValueError):
+            raise model.ApiError("「%s」需要填数字" % field["label"])
+    if field["type"] == "select":
+        if value in (None, ""):
+            return ""
+        value = str(value).strip()
+        if value not in field["options"]:
+            raise model.ApiError("「%s」的选项不在可选范围内" % field["label"])
+        return value
+    return str(value or "").strip()[:500]
+
+
+def submit_signup(conn, row, form, ip=""):
+    """公开页的一次提交：校验范围与名额，然后把这个人写进名单。
+
+    学号与姓名永远是必填项；限制会员时，两者都要和限制名单里的记录对上。
+    """
+    now = time.time()
+    sid = (form.get("sid") or "").strip()
+    name = (form.get("name") or "").strip()
+    if not sid or not name:
+        raise model.ApiError("学号和姓名均为必填")
+    if len(sid) > 32 or len(name) > 32:
+        raise model.ApiError("学号或姓名过长")
+    count = signup_counts(conn, [row["id"]]).get(row["id"], 0)
+    status = signup_status(row, count, now)
+    if status == "closed":
+        raise model.ApiError("本次报名已关闭", 409)
+    if status == "upcoming":
+        raise model.ApiError("本次报名尚未开始", 409)
+    if status == "ended":
+        raise model.ApiError("本次报名已结束", 409)
+    if status == "full":
+        raise model.ApiError("名额已满", 409)
+
+    member = None
+    if row["filter_roster_id"]:
+        member = conn.execute(
+            "SELECT p.* FROM people p JOIN roster_entries e ON e.person_id = p.id"
+            " WHERE e.roster_id=? AND e.state='active' AND p.sid=?",
+            (row["filter_roster_id"], sid)).fetchone()
+        if member is None:
+            raise model.ApiError("你不在本次报名的范围名单内", 403)
+        if _norm(member["name"]) != _norm(name):
+            raise model.ApiError("姓名与名单中的记录不一致", 403)
+
+    fields = _fields_of(row)
+    answers = {}
+    for field in fields:
+        value = _coerce_field(field, (form.get("answers") or {}).get(field["key"]))
+        if field["required"] and not value:
+            raise model.ApiError("「%s」为必填项" % field["label"])
+        answers[field["key"]] = value
+
+    def into(target):
+        for field in fields:
+            if field["into"] == target and answers.get(field["key"]):
+                return answers[field["key"]]
+        return ""
+
+    # 字段上标了去向就以字段为准：那是组织者明确指定的，公开页上的通用输入框只是兜底
+    dept = into("person.dept") or (form.get("dept") or "").strip()
+    grp = into("person.grp") or (form.get("grp") or "").strip()
+    person_id, created = upsert_person(conn, sid, name, grp, "", None, None, dept)
+
+    existing = conn.execute(
+        "SELECT * FROM signup_entries WHERE signup_id=? AND person_id=?",
+        (row["id"], person_id)).fetchone()
+    if existing is not None and row["dedup"] != "update":
+        return {"ok": True, "duplicate": True, "ts": existing["ts"],
+                "name": existing["name"], "count": count}
+
+    payload = json.dumps(answers, ensure_ascii=False)
+    if existing is not None:
+        conn.execute(
+            "UPDATE signup_entries SET name=?, dept=?, grp=?, answers=?, ip=?"
+            " WHERE signup_id=? AND person_id=?",
+            (name, dept, grp, payload, ip, row["id"], person_id))
+    else:
+        conn.execute(
+            "INSERT INTO signup_entries (signup_id, person_id, sid, name, dept,"
+            " grp, note, answers, ts, ip, state) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (row["id"], person_id, sid, name, dept, grp, "", payload, now, ip,
+             "accepted"))
+    add_entry(conn, row["roster_id"], person_id, into("roster.tag"),
+              into("roster.note"), "signup")
+    conn.execute("UPDATE signups SET updated_at=? WHERE id=?", (now, row["id"]))
+    return {"ok": True, "duplicate": False, "ts": existing["ts"] if existing else now,
+            "count": signup_counts(conn, [row["id"]]).get(row["id"], 0)}
+
+
+def signup_export_rows(conn, signup_id):
+    row = signup(conn, signup_id)
+    fields = _fields_of(row) if row else []
+    head = ["学号", "姓名", "院系", "班级", "提交时间"] + [
+        f["label"] for f in fields] + ["备注"]
+    rows = [head]
+    for r in conn.execute(
+            "SELECT * FROM signup_entries WHERE signup_id=? ORDER BY ts", (signup_id,)):
+        view = signup_entry_view(r)
+        stamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(r["ts"]))
+        rows.append([view["sid"], view["name"], view["dept"], view["grp"], stamp]
+                    + [str(view["answers"].get(f["key"], "")) for f in fields]
+                    + [view["note"]])
+    return rows

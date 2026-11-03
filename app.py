@@ -817,6 +817,9 @@ class Handler(BaseHTTPRequestHandler):
             if kind == "panel":
                 return self._panel(method, route, parsed.path, query)
 
+            if kind == "join":
+                return self._join(method, route, token)
+
             redirect_to = shortlink_redirect(parsed.path)
             if redirect_to is not None:
                 log("shortlink accepted -> %s" % redirect_to)
@@ -858,6 +861,60 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             log("ERROR %s %s\n%s" % (method, self.path, traceback.format_exc()))
             self._err("服务器内部错误,请看服务日志", 500)
+
+    # ---------------- public signup page ----------------
+
+    def _join(self, method, route, token):
+        """A public 报名 page: no account, no session, one token in the URL."""
+        lx = lists.connect()
+        row = lists.signup_by_token(lx, token)
+        if row is None:
+            return self._err("not found", 404)
+
+        if method == "GET" and route.startswith("/static/"):
+            rel = route[len("/static/"):]
+            if ".." in rel:
+                return self._err("bad path", 400)
+            full = os.path.join(panel.PANEL_STATIC, rel)
+            if not os.path.isfile(full):
+                return self._err("not found", 404)
+            with open(full, "rb") as fh:
+                body = fh.read()
+            ctype = mimetypes.guess_type(full)[0] or "application/octet-stream"
+            if ctype.startswith("text/") or ctype == "application/javascript":
+                ctype += "; charset=utf-8"
+            return self._send(200, body, ctype, [("Cache-Control", "public, max-age=60")])
+
+        if method == "GET" and route in ("", "/"):
+            # 相对路径的 static/… 只有在地址以 / 结尾时才算得对
+            raw = (self.path or "").split("?")[0]
+            if not raw.endswith("/"):
+                return self._redirect(raw + "/")
+            return self._serve_panel_page("signup.html")
+
+        if method == "GET" and route == "/api/state":
+            count = lists.signup_counts(lx, [row["id"]]).get(row["id"], 0)
+            view = lists.signup_view(lx, row, count)
+            target = lists.roster(lx, row["roster_id"])
+            return self._json({
+                "ok": True,
+                "signup": {k: view[k] for k in (
+                    "title", "note", "status", "statusLabel", "capacity",
+                    "opensAt", "closesAt", "entries", "fields")},
+                "rosterName": target["name"] if target else "",
+                "limited": bool(row["filter_roster_id"]),
+            })
+
+        if method == "POST" and route == "/api/submit":
+            data = self._body()
+            with lists.tx() as tx:
+                res = lists.submit_signup(tx, row, data, self.client_address[0])
+            with panel.tx() as px:
+                panel.audit(px, "signup", "signup_submit", str(row["id"]),
+                            "%s %s" % (data.get("sid"), data.get("name")))
+            return self._json(res)
+
+        return self._err("not found", 404)
 
     # ---------------- master panel ----------------
 
@@ -2106,6 +2163,104 @@ class Handler(BaseHTTPRequestHandler):
                 a["ownerName"] = names.get(a["ownerId"], "")
             return self._json({"ok": True, "pending": pending, "asks": asks,
                                "count": len(pending)})
+
+        # ---- 报名：一个公开链接 + 时间窗，往名单里写人 ----
+        def open_signup(sid, write=False):
+            lx = lists.connect()
+            row = lists.signup(lx, sid)
+            if row is None:
+                raise model.ApiError("报名不存在", 404)
+            if write:
+                if row["owner_id"] != acc["id"]:
+                    raise model.ApiError("仅报名创建者可修改", 403)
+            elif not (row["owner_id"] == acc["id"]
+                      or row["visibility"] != "private"
+                      or acc["role"] in ("owner", "superadmin")):
+                raise model.ApiError("无权查看该报名", 403)
+            return row
+
+        if path == "/signups" and method == "GET":
+            q = (query.get("q") or [""])[0].strip()
+            scope = (query.get("scope") or ["joined"])[0]
+            if scope not in ("joined", "mine", "all"):
+                scope = "joined"
+            offset = _int_arg(query, "offset", 0, 0, 100000)
+            limit = _int_arg(query, "limit", 30, 1, 100)
+            res = lists.list_signups(lists.connect(), acc, q, scope, offset, limit)
+            base = (LOCAL_CFG.get("public_base_prefix") or "").rstrip("/")
+            for item in res["signups"]:
+                item["url"] = "%s/join/%s" % (base, item["token"])
+            return self._json({"ok": True, **res})
+
+        if path == "/signup" and method == "GET":
+            sid = _int_arg(query, "id", 0, 0, 1000000)
+            row = open_signup(sid)
+            lx = lists.connect()
+            count = lists.signup_counts(lx, [sid]).get(sid, 0)
+            view = lists.signup_view(lx, row, count, acc)
+            base = (LOCAL_CFG.get("public_base_prefix") or "").rstrip("/")
+            view["url"] = "%s/join/%s" % (base, row["token"])
+            return self._json({"ok": True, "signup": view})
+
+        if path == "/signup/create" and method == "POST":
+            data = body()
+            roster_id = int(data.get("roster_id") or 0)
+            roster_row = lists.roster(lists.connect(), roster_id)
+            if roster_row is None:
+                raise model.ApiError("请选择报名写入的名单")
+            if not lists.writable(lists.connect(), acc, "roster", roster_row):
+                raise model.ApiError("对该名单没有写入权限，无法往里面写人", 403)
+            with lists.tx() as lx:
+                sid = lists.create_signup(lx, acc["id"], data)
+            with panel.tx() as tx:
+                panel.audit(tx, acc["username"], "signup_create", str(sid),
+                            (data.get("title") or "").strip())
+            return self._json({"ok": True, "id": sid})
+
+        if path == "/signup/update" and method == "POST":
+            data = body()
+            sid = int(data.get("id") or 0)
+            open_signup(sid, write=True)
+            with lists.tx() as lx:
+                lists.update_signup(lx, sid, data)
+            with panel.tx() as tx:
+                panel.audit(tx, acc["username"], "signup_update", str(sid),
+                            json.dumps({k: data.get(k) for k in
+                                        ("title", "state", "capacity")
+                                        if k in data}, ensure_ascii=False))
+            return self._json({"ok": True})
+
+        if path == "/signup/delete" and method == "POST":
+            data = body()
+            sid = int(data.get("id") or 0)
+            row = open_signup(sid, write=True)
+            with lists.tx() as lx:
+                lists.delete_signup(lx, sid)
+            with panel.tx() as tx:
+                panel.audit(tx, acc["username"], "signup_delete", str(sid), row["title"])
+            return self._json({"ok": True})
+
+        if path == "/signup/entries" and method == "GET":
+            sid = _int_arg(query, "id", 0, 0, 1000000)
+            open_signup(sid)
+            q = (query.get("q") or [""])[0].strip()
+            offset = _int_arg(query, "offset", 0, 0, 1000000)
+            limit = _int_arg(query, "limit", 100, 1, 200)
+            res = lists.signup_entries_page(lists.connect(), sid, q, offset, limit)
+            return self._json({"ok": True, **res})
+
+        if path == "/signup/export.csv" and method == "GET":
+            sid = _int_arg(query, "id", 0, 0, 1000000)
+            row = open_signup(sid)
+            rows = lists.signup_export_rows(lists.connect(), sid)
+            buf = io.StringIO()
+            writer = csv.writer(buf, lineterminator="\r\n")
+            for line in rows:
+                writer.writerow(line)
+            name = re.sub(r'[\\/:*?"<>|]+', "_", row["title"] or "signup")
+            return self._send(
+                200, "\ufeff" + buf.getvalue(), "text/csv; charset=utf-8",
+                headers=[_attachment_header(name + ".csv")])
 
         if path == "/people/search" and method == "GET":
             q = (query.get("q") or [""])[0].strip()

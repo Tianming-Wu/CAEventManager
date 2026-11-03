@@ -23,6 +23,8 @@
     "events": { min: "admin" },
     "rosters": { min: "admin", group: "lists" },
     "roster": { min: "admin", group: "lists" },
+    "signups": { min: "admin", group: "lists" },
+    "signup": { min: "admin", group: "lists" },
     "write-approvals": { min: "admin", group: "lists" },
     "templates": { min: "admin" },
     "users": { min: "superadmin" },
@@ -71,6 +73,13 @@
     entryTotal: null,
     entryFilter: "",
     rosterImportName: "",
+    signups: [],
+    signupTotal: null,
+    signupFilter: "",
+    signup: null,
+    signupEntries: [],
+    signupEntryTotal: null,
+    signupEntryFilter: "",
     approvals: [],
     myAsks: [],
     approvalsCount: 0,
@@ -1066,6 +1075,263 @@
     }
   }
 
+  /* ------------------------------------------------------------------ 报名 --- */
+  /* 一个报名 = 一个公开链接 + 时间窗 + 往哪份名单里写。管理侧只管设置与记录；
+   * 公开页在 /join/<token>，不经过面板登录。 */
+  var SIGNUP_PAGE = 30;
+  var SIGNUP_ENTRY_PAGE = 100;
+
+  function loadSignups(more) {
+    if (more) {
+      if (S.signupTotal !== null && S.signups.length >= S.signupTotal) {
+        return Promise.resolve();
+      }
+    } else {
+      S.signups = [];
+      S.signupTotal = null;
+    }
+    var parts = ["/signups?offset=" + (more ? S.signups.length : 0),
+                 "limit=" + SIGNUP_PAGE];
+    if (S.signupFilter) parts.push("q=" + encodeURIComponent(S.signupFilter));
+    return PX.api(parts.join("&"))
+      .then(function (d) {
+        S.signups = (more ? S.signups : []).concat(d.signups || []);
+        S.signupTotal = d.total || 0;
+      })
+      .catch(function (e) { PX.toast(PX.esc(e.message), true); });
+  }
+
+  function drawSignups() {
+    var body = $("#signupTable tbody");
+    if (!body) return;
+    var rows = S.signups || [];
+    body.innerHTML = rows.length ? rows.map(function (r) {
+      return "<tr>" +
+        '<td><a href="#/signup/' + r.id + '"><b>' + PX.esc(r.title) + "</b></a>" +
+        (r.note ? '<div class="hint">' + PX.esc(r.note) + "</div>" : "") + "</td>" +
+        "<td>" + PX.esc(r.rosterName || "—") +
+        (r.filterRosterName ? '<div class="hint">限 ' + PX.esc(r.filterRosterName) +
+          " 内成员</div>" : "") + "</td>" +
+        '<td><span class="tag' + (r.status === "open" ? " pending" : "") + '">' +
+        PX.esc(r.statusLabel) + "</span></td>" +
+        '<td class="right num">' + r.entries +
+        (r.capacity ? " / " + r.capacity : "") + "</td>" +
+        '<td class="actions"><button class="btn sm" type="button" data-open-signup="' +
+        r.id + '">打开</button></td></tr>';
+    }).join("") : emptyRow(5, S.signupTotal === 0 ? "还没有报名" : "正在读取…");
+    var count = $("#signupCount");
+    if (count) count.textContent = S.signupTotal === null ? "" : "共 " + S.signupTotal + " 个";
+    var more = $("#signupMore");
+    if (more) {
+      var left = (S.signupTotal === null) ? 0 : S.signupTotal - rows.length;
+      more.hidden = left <= 0;
+      more.textContent = left > 0 ? "再显示 " + Math.min(SIGNUP_PAGE, left) + " 个" : "";
+    }
+  }
+
+  function loadSignup(id) {
+    return PX.api("/signup?id=" + id)
+      .then(function (d) { S.signup = d.signup; })
+      .catch(function (e) {
+        PX.toast(PX.esc(e.message), true);
+        S.signup = null;
+      });
+  }
+
+  function loadSignupEntries(more) {
+    if (!S.signup) return Promise.resolve();
+    if (more) {
+      if (S.signupEntryTotal !== null && S.signupEntries.length >= S.signupEntryTotal) {
+        return Promise.resolve();
+      }
+    } else {
+      S.signupEntries = [];
+      S.signupEntryTotal = null;
+    }
+    var parts = ["/signup/entries?id=" + S.signup.id,
+                 "offset=" + (more ? S.signupEntries.length : 0),
+                 "limit=" + SIGNUP_ENTRY_PAGE];
+    if (S.signupEntryFilter) parts.push("q=" + encodeURIComponent(S.signupEntryFilter));
+    return PX.api(parts.join("&"))
+      .then(function (d) {
+        S.signupEntries = (more ? S.signupEntries : []).concat(d.entries || []);
+        S.signupEntryTotal = d.total || 0;
+      })
+      .catch(function (e) { PX.toast(PX.esc(e.message), true); });
+  }
+
+  function toLocalInput(ts) {
+    if (!ts) return "";
+    var d = new Date(ts * 1000);
+    return d.getFullYear() + "-" + PX.pad(d.getMonth() + 1) + "-" + PX.pad(d.getDate()) +
+      "T" + PX.pad(d.getHours()) + ":" + PX.pad(d.getMinutes());
+  }
+
+  function fromLocalInput(value) {
+    if (!value) return 0;
+    var t = Date.parse(value);
+    return isNaN(t) ? 0 : Math.round(t / 1000);
+  }
+
+  function fieldRowHtml(field, index) {
+    var f = field || { label: "", type: "text", into: "", required: false };
+    var types = [["text", "单行文本"], ["textarea", "多行文本"], ["number", "数字"],
+                 ["select", "单选"], ["date", "日期"]];
+    var intos = [["", "只留在本次报名"], ["person.dept", "写入院系"], ["person.grp", "写入班级"],
+                 ["roster.tag", "写成名单分组"], ["roster.note", "写成名单备注"]];
+    return '<div class="prize-row field-row" data-fi="' + index + '">' +
+      '<input class="f-label" type="text" maxlength="40" placeholder="字段名称" value="' +
+      PX.esc(f.label) + '">' +
+      '<select class="f-type">' + types.map(function (t) {
+        return '<option value="' + t[0] + '"' + (f.type === t[0] ? " selected" : "") +
+          ">" + t[1] + "</option>";
+      }).join("") + "</select>" +
+      '<select class="f-into">' + intos.map(function (t) {
+        return '<option value="' + t[0] + '"' + (f.into === t[0] ? " selected" : "") +
+          ">" + t[1] + "</option>";
+      }).join("") + "</select>" +
+      '<label class="f-req"><input type="checkbox" class="f-required"' +
+      (f.required ? " checked" : "") + "> 必填</label>" +
+      '<button class="btn sm danger" type="button" data-field-del="' + index + '">删除</button>' +
+      "</div>";
+  }
+
+  function drawFieldEditor() {
+    var box = $("#fieldEditor");
+    if (!box || !S.signup) return;
+    var fields = S.signup.fields || [];
+    box.innerHTML = fields.length
+      ? fields.map(fieldRowHtml).join("")
+      : '<p class="hint">还没有自定义字段</p>';
+  }
+
+  function drawSignup() {
+    var r = S.signup;
+    var head = $("#signupTitle");
+    if (!r) {
+      if (head) head.textContent = "报名";
+      return;
+    }
+    head.textContent = r.title;
+    $("#signupSub").textContent = r.statusLabel + " · 已报 " + r.entries +
+      (r.capacity ? " / " + r.capacity : "") + " 人 · 写入名单 " + (r.rosterName || "—") +
+      (r.filterRosterName ? " · 限 " + r.filterRosterName + " 内成员" : "");
+    document.title = r.title + " · CAEventManager";
+    $("#signupUrl").value = r.url || "";
+    $("#signupOpenBtn").setAttribute("href", r.url || "#");
+    $("#signupName").value = r.title || "";
+    $("#signupNote").value = r.note || "";
+    $("#signupState").value = r.state || "open";
+    $("#signupOpens").value = toLocalInput(r.opensAt);
+    $("#signupCloses").value = toLocalInput(r.closesAt);
+    $("#signupCap").value = r.capacity || 0;
+    $("#signupDedup").value = r.dedup || "skip";
+    $("#signupEntryCount").textContent = S.signupEntryTotal === null
+      ? "" : "共 " + S.signupEntryTotal + " 条";
+    drawFieldEditor();
+    drawSignupEntries();
+  }
+
+  function drawSignupEntries() {
+    var body = $("#signupEntryTable tbody");
+    if (!body || !S.signup) return;
+    var fields = S.signup.fields || [];
+    var rows = S.signupEntries || [];
+    body.innerHTML = rows.length ? rows.map(function (e) {
+      var extra = fields.map(function (f) {
+        var value = (e.answers || {})[f.key] || "";
+        return value ? f.label + "：" + value : "";
+      }).filter(Boolean).join(" · ");
+      return "<tr>" +
+        '<td class="mono">' + PX.esc(e.sid) + "</td>" +
+        "<td><b>" + PX.esc(e.name) + "</b></td>" +
+        "<td>" + PX.esc(e.dept || "—") + "</td>" +
+        "<td>" + PX.esc(e.grp || "—") + "</td>" +
+        '<td class="mono">' + PX.whenExact(e.ts) + "</td>" +
+        '<td class="wrap">' + (extra ? PX.esc(extra) : "—") + "</td></tr>";
+    }).join("") : emptyRow(6, S.signupEntryTotal === 0 ? "还没有人报名" : "没有匹配的记录");
+    var more = $("#signupEntryMore");
+    if (more) {
+      var left = (S.signupEntryTotal === null) ? 0 : S.signupEntryTotal - rows.length;
+      more.hidden = left <= 0;
+      more.textContent = left > 0 ? "再显示 " + Math.min(SIGNUP_ENTRY_PAGE, left) + " 条" : "";
+    }
+    var count = $("#signupEntryCount");
+    if (count) {
+      count.textContent = S.signupEntryTotal === null ? "" : "共 " + S.signupEntryTotal + " 条";
+    }
+  }
+
+  function collectFields() {
+    var rows = $$("#fieldEditor .field-row");
+    return rows.map(function (row) {
+      return {
+        label: $(".f-label", row).value.trim(),
+        type: $(".f-type", row).value,
+        into: $(".f-into", row).value,
+        required: $(".f-required", row).checked
+      };
+    }).filter(function (f) { return f.label; });
+  }
+
+  function saveSignup() {
+    if (!S.signup) return;
+    var body = {
+      id: S.signup.id,
+      title: $("#signupName").value.trim(),
+      note: $("#signupNote").value.trim(),
+      state: $("#signupState").value,
+      opens_at: fromLocalInput($("#signupOpens").value),
+      closes_at: fromLocalInput($("#signupCloses").value),
+      capacity: Number($("#signupCap").value) || 0,
+      dedup: $("#signupDedup").value,
+      fields: collectFields()
+    };
+    PX.api("/signup/update", { method: "POST", body: body })
+      .then(function () {
+        PX.toast("已保存");
+        return loadSignup(S.signup.id).then(drawSignup);
+      })
+      .catch(function (e) { PX.toast(PX.esc(e.message), true); });
+  }
+
+  function signupDialog() {
+    var options = (S.rosters || []).map(function (r) {
+      return '<option value="' + r.id + '">' + PX.esc(r.name) + "</option>";
+    }).join("");
+    openOverlay("signup", "创建报名",
+      '<div class="field"><label for="signupNewName">名称</label>' +
+      '<input id="signupNewName" type="text" maxlength="60" ' +
+      'placeholder="例如 秋日祭现场报名"></div>' +
+      '<div class="field"><label for="signupNewRoster">写入哪份名单</label>' +
+      '<select id="signupNewRoster">' + options + "</select>" +
+      '<p class="hint">报名成功的人直接进入这份名单</p></div>' +
+      '<div class="field"><label for="signupNewFilter">限制范围</label>' +
+      '<select id="signupNewFilter"><option value="0">不限制，任何人可报名</option>' +
+      options + "</select>" +
+      '<p class="hint">选定名单后，只有该名单内的成员可以报名，学号与姓名需与记录一致</p></div>' +
+      '<div class="row" style="margin-top:18px;justify-content:flex-end">' +
+      '<button class="btn" type="button" data-close-overlay="1">取消</button>' +
+      '<button class="btn primary" type="button" id="signupNewGo">创建</button></div>');
+    $("#signupNewName").focus();
+    $("#signupNewGo").addEventListener("click", function () {
+      var title = $("#signupNewName").value.trim();
+      if (!title) { PX.toast("请填写报名名称", true); return; }
+      PX.api("/signup/create", {
+        method: "POST",
+        body: {
+          title: title,
+          roster_id: Number($("#signupNewRoster").value) || 0,
+          filter_roster_id: Number($("#signupNewFilter").value) || 0
+        }
+      }).then(function (d) {
+        closeOverlay();
+        PX.toast("已创建报名");
+        location.hash = "#/signup/" + d.id;
+      }).catch(function (e) { PX.toast(PX.esc(e.message), true); });
+    });
+  }
+
   /* ------------------------------------------------------------------ 写入审批 --- */
   /* 一个统一入口：别人申请写你的名单，都在这里。普通账号也用得上，所以它和
    * 超管那份「活跃审批」是两条独立的路由，鉴权各自管各自的。
@@ -1328,6 +1594,10 @@
         S.rosterId = Number(tail) || 0;
         return head;
       }
+      if (head === "signup" && ROUTES[head]) {
+        S.signupId = Number(tail) || 0;
+        return head;
+      }
     }
     return null;
   }
@@ -1403,6 +1673,18 @@
       S.rosterScope = S.rosterScope || "joined";
       loadRosters(false).then(drawRosters);
     }
+    if (wanted === "signups") {
+      loadSignups(false).then(drawSignups);
+    }
+    if (wanted === "signup") {
+      if (!S.signupId) {
+        location.hash = "#/signups";
+        return;
+      }
+      loadSignup(S.signupId)
+        .then(function () { return loadSignupEntries(false); })
+        .then(drawSignup);
+    }
     if (wanted === "write-approvals") {
       S.backTo = hashQuery().back || null;
       loadApprovals().then(drawApprovals);
@@ -1427,6 +1709,8 @@
       case "events": return drawEvents();
       case "rosters": return drawRosters();
       case "roster": return drawRoster();
+      case "signups": return drawSignups();
+      case "signup": return drawSignup();
       case "write-approvals": return drawApprovals();
       case "templates": return drawTemplates();
       case "new-event": return drawNewEvent();
@@ -3055,6 +3339,65 @@
     if (!btn) return;
     location.hash = "#/roster/" + btn.getAttribute("data-open-roster");
   });
+  /* ---- 报名 ---- */
+  $("#signupNewBtn").addEventListener("click", function () {
+    if (!(S.rosters || []).length) {
+      loadRosters(false).then(function () { signupDialog(); });
+      return;
+    }
+    signupDialog();
+  });
+  $("#signupTable").addEventListener("click", function (e) {
+    var btn = e.target.closest ? e.target.closest("[data-open-signup]") : null;
+    if (!btn) return;
+    location.hash = "#/signup/" + btn.getAttribute("data-open-signup");
+  });
+  $("#signupMore").addEventListener("click", function () {
+    loadSignups(true).then(drawSignups);
+  });
+  $("#signupSaveBtn").addEventListener("click", saveSignup);
+  $("#signupCopyBtn").addEventListener("click", function () {
+    var box = $("#signupUrl");
+    box.select();
+    try {
+      document.execCommand("copy");
+      PX.toast("链接已复制");
+    } catch (e) {
+      PX.toast("复制失败，请手动选择", true);
+    }
+  });
+  $("#signupExportBtn").addEventListener("click", function () {
+    if (!S.signup) return;
+    location.href = PX.PREFIX + "/api/panel/signup/export.csv?id=" + S.signup.id;
+  });
+  $("#signupEntryMore").addEventListener("click", function () {
+    loadSignupEntries(true).then(drawSignupEntries);
+  });
+  $("#fieldAddBtn").addEventListener("click", function () {
+    if (!S.signup) return;
+    var fields = collectFields().concat([{ label: "", type: "text", into: "", required: false }]);
+    S.signup.fields = fields;
+    drawFieldEditor();
+    var inputs = $$("#fieldEditor .f-label");
+    if (inputs.length) inputs[inputs.length - 1].focus();
+  });
+  $("#fieldEditor").addEventListener("click", function (e) {
+    var btn = e.target.closest ? e.target.closest("[data-field-del]") : null;
+    if (!btn) return;
+    var kept = collectFields();
+    kept.splice(Number(btn.getAttribute("data-field-del")), 1);
+    S.signup.fields = kept;
+    drawFieldEditor();
+  });
+  bindLiveSearch("#signupSearch", "#signupSearchClear", function (value) {
+    S.signupFilter = value;
+    loadSignups(false).then(drawSignups);
+  });
+  bindLiveSearch("#signupEntrySearch", "#signupEntrySearchClear", function (value) {
+    S.signupEntryFilter = value;
+    loadSignupEntries(false).then(drawSignupEntries);
+  });
+
   $("#approvalsTable").addEventListener("click", function (e) {
     var t = e.target.closest ? e.target.closest("[data-approve],[data-reject]") : null;
     if (!t) return;

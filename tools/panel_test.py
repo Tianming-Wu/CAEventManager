@@ -11,6 +11,7 @@ import json
 import os
 import socket
 import sys
+import time
 import urllib.error
 import urllib.request
 
@@ -888,6 +889,118 @@ def main():
     left = [r for r in allseen["rosters"] if r["id"] == roster_id][0]
     check("an admin's view of someone else's roster is read-only",
           left["editable"] is False, left)
+
+    print("== 报名：公开页与提交 ==")
+    made = post(owner, "/api/panel/signup/create",
+                {"title": "秋日祭现场报名", "roster_id": roster_id,
+                 "capacity": 2,
+                 "fields": [{"label": "是否住宿", "type": "select",
+                             "options": ["住", "不住"], "required": True,
+                             "into": "roster.note"},
+                            {"label": "院系补充", "type": "text",
+                             "into": "person.dept"}]})
+    signup_id = (made or {}).get("id")
+    check("报名 can be created", bool(signup_id), made)
+    detail = call(owner, "/api/panel/signup?id=%d" % signup_id)["signup"]
+    check("报名 points at its roster and link", roster_id == detail["rosterId"]
+          and "/join/" in detail["url"], detail.get("url"))
+    check("报名 is open from the start", detail["status"] == "open", detail["status"])
+    token = detail["token"]
+
+    anon3 = urllib.request.build_opener(
+        urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+    page = anon3.open(ROOT + "/join/" + token, timeout=20)
+    body = page.read()
+    check("the public page needs no session",
+          page.status == 200 and "提交报名".encode() in body or "报名".encode() in body)
+    check("it redirects to a directory address",
+          page.geturl().endswith("/"), page.geturl())
+    state = json.loads(anon3.open(ROOT + "/join/" + token + "/api/state",
+                                  timeout=20).read())
+    check("the public state carries the fields",
+          [f["label"] for f in state["signup"]["fields"]] == ["是否住宿", "院系补充"], state)
+    check("an unrestricted 报名 says so", state["limited"] is False, state)
+
+    def submit(body):
+        req = urllib.request.Request(
+            ROOT + "/join/" + token + "/api/submit",
+            data=json.dumps(body).encode(),
+            headers={"Content-Type": "application/json",
+                     "X-Requested-With": "signup"}, method="POST")
+        try:
+            with anon3.open(req, timeout=20) as res:
+                return res.status, json.loads(res.read())
+        except urllib.error.HTTPError as exc:
+            return exc.code, json.loads(exc.read())
+
+    code, res = submit({"sid": "20240201", "name": "新同学", "dept": "外语学院",
+                        "answers": {"f1": "住", "f2": "英语系"}})
+    check("a submission is accepted", code == 200 and res["ok"], (code, res))
+    entries = call(owner, "/api/panel/signup/entries?id=%d" % signup_id)
+    check("the submission is recorded", entries["total"] == 1, entries)
+    row = entries["entries"][0]
+    check("the answers are kept per submission",
+          row["answers"] == {"f1": "住", "f2": "英语系"}, row["answers"])
+    member = [e for e in call(owner, "/api/panel/roster/entries?id=%d" % roster_id)["entries"]
+              if e["sid"] == "20240201"]
+    check("the person lands on the target roster", bool(member), member)
+    check("a field marked 写成名单备注 arrives there",
+          member and member[0]["note"] == "住", member)
+    check("a field marked 写入院系 arrives there",
+          member and member[0]["dept"] == "英语系", member)
+
+    code, res = submit({"sid": "20240201", "name": "新同学",
+                        "answers": {"f1": "不住", "f2": ""}})
+    check("a second submission is recognised as a duplicate",
+          code == 200 and res["duplicate"] is True, (code, res))
+    code, res = submit({"sid": "20240202", "name": "另一个人",
+                        "answers": {"f1": "住"}})
+    check("a second person is accepted", code == 200 and res["count"] == 2, (code, res))
+    code, res = submit({"sid": "20240203", "name": "第三个人",
+                        "answers": {"f1": "住"}})
+    check("the capacity stops further submissions",
+          code == 409 and "名额" in res.get("error", ""), (code, res))
+    code, res = submit({"sid": "20240204", "name": "没填必填项"})
+    check("a required field is enforced",
+          code == 409 or code == 400, (code, res))
+
+    sheet = call(owner, "/api/panel/signup/export.csv?id=%d" % signup_id)
+    check("报名 exports with its own columns",
+          isinstance(sheet, bytes) and "是否住宿".encode() in sheet, (sheet or b"")[:40])
+
+    print("== 报名：限制会员 ==")
+    post(owner, "/api/panel/signup/update",
+         {"id": signup_id, "capacity": 0, "filter_roster_id": roster_id})
+    code, res = submit({"sid": "20240209", "name": "名单外的人",
+                        "answers": {"f1": "住"}})
+    check("someone outside the roster is refused",
+          code == 403 and "范围" in res.get("error", ""), (code, res))
+    code, res = submit({"sid": "20240101", "name": "写错的名字",
+                        "answers": {"f1": "住"}})
+    check("a mismatched name is refused",
+          code == 403 and "不一致" in res.get("error", ""), (code, res))
+    code, res = submit({"sid": "20240101", "name": "高勇",
+                        "answers": {"f1": "住"}})
+    check("a member of that roster gets in", code == 200, (code, res))
+
+    print("== 报名：时间窗与关闭 ==")
+    future = time.time() + 3600
+    post(owner, "/api/panel/signup/update",
+         {"id": signup_id, "filter_roster_id": 0, "opens_at": future})
+    code, res = submit({"sid": "20240210", "name": "太早了", "answers": {"f1": "住"}})
+    check("before the start it refuses",
+          code == 409 and "尚未开始" in res.get("error", ""), (code, res))
+    post(owner, "/api/panel/signup/update",
+         {"id": signup_id, "opens_at": 0, "closes_at": time.time() - 10})
+    code, res = submit({"sid": "20240210", "name": "太晚了", "answers": {"f1": "住"}})
+    check("after the deadline it refuses",
+          code == 409 and "结束" in res.get("error", ""), (code, res))
+    post(owner, "/api/panel/signup/update", {"id": signup_id, "closes_at": 0})
+    post(owner, "/api/panel/signup/update", {"id": signup_id, "state": "closed"})
+    code, res = submit({"sid": "20240210", "name": "关了", "answers": {"f1": "住"}})
+    check("a closed 报名 refuses",
+          code == 409 and "关闭" in res.get("error", ""), (code, res))
+    post(owner, "/api/panel/signup/update", {"id": signup_id, "state": "open"})
 
     print("== event pages still reachable ==")
     token = events[0]["id"]

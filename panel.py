@@ -767,6 +767,17 @@ def event_seq(token):
     return row["seq"] if row else None
 
 
+JOIN_SEGMENT = "join"
+
+
+def _join_index(parts):
+    """The token index when this path is a 报名 page (``/join/<token>/...``)."""
+    for i, seg in enumerate(parts):
+        if seg == JOIN_SEGMENT and i + 1 < len(parts) and parts[i + 1]:
+            return i + 1
+    return None
+
+
 def classify(raw_path, tokens):
     """Decide which family a request belongs to.
 
@@ -782,6 +793,10 @@ def classify(raw_path, tokens):
         if seg and seg in tokens:
             idx = parts.index(seg)
             return "event", "/" + "/".join(parts[idx + 1:]), seg
+    # 报名页是公开的，地址里带自己的 token，和活动 token 同一层但不共用
+    idx = _join_index(parts)
+    if idx is not None:
+        return "join", "/" + "/".join(parts[idx + 1:]), parts[idx]
     if _is_panel_route(raw_path):
         return "panel", raw_path, None
     for i in range(1, len(parts)):

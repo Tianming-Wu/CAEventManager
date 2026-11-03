@@ -372,6 +372,7 @@ def routes_page(page):
     print("== every route renders its own page ==")
     for route, expect in [
             ("overview", "总览"), ("events", "我的活动"), ("rosters", "我的名单"),
+            ("signups", "我的报名"), ("write-approvals", "写入审批"),
             ("templates", "预设管理"),
             ("users", "用户管理"), ("all-events", "活动管理"),
             ("approval-users", "注册申请"), ("approval-events", "活动申请"),

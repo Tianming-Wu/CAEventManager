@@ -3089,6 +3089,9 @@
     var apply = function () {
       root.setAttribute("data-theme", next);
       root.setAttribute("data-theme-pref", pref);
+      // 选中态要和主题在同一次 DOM 变更里翻过来：startViewTransition 的回调是异步的，
+      // 在外面读完再画就会画到旧值上，看起来要再点一次才生效
+      drawAppearance();
     };
 
     // Cross-fade two snapshots rather than animating each property: measured
@@ -3097,13 +3100,12 @@
     if (changed && !reducedMotion() && document.startViewTransition) {
       try {
         document.startViewTransition(apply);
+        return;
       } catch (err) {
-        apply();
+        // fall through to the direct path
       }
-    } else {
-      apply();
     }
-    drawAppearance();
+    apply();
   }
 
   function reducedMotion() {

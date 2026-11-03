@@ -409,6 +409,31 @@ def signup_page(page, browser):
     check("two independent columns", layout and layout["cols"] == 2, layout)
     check("the two columns end on one line",
           layout and layout["gap"] <= 2, layout)
+    rhythm = page.evaluate(
+        """() => {
+        const pageEl = document.querySelector('.page[data-page="signup"]');
+        const cols = pageEl.querySelector('.cols-2');
+        const colEls = [...cols.querySelectorAll(':scope > .col')];
+        const left = [...colEls[0].querySelectorAll(':scope > .card')];
+        const right = [...colEls[1].querySelectorAll(':scope > .card')];
+        const cards = [...pageEl.querySelectorAll(':scope > .card')];
+        const link = cards[0].getBoundingClientRect();
+        const collect = cards.find(c => c.querySelector('h2') &&
+          c.querySelector('h2').textContent === '收集字段').getBoundingClientRect();
+        const colTop = cols.getBoundingClientRect().top;
+        const colBottom = Math.max(...colEls.map(c =>
+          c.querySelector(':scope > .card:last-child').getBoundingClientRect().bottom));
+        return [
+          Math.round(colTop - link.bottom),
+          Math.round(left[1].getBoundingClientRect().top -
+                     left[0].getBoundingClientRect().bottom),
+          Math.round(right[0].getBoundingClientRect().left -
+                     left[0].getBoundingClientRect().right),
+          Math.round(collect.top - colBottom)
+        ];
+      }""")
+    check("纵向与横向的卡片间距一致", len(set(rhythm)) == 1, rhythm)
+    check("两列与下面整宽卡片之间留出了间距", rhythm[3] > 0, rhythm)
     check("the短 column starts the next card right under itself", layout and (
         # 左列第二张卡片紧跟在第一张后面，而不是等到右列第一张结束
         [c for c in layout["cards"] if c["id"] == "signupTimeCard"][0]["top"]
@@ -1220,6 +1245,10 @@ def theme_page(page):
     check("the switch cross-fades instead of cutting",
           page.evaluate("() => window.__vt") == 1,
           page.evaluate("() => window.__vt"))
+    # 选中态必须和主题一起翻过来，不能等第二次点击
+    chosen = page.eval_on_selector(
+        '#themeSeg button[aria-checked="true"]', "el => el.dataset.themePref")
+    check("the chosen theme is marked at once", chosen == "dark", chosen)
     page.wait_for_timeout(400)
     check("dark applied",
           page.evaluate("() => document.documentElement.dataset.theme") == "dark")

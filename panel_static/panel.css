@@ -1616,9 +1616,9 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   display: flex;
   align-items: center;
   justify-content: center;
-  /* 白底就是框：不描边，码四周留白由生成的 quiet zone 提供 */
+  /* 圆角框留着，只把深色下那条近黑的描边换成一根浅灰：白底上两个主题都成立 */
   background: #fff;
-  border: 0;
+  border: 1px solid rgba(28, 25, 23, .12);
   border-radius: var(--radius-sm);
   padding: 6px;
 }

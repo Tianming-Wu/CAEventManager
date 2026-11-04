@@ -1254,8 +1254,7 @@
       var qr = qrcode(0, "M");
       qr.addData(url);
       qr.make();
-      // margin 的单位是像素而不是模块：留一格 = cellSize
-      holder.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 4, scalable: true });
+      holder.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 1, scalable: true });
     } catch (e) {
       holder.innerHTML = '<span class="hint">二维码生成失败</span>';
     }

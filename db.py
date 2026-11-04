@@ -136,6 +136,8 @@ CREATE TABLE IF NOT EXISTS students (
     grp         TEXT,
     note        TEXT,
     role        TEXT    NOT NULL DEFAULT 'participant',  -- participant | staff | volunteer
+    origin      TEXT    NOT NULL DEFAULT 'manual',       -- manual | import | roster | signup
+    detached_at REAL    NOT NULL DEFAULT 0,              -- 绑定的名单里已经没有这个人
     created_at  REAL    NOT NULL
 );
 
@@ -259,6 +261,14 @@ def init_db():
         if "batch" not in cols:
             conn.execute("ALTER TABLE draws ADD COLUMN batch TEXT")
         scols = {row["name"] for row in conn.execute("PRAGMA table_info(students)")}
+        if "origin" not in scols:
+            conn.execute(
+                "ALTER TABLE students ADD COLUMN origin TEXT NOT NULL DEFAULT 'manual'"
+            )
+        if "detached_at" not in scols:
+            conn.execute(
+                "ALTER TABLE students ADD COLUMN detached_at REAL NOT NULL DEFAULT 0"
+            )
         if "role" not in scols:
             conn.execute(
                 "ALTER TABLE students ADD COLUMN role TEXT NOT NULL DEFAULT 'participant'"

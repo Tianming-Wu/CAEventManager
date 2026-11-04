@@ -2674,10 +2674,21 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/admin/state" and method == "GET":
             cfg = db.all_config(conn)
             students = model.snapshot(conn, cfg)
+            roster_id = int(cfg.get("roster_id") or 0)
+            roster_name = ""
+            if roster_id:
+                row = lists.roster(lists.connect(), roster_id)
+                roster_name = row["name"] if row else ""
+            detached = conn.execute(
+                "SELECT COUNT(*) AS n FROM students WHERE detached_at<>0"
+            ).fetchone()["n"]
             return self._json(
                 {
                     "ok": True,
                     "config": db.config_view(conn),
+                    "roster": {"id": roster_id, "name": roster_name,
+                               "syncedAt": cfg.get("roster_synced_at") or 0,
+                               "detached": int(detached or 0)},
                     "publicBaseUrl": public_base_url(conn),
                     "stats": model.stats(conn, cfg, students),
                     "prizes": model.prize_status(conn, cfg),
@@ -2935,6 +2946,62 @@ class Handler(BaseHTTPRequestHandler):
             with db.tx(conn):
                 res = model.reset_tickets(conn)
                 me.touch_unlock()
+            return self._json({"ok": True, "result": res})
+
+        if path == "/api/admin/rosters" and method == "GET":
+            # 活动能绑哪些名单：只看自己看得见、并且有写入权的
+            lx = lists.connect()
+            mine = lists.list_rosters(lx, me.acc, "", "all", 0, 200)
+            out = []
+            for r in mine["rosters"]:
+                if not r["editable"]:
+                    continue
+                counts = lists.roster_counts(lx, [r["id"]])
+                out.append({"id": r["id"], "name": r["name"],
+                            "members": counts.get(r["id"], 0)})
+            bound = db.get_config(conn, "roster_id", 0) or 0
+            return self._json({"ok": True, "rosters": out, "bound": int(bound)})
+
+        if path == "/api/admin/roster_bind" and method == "POST":
+            need_owner()
+            data = self._body()
+            rid = int(data.get("roster_id") or 0)
+            if rid:
+                # 绑定之前确认自己有这份名单的写入权，否则同步会写不进来
+                lx = lists.connect()
+                row = lists.roster(lx, rid)
+                if row is None:
+                    raise model.ApiError("名单不存在", 404)
+                if not lists.writable(lx, me.acc, "roster", row):
+                    raise model.ApiError("对该名单没有写入权限", 403)
+            with db.tx(conn):
+                db.set_config_raw(conn, "roster_id", rid)
+                db.audit(conn, "roster_bind", detail=str(rid), actor=me.name)
+            return self._json({"ok": True, "rosterId": rid})
+
+        if path == "/api/admin/roster_sync" and method == "POST":
+            need_owner()
+            rid = int(db.get_config(conn, "roster_id", 0) or 0)
+            if not rid:
+                raise model.ApiError("这场活动还没有绑定名单", 409)
+            lx = lists.connect()
+            row = lists.roster(lx, rid)
+            if row is None:
+                raise model.ApiError("绑定的名单已经不存在", 404)
+            if not lists.writable(lx, me.acc, "roster", row):
+                raise model.ApiError("对该名单没有写入权限", 403)
+            entries = [
+                (r["sid"], r["name"], r["dept"], r["grp"])
+                for r in lx.execute(
+                    "SELECT p.sid, p.name, p.dept, p.grp FROM roster_entries e"
+                    " JOIN people p ON p.id = e.person_id"
+                    " WHERE e.roster_id=? AND e.state='active' ORDER BY p.sid", (rid,))
+            ]
+            with db.tx(conn):
+                res = model.sync_from_roster(conn, entries, actor=me.name)
+                db.set_config_raw(conn, "roster_synced_at", time.time())
+            res["rosterId"] = rid
+            res["rosterName"] = row["name"]
             return self._json({"ok": True, "result": res})
 
         if path == "/api/admin/draw" and method == "POST":

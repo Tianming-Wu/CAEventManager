@@ -1044,6 +1044,54 @@ def main():
           code == 409 and "关闭" in res.get("error", ""), (code, res))
     post(owner, "/api/panel/signup/update", {"id": signup_id, "state": "open"})
 
+    print("== 活动绑定名单与同步 ==")
+    club = post(owner, "/api/panel/roster/import",
+                {"name": "活动用名单",
+                 "text": "学号,姓名,院系,班级\n20250001,甲一,计算机学院,计科2501\n"
+                         "20250002,乙二,软件学院,软工2501\n"
+                         "20250003,丙三,计算机学院,计科2502\n"})
+    club_id = (club or {}).get("id")
+    check("a roster to bind exists", bool(club_id), club)
+    token = events[0]["id"]
+    base = "/%s/api/admin" % token
+    listed = call(owner, base + "/rosters", marker="lottery")
+    check("the console lists the rosters this account may write",
+          any(r["id"] == club_id for r in listed["rosters"]), listed)
+    post(owner, base + "/roster_bind", {"roster_id": club_id}, marker="lottery")
+    state = call(owner, base + "/state", marker="lottery")
+    check("the binding is stored", state["roster"]["id"] == club_id, state.get("roster"))
+    synced = post(owner, base + "/roster_sync", {}, marker="lottery")
+    check("the first sync brings everybody in",
+          synced and synced["result"]["added"] == 3, synced)
+    state = call(owner, base + "/state", marker="lottery")
+    sids = {x["sid"] for x in state["students"]}
+    check("the people are on the activity roster",
+          {"20250001", "20250002", "20250003"} <= sids, sorted(sids)[:6])
+    check("the sync is remembered", bool(state["roster"]["syncedAt"]))
+
+    again = post(owner, base + "/roster_sync", {}, marker="lottery")
+    check("a second sync changes nothing",
+          again["result"]["added"] == 0 and again["result"]["same"] == 3, again["result"])
+
+    target = [e for e in call(owner, "/api/panel/roster/entries?id=%d" % club_id)["entries"]
+              if e["sid"] == "20250003"][0]
+    post(owner, "/api/panel/roster/entry/drop",
+         {"id": club_id, "personId": target["personId"]})
+    third = post(owner, base + "/roster_sync", {}, marker="lottery")
+    check("someone who left the roster is reported, not deleted",
+          [m["sid"] for m in third["result"]["missing"]] == ["20250003"], third["result"])
+    state = call(owner, base + "/state", marker="lottery")
+    check("but is still on the activity roster",
+          "20250003" in {x["sid"] for x in state["students"]})
+    check("and is counted as detached", state["roster"]["detached"] == 1,
+          state["roster"])
+
+    post(owner, base + "/roster_bind", {"roster_id": 0}, marker="lottery")
+    state = call(owner, base + "/state", marker="lottery")
+    check("the binding can be cleared", state["roster"]["id"] == 0, state["roster"])
+    post(owner, base + "/roster_sync", {}, expect=409, marker="lottery")
+    check("syncing without a binding is refused", True)
+
     print("== event pages still reachable ==")
     token = events[0]["id"]
     board = call(anon, "/%s/api/board" % token)

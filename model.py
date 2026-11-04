@@ -1180,3 +1180,68 @@ def last_batch(conn):
         "mode": last["mode"],
         "winners": rows,
     }
+
+
+def sync_from_roster(conn, entries, actor="admin"):
+    """并入一份名单：按学号增量更新，只增不删。
+
+    ``entries`` 是 [(学号, 姓名, 院系, 班级), ...]，由调用方从名单库里读出来。
+    已经在这场的名单里但**不在**这份名单里的人不会被删——他可能已经有奖票、有签到记录，
+    改成 detached_at 标记，界面单独列出来由人决定。
+    """
+    now = time.time()
+    if not entries:
+        raise ApiError("这份名单是空的", 409)
+    wanted = {}
+    for sid, name, dept, grp in entries:
+        sid = (sid or "").strip()
+        name = (name or "").strip()
+        if sid and name:
+            wanted[sid] = {"name": name, "dept": (dept or "").strip(),
+                           "grp": (grp or "").strip()}
+    if not wanted:
+        raise ApiError("这份名单里没有有效的学号与姓名", 409)
+
+    existing = {
+        row["sid"]: dict(row)
+        for row in conn.execute("SELECT * FROM students")
+    }
+    added = updated = restored = same = 0
+    for sid, item in wanted.items():
+        row = existing.get(sid)
+        grp = item["grp"] or item["dept"]
+        if row is None:
+            conn.execute(
+                "INSERT INTO students (sid, name, py, pyi, grp, note, role, origin,"
+                " created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                (sid, item["name"], *normalize_pinyin({"name": item["name"]}),
+                 grp, "", "participant", "roster", now),
+            )
+            added += 1
+            continue
+        changed = (row["name"] != item["name"] or (row["grp"] or "") != grp
+                   or row["detached_at"])
+        if not changed:
+            same += 1
+            continue
+        conn.execute(
+            "UPDATE students SET name=?, py=?, pyi=?, grp=?, detached_at=0 WHERE id=?",
+            (item["name"], *normalize_pinyin({"name": item["name"]}), grp, row["id"]),
+        )
+        if row["detached_at"]:
+            restored += 1
+        else:
+            updated += 1
+
+    missing = []
+    for sid, row in existing.items():
+        if sid in wanted or row["detached_at"]:
+            continue
+        conn.execute("UPDATE students SET detached_at=? WHERE id=?", (now, row["id"]))
+        missing.append({"sid": sid, "name": row["name"]})
+
+    db.audit(conn, "roster_sync", detail=
+             "新增 %d 人，更新 %d 人，恢复 %d 人，未变化 %d 人，已不在名单 %d 人"
+             % (added, updated, restored, same, len(missing)), actor=actor)
+    return {"added": added, "updated": updated, "restored": restored,
+            "same": same, "missing": sorted(missing, key=lambda x: x["sid"])}

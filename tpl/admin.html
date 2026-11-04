@@ -387,6 +387,23 @@
     </div>
 
     <div class="panel">
+      <h2>名单来源</h2>
+      <p class="panel-hint">
+        绑定一份名单后，名单里的人在同步时并入本场活动的名单；只增不删，
+        名单里已经没有的人会标成「已不在名单」，由人决定是否移出。
+      </p>
+      <div class="field" style="max-width:420px">
+        <label for="rosterPick">绑定的名单</label>
+        <select id="rosterPick"><option value="0">不绑定</option></select>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button class="btn primary" id="rosterSyncBtn" type="button">立即同步</button>
+        <span class="note" id="rosterNote"></span>
+      </div>
+      <dl class="kv" id="rosterInfo" style="margin-top:14px"></dl>
+    </div>
+
+    <div class="panel">
       <h2>活动</h2>
       <div class="field" style="max-width:420px">
         <label for="eventName">名称</label>

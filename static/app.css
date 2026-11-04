@@ -393,12 +393,13 @@ table.tbl th.sorted[data-dir="desc"]::after { content: " \25BC"; }
   bottom: 24px;
   transform: translateX(-50%) translateY(140%);
   background: var(--surface);
-  border: 1px solid var(--line);
+  border: 1px solid var(--accent-line);
   border-left: 3px solid var(--accent);
-  box-shadow: var(--shadow);
+  box-shadow: 0 12px 28px rgba(40, 28, 12, .18);
   padding: 10px 16px;
   border-radius: var(--radius-sm);
   font-size: .9rem;
+  color: var(--text);
   z-index: 100;
   max-width: min(90vw, 620px);
   transition: transform .2s ease, opacity .16s;
@@ -406,7 +407,7 @@ table.tbl th.sorted[data-dir="desc"]::after { content: " \25BC"; }
   pointer-events: none;
 }
 .toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
-.toast.bad { border-left-color: var(--danger); }
+.toast.bad { border-left-color: var(--danger); border-color: var(--danger-line); }
 .toast b { color: var(--accent-strong); }
 
 .modal-back {

@@ -681,6 +681,41 @@ def main():
         page.wait_for_timeout(300)
         shot(page, "20-settings", full=True)
 
+        # 名单来源：绑定一份名单，同步一次，人应该出现在这场的名单里
+        check("the settings page offers a roster to bind",
+              page.locator("#rosterPick").count() == 1)
+        bound = page.evaluate("""async () => {
+          const post = (p, b) => fetch(p, {method: 'POST',
+            headers: {'X-Requested-With': 'CAEventManager',
+                      'Content-Type': 'application/json'},
+            body: JSON.stringify(b)}).then(r => r.json());
+          const made = await post('/api/panel/roster/create', {name: '活动绑定测试'});
+          await post('/api/panel/roster/import',
+                     {id: made.id, text: '学号,姓名\\n20260001,绑定甲\\n20260002,绑定乙\\n'});
+          const r = await fetch('api/admin/roster_bind', {method: 'POST',
+            headers: {'X-Requested-With': 'lottery', 'Content-Type': 'application/json'},
+            body: JSON.stringify({roster_id: made.id})}).then(x => x.json());
+          const s = await fetch('api/admin/roster_sync', {method: 'POST',
+            headers: {'X-Requested-With': 'lottery'}}).then(x => x.json());
+          return {id: made.id, bind: r, sync: s};
+        }""")
+        check("the binding and the sync go through",
+              bound and bound["bind"].get("ok") and
+              bound["sync"].get("result", {}).get("added") == 2, bound)
+        page.reload(wait_until="networkidle")
+        page.wait_for_selector('#tabs button[data-tab="roster"]', timeout=15000)
+        page.wait_for_timeout(900)
+        page.click('#tabs button[data-tab="roster"]')
+        page.wait_for_timeout(900)
+        table = page.inner_text("#rosterTable")
+        check("the synced people are on the activity roster",
+              "20260001" in table and "绑定甲" in table, table[:120])
+        page.click('#tabs button[data-tab="settings"]')
+        page.wait_for_timeout(1200)
+        info = page.inner_text("#rosterInfo")
+        check("the settings card names the bound roster",
+              "活动绑定测试" in info and "上次同步" in info, info)
+
         page.click('#tabs button[data-tab="log"]')
         page.wait_for_timeout(800)
         check("audit log filled", page.locator("#logTable tbody tr").count() > 5,

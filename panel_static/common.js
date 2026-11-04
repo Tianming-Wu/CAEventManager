@@ -149,19 +149,41 @@
     open();
   }
 
-  var toastEl = null, toastTimer = null;
-  function toast(msg, bad) {
-    if (!toastEl) {
-      toastEl = document.createElement("div");
-      toastEl.className = "toast";
-      document.body.appendChild(toastEl);
+  /* 通知从右上角落下：底部弹一条颜色接近页面的条，人一低头就错过了。
+     多条时叠成一列，点一下（或按 Esc）随身带走，错误留得久一点。 */
+  var toastStack = null;
+  function toastBox() {
+    if (!toastStack || !toastStack.isConnected) {
+      toastStack = document.createElement("div");
+      toastStack.className = "toast-stack";
+      toastStack.setAttribute("role", "status");
+      toastStack.setAttribute("aria-live", "polite");
+      document.body.appendChild(toastStack);
     }
-    toastEl.className = "toast" + (bad ? " bad" : "");
-    toastEl.innerHTML = msg;
-    void toastEl.offsetWidth;
-    toastEl.classList.add("show");
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(function () { toastEl.classList.remove("show"); }, 2600);
+    return toastStack;
+  }
+
+  function toast(msg, bad, ms) {
+    var stack = toastBox();
+    var el = document.createElement("div");
+    el.className = "toast" + (bad ? " bad" : "");
+    el.innerHTML =
+      '<span class="toast-mark" aria-hidden="true">' + (bad ? "!" : "✓") + "</span>" +
+      '<span class="toast-text">' + msg + "</span>" +
+      '<button class="toast-x" type="button" aria-label="关闭通知">×</button>';
+    stack.appendChild(el);
+    void el.offsetWidth;
+    el.classList.add("show");
+    var close = function () {
+      el.classList.remove("show");
+      setTimeout(function () {
+        if (el.parentNode) el.parentNode.removeChild(el);
+      }, 200);
+    };
+    el.querySelector(".toast-x").addEventListener("click", close);
+    setTimeout(close, ms || (bad ? 4200 : 2600));
+    // 只留最近四条，别把屏幕堆满
+    while (stack.children.length > 4) stack.removeChild(stack.firstChild);
   }
 
   window.PX = {

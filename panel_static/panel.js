@@ -81,6 +81,8 @@
     signupEntryTotal: null,
     signupEntryFilter: "",
     signupDirty: false,     // 表单被改过：后台刷新不要覆盖它
+    history: [],            // 表单快照栈：Ctrl+Z / Ctrl+Shift+Z
+    historyPos: -1,
     approvals: [],
     myAsks: [],
     approvalsCount: 0,
@@ -1135,6 +1137,8 @@
       .then(function (d) {
         S.signup = d.signup;
         S.signupDirty = false;
+        S.history = [];
+        S.historyPos = -1;
       })
       .catch(function (e) {
         PX.toast(PX.esc(e.message), true);
@@ -1171,10 +1175,40 @@
       "T" + PX.pad(d.getHours()) + ":" + PX.pad(d.getMinutes());
   }
 
-  function fromLocalInput(value) {
-    if (!value) return 0;
-    var t = Date.parse(value);
-    return isNaN(t) ? 0 : Math.round(t / 1000);
+  /* 时间与日期是两个文本框：原生控件的占位符跟着浏览器语言走，中英混排很怪，
+     所以显示交给我们自己的占位符，选择器由一个日历按钮调出来。 */
+  function parsePair(dateSel, timeSel) {
+    var date = ($(dateSel).value || "").trim();
+    if (!date) return { ts: 0 };
+    var m = date.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    if (!m) return { error: "日期请写成 yyyy-mm-dd" };
+    var time = ($(timeSel).value || "").trim() || "00:00";
+    var t = time.match(/^(\d{1,2}):(\d{2})$/);
+    if (!t) return { error: "时刻请写成 HH:MM" };
+    var stamp = Date.parse(m[1] + "-" + PX.pad(Number(m[2])) + "-" +
+                           PX.pad(Number(m[3])) + "T" +
+                           PX.pad(Number(t[1])) + ":" + t[2]);
+    if (isNaN(stamp)) return { error: "日期或时刻不合法" };
+    return { ts: Math.round(stamp / 1000) };
+  }
+
+  function pairValue(dateSel, timeSel) {
+    return parsePair(dateSel, timeSel).ts || 0;
+  }
+
+  function setPair(dateSel, timeSel, clearSel, ts) {
+    var full = toLocalInput(ts);
+    $(dateSel).value = full ? full.slice(0, 10) : "";
+    $(timeSel).value = full ? full.slice(11, 16) : "";
+    if (clearSel) $(clearSel).disabled = !full;
+  }
+
+  function clearPair(dateSel, timeSel, clearSel) {
+    $(dateSel).value = "";
+    $(timeSel).value = "";
+    if (clearSel) $(clearSel).disabled = true;
+    S.signupDirty = true;
+    pushHistory();
   }
 
   function fieldRowHtml(field, index) {
@@ -1308,8 +1342,8 @@
     // 时间：有任一端就当作"启用了时间限制"
     var hasTime = !!(r.opensAt || r.closesAt);
     $("#signupTimeOn").checked = hasTime;
-    $("#signupOpens").value = toLocalInput(r.opensAt);
-    $("#signupCloses").value = toLocalInput(r.closesAt);
+    setPair("#signupOpensDate", "#signupOpensTime", "#signupOpensClear", r.opensAt);
+    setPair("#signupClosesDate", "#signupClosesTime", "#signupClosesClear", r.closesAt);
     $("#signupCapOn").checked = !!r.capacity;
     $("#signupCap").value = r.capacity || 1;
     $("#signupSelfEdit").value = r.selfEdit || "off";
@@ -1325,6 +1359,7 @@
     drawFieldEditor();
     drawSignupEntries();
     drawThemePreview();
+    if (!S.signupDirty && !S.history.length) pushHistory();   // 基线：刚打开时的样子
   }
 
   function drawSignupEntries() {
@@ -1372,8 +1407,14 @@
   function saveSignup() {
     if (!S.signup) return;
     var timeOn = $("#signupTimeOn").checked;
-    var opens = timeOn ? fromLocalInput($("#signupOpens").value) : 0;
-    var closes = timeOn ? fromLocalInput($("#signupCloses").value) : 0;
+    var openPair = timeOn ? parsePair("#signupOpensDate", "#signupOpensTime") : { ts: 0 };
+    var closePair = timeOn ? parsePair("#signupClosesDate", "#signupClosesTime") : { ts: 0 };
+    if (openPair.error || closePair.error) {
+      PX.toast(openPair.error || closePair.error, true);
+      return;
+    }
+    var opens = openPair.ts || 0;
+    var closes = closePair.ts || 0;
     if (opens && closes && opens >= closes) {
       PX.toast("开始时间必须早于结束时间", true);
       return;
@@ -1439,6 +1480,85 @@
         location.hash = "#/signup/" + d.id;
       }).catch(function (e) { PX.toast(PX.esc(e.message), true); });
     });
+  }
+
+  /* ------------------------------------------------------------------ 撤销 --- */
+  /* 报名设置是一张表单：切换开关、选主题、加删字段这些动作浏览器不会替你撤销，
+   * 所以自己留一份快照栈。粒度是"一次改变"，不是每个按键；保存成功后清空。 */
+  var HISTORY_MAX = 40;
+
+  function signupFormState() {
+    if (!S.signup) return null;
+    return {
+      name: $("#signupName").value,
+      note: $("#signupNote").value,
+      state: $("#signupState").value,
+      theme: $("#signupTheme").value,
+      accent: $("#signupAccent").value,
+      timeOn: $("#signupTimeOn").checked,
+      opensDate: $("#signupOpensDate").value,
+      opensTime: $("#signupOpensTime").value,
+      closesDate: $("#signupClosesDate").value,
+      closesTime: $("#signupClosesTime").value,
+      capOn: $("#signupCapOn").checked,
+      cap: $("#signupCap").value,
+      selfEdit: $("#signupSelfEdit").value,
+      collectDept: $("#collectDept").checked,
+      collectGrp: $("#collectGrp").checked,
+      fields: collectFields()
+    };
+  }
+
+  function applySignupFormState(st) {
+    if (!st || !S.signup) return;
+    $("#signupName").value = st.name;
+    $("#signupNote").value = st.note;
+    $("#signupState").value = st.state;
+    $("#signupTheme").value = st.theme;
+    $("#signupAccent").value = st.accent;
+    $("#signupTimeOn").checked = st.timeOn;
+    $("#signupOpensDate").value = st.opensDate;
+    $("#signupOpensTime").value = st.opensTime;
+    $("#signupClosesDate").value = st.closesDate;
+    $("#signupClosesTime").value = st.closesTime;
+    $("#signupOpensClear").disabled = !(st.opensDate || st.opensTime);
+    $("#signupClosesClear").disabled = !(st.closesDate || st.closesTime);
+    $("#signupCapOn").checked = st.capOn;
+    $("#signupCap").value = st.cap;
+    $("#signupSelfEdit").value = st.selfEdit;
+    $("#collectDept").checked = st.collectDept;
+    $("#collectGrp").checked = st.collectGrp;
+    S.signup.fields = st.fields;
+    toggleCardState("#signupCapCard", !!st.capOn);
+    toggleCardState("#signupTimeCard", !!st.timeOn);
+    drawFieldEditor();
+    drawThemePreview();
+    S.signupDirty = true;
+  }
+
+  function pushHistory() {
+    var st = signupFormState();
+    if (!st) return;
+    var top = S.history[S.historyPos];
+    if (top && JSON.stringify(top) === JSON.stringify(st)) return;
+    S.history = S.history.slice(0, S.historyPos + 1);
+    S.history.push(st);
+    if (S.history.length > HISTORY_MAX) S.history.shift();
+    S.historyPos = S.history.length - 1;
+  }
+
+  function undoSignup() {
+    if (S.historyPos <= 0) return;
+    S.historyPos -= 1;
+    applySignupFormState(S.history[S.historyPos]);
+    PX.toast("已撤销");
+  }
+
+  function redoSignup() {
+    if (S.historyPos >= S.history.length - 1) return;
+    S.historyPos += 1;
+    applySignupFormState(S.history[S.historyPos]);
+    PX.toast("已恢复");
   }
 
   /* ------------------------------------------------------------------ 写入审批 --- */
@@ -3466,15 +3586,66 @@
   $("#signupMore").addEventListener("click", function () {
     loadSignups(true).then(drawSignups);
   });
-  (function bindSignupDirty() {
+  (function bindSignupForm() {
     var form = document.querySelector('.page[data-page="signup"]');
     if (!form) return;
-    ["input", "change"].forEach(function (evt) {
-      form.addEventListener(evt, function (e) {
-        if (e.target && e.target.tagName !== "BUTTON") S.signupDirty = true;
+    form.addEventListener("input", function (e) {
+      if (e.target && e.target.tagName !== "BUTTON") S.signupDirty = true;
+    });
+    // change 是"这次改完了"的信号，用它落一版快照
+    form.addEventListener("change", function (e) {
+      if (e.target && e.target.tagName !== "BUTTON") {
+        S.signupDirty = true;
+        pushHistory();
+      }
+    });
+    form.addEventListener("blur", function (e) {
+      var t = e.target;
+      if (t && (t.type === "text" || t.type === "number" || t.tagName === "TEXTAREA")) {
+        pushHistory();
+      }
+    }, true);
+  })();
+
+  function wirePicker(pickSel, dateSel, timeSel, clearSel) {
+    $(pickSel).addEventListener("click", function () {
+      var native = $(pickSel.replace("Pick", "DatePick"));
+      native.value = $(dateSel).value || "";
+      if (native.showPicker) {
+        try { native.showPicker(); return; } catch (e) { /* 老浏览器退回点击 */ }
+      }
+      native.click();
+    });
+    $(pickSel.replace("Pick", "DatePick")).addEventListener("change", function () {
+      if (this.value) {
+        $(dateSel).value = this.value;
+        if (!$(timeSel).value) $(timeSel).value = "00:00";
+        $(clearSel).disabled = false;
+        S.signupDirty = true;
+        pushHistory();
+      }
+    });
+  }
+  wirePicker("#signupOpensPick", "#signupOpensDate", "#signupOpensTime", "#signupOpensClear");
+  wirePicker("#signupClosesPick", "#signupClosesDate", "#signupClosesTime", "#signupClosesClear");
+
+  $("#signupOpensClear").addEventListener("click", function () {
+    clearPair("#signupOpensDate", "#signupOpensTime", "#signupOpensClear");
+    drawThemePreview();
+  });
+  $("#signupClosesClear").addEventListener("click", function () {
+    clearPair("#signupClosesDate", "#signupClosesTime", "#signupClosesClear");
+  });
+  // 清空按钮的状态跟着两个输入框走
+  ["#signupOpensDate", "#signupOpensTime", "#signupClosesDate", "#signupClosesTime"]
+    .forEach(function (sel) {
+      $(sel).addEventListener("input", function () {
+        $("#signupOpensClear").disabled =
+          !($("#signupOpensDate").value || $("#signupOpensTime").value);
+        $("#signupClosesClear").disabled =
+          !($("#signupClosesDate").value || $("#signupClosesTime").value);
       });
     });
-  })();
   $("#signupSaveBtn").addEventListener("click", saveSignup);
   $("#signupBack").addEventListener("click", function () {
     location.hash = "#/signups";
@@ -3675,6 +3846,41 @@
   });
 
   window.addEventListener("keydown", function (e) {
+    var onSignup = S.route === "signup";
+    var mod = e.ctrlKey || e.metaKey;
+    if (mod && !e.altKey) {
+      var key = (e.key || "").toLowerCase();
+      // Ctrl+S 默认会弹"保存网页"，换成保存这张表单
+      if (key === "s" && onSignup && S.signup) {
+        e.preventDefault();
+        saveSignup();
+        return;
+      }
+      // 撤销 / 恢复：光标在文本输入框里时交给浏览器（逐字撤销是它更熟的语义），
+      // 其余情况（刚拨过开关、刚选过下拉）撤销的是整张表单的状态
+      var typing = (function (el) {
+        if (!el) return false;
+        // 日期/时刻这两格是表单控件，不是随手的文字：撤销应该回退整张表单
+        if (el.classList && (el.classList.contains("dt-date") ||
+                             el.classList.contains("dt-time"))) return false;
+        var tag = (el.tagName || "").toLowerCase();
+        return tag === "textarea" ||
+          (tag === "input" && ["text", "number", "search", "email"].indexOf(el.type) >= 0);
+      })(document.activeElement);
+      if (onSignup && $("#overlay").hidden && !typing) {
+        if (key === "z") {
+          e.preventDefault();
+          if (e.shiftKey) redoSignup();
+          else undoSignup();
+          return;
+        }
+        if (key === "y") {
+          e.preventDefault();
+          redoSignup();
+          return;
+        }
+      }
+    }
     if (e.key === "Escape") {
       if (cardMenuEl) return closeCardMenu();
       if (!$("#overlay").hidden) return closeOverlay();

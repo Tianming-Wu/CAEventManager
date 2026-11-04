@@ -1326,7 +1326,15 @@ select:invalid { color: var(--dim); }
   font-family: inherit;
   cursor: pointer;
   white-space: nowrap;
+  /* 带图标的按钮：图标与文字在同一条中线上，而不是坐在基线上下沉 */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  line-height: 1.2;
+  vertical-align: middle;
 }
+.btn svg { flex: none; display: block; }
 .btn:hover:not(:disabled) { background: var(--surface-2); }
 .btn:disabled { opacity: .45; cursor: not-allowed; }
 .btn.primary {
@@ -1538,6 +1546,22 @@ input[type="color"] {
 }
 .tag-x:hover { opacity: 1; color: var(--danger); }
 
+/* 日期与时刻分成两格：平台原生 datetime-local 的占位符是中英混排，看着很怪 */
+.dt-pair { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.dt-pair .dt-date { flex: 1 1 150px; min-width: 140px; }
+.dt-pair .dt-time { flex: 0 0 110px; }
+.dt-pair .dt-cal {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  min-height: 34px;
+  padding: 0;
+}
+.dt-pair .dt-clear { flex: none; }
+.dt-pair .dt-clear:disabled { opacity: .45; cursor: default; }
+
 /* ---------- switch: one card's worth of功能 on or off ---------- */
 .switch { display: inline-flex; align-items: center; gap: 9px; cursor: pointer; }
 .switch input { position: absolute; opacity: 0; width: 0; height: 0; }
@@ -1699,17 +1723,34 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   font-weight: 650;
 }
 
-.toast {
+.toast-stack {
   position: fixed;
-  left: 50%;
-  bottom: calc(24px + env(safe-area-inset-bottom));
-  transform: translateX(-50%) translateY(140%);
+  top: calc(var(--titlebar) + 12px);
+  right: 18px;
+  z-index: 400;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-end;
+  pointer-events: none;
+  max-width: min(420px, calc(100vw - 32px));
+}
+.toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  max-width: 100%;
+  transform: translateY(-12px);
+  opacity: 0;
+  transition: transform .18s ease-out, opacity .18s ease-out;
   background: var(--surface);
-  border: 1px solid var(--line);
-  border-left: 3px solid var(--accent);
-  box-shadow: var(--shadow);
-  padding: 10px 16px;
+  border: 1px solid var(--accent-line);
+  box-shadow: 0 12px 28px rgba(40, 28, 12, .18);
+  padding: 10px 12px 10px 11px;
   border-radius: var(--radius-sm);
+  font-size: .86rem;
+  color: var(--text);
   font-size: .88rem;
   z-index: 100;
   max-width: min(90vw, 560px);
@@ -1717,8 +1758,36 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   pointer-events: none;
   transition: transform .2s ease, opacity .16s;
 }
-.toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
-.toast.bad { border-left-color: var(--danger); }
+.toast.show { transform: none; opacity: 1; }
+.toast .toast-mark {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-size: .72rem;
+  line-height: 18px;
+  text-align: center;
+  font-weight: 700;
+}
+.toast .toast-text { flex: 1 1 auto; word-break: break-word; }
+.toast .toast-x {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--dim);
+  font: inherit;
+  line-height: 1;
+  padding: 0 0 0 2px;
+  cursor: pointer;
+}
+.toast .toast-x:hover { color: var(--text); }
+.toast.bad { border-color: var(--danger-line); }
+.toast.bad .toast-mark { background: var(--danger); }
+@media (max-width: 640px) {
+  .toast-stack { left: 12px; right: 12px; max-width: none; align-items: stretch; }
+}
 
 .site-foot {
   max-width: 1120px;

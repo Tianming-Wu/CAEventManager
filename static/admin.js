@@ -597,6 +597,7 @@
   function applyState(d) {
     S.config = d.config || {};
     S.prizes = d.prizes || [];
+    S.roster = d.roster || null;
     S.publicBaseUrl = (d.publicBaseUrl || S.config.public_base_url || "").replace(/\/+$/, "");
     S.students = d.students || [];
     S.byId = {};
@@ -1222,12 +1223,80 @@
   }
 
   // ------------------------------------------------------------ 活动设置
+  function loadRosterSource() {
+    return LT.api("/api/admin/rosters")
+      .then(function (d) {
+        S.rosterChoices = d.rosters || [];
+        var pick = $("#rosterPick");
+        if (!pick) return;
+        var bound = (S.roster || {}).id || d.bound || 0;
+        pick.innerHTML = '<option value="0">不绑定</option>' +
+          S.rosterChoices.map(function (r) {
+            return '<option value="' + r.id + '">' + LT.esc(r.name) +
+              "（" + r.members + " 人）</option>";
+          }).join("");
+        pick.value = String(bound);
+        renderRosterSource();
+      })
+      .catch(function () { /* 名单里的东西看不到就算了，不挡住控制台 */ });
+  }
+
+  function renderRosterSource() {
+    var info = $("#rosterInfo");
+    var pick = $("#rosterPick");
+    if (!info || !pick) return;
+    var r = S.roster || {};
+    var bound = Number(pick.value) || 0;
+    var name = "";
+    (S.rosterChoices || []).forEach(function (x) {
+      if (x.id === bound) name = x.name;
+    });
+    var rows = [
+      ["当前绑定", bound ? (name || r.name || "—") : "未绑定"],
+      ["上次同步", r.syncedAt ? LT.fmtDateTime(r.syncedAt) : "—"],
+      ["已不在名单", r.detached ? r.detached + " 人" : "—"]
+    ];
+    info.innerHTML = rows.map(function (kv) {
+      return "<dt>" + kv[0] + "</dt><dd>" + LT.esc(String(kv[1])) + "</dd>";
+    }).join("");
+    $("#rosterSyncBtn").disabled = !bound;
+  }
+
+  function bindRoster(rosterId) {
+    LT.api("/api/admin/roster_bind", { method: "POST",
+      body: { roster_id: rosterId } })
+      .then(function () {
+        ok(rosterId ? "已绑定名单" : "已取消绑定");
+        return load();
+      })
+      .then(loadRosterSource)
+      .catch(bad);
+  }
+
+  function syncRoster() {
+    LT.api("/api/admin/roster_sync", { method: "POST" })
+      .then(function (d) {
+        var r = d.result || {};
+        var msg = "新增 " + r.added + " 人，更新 " + r.updated + " 人";
+        if (r.restored) msg += "，恢复 " + r.restored + " 人";
+        if ((r.missing || []).length) {
+          msg += "；" + r.missing.length + " 人已不在名单";
+        }
+        $("#rosterNote").textContent = msg;
+        ok(msg);
+        return load();
+      })
+      .then(loadRosterSource)
+      .catch(bad);
+  }
+
   function loadMembers() {
     LT.api("/api/admin/members").then(function (d) {
       S.members = d.members || [];
       S.seat = d.me || {};
       renderMembers();
       renderEventInfo();
+      loadRosterSource();
     }).catch(function (e) {
       if (e.status === 401) { location.href = LT.panelLoginUrl(); return; }
       if (e.status === 403) {
@@ -1424,6 +1493,10 @@
     $("#shortlinkBtn").addEventListener("click", mintShortlink);
     $("#memberInviteBtn").addEventListener("click", openInviteSearch);
     $("#eventNameSave").addEventListener("click", saveEventName);
+    $("#rosterSyncBtn").addEventListener("click", syncRoster);
+    $("#rosterPick").addEventListener("change", function () {
+      bindRoster(Number(this.value) || 0);
+    });
     $("#memberTable").addEventListener("click", function (e) {
       var btn = e.target.closest("[data-member]");
       if (!btn) return;

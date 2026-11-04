@@ -462,21 +462,66 @@ def signup_page(page, browser):
     check("the switch turns the limit on",
           "0 / 5" in page.inner_text("#signupSub"), page.inner_text("#signupSub"))
 
+    # 日期与时刻是两个框，占位符不再中英混排
+    check("date and time are separate fields",
+          page.locator("#signupOpensDate").count() == 1 and
+          page.locator("#signupOpensTime").count() == 1)
+    check("the placeholder text is ours, not the browser's",
+          page.get_attribute("#signupOpensDate", "placeholder") == "yyyy-mm-dd" and
+          page.get_attribute("#signupOpensTime", "placeholder") == "HH:MM",
+          page.get_attribute("#signupOpensDate", "placeholder"))
+    check("a readable date is refused when malformed", page.evaluate(
+        """() => {
+        const d = document.querySelector('#signupOpensDate');
+        return d.type === 'text' && d.inputMode === 'numeric';
+      }"""))
+
     # 开始晚于结束要被拦下
     page.click('#signupTimeCard .switch')
-    page.fill("#signupOpens", "2026-12-02T10:00")
-    page.fill("#signupCloses", "2026-12-01T10:00")
+    page.fill("#signupOpensDate", "2026-12-02")
+    page.fill("#signupOpensTime", "10:00")
+    page.fill("#signupClosesDate", "2026-12-01")
+    page.fill("#signupClosesTime", "10:00")
     page.click("#signupSaveBtn")
     page.wait_for_timeout(700)
     check("a start after the end is refused",
           "开始时间必须早于结束时间" in page.inner_text(".toast, body"),
           page.inner_text(".toast, body")[:60])
-    page.fill("#signupOpens", "2026-11-01T10:00")
-    page.fill("#signupCloses", "2026-12-03T10:00")
+
+    # 撤销：把日期清掉再撤销，值应该回来
+    page.click("#signupOpensClear")
+    page.wait_for_timeout(300)
+    check("the clear button empties the pair",
+          page.input_value("#signupOpensDate") == "", page.input_value("#signupOpensDate"))
+    page.click("#signupClosesDate")
+    page.keyboard.press("Control+z")
+    page.wait_for_timeout(400)
+    check("undo brings the cleared date back",
+          page.input_value("#signupOpensDate") == "2026-12-02",
+          page.input_value("#signupOpensDate"))
+    page.keyboard.press("Control+Shift+z")
+    page.wait_for_timeout(400)
+    check("redo re-applies the change",
+          page.input_value("#signupOpensDate") == "", page.input_value("#signupOpensDate"))
+    page.keyboard.press("Control+z")
+    page.wait_for_timeout(300)
+
+    page.fill("#signupOpensDate", "2026-11-01")
+    page.fill("#signupOpensTime", "10:00")
+    page.fill("#signupClosesDate", "2026-12-03")
+    page.fill("#signupClosesTime", "10:00")
     page.click("#signupSaveBtn")
     page.wait_for_timeout(1000)
     check("a valid window is saved", "进行中" in page.inner_text("#signupSub"),
           page.inner_text("#signupSub"))
+
+    # Ctrl+S 保存的是这张表单，而不是浏览器弹出的"保存网页"
+    page.fill("#signupNote", "快捷键保存")
+    page.click("#signupTitle")
+    page.keyboard.press("Control+s")
+    page.wait_for_timeout(900)
+    check("Ctrl+S saves the form", "快捷键保存" in page.input_value("#signupNote"),
+          page.input_value("#signupNote"))
 
     check("the time card is not dimmed once its switch is on", page.evaluate(
         """() => !document.querySelector('#signupTimeCard')

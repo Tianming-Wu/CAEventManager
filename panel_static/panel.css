@@ -1575,8 +1575,10 @@ html[data-theme="dark"] .switch .track::after { background: #f3efe9; }
 .switch input:disabled + .track { opacity: .5; }
 .switch .switch-text { font-size: .8rem; color: var(--muted); }
 /* a card whose feature is switched off dims as a whole -- title included --
-   while the switch itself stays fully legible, because that is how you turn it back on */
-.card.is-off { background: var(--surface-2); }
+   while the switch itself stays fully legible, because that is how you turn it back on.
+   浅色下卡片比底色亮，所以关掉的卡片要用比底色还淡一档的底，而不是更深的 --surface-2 */
+.card.is-off { background: var(--tint); }
+html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
 .card.is-off > .card-head h2 { color: var(--dim); }
 .card.is-off > .field,
 .card.is-off > .row,

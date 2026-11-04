@@ -37,7 +37,8 @@
       qr.addData(url);
       qr.make();
       $("#qr").innerHTML =
-        qr.createSvgTag({ cellSize: 6, margin: 2, scalable: true }) +
+        // margin 以像素计；给两格白边，投影仪上扫得稳
+        qr.createSvgTag({ cellSize: 6, margin: 12, scalable: true }) +
         '<div class="cap">' + caption + "</div>";
     } catch (e) {
       $("#qr").innerHTML = '<div class="cap" style="color:#f87171">二维码生成失败</div>';

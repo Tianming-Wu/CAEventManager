@@ -1254,7 +1254,8 @@
       var qr = qrcode(0, "M");
       qr.addData(url);
       qr.make();
-      holder.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 1, scalable: true });
+      // margin 的单位是像素而不是模块：留一格 = cellSize
+      holder.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 4, scalable: true });
     } catch (e) {
       holder.innerHTML = '<span class="hint">二维码生成失败</span>';
     }
@@ -3512,11 +3513,20 @@
     } catch (e) { failed(); }
   });
   $("#signupQrSave").addEventListener("click", function () {
-    var holder = $("#signupQr");
-    var svg = holder ? holder.querySelector("svg") : null;
-    if (!svg) { PX.toast("二维码还没有生成", true); return; }
-    // 画到画布上再导出 PNG，直接存 SVG 有些看图软件打不开
-    var text = new XMLSerializer().serializeToString(svg);
+    var url = (S.signup && S.signup.url) || "";
+    if (!url) { PX.toast("还没有可用的报名链接", true); return; }
+    // 下载件单独生成：留出四个模块的白边（网页里那圈只有一格），
+    // 并且给出明确的像素尺寸，导出的 PNG 才不会糊
+    var svgTag;
+    try {
+      var qr = qrcode(0, "M");
+      qr.addData(url);
+      qr.make();
+      svgTag = qr.createSvgTag({ cellSize: 8, margin: 32 });
+    } catch (e) {
+      PX.toast("二维码生成失败", true);
+      return;
+    }
     var img = new Image();
     img.onload = function () {
       var size = 720;
@@ -3533,8 +3543,9 @@
       link.click();
     };
     img.onerror = function () { PX.toast("导出二维码失败", true); };
-    img.src = "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(text)));
+    img.src = "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(svgTag)));
   });
+
   ["#signupTheme", "#signupAccent", "#signupName", "#signupNote",
    "#collectDept", "#collectGrp"].forEach(function (sel) {
     var el = $(sel);

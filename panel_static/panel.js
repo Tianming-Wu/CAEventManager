@@ -822,6 +822,56 @@
     $("#menuBtn").setAttribute("aria-expanded", "false");
   }
 
+  /* 侧栏用方向键走：整栏只占一个 Tab 位，上下键在可见项之间移动
+     （展开的分组子项也在序列里），Home/End 到首尾。 */
+  function bindSidebarKeys() {
+    var bar = $("#sidebar");
+    if (!bar) return;
+
+    function items() {
+      return Array.prototype.filter.call(
+        bar.querySelectorAll('[data-nav], [data-toggle]'),
+        function (el) {
+          if (el.closest("[inert]")) return false;
+          var parent = el.closest(".nav-sub");
+          if (parent && parent.hidden) return false;
+          return el.offsetParent !== null;
+        });
+    }
+
+    function rove(target) {
+      var list = items();
+      if (!list.length) return;
+      list.forEach(function (el) { el.tabIndex = -1; });
+      (target || list[0]).tabIndex = 0;
+    }
+
+    bar.addEventListener("keydown", function (e) {
+      var key = e.key;
+      if (["ArrowDown", "ArrowUp", "Home", "End"].indexOf(key) < 0) return;
+      var list = items();
+      if (!list.length) return;
+      var here = document.activeElement;
+      var idx = list.indexOf(here);
+      var next;
+      if (key === "Home") next = 0;
+      else if (key === "End") next = list.length - 1;
+      else if (idx < 0) next = 0;
+      else next = (idx + (key === "ArrowDown" ? 1 : -1) + list.length) % list.length;
+      e.preventDefault();
+      list[next].focus();
+    });
+
+    // 焦点落进侧栏时，把唯一的 Tab 位挪到它身上
+    bar.addEventListener("focusin", function (e) {
+      if (e.target.getAttribute && (e.target.hasAttribute("data-nav") ||
+                                    e.target.hasAttribute("data-toggle"))) {
+        rove(e.target);
+      }
+    });
+    rove(null);
+  }
+
   /* ------------------------------------------------------------------ 通知 --- */
   /* 右上角一个铃铛：有未读就亮红点，点开是列表。紧急级未读一上线就全屏弹出，
    * 只能点"已读 / 关闭"结束——点周围不消失。 */
@@ -2138,6 +2188,13 @@
       var on = !!ROUTES[wanted] && ROUTES[wanted].group === g.getAttribute("data-group");
       g.classList.toggle("has-current", on);
     });
+    var current = document.querySelector('#sidebar [data-nav][aria-current="page"]');
+    if (current) {
+      $$('#sidebar [data-nav], #sidebar [data-toggle]').forEach(function (el) {
+        el.tabIndex = -1;
+      });
+      current.tabIndex = 0;
+    }
 
     closePane();
     $("#content").scrollTop = 0;
@@ -4234,6 +4291,7 @@
       renderIdentity();
       applyRoleVisibility();
       labelNav();
+      bindSidebarKeys();
       // another session's writes come back through the stream
       PX.watch(function (revs, before) {
         if (!before || before.panel === undefined) return;

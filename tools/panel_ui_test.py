@@ -716,6 +716,26 @@ def group_page(page):
                  .classList.contains('has-current')"""))
 
 
+def nav_keys_page(page):
+    print("== 侧栏方向键 ==")
+    page.goto(BASE + "/panel#/overview")
+    page.wait_for_timeout(600)
+    stops = page.evaluate("""() => [...document.querySelectorAll('#sidebar [data-nav], #sidebar [data-toggle]')]
+        .filter(el => el.tabIndex === 0).length""")
+    check("the whole sidebar is one tab stop", stops == 1, stops)
+    page.focus('#sidebar [data-nav][tabindex="0"]')
+    page.keyboard.press("ArrowDown")
+    page.wait_for_timeout(120)
+    first = page.evaluate(
+        "() => document.activeElement.getAttribute('data-nav') || "
+        "document.activeElement.getAttribute('data-toggle')")
+    check("the down arrow moves to the next item", first == "events", first)
+    page.keyboard.press("End")
+    page.wait_for_timeout(120)
+    last = page.evaluate("() => document.activeElement.getAttribute('data-nav')")
+    check("End goes to the last entry", last == "account", last)
+
+
 def search_page(page):
     print("== the account search box ==")
     page.goto(BASE + "/panel#/users")
@@ -1675,6 +1695,7 @@ def main():
                 routes_page(page)
                 title_row(page)
                 group_page(page)
+                nav_keys_page(page)
                 roster_page(page)
                 signup_page(page, browser)
                 notice_page(page)

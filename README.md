@@ -31,6 +31,13 @@
 活动有两个标识：数字 `seq` 只用于存储，不出现在 URL 里；`token` 是 32 位 base64url 的访问凭据，
 本身就是 URL 中的一段。`path_secret` 是首个活动的 token，可在控制台重新生成，旧链接随即失效。
 
+## 展示屏幕
+
+大屏是一个可替换的插接件：`/<token>/screen` 提供活动配置里 `screen_pack` 指定的那份页面，
+查找顺序是实例目录 `screen_packs/<名字>/` → 内置 `builtin/screen_packs/<名字>/`，
+都找不到时退回内置的 `classic`。一份包只需要 `screen.html`（和它自己的 js/css），
+不需要 `module.json`，也不声明任何能力；数据仍从 `/<token>/api/board` 与 `/api/stream` 取。
+
 ## 活动页面
 
 公示页只读，展示签到人数、任务完成数、已发奖票与中奖名单。大屏页在签到阶段显示签到二维码，抽奖阶段

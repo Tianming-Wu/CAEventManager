@@ -2360,6 +2360,9 @@ class Handler(BaseHTTPRequestHandler):
             "/checkin": ("checkin", "checkin.html", "text/html; charset=utf-8"),
         }
         routes = {k: v for k, v in catalogue.items() if v[0] in allowed}
+
+        if path == "/screen" or path.startswith("/screen/"):
+            return self._screen_pack(path)
         if path == "/favicon.ico":
             return self._send(204, b"", "image/x-icon")
         if path == "/login":
@@ -2403,6 +2406,40 @@ class Handler(BaseHTTPRequestHandler):
                 return self._err("not found", 404)
             return self._serve_file(full, None, cache=True)
         return self._err("not found", 404)
+
+    def _screen_pack(self, path):
+        """展示屏幕是一个可替换的插接件：只需一份 screen.html（和它自己的 js/css）。
+
+        查找顺序：实例目录 screen_packs/<包>/ → 内置 builtin/screen_packs/<包>/。
+        包名放在活动配置的 screen_pack 里，缺省用 classic。
+        """
+        conn = db.connect()
+        want = (db.get_config(conn, "screen_pack", "") or "").strip() or "classic"
+        tail = path[len("/screen"):].lstrip("/")
+        if ".." in tail or ".." in want:
+            return self._err("bad path", 400)
+        rel = tail or "screen.html"
+        roots = [os.path.join(TPL_DIR, "..", "screen_packs", want),
+                 os.path.join(TPL_DIR, "..", "builtin", "screen_packs", want)]
+        for root in roots:
+            full = os.path.join(root, rel)
+            if os.path.isfile(full):
+                with open(full, "rb") as fh:
+                    body = fh.read()
+                ctype = mimetypes.guess_type(full)[0] or "application/octet-stream"
+                if ctype.startswith("text/") or ctype == "application/javascript":
+                    ctype += "; charset=utf-8"
+                if rel == "screen.html":
+                    body = body.replace(b"{{FOOTER}}", panel.FOOTER.encode("utf-8"))
+                    body = body.replace(b"{{VERSION}}", VERSION.encode("utf-8"))
+                return self._send(200, body, ctype, [("Cache-Control", "no-store")])
+        # 包不见了：退回内置的 classic，别让现场黑屏
+        with open(os.path.join(TPL_DIR, "..", "builtin", "screen_packs", "classic",
+                               "screen.html"), "rb") as fh:
+            body = fh.read()
+        body = body.replace(b"{{FOOTER}}", panel.FOOTER.encode("utf-8"))
+        body = body.replace(b"{{VERSION}}", VERSION.encode("utf-8"))
+        return self._send(200, body, "text/html; charset=utf-8")
 
     def _page_html(self, name, headers=None):
         with open(os.path.join(TPL_DIR, name), "rb") as fh:

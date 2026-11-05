@@ -2273,9 +2273,12 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
    - 返回键：绝对定位在左侧，淡入 + 放大 / 淡出 + 缩小 */
 .head-title { position: relative; padding-left: 0; transition: padding-left .2s ease; }
 .head-title.has-back { padding-left: 36px; }
-/* 没有返回键时，面包屑不该还挂着一个"上一级"：只留当前名称 */
+/* 没有返回键时，面包屑不该还挂着一个"上一级"：只留当前名称。
+   返回键只是"临时给一条回去的路"（?back=）时也一样：标题就写这一页的名字。 */
 .head-title:not(.has-back) .crumb-title .crumb,
-.head-title:not(.has-back) .crumb-title .crumb-sep { display: none; }
+.head-title:not(.has-back) .crumb-title .crumb-sep,
+.head-title.back-only .crumb-title .crumb,
+.head-title.back-only .crumb-title .crumb-sep { display: none; }
 .head-title .crumb-back {
   position: absolute;
   left: 0;

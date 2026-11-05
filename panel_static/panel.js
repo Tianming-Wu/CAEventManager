@@ -1759,9 +1759,11 @@
     if (!head) return;
     var want = routeHasBack(wanted);
     var root = document.documentElement;
+    var backOnly = want && !!S.explicitBack && !routeParent(wanted);
     if (prevHadBack === want) {
       root.classList.add("no-crumb-anim");
       head.classList.toggle("has-back", want);
+      head.classList.toggle("back-only", backOnly);
       void head.offsetWidth;
       requestAnimationFrame(function () { root.classList.remove("no-crumb-anim"); });
       return;
@@ -1772,6 +1774,7 @@
     void head.offsetWidth;
     root.classList.remove("no-crumb-anim");
     head.classList.toggle("has-back", want);
+    head.classList.toggle("back-only", backOnly);
   }
 
   function syncBackButton() {

@@ -578,40 +578,46 @@
               <div class="dt-pair">
                 <input id="signupOpensDate" class="dt-date" type="text" inputmode="numeric"
                        placeholder="yyyy-mm-dd" aria-label="开始日期">
-                <input id="signupOpensDatePick" type="date" hidden aria-hidden="true">
-                <button class="btn sm dt-cal" id="signupOpensPick" type="button"
+                <span class="dt-cal-wrap">
+                  <button class="btn sm dt-cal" id="signupOpensPick" type="button"
                         title="选择开始日期" aria-label="选择开始日期">
                   <svg viewBox="0 0 20 20" aria-hidden="true" style="width:15px;height:15px">
                     <rect x="3" y="4.6" width="14" height="12.4" rx="1.8"/>
                     <path d="M3 8.4h14M7 3v3M13 3v3"/>
                   </svg>
-                </button>
+                  </button>
+                  <input id="signupOpensDatePick" type="date" tabindex="-1"
+                         aria-hidden="true" aria-label="开始日期选择器">
+                </span>
                 <input id="signupOpensTime" class="dt-time" type="text" inputmode="numeric"
                        placeholder="HH:MM" aria-label="开始时刻">
                 <button class="btn sm dt-clear" id="signupOpensClear" type="button"
                         title="清空开始时间">清除</button>
               </div>
-              <p class="hint">留空表示不设下界</p>
+              <p class="hint">留空即不限制开始时间</p>
             </div>
             <div class="field">
               <label for="signupClosesDate">结束时间</label>
               <div class="dt-pair">
                 <input id="signupClosesDate" class="dt-date" type="text" inputmode="numeric"
                        placeholder="yyyy-mm-dd" aria-label="结束日期">
-                <input id="signupClosesDatePick" type="date" hidden aria-hidden="true">
-                <button class="btn sm dt-cal" id="signupClosesPick" type="button"
+                <span class="dt-cal-wrap">
+                  <button class="btn sm dt-cal" id="signupClosesPick" type="button"
                         title="选择结束日期" aria-label="选择结束日期">
                   <svg viewBox="0 0 20 20" aria-hidden="true" style="width:15px;height:15px">
                     <rect x="3" y="4.6" width="14" height="12.4" rx="1.8"/>
                     <path d="M3 8.4h14M7 3v3M13 3v3"/>
                   </svg>
-                </button>
+                  </button>
+                  <input id="signupClosesDatePick" type="date" tabindex="-1"
+                         aria-hidden="true" aria-label="结束日期选择器">
+                </span>
                 <input id="signupClosesTime" class="dt-time" type="text" inputmode="numeric"
                        placeholder="HH:MM" aria-label="结束时刻">
                 <button class="btn sm dt-clear" id="signupClosesClear" type="button"
                         title="清空结束时间">清除</button>
               </div>
-              <p class="hint">留空表示不设上界</p>
+              <p class="hint">留空即不限制结束时间</p>
             </div>
           </div>
         </div>

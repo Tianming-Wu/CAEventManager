@@ -2954,8 +2954,7 @@ class Handler(BaseHTTPRequestHandler):
             mine = lists.list_rosters(lx, me.acc, "", "all", 0, 200)
             out = []
             for r in mine["rosters"]:
-                if not r["editable"]:
-                    continue
+                # 活动只读名单，不往回写：看得见就能绑，不要求写入权
                 counts = lists.roster_counts(lx, [r["id"]])
                 out.append({"id": r["id"], "name": r["name"],
                             "members": counts.get(r["id"], 0)})
@@ -2967,13 +2966,13 @@ class Handler(BaseHTTPRequestHandler):
             data = self._body()
             rid = int(data.get("roster_id") or 0)
             if rid:
-                # 绑定之前确认自己有这份名单的写入权，否则同步会写不进来
+                # 只要求看得见：活动从名单里读人，不写回名单
                 lx = lists.connect()
                 row = lists.roster(lx, rid)
                 if row is None:
                     raise model.ApiError("名单不存在", 404)
-                if not lists.writable(lx, me.acc, "roster", row):
-                    raise model.ApiError("对该名单没有写入权限", 403)
+                if not lists.row_visible(me.acc, row):
+                    raise model.ApiError("无权查看该名单", 403)
             with db.tx(conn):
                 db.set_config_raw(conn, "roster_id", rid)
                 db.audit(conn, "roster_bind", detail=str(rid), actor=me.name)
@@ -2988,8 +2987,8 @@ class Handler(BaseHTTPRequestHandler):
             row = lists.roster(lx, rid)
             if row is None:
                 raise model.ApiError("绑定的名单已经不存在", 404)
-            if not lists.writable(lx, me.acc, "roster", row):
-                raise model.ApiError("对该名单没有写入权限", 403)
+            if not lists.row_visible(me.acc, row):
+                raise model.ApiError("无权查看该名单", 403)
             entries = [
                 (r["sid"], r["name"], r["dept"], r["grp"])
                 for r in lx.execute(

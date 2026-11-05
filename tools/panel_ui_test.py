@@ -506,14 +506,29 @@ def signup_page(page, browser):
     page.keyboard.press("Control+z")
     page.wait_for_timeout(300)
 
-    page.fill("#signupOpensDate", "2026-11-01")
+    # 宽松格式：斜杠分隔、带时刻的紧凑写法都认，保存后改写成标准格式
+    page.fill("#signupOpensDate", "2026/11/01")
     page.fill("#signupOpensTime", "10:00")
-    page.fill("#signupClosesDate", "2026-12-03")
-    page.fill("#signupClosesTime", "10:00")
+    page.fill("#signupClosesDate", "20261203T2359")
+    page.fill("#signupClosesTime", "")
     page.click("#signupSaveBtn")
-    page.wait_for_timeout(1000)
+    page.wait_for_timeout(1200)
     check("a valid window is saved", "进行中" in page.inner_text("#signupSub"),
           page.inner_text("#signupSub"))
+    check("a slash date is rewritten as yyyy-mm-dd",
+          page.input_value("#signupOpensDate") == "2026-11-01",
+          page.input_value("#signupOpensDate"))
+    check("a compact timestamp is understood",
+          page.input_value("#signupClosesDate") == "2026-12-03" and
+          page.input_value("#signupClosesTime") == "23:59",
+          [page.input_value("#signupClosesDate"), page.input_value("#signupClosesTime")])
+    page.fill("#signupOpensTime", "")
+    page.click("#signupSaveBtn")
+    page.wait_for_timeout(900)
+    check("an empty time becomes 00:00",
+          page.input_value("#signupOpensTime") == "00:00",
+          page.input_value("#signupOpensTime"))
+    page.fill("#signupOpensTime", "10:00")
 
     # Ctrl+S 保存的是这张表单，而不是浏览器弹出的"保存网页"
     page.fill("#signupNote", "快捷键保存")

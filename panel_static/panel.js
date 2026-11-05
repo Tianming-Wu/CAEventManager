@@ -1176,24 +1176,60 @@
   }
 
   /* 时间与日期是两个文本框：原生控件的占位符跟着浏览器语言走，中英混排很怪，
-     所以显示交给我们自己的占位符，选择器由一个日历按钮调出来。 */
-  function parsePair(dateSel, timeSel) {
-    var date = ($(dateSel).value || "").trim();
-    if (!date) return { ts: 0 };
-    var m = date.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
-    if (!m) return { error: "日期请写成 yyyy-mm-dd" };
-    var time = ($(timeSel).value || "").trim() || "00:00";
-    var t = time.match(/^(\d{1,2}):(\d{2})$/);
-    if (!t) return { error: "时刻请写成 HH:MM" };
-    var stamp = Date.parse(m[1] + "-" + PX.pad(Number(m[2])) + "-" +
-                           PX.pad(Number(m[3])) + "T" +
-                           PX.pad(Number(t[1])) + ":" + t[2]);
+     所以显示交给我们自己的占位符，选择器由一个日历按钮调出来。
+     解析尽量宽：2026-12-01 / 2026/12/01 / 2026.12.01 / 20261201，
+     带时间时再认 12:31 或 1231，也认直接粘进来的 20261201T12:31。 */
+  function parseStamp(text) {
+    var raw = String(text || "").trim().replace(/\s+/g, " ");
+    if (!raw) return { empty: true };
+    var m = raw.match(
+      /^(\d{4})[-/.\u5e74]?(\d{1,2})[-/.\u6708]?(\d{1,2})\u65e5?(?:[ T,]*?(\d{1,2})(?::?(\d{2}))?(?::?(\d{2}))?)?$/);
+    if (!m) return { error: "日期请写成 2026-12-01 这样的格式" };
+    var year = Number(m[1]);
+    var month = Number(m[2]);
+    var day = Number(m[3]);
+    var hour = m[4] === undefined ? 0 : Number(m[4]);
+    var minute = m[5] === undefined ? 0 : Number(m[5]);
+    if (month < 1 || month > 12 || day < 1 || day > 31 || hour > 23 || minute > 59) {
+      return { error: "日期或时刻超出范围" };
+    }
+    var probe = new Date(year, month - 1, day);
+    if (probe.getMonth() !== month - 1 || probe.getDate() !== day) {
+      return { error: "这个月没有这一天" };
+    }
+    var stamp = new Date(year, month - 1, day, hour, minute).getTime();
     if (isNaN(stamp)) return { error: "日期或时刻不合法" };
-    return { ts: Math.round(stamp / 1000) };
+    return {
+      ts: Math.round(stamp / 1000),
+      date: year + "-" + PX.pad(month) + "-" + PX.pad(day),
+      time: PX.pad(hour) + ":" + PX.pad(minute),
+      hasTime: m[4] !== undefined
+    };
+  }
+
+  function parsePair(dateSel, timeSel) {
+    var text = ($(dateSel).value || "").trim();
+    if (!text) return { ts: 0 };
+    var parsed = parseStamp(text);
+    if (parsed.error) return { error: parsed.error };
+    var timeText = ($(timeSel).value || "").trim();
+    if (timeText) {
+      var time = parseStamp(parsed.date + " " + timeText);
+      if (time.error) return { error: "时刻请写成 12:31 这样的格式" };
+      return { ts: time.ts, date: parsed.date, time: time.time };
+    }
+    // 日期里自带时刻就用它，否则落到 00:00
+    return { ts: parsed.ts, date: parsed.date, time: parsed.time, inferredTime: !parsed.hasTime };
   }
 
   function pairValue(dateSel, timeSel) {
     return parsePair(dateSel, timeSel).ts || 0;
+  }
+
+  /* 保存时把两个框改写成库里的显示格式，用户看得见实际存的是什么 */
+  function normalizePair(dateSel, timeSel, clearSel, ts) {
+    if (!ts) { setPair(dateSel, timeSel, clearSel, 0); return; }
+    setPair(dateSel, timeSel, clearSel, ts);
   }
 
   function setPair(dateSel, timeSel, clearSel, ts) {
@@ -1418,6 +1454,13 @@
     if (opens && closes && opens >= closes) {
       PX.toast("开始时间必须早于结束时间", true);
       return;
+    }
+    // 粘进来的 20261201T12:31、2026/12/01 都在这里被改写成本系统的显示格式
+    if (timeOn) {
+      if (openPair.ts) normalizePair("#signupOpensDate", "#signupOpensTime",
+                                     "#signupOpensClear", openPair.ts);
+      if (closePair.ts) normalizePair("#signupClosesDate", "#signupClosesTime",
+                                      "#signupClosesClear", closePair.ts);
     }
     var capOn = $("#signupCapOn").checked;
     var collect = [];
@@ -3601,7 +3644,21 @@
     });
     form.addEventListener("blur", function (e) {
       var t = e.target;
-      if (t && (t.type === "text" || t.type === "number" || t.tagName === "TEXTAREA")) {
+      if (!t) return;
+      if (t.classList && t.classList.contains("dt-date")) {
+        var parsed = parseStamp(t.value);
+        if (parsed.error) return;            // 让用户自己改，别把输入吃掉
+        if (parsed.date) {
+          t.value = parsed.date;
+          // 只有日期里自带时刻时才写时刻框；空的时刻留给保存时补 00:00，
+          // 否则会和用户接下来的输入打架
+          var timeBox = $("#" + t.id.replace("Date", "Time"));
+          if (parsed.hasTime && timeBox) timeBox.value = parsed.time;
+          S.signupDirty = true;
+          pushHistory();
+        }
+      }
+      if (t.type === "text" || t.type === "number" || t.tagName === "TEXTAREA") {
         pushHistory();
       }
     }, true);

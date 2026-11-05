@@ -1736,8 +1736,9 @@
   function syncBackButton() {
     var back = $("#approvalsBack");
     if (!back) return;
-    back.hidden = !S.backTo;
     back.setAttribute("data-back", S.backTo || "");
+    var head = back.closest(".head-title");
+    if (head) head.classList.toggle("has-back", !!S.backTo);
   }
 
   function drawApprovals() {

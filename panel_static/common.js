@@ -182,7 +182,14 @@
         if (el.parentNode) el.parentNode.removeChild(el);
       }, 200);
     };
-    el.querySelector(".toast-x").addEventListener("click", close);
+    var x = el.querySelector(".toast-x");
+    ["pointerdown", "click"].forEach(function (evt) {
+      x.addEventListener(evt, function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        close();
+      });
+    });
     setTimeout(close, ms || (bad ? 4200 : 2600));
     // 只留最近四条，别把屏幕堆满
     while (stack.children.length > 4) stack.removeChild(stack.firstChild);

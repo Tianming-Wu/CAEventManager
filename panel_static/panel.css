@@ -440,9 +440,7 @@ button.nav-item {
 .head-title h1 { min-width: 0; }
 /* the 30px button overhangs the 24px title line symmetrically: it centres on
    the title without making the header taller than the other pages */
-.page-head .crumb-back[hidden] { display: none; }
 .page-head .crumb-back {
-  animation: crumb-in .16s ease-out;
   width: 30px;
   height: 30px;
   margin: -3px 0 -3px -4px;
@@ -1840,6 +1838,7 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   border-radius: 4px;
   cursor: pointer;
 }
+.toast .toast-x { pointer-events: auto; touch-action: manipulation; }
 .toast .toast-x svg {
   width: 12px;
   height: 12px;
@@ -2267,9 +2266,20 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   color: var(--accent-strong);
 }
 
-@keyframes crumb-in {
-  from { opacity: 0; transform: translateX(-6px); }
-  to { opacity: 1; transform: none; }
+/* 返回键像 sudo 标签那样"长出来"：宽度 0 → 34px，标题随之滑到右边 */
+.head-title .crumb-back {
+  width: 0;
+  opacity: 0;
+  margin-right: 0;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  transition: width .18s ease, opacity .18s ease, margin-right .18s ease;
+}
+.head-title.has-back .crumb-back {
+  width: 34px;
+  opacity: 1;
+  margin-right: 2px;
 }
 
 /* 弹窗里的字段不要挤在一起：上一行的输入框与下一行的标题之间留出呼吸 */

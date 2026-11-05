@@ -27,8 +27,7 @@
     "signups": { min: "admin", group: "lists" },
     "signup": { min: "admin", group: "lists",
                 parent: { href: "#/signups", label: "我的报名" } },
-    "write-approvals": { min: "admin", group: "lists",
-                         parent: { href: "#/rosters", label: "我的名单" } },
+    "write-approvals": { min: "admin", group: "lists" },
     "templates": { min: "admin" },
     "users": { min: "superadmin" },
     "all-events": { min: "superadmin" },
@@ -92,7 +91,8 @@
     approvals: [],
     myAsks: [],
     approvalsCount: 0,
-    backTo: null          // 从别的页面跳进审批中心时，返回哪里
+    backTo: null,         // 从别的页面跳进审批中心时，返回哪里
+    explicitBack: null,   // 地址里真的写了 ?back=
   };
 
   var RAIL_QUERY = "(max-width: 1100px)";
@@ -1744,8 +1744,11 @@
     return (r && r.parent) || null;
   }
 
+  /* 顶层页也可以临时有返回键：地址里带 ?back= 时（从别处跳过来），给它一个回去的路。
+     这时返回键的目的地是那一页，面包屑写「返回」。 */
   function routeHasBack(route) {
-    return !!routeParent(route);
+    if (routeParent(route)) return true;
+    return !!(route && S.explicitBack);
   }
 
   /* 切换页面时给标题与返回键放一次入场动画：
@@ -1778,12 +1781,19 @@
 
   /* 当前页面的面包屑：上一段来自路由表，当前段就是这一页的标题 */
   function syncCrumb(wanted) {
-    var parent = routeParent(wanted);
     var page = document.querySelector('.page[data-page="' + wanted + '"]');
     var crumb = page ? page.querySelector(".crumb-title .crumb") : null;
-    if (!crumb || !parent) return;
-    crumb.setAttribute("href", parent.href);
-    crumb.textContent = parent.label;
+    if (!crumb) return;
+    var parent = routeParent(wanted);
+    if (parent) {
+      crumb.setAttribute("href", parent.href);
+      crumb.textContent = parent.label;
+      return;
+    }
+    if (S.explicitBack) {
+      crumb.setAttribute("href", "#" + S.explicitBack);
+      crumb.textContent = "返回";
+    }
   }
 
   function drawApprovals() {
@@ -2102,7 +2112,8 @@
     S.route = wanted;
     // 返回键属于"这一页有没有上一级"：先定下来，动画与渲染都靠它
     var parent = routeParent(wanted);
-    S.backTo = (hashQuery().back || (parent ? parent.href.replace(/^#/, "") : null));
+    S.explicitBack = hashQuery().back || null;
+    S.backTo = S.explicitBack || (parent ? parent.href.replace(/^#/, "") : null);
     S.denied = null;
     $("#denied").hidden = true;
     $("#siteFoot").hidden = false;
@@ -4056,9 +4067,8 @@
   });
 
   $("#approvalsBack").addEventListener("click", function () {
-    var to = this.getAttribute("data-back") ||
-             (routeParent("write-approvals") || {}).href || "";
-    if (to) location.hash = to.charAt(0) === "#" ? to : "#" + to;
+    var to = this.getAttribute("data-back") || "";
+    if (to) location.hash = "#" + to;
   });
   $("#approvalsTable").addEventListener("click", function (e) {
     var t = e.target.closest ? e.target.closest("[data-approve],[data-reject]") : null;

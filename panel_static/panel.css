@@ -1338,6 +1338,8 @@ select:invalid { color: var(--dim); }
   vertical-align: middle;
 }
 .btn svg { flex: none; display: block; }
+.btn, .btn:hover, .btn:focus, .btn:active { text-decoration: none; }
+a.crumb, a.crumb:hover, .nav-item, .nav-item:hover { text-decoration: none; }
 .btn:hover:not(:disabled) { background: var(--surface-2); }
 .btn:disabled { opacity: .45; cursor: not-allowed; }
 .btn.primary {
@@ -2271,6 +2273,9 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
    - 返回键：绝对定位在左侧，淡入 + 放大 / 淡出 + 缩小 */
 .head-title { position: relative; padding-left: 0; transition: padding-left .2s ease; }
 .head-title.has-back { padding-left: 36px; }
+/* 没有返回键时，面包屑不该还挂着一个"上一级"：只留当前名称 */
+.head-title:not(.has-back) .crumb-title .crumb,
+.head-title:not(.has-back) .crumb-title .crumb-sep { display: none; }
 .head-title .crumb-back {
   position: absolute;
   left: 0;

@@ -348,7 +348,7 @@ def roster_page(page):
     page.wait_for_timeout(900)
     check("the roster links to the approval centre",
           page.locator('.page[data-page="write-approvals"]').is_visible())
-    check("arriving from a page shows the usual left-hand back button",
+    check("arriving with ?back shows the usual left-hand back button",
           page.locator("#approvalsBack.crumb-back").is_visible())
     page.click("#approvalsBack")
     page.wait_for_timeout(900)
@@ -356,13 +356,10 @@ def roster_page(page):
           page.locator('.page[data-page="roster"]').is_visible())
     page.goto(BASE + "/panel#/write-approvals")
     page.wait_for_timeout(900)
-    check("a page with a parent always has a back button",
-          page.locator("#approvalsBack").is_visible())
-    page.click("#approvalsBack")
-    page.wait_for_timeout(800)
-    check("without ?back it returns to its parent section",
-          page.locator('.page[data-page="rosters"]').is_visible())
-    page.goto(BASE + "/panel#/write-approvals")
+    check("a top-level page has no back button on its own",
+          page.locator("#approvalsBack").is_hidden())
+    check("and its crumb is not pretending to have a parent",
+          page.locator('.page[data-page="write-approvals"] .crumb').is_hidden())
     check("the centre explains both lists",
           "暂无待审批的申请" in page.inner_text("#approvalsTable tbody")
           or page.locator("#approvalsTable tbody tr").count() >= 1,

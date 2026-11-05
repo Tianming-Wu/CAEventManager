@@ -491,6 +491,24 @@ def _attachment_header(filename):
             % (plain, quote(filename, safe="")))
 
 
+def _screen_packs():
+    """可用的展示屏幕包：实例目录优先，内置目录补充，同名以实例为准。"""
+    root = os.path.join(os.path.dirname(os.path.abspath(__file__)))
+    seen, out = set(), []
+    for base, builtin in ((os.path.join(root, "screen_packs"), False),
+                          (os.path.join(root, "builtin", "screen_packs"), True)):
+        if not os.path.isdir(base):
+            continue
+        for name in sorted(os.listdir(base)):
+            if name in seen or not os.path.isfile(
+                    os.path.join(base, name, "screen.html")):
+                continue
+            seen.add(name)
+            out.append({"id": name, "name": name, "builtin": builtin,
+                        "source": "内置" if builtin else "实例目录"})
+    return out
+
+
 def _account_label(conn, account_id):
     """A human name for a notice body; falls back to the login name."""
     row = conn.execute("SELECT name, username FROM accounts WHERE id=?",
@@ -1894,6 +1912,23 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, blob, ctype,
                               [("Cache-Control", "private, max-age=86400")])
 
+        if path == "/screen_packs" and method == "GET":
+            packs = _screen_packs()
+            active = panel.get_setting(conn, "screen_pack", "") or "classic"
+            return self._json({"ok": True, "packs": packs, "active": active,
+                               "canEdit": acc["role"] in ("owner", "superadmin")})
+
+        if path == "/screen_pack" and method == "POST":
+            need("owner", "superadmin")
+            data = body()
+            want = (data.get("id") or "").strip()
+            if want not in {p["id"] for p in _screen_packs()}:
+                raise model.ApiError("没有这个屏幕包", 404)
+            with panel.tx() as tx:
+                panel.set_setting(tx, "screen_pack", want, acc["username"])
+                panel.audit(tx, acc["username"], "screen_pack", want, "")
+            return self._json({"ok": True, "active": want})
+
         if path == "/notices" and method == "GET":
             items = panel.notices_for(conn, acc)
             return self._json({"ok": True, "notices": items,
@@ -2414,7 +2449,9 @@ class Handler(BaseHTTPRequestHandler):
         包名放在活动配置的 screen_pack 里，缺省用 classic。
         """
         conn = db.connect()
-        want = (db.get_config(conn, "screen_pack", "") or "").strip() or "classic"
+        want = (db.get_config(conn, "screen_pack", "") or "").strip()
+        if not want:
+            want = panel.get_setting(panel.connect(), "screen_pack", "") or "classic"
         tail = path[len("/screen"):].lstrip("/")
         if ".." in tail or ".." in want:
             return self._err("bad path", 400)

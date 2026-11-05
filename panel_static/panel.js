@@ -28,6 +28,7 @@
     "signup": { min: "admin", group: "lists",
                 parent: { href: "#/signups", label: "我的报名" } },
     "write-approvals": { min: "admin", group: "lists" },
+    "screens": { min: "admin", group: "resources" },
     "templates": { min: "admin" },
     "users": { min: "superadmin" },
     "all-events": { min: "superadmin" },
@@ -85,6 +86,9 @@
     signupDirty: false,     // 表单被改过：后台刷新不要覆盖它
     history: [],            // 表单快照栈：Ctrl+Z / Ctrl+Shift+Z
     historyPos: -1,
+    screenPacks: [],
+    screenPackActive: "",
+    screenPackEditable: false,
     notices: [],
     noticeUnread: 0,
     alertOpen: false,
@@ -1235,6 +1239,44 @@
     }
   }
 
+  /* ------------------------------------------------------------------ 屏幕包 --- */
+  function loadScreenPacks() {
+    return PX.api("/screen_packs")
+      .then(function (d) {
+        S.screenPacks = d.packs || [];
+        S.screenPackActive = d.active || "classic";
+        S.screenPackEditable = !!d.canEdit;
+      })
+      .catch(function (e) { PX.toast(PX.esc(e.message), true); });
+  }
+
+  function drawScreens() {
+    var box = $("#screenPackList");
+    if (!box) return;
+    var hint = $("#screenPackHint");
+    if (hint) hint.textContent = S.screenPackActive
+      ? "当前默认：" + S.screenPackActive : "";
+    var packs = S.screenPacks || [];
+    box.innerHTML = packs.length ? packs.map(function (pk) {
+      var on = pk.id === S.screenPackActive;
+      return '<button class="pack-card' + (on ? " on" : "") + '" type="button"' +
+        ' data-pack="' + PX.esc(pk.id) + '"' + (S.screenPackEditable ? "" : " disabled") + '>' +
+        '<span class="pack-name">' + PX.esc(pk.name) + "</span>" +
+        '<span class="pack-src">' + PX.esc(pk.source) + "</span>" +
+        (on ? '<span class="pack-badge">使用中</span>' : "") + "</button>";
+    }).join("") : '<p class="hint">还没有可用的屏幕包</p>';
+  }
+
+  function pickScreenPack(id) {
+    PX.api("/screen_pack", { method: "POST", body: { id: id } })
+      .then(function (d) {
+        S.screenPackActive = d.active;
+        PX.toast("已切换展示屏幕");
+        return loadScreenPacks().then(drawScreens);
+      })
+      .catch(function (e) { PX.toast(PX.esc(e.message), true); });
+  }
+
   /* ------------------------------------------------------------------ 报名 --- */
   /* 一个报名 = 一个公开链接 + 时间窗 + 往哪份名单里写。管理侧只管设置与记录；
    * 公开页在 /join/<token>，不经过面板登录。 */
@@ -2221,6 +2263,7 @@
         .then(function () { return loadSignupEntries(false); })
         .then(drawSignup);
     }
+    if (wanted === "screens") loadScreenPacks().then(drawScreens);
     if (wanted === "write-approvals") {
       syncBackButton();
       loadApprovals().then(drawApprovals);
@@ -2245,6 +2288,7 @@
       case "roster": return drawRoster();
       case "signups": return drawSignups();
       case "signup": return drawSignup();
+      case "screens": return drawScreens();
       case "write-approvals": return drawApprovals();
       case "templates": return drawTemplates();
       case "new-event": return drawNewEvent();
@@ -4093,6 +4137,11 @@
     loadSignupEntries(false).then(drawSignupEntries);
   });
 
+  $("#screenPackList").addEventListener("click", function (e) {
+    var card = e.target.closest ? e.target.closest("[data-pack]") : null;
+    if (!card || card.disabled) return;
+    pickScreenPack(card.getAttribute("data-pack"));
+  });
   $("#bellBtn").addEventListener("click", function () {
     openNoticePanel();
   });

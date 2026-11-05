@@ -2443,3 +2443,35 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   color: var(--danger);
   font-size: .74rem;
 }
+
+/* ---------- 屏幕包 ---------- */
+.pack-grid { display: flex; flex-wrap: wrap; gap: 12px; }
+.pack-card {
+  appearance: none;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 190px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+.pack-card:hover:not(:disabled) { background: var(--surface-2); }
+.pack-card.on { border-color: var(--accent-line); background: var(--accent-soft); }
+.pack-card:disabled { cursor: default; }
+.pack-name { font-weight: 650; font-size: .92rem; }
+.pack-src { font-size: .76rem; color: var(--muted); }
+.pack-badge {
+  align-self: flex-start;
+  margin-top: 2px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--accent-line);
+  color: var(--accent-strong);
+  font-size: .72rem;
+}

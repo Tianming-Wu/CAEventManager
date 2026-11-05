@@ -154,6 +154,13 @@ CREATE TABLE IF NOT EXISTS drafts (
     PRIMARY KEY (account_id, key)
 );
 
+CREATE TABLE IF NOT EXISTS settings (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL DEFAULT '',
+    updated_at REAL NOT NULL DEFAULT 0,
+    updated_by TEXT NOT NULL DEFAULT ''
+);
+
 CREATE TABLE IF NOT EXISTS notices (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     ts           REAL    NOT NULL,
@@ -894,3 +901,19 @@ def mark_notices(conn, acc, ids=None):
         conn.execute(
             "UPDATE notices SET read_at=? WHERE read_at=0 AND (account_id=0"
             " OR account_id=?)", (time.time(), acc["id"]))
+
+
+# --------------------------------------------------------------------------- #
+# settings
+# --------------------------------------------------------------------------- #
+def get_setting(conn, key, default=""):
+    row = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+    return row["value"] if row else default
+
+
+def set_setting(conn, key, value, actor=""):
+    conn.execute(
+        "INSERT INTO settings (key, value, updated_at, updated_by) VALUES (?,?,?,?)"
+        " ON CONFLICT(key) DO UPDATE SET value=excluded.value,"
+        " updated_at=excluded.updated_at, updated_by=excluded.updated_by",
+        (key, value or "", time.time(), actor or ""))

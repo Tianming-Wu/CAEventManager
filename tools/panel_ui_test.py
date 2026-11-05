@@ -667,6 +667,7 @@ def routes_page(page):
     for route, expect in [
             ("overview", "总览"), ("events", "我的活动"), ("rosters", "我的名单"),
             ("signups", "我的报名"), ("write-approvals", "写入审批"),
+            ("screens", "展示屏幕"),
             ("templates", "预设管理"),
             ("users", "用户管理"), ("all-events", "活动管理"),
             ("approval-users", "注册申请"), ("approval-events", "活动申请"),
@@ -714,6 +715,21 @@ def group_page(page):
     check("the parent stays marked", page.evaluate(
         """() => document.querySelector('.nav-group[data-group="approvals"]')
                  .classList.contains('has-current')"""))
+
+
+def screens_page(page):
+    print("== 展示屏幕 ==")
+    page.goto(BASE + "/panel#/screens")
+    page.wait_for_timeout(900)
+    check("the page lists the built-in pack",
+          page.locator('.pack-card').count() >= 1,
+          page.locator('.pack-card').count())
+    check("it shows which pack is active now",
+          "当前默认" in page.inner_text("#screenPackHint"),
+          page.inner_text("#screenPackHint"))
+    check("the active pack is marked",
+          "使用中" in page.inner_text("#screenPackList"),
+          page.inner_text("#screenPackList"))
 
 
 def nav_keys_page(page):
@@ -1696,6 +1712,7 @@ def main():
                 title_row(page)
                 group_page(page)
                 nav_keys_page(page)
+                screens_page(page)
                 roster_page(page)
                 signup_page(page, browser)
                 notice_page(page)

@@ -139,7 +139,7 @@ LATE_COLUMNS = (
 )
 
 GRANT_MODES = ("auto", "confirm")
-SIGNUP_STATES = ("open", "closed")
+SIGNUP_STATES = ("open", "disabled")
 # 报名后能不能自己改信息：on 可以改，off 只能联系负责人
 SELF_EDIT = ("off", "on")
 # 公开页的内置字段：学号与姓名固定有，这两项可选
@@ -155,8 +155,8 @@ FIELD_TYPE_LABEL = {"text": "单行文本", "textarea": "多行文本", "number"
 FIELD_INTO_LABEL = {"": "只留在本次报名", "person.dept": "写入学号对应的院系",
                     "person.grp": "写入班级", "roster.tag": "写成名单里的分组",
                     "roster.note": "写成名单里的备注"}
-STATUS_LABEL = {"closed": "已关闭", "upcoming": "未开始", "open": "进行中",
-                "full": "已满", "ended": "已结束", "archived": "已结束"}
+STATUS_LABEL = {"disabled": "已禁用", "upcoming": "未开始", "open": "进行中",
+                "full": "已满", "ended": "已结束"}
 # 谁能批写入申请：只有拥有者，或拥有者让可写的人也来批
 APPROVE_MODES = ("owner", "editors")
 APPROVE_MODE_LABEL = {"owner": "只有我", "editors": "可写的人也可以"}
@@ -916,7 +916,11 @@ def update_signup(conn, signup_id, data):
     if "theme" in data:
         put("theme", json.dumps(normalize_theme(data.get("theme")), ensure_ascii=False))
     if "state" in data:
-        put("state", data.get("state") if data.get("state") in SIGNUP_STATES else "open")
+        value = data.get("state")
+        # 老值 closed 与新值 disabled 同义：都是"人关掉了"
+        if value == "closed":
+            value = "disabled"
+        put("state", value if value in SIGNUP_STATES else "open")
     if "visibility" in data and data.get("visibility") in VISIBILITY:
         put("visibility", data.get("visibility"))
     if "filter_roster_id" in data:
@@ -957,9 +961,10 @@ def signup_counts(conn, ids=None):
 
 
 def signup_status(row, count, now=None):
+    """开不开放由时间与名额自动判定；只有"禁用"是人说了算的。"""
     now = time.time() if now is None else now
-    if row["state"] == "closed":
-        return "closed"
+    if row["state"] in ("closed", "disabled"):
+        return "disabled"
     if row["opens_at"] and now < row["opens_at"]:
         return "upcoming"
     if row["closes_at"] and now > row["closes_at"]:
@@ -1104,7 +1109,7 @@ def submit_signup(conn, row, form, ip=""):
         raise model.ApiError("学号或姓名过长")
     count = signup_counts(conn, [row["id"]]).get(row["id"], 0)
     status = signup_status(row, count, now)
-    if status == "closed":
+    if status == "disabled":
         raise model.ApiError("本次报名已关闭", 409)
     if status == "upcoming":
         raise model.ApiError("本次报名尚未开始", 409)

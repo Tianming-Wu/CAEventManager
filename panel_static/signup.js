@@ -238,12 +238,14 @@
       renderForm();
     } else {
       var why = {
-        upcoming: "本次报名尚未开始",
-        ended: "本次报名已结束",
-        closed: "本次报名已关闭",
-        full: "名额已满"
-      }[s.status] || "本次报名不接受提交";
-      $("#body").innerHTML = '<p class="hint">' + esc(why) + "</p>";
+        upcoming: ["本次报名尚未开始", s.opensAt ? "开始时间：" + when(s.opensAt) : ""],
+        ended: ["本次报名已结束", s.closesAt ? "结束时间：" + when(s.closesAt) : ""],
+        disabled: ["本次报名已关闭", "如需报名，请联系活动负责人"],
+        full: ["名额已满", s.capacity ? "上限 " + s.capacity + " 人" : ""]
+      }[s.status] || ["本次报名不接受提交", ""];
+      $("#body").innerHTML =
+        '<div class="blocked"><b>' + esc(why[0]) + "</b>" +
+        (why[1] ? "<span>" + esc(why[1]) + "</span>" : "") + "</div>";
     }
     applyTheme();
   }

@@ -841,6 +841,8 @@
   function drawNoticeList() {
     var box = $("#noticeList");
     if (!box) return;
+    var foot = $("#noticeFoot");
+    if (foot) foot.hidden = !S.notices.some(function (n) { return n.unread; });
     if (!S.notices.length) {
       box.innerHTML = '<p class="notice-empty">还没有通知</p>';
       return;
@@ -1024,7 +1026,8 @@
       (r.visibility === "org" ? "（组织尚未建立，暂按公开处理）" : "");
     document.title = r.name + " · CAEventManager";
     $("#rosterReadOnly").hidden = !!r.editable;
-    $("#rosterAddRow").hidden = !r.editable;
+    var addBtn = $("#rosterAddBtn");
+    if (addBtn) addBtn.hidden = !r.editable;
     $("#rosterMergeBtn").hidden = !r.editable;
     $("#rosterEditBtn").hidden = !r.owner;
     $("#rosterMemberCount").textContent = (S.entryTotal === null ? "" : "共 " + S.entryTotal + " 人") +
@@ -1215,7 +1218,7 @@
         '<td class="right num">' + r.entries +
         (r.capacity ? " / " + r.capacity : "") + "</td>" +
         '<td class="actions"><button class="btn sm" type="button" data-open-signup="' +
-        r.id + '">打开</button></td></tr>';
+        r.id + '">编辑</button></td></tr>';
     }).join("") : emptyRow(5, S.signupTotal === 0 ? "还没有报名" : "正在读取…");
     var count = $("#signupCount");
     if (count) count.textContent = S.signupTotal === null ? "" : "共 " + S.signupTotal + " 个";
@@ -1725,7 +1728,7 @@
     var back = $("#approvalsBack");
     if (back) {
       back.hidden = !S.backTo;
-      if (S.backTo) back.setAttribute("href", "#" + S.backTo);
+      back.setAttribute("data-back", S.backTo || "");
     }
     $("#approvalsCount").textContent = S.approvalsCount
       ? "共 " + S.approvalsCount + " 条" : "";
@@ -1890,6 +1893,32 @@
     reader.readAsText(file, "utf-8");
   }
 
+  function addRosterEntryDialog() {
+    if (!S.roster) return;
+    openOverlay("roster-entry", "手动录入",
+      '<div class="field"><label for="rosterAddSid">学号</label>' +
+      '<input id="rosterAddSid" type="text" maxlength="32" autocomplete="off"></div>' +
+      '<div class="field"><label for="rosterAddName">姓名</label>' +
+      '<input id="rosterAddName" type="text" maxlength="32" autocomplete="off"></div>' +
+      '<div class="field"><label for="rosterAddDept">院系</label>' +
+      '<input id="rosterAddDept" type="text" maxlength="40" autocomplete="off"></div>' +
+      '<div class="field"><label for="rosterAddGrp">班级</label>' +
+      '<input id="rosterAddGrp" type="text" maxlength="40" autocomplete="off"></div>' +
+      '<div class="field"><label for="rosterAddTag">分组</label>' +
+      '<input id="rosterAddTag" type="text" maxlength="40" autocomplete="off"></div>' +
+      '<div class="row" style="margin-top:18px;justify-content:flex-end">' +
+      '<button class="btn" type="button" data-close-overlay="1">取消</button>' +
+      '<button class="btn primary" type="button" id="rosterAddGo">加入名单</button></div>');
+    $("#rosterAddSid").focus();
+    $("#rosterAddGo").addEventListener("click", addRosterEntry);
+    ["#rosterAddSid", "#rosterAddName", "#rosterAddDept", "#rosterAddGrp",
+     "#rosterAddTag"].forEach(function (sel) {
+      $(sel).addEventListener("keydown", function (e) {
+        if (e.key === "Enter") { e.preventDefault(); addRosterEntry(); }
+      });
+    });
+  }
+
   function addRosterEntry() {
     if (!S.roster) return;
     var sid = $("#rosterAddSid").value.trim();
@@ -1904,9 +1933,8 @@
         tag: $("#rosterAddTag").value.trim()
       }
     }).then(function () {
-      ["#rosterAddSid", "#rosterAddName", "#rosterAddDept", "#rosterAddGrp",
-       "#rosterAddTag"].forEach(function (sel) { $(sel).value = ""; });
-      $("#rosterAddSid").focus();
+      closeOverlay();
+      PX.toast("已加入名单");
       return loadRoster(S.roster.id).then(function () {
         return loadEntries(false);
       }).then(drawRoster);
@@ -3679,13 +3707,7 @@
   $("#rosterEditBtn").addEventListener("click", function () {
     if (S.roster) rosterDialog(S.roster);
   });
-  $("#rosterAddBtn").addEventListener("click", addRosterEntry);
-  ["#rosterAddSid", "#rosterAddName", "#rosterAddGrp", "#rosterAddTag"]
-    .forEach(function (sel) {
-      $(sel).addEventListener("keydown", function (e) {
-        if (e.key === "Enter") { e.preventDefault(); addRosterEntry(); }
-      });
-    });
+  $("#rosterAddBtn").addEventListener("click", addRosterEntryDialog);
   $("#rosterMore").addEventListener("click", function () {
     loadRosters(true).then(drawRosters);
   });
@@ -3922,7 +3944,14 @@
   $("#bellBtn").addEventListener("click", function () {
     openNoticePanel();
   });
-  $("#noticeClose").addEventListener("click", function () { openNoticePanel(false); });
+  document.addEventListener("keydown", function (e) {
+    // 紧急弹窗可以用 ESC 收起，等同于点"关闭"（不标已读）
+    if (e.key === "Escape" && $("#alertBack") && !$("#alertBack").hidden) {
+      e.preventDefault();
+      e.stopPropagation();
+      closeAlert(false);
+    }
+  }, true);
   $("#noticeReadAll").addEventListener("click", function () { markNotices([]); });
   $("#noticeList").addEventListener("click", function (e) {
     var item = e.target.closest ? e.target.closest("[data-notice]") : null;
@@ -3945,6 +3974,10 @@
     openNoticePanel(false);
   });
 
+  $("#approvalsBack").addEventListener("click", function () {
+    var to = this.getAttribute("data-back") || "";
+    if (to) location.hash = "#" + to;
+  });
   $("#approvalsTable").addEventListener("click", function (e) {
     var t = e.target.closest ? e.target.closest("[data-approve],[data-reject]") : null;
     if (!t) return;

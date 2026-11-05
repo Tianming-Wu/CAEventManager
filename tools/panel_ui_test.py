@@ -289,12 +289,17 @@ def roster_page(page):
           "除拥有者外暂无其他账号" in page.inner_text("#rosterShareBody"),
           page.inner_text("#rosterShareBody"))
 
+    check("the roster header is one line: 人数 / 搜索 / 手动录入",
+          page.locator('.page[data-page="roster"] .card-head .searchbox').count() == 1 and
+          page.locator("#rosterAddBtn").is_visible())
+    page.click("#rosterAddBtn")
+    page.wait_for_selector("#rosterAddSid", timeout=8000)
     page.fill("#rosterAddSid", "20249001")
     page.fill("#rosterAddName", "测试甲")
     page.fill("#rosterAddDept", "计算机学院")
     page.fill("#rosterAddGrp", "计科2401")
-    page.click("#rosterAddBtn")
-    page.wait_for_timeout(900)
+    page.click("#rosterAddGo")
+    page.wait_for_timeout(1000)
     check("a person can be added from the page",
           "20249001" in page.inner_text("#rosterEntryTable tbody"),
           page.inner_text("#rosterEntryTable tbody"))
@@ -343,8 +348,8 @@ def roster_page(page):
     page.wait_for_timeout(900)
     check("the roster links to the approval centre",
           page.locator('.page[data-page="write-approvals"]').is_visible())
-    check("arriving from a page shows a way back",
-          page.locator("#approvalsBack").is_visible())
+    check("arriving from a page shows the usual left-hand back button",
+          page.locator("#approvalsBack.crumb-back").is_visible())
     page.click("#approvalsBack")
     page.wait_for_timeout(900)
     check("and it returns to where it came from",
@@ -650,7 +655,9 @@ def notice_page(page):
     page.click("#noticeReadAll")
     page.wait_for_timeout(700)
     check("全部已读 clears the dot", page.locator("#bellDot").is_hidden())
-    page.click("#noticeClose")
+    check("the panel has no title bar of its own",
+          page.locator("#noticePanel .notice-head").count() == 0)
+    page.click("#bellBtn")   # 再点铃铛收起
 
 
 def routes_page(page):

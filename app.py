@@ -491,6 +491,15 @@ def _attachment_header(filename):
             % (plain, quote(filename, safe="")))
 
 
+def _account_label(conn, account_id):
+    """A human name for a notice body; falls back to the login name."""
+    row = conn.execute("SELECT name, username FROM accounts WHERE id=?",
+                       (int(account_id or 0),)).fetchone()
+    if row is None:
+        return "有人"
+    return row["name"] or row["username"]
+
+
 def _roster_viewable(acc, row):
     """Who may open a roster: its creator, an admin, or anyone when it is shared.
 
@@ -1885,6 +1894,22 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, blob, ctype,
                               [("Cache-Control", "private, max-age=86400")])
 
+        if path == "/notices" and method == "GET":
+            items = panel.notices_for(conn, acc)
+            return self._json({"ok": True, "notices": items,
+                               "unread": int(panel.unread_count(conn, acc) or 0),
+                               "revs": bus.snapshot()})
+
+        if path == "/notices/read" and method == "POST":
+            data = body()
+            ids = data.get("ids") or []
+            if not isinstance(ids, list):
+                ids = []
+            with panel.tx() as tx:
+                panel.mark_notices(tx, acc, ids)
+            return self._json({"ok": True,
+                               "unread": int(panel.unread_count(conn, acc) or 0)})
+
         if path == "/host" and method == "GET":
             need("owner")
             return self._json({"ok": True, "host": host_stats()})
@@ -1928,6 +1953,12 @@ class Handler(BaseHTTPRequestHandler):
                 panel.audit(tx, acc["username"],
                             "roster_ask" if level == "pending" else "roster_grant",
                             str(rid), long_row["name"])
+                if level == "pending":
+                    panel.notice(
+                        tx, "important", "有人申请写入名单「%s」" % long_row["name"],
+                        "%s 申请修改这份名单，需要你确认。" % _account_label(conn, acc["id"]),
+                        account_id=long_row["owner_id"], actor=acc["username"],
+                        obj="roster:%d" % rid)
             return self._json({"ok": True, "level": level,
                                "levelLabel": lists.LEVEL_LABEL[level]})
 
@@ -1971,6 +2002,12 @@ class Handler(BaseHTTPRequestHandler):
                 panel.audit(tx, acc["username"],
                             "roster_ask_approve" if action == "approve"
                             else "roster_ask_reject", str(rid), str(who))
+                panel.notice(
+                    tx, "info",
+                    "写入名单「%s」的申请%s" % (row["name"],
+                                            "已通过" if action == "approve" else "被拒绝"),
+                    "", account_id=who, actor=acc["username"],
+                    obj="roster:%d" % rid)
             return self._json({"ok": True})
 
         if path == "/roster/grant/revoke" and method == "POST":

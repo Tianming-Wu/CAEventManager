@@ -63,6 +63,15 @@
       </span>
     </div>
 
+    <button class="bell" id="bellBtn" type="button" aria-label="通知"
+            aria-expanded="false" title="通知">
+      <svg viewBox="0 0 20 20" aria-hidden="true">
+        <path d="M10 3.2a4.4 4.4 0 0 0-4.4 4.4c0 3.2-1.2 4.3-1.2 4.3h11.2s-1.2-1.1-1.2-4.3A4.4 4.4 0 0 0 10 3.2Z"/>
+        <path d="M8.4 15.1a1.7 1.7 0 0 0 3.2 0"/>
+      </svg>
+      <span class="bell-dot" id="bellDot" hidden></span>
+    </button>
+
   </header>
 
   <!-- ------------------------------------------------------------- sidebar -->
@@ -1165,6 +1174,28 @@
         <div class="unwired-note">侧栏密度、语言与快捷键说明还没有接入</div>
       </div>
     </section>
+
+    <div class="notice-panel" id="noticePanel" hidden>
+      <div class="notice-head">
+        <h2>通知</h2>
+        <button class="btn sm" id="noticeReadAll" type="button">全部已读</button>
+        <button class="icon-btn" id="noticeClose" type="button" aria-label="收起通知">×</button>
+      </div>
+      <div class="notice-list" id="noticeList"></div>
+    </div>
+
+    <div class="alert-back" id="alertBack" hidden>
+      <div class="alert-box" role="alertdialog" aria-modal="true"
+           aria-labelledby="alertTitle">
+        <span class="alert-level" id="alertLevel">紧急</span>
+        <h2 id="alertTitle">—</h2>
+        <p id="alertBody"></p>
+        <div class="row" style="justify-content:flex-end;margin-top:16px">
+          <button class="btn primary" id="alertRead" type="button">已读</button>
+          <button class="btn" id="alertClose" type="button">关闭</button>
+        </div>
+      </div>
+    </div>
 
     <div class="denied" id="denied" hidden>
       <div class="denied-inner">

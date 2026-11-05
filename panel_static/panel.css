@@ -1560,17 +1560,18 @@ input[type="color"] {
   min-height: 34px;
   padding: 0;
 }
-/* 透明的原生日期控件正好盖住按钮：选择器就会在按钮旁边弹出，
-   而不是因为它被 hidden 掉而跑到页面左上角 */
+/* 原生日期控件缩成按钮中心的一个点：它只是选择器的锚点，
+   不接受点击（否则只有点在控件的日历图标上才会弹出），点击由按钮调 showPicker() */
 .dt-cal-wrap input[type="date"] {
   position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
+  left: 50%;
+  top: 50%;
+  width: 1px;
+  height: 1px;
   padding: 0;
   border: 0;
   opacity: 0;
-  cursor: pointer;
+  pointer-events: none;
 }
 .dt-pair .dt-clear { flex: none; }
 .dt-pair .dt-clear:disabled { opacity: .45; cursor: default; }
@@ -1751,7 +1752,7 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
 .toast {
   pointer-events: auto;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 9px;
   max-width: 100%;
   transform: translateY(-12px);
@@ -1802,7 +1803,6 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   padding: 0;
   border-radius: 5px;
   cursor: pointer;
-  align-self: center;
 }
 .toast .toast-x:hover { color: var(--text); background: var(--surface-2); }
 .toast.bad { border-color: var(--danger-line); }
@@ -2212,4 +2212,130 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   border-color: var(--accent-line);
   background: var(--accent-soft);
   color: var(--accent-strong);
+}
+
+/* ---------- 通知中心：右上角铃铛 ---------- */
+.bell {
+  position: relative;
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  cursor: pointer;
+  flex: none;
+}
+.bell:hover { background: var(--surface-2); color: var(--text); }
+.bell svg { width: 19px; height: 19px; fill: none; stroke: currentColor;
+            stroke-width: 1.6; stroke-linecap: round; }
+.bell-dot {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--danger);
+  box-shadow: 0 0 0 2px var(--surface);
+}
+.notice-panel {
+  position: fixed;
+  top: calc(var(--titlebar) + 10px);
+  right: 16px;
+  width: min(380px, calc(100vw - 24px));
+  max-height: min(70vh, 520px);
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: 0 18px 40px rgba(40, 28, 12, .22);
+  z-index: 350;
+  overflow: hidden;
+}
+.notice-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.notice-head h2 { flex: 1 1 auto; margin: 0; font-size: .95rem; }
+.notice-list { overflow: auto; padding: 6px; }
+.notice-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  cursor: pointer;
+  color: var(--text);
+  font: inherit;
+}
+.notice-item:hover { background: var(--surface-2); }
+.notice-item + .notice-item { border-top: 1px solid var(--line-soft); }
+.notice-meta { display: flex; align-items: center; gap: 8px; font-size: .74rem;
+               color: var(--dim); margin-bottom: 4px; }
+.notice-level {
+  display: inline-block;
+  padding: 0 7px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  font-size: .72rem;
+  color: var(--muted);
+}
+.notice-item.important .notice-level { border-color: var(--accent-line); color: var(--accent-strong); }
+.notice-item.critical .notice-level { border-color: var(--danger-line); color: var(--danger); }
+.notice-title { display: block; font-size: .88rem; font-weight: 600; }
+.notice-item.unread .notice-title::after {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--danger);
+  vertical-align: middle;
+}
+.notice-body { display: block; font-size: .8rem; color: var(--muted);
+               margin-top: 3px; white-space: normal; }
+.notice-empty { padding: 18px 12px; color: var(--dim); font-size: .84rem; text-align: center; }
+
+/* 紧急通知：全屏，只能点"已读 / 关闭"，点周围不消失 */
+.alert-back {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  background: rgba(20, 14, 8, .62);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.alert-box {
+  background: var(--surface);
+  border: 1px solid var(--danger-line);
+  border-radius: var(--radius);
+  box-shadow: 0 24px 60px rgba(20, 12, 4, .35);
+  padding: 22px 24px;
+  max-width: 520px;
+  width: 100%;
+}
+.alert-box h2 { margin: 8px 0 6px; font-size: 1.05rem; }
+.alert-box p { margin: 0; color: var(--muted); font-size: .88rem; white-space: normal; }
+.alert-level {
+  display: inline-block;
+  padding: 1px 9px;
+  border-radius: 999px;
+  background: var(--danger-soft);
+  border: 1px solid var(--danger-line);
+  color: var(--danger);
+  font-size: .74rem;
 }

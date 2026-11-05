@@ -154,6 +154,22 @@ CREATE TABLE IF NOT EXISTS drafts (
     PRIMARY KEY (account_id, key)
 );
 
+CREATE TABLE IF NOT EXISTS notices (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts           REAL    NOT NULL,
+    level        TEXT    NOT NULL DEFAULT 'info',   -- info | important | critical
+    title        TEXT    NOT NULL,
+    body         TEXT    NOT NULL DEFAULT '',
+    -- all（所有人）/ 0（只给某个账号，见 account_id）
+    audience     TEXT    NOT NULL DEFAULT 'all',
+    account_id   INTEGER NOT NULL DEFAULT 0,
+    actor        TEXT    NOT NULL DEFAULT '',
+    object       TEXT    NOT NULL DEFAULT '',       -- 例如 roster:3，用来做跳转
+    read_at      REAL    NOT NULL DEFAULT 0,
+    dismissed_at REAL    NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS notices_account ON notices(account_id, ts);
+
 CREATE TABLE IF NOT EXISTS audit (
     id      INTEGER PRIMARY KEY AUTOINCREMENT,
     ts      REAL NOT NULL,
@@ -223,6 +239,9 @@ LATE_COLUMNS = (
     ("presets", "source", "TEXT NOT NULL DEFAULT ''"),
 )
 
+
+LEVEL_LABEL = {"info": "通知", "important": "重要", "critical": "紧急"}
+LEVELS = ("info", "important", "critical")
 
 DEFAULT_KIND = "nwuca.lottery"
 
@@ -824,3 +843,54 @@ def mount_prefix(raw_path, token):
         return ""
     head = (raw_path or "").split("/" + token)[0]
     return head.rstrip("/")
+
+
+# --------------------------------------------------------------------------- #
+# notices
+# --------------------------------------------------------------------------- #
+def notice(tx, level, title, body="", account_id=0, actor="", obj=""):
+    """排队一条通知。account_id=0 表示发给所有人。"""
+    if level not in LEVELS:
+        level = "info"
+    cur = tx.execute(
+        "INSERT INTO notices (ts, level, title, body, audience, account_id, actor, object)"
+        " VALUES (?,?,?,?,?,?,?,?)",
+        (time.time(), level, title[:120], (body or "")[:600],
+         "one" if account_id else "all", int(account_id or 0), actor or "", obj or ""))
+    return cur.lastrowid
+
+
+def notices_for(conn, acc, limit=30):
+    """这个人看得到的通知：发给所有人的，加上点名给他的。"""
+    rows = conn.execute(
+        "SELECT * FROM notices WHERE dismissed_at=0"
+        " AND (account_id=0 OR account_id=?)"
+        " ORDER BY ts DESC LIMIT ?", (acc["id"], limit)).fetchall()
+    return [notice_view(r) for r in rows]
+
+
+def notice_view(row):
+    return {"id": row["id"], "ts": row["ts"], "level": row["level"],
+            "levelLabel": LEVEL_LABEL.get(row["level"], row["level"]),
+            "title": row["title"], "body": row["body"],
+            "object": row["object"], "unread": not row["read_at"]}
+
+
+def unread_count(conn, acc):
+    return conn.execute(
+        "SELECT COUNT(*) AS n FROM notices WHERE dismissed_at=0 AND read_at=0"
+        " AND (account_id=0 OR account_id=?)", (acc["id"],)).fetchone()["n"]
+
+
+def mark_notices(conn, acc, ids=None):
+    """标为已读；ids 为空表示全部已读。"""
+    if ids:
+        marks = ",".join("?" * len(ids))
+        conn.execute(
+            "UPDATE notices SET read_at=? WHERE read_at=0 AND (account_id=0"
+            " OR account_id=?) AND id IN (%s)" % marks,
+            [time.time(), acc["id"]] + [int(i) for i in ids])
+    else:
+        conn.execute(
+            "UPDATE notices SET read_at=? WHERE read_at=0 AND (account_id=0"
+            " OR account_id=?)", (time.time(), acc["id"]))

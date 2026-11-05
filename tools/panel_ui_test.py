@@ -612,6 +612,47 @@ def signup_page(page, browser):
     guest.close()
 
 
+def notice_page(page):
+    print("== 通知中心 ==")
+    import sys as _sys
+    _sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    import panel as _panel
+
+    _panel.init_db()
+    with _panel.tx() as tx:
+        _panel.notice(tx, "important", "周末活动报名已开放", "报名截止到周五 18:00。")
+        _panel.notice(tx, "critical", "服务将在 22:00 重启", "重启约需 30 秒。")
+
+    page.goto(BASE + "/panel#/overview", wait_until="networkidle")
+    page.reload(wait_until="networkidle")
+    page.wait_for_timeout(1600)
+    check("a critical notice opens full screen",
+          page.locator("#alertBack").is_visible())
+    check("it says what it is about",
+          "服务将在 22:00 重启" in page.inner_text("#alertTitle"),
+          page.inner_text("#alertTitle"))
+    page.mouse.click(30, 400)
+    page.wait_for_timeout(400)
+    check("clicking around it does not dismiss it",
+          page.locator("#alertBack").is_visible())
+    page.click("#alertRead")
+    page.wait_for_timeout(800)
+    check("已读 closes it", page.locator("#alertBack").is_hidden())
+    check("the bell keeps a red dot for the rest",
+          page.locator("#bellDot").is_visible())
+    page.click("#bellBtn")
+    page.wait_for_timeout(600)
+    check("the panel lists the notices",
+          page.locator(".notice-item").count() == 2,
+          page.locator(".notice-item").count())
+    check("levels are marked", "重要" in page.inner_text("#noticeList") and
+          "紧急" in page.inner_text("#noticeList"), page.inner_text("#noticeList")[:80])
+    page.click("#noticeReadAll")
+    page.wait_for_timeout(700)
+    check("全部已读 clears the dot", page.locator("#bellDot").is_hidden())
+    page.click("#noticeClose")
+
+
 def routes_page(page):
     print("== every route renders its own page ==")
     for route, expect in [
@@ -1627,6 +1668,7 @@ def main():
                 group_page(page)
                 roster_page(page)
                 signup_page(page, browser)
+                notice_page(page)
                 card_page(page)
                 create_page(browser)
                 # profile_page edits the signed-in account, so it only runs on a

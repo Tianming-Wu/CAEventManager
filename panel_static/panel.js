@@ -83,6 +83,9 @@
     signupDirty: false,     // 表单被改过：后台刷新不要覆盖它
     history: [],            // 表单快照栈：Ctrl+Z / Ctrl+Shift+Z
     historyPos: -1,
+    notices: [],
+    noticeUnread: 0,
+    alertOpen: false,
     approvals: [],
     myAsks: [],
     approvalsCount: 0,
@@ -808,6 +811,98 @@
     $("#shell").classList.remove("nav-open");
     $("#scrim").hidden = true;
     $("#menuBtn").setAttribute("aria-expanded", "false");
+  }
+
+  /* ------------------------------------------------------------------ 通知 --- */
+  /* 右上角一个铃铛：有未读就亮红点，点开是列表。紧急级未读一上线就全屏弹出，
+   * 只能点"已读 / 关闭"结束——点周围不消失。 */
+  function loadNotices() {
+    return PX.api("/notices")
+      .then(function (d) {
+        S.notices = d.notices || [];
+        S.noticeUnread = d.unread || 0;
+        drawBell();
+        drawNoticeList();
+        maybeShowAlert();
+      })
+      .catch(function () { /* 通知读不到不该影响主流程 */ });
+  }
+
+  function drawBell() {
+    var dot = $("#bellDot");
+    if (dot) dot.hidden = !S.noticeUnread;
+    var btn = $("#bellBtn");
+    if (btn) {
+      btn.setAttribute("aria-label",
+        S.noticeUnread ? "通知（" + S.noticeUnread + " 条未读）" : "通知");
+    }
+  }
+
+  function drawNoticeList() {
+    var box = $("#noticeList");
+    if (!box) return;
+    if (!S.notices.length) {
+      box.innerHTML = '<p class="notice-empty">还没有通知</p>';
+      return;
+    }
+    box.innerHTML = S.notices.map(function (n) {
+      return '<button class="notice-item ' + PX.esc(n.level) +
+        (n.unread ? " unread" : "") + '" type="button" data-notice="' + n.id +
+        '" data-object="' + PX.esc(n.object || "") + '">' +
+        '<span class="notice-meta"><span class="notice-level">' +
+        PX.esc(n.levelLabel) + "</span>" + PX.esc(PX.whenExact(n.ts)) + "</span>" +
+        '<span class="notice-title">' + PX.esc(n.title) + "</span>" +
+        (n.body ? '<span class="notice-body">' + PX.esc(n.body) + "</span>" : "") +
+        "</button>";
+    }).join("");
+  }
+
+  function markNotices(ids) {
+    PX.api("/notices/read", { method: "POST", body: { ids: ids || [] } })
+      .then(function () { return loadNotices(); })
+      .catch(function () {});
+  }
+
+  /* 紧急级：一次弹一条，关掉一条再看下一条 */
+  function maybeShowAlert() {
+    if (S.alertOpen) return;
+    var next = null;
+    for (var i = 0; i < S.notices.length; i += 1) {
+      if (S.notices[i].level === "critical" && S.notices[i].unread) {
+        next = S.notices[i];
+        break;
+      }
+    }
+    var back = $("#alertBack");
+    if (!back) return;
+    if (!next) {
+      back.hidden = true;
+      S.alertOpen = false;
+      return;
+    }
+    S.alertOpen = next.id;
+    $("#alertTitle").textContent = next.title;
+    $("#alertBody").textContent = next.body || "";
+    back.hidden = false;
+    var ok = $("#alertRead");
+    if (ok) ok.focus();
+  }
+
+  function closeAlert(mark) {
+    var id = S.alertOpen;
+    S.alertOpen = false;
+    $("#alertBack").hidden = true;
+    if (mark && id) markNotices([id]);
+  }
+
+  function openNoticePanel(open) {
+    var panel = $("#noticePanel");
+    var btn = $("#bellBtn");
+    if (!panel) return;
+    var show = open === undefined ? panel.hidden : open;
+    panel.hidden = !show;
+    if (btn) btn.setAttribute("aria-expanded", show ? "true" : "false");
+    if (show) loadNotices();
   }
 
   /* --------------------------------------------------------------- 名单 --- */
@@ -1938,6 +2033,7 @@
     closePane();
     $("#content").scrollTop = 0;
     draw();
+    loadNotices();
     syncSudo();
     if (wanted === "server" || wanted === "overview") refreshHost();
     if (wanted === "audit" && canAudit() && !S.audit.length) loadAudit().then(draw);
@@ -3668,9 +3764,11 @@
     $(pickSel).addEventListener("click", function () {
       var native = $(pickSel.replace("Pick", "DatePick"));
       native.value = $(dateSel).value || "";
+      // showPicker 把选择器锚在这个控件上：它就在按钮中心，看起来是"贴着按钮弹出"
       if (native.showPicker) {
         try { native.showPicker(); return; } catch (e) { /* 老浏览器退回点击 */ }
       }
+      native.focus();
       native.click();
     });
     $(pickSel.replace("Pick", "DatePick")).addEventListener("change", function () {
@@ -3819,6 +3917,32 @@
   bindLiveSearch("#signupEntrySearch", "#signupEntrySearchClear", function (value) {
     S.signupEntryFilter = value;
     loadSignupEntries(false).then(drawSignupEntries);
+  });
+
+  $("#bellBtn").addEventListener("click", function () {
+    openNoticePanel();
+  });
+  $("#noticeClose").addEventListener("click", function () { openNoticePanel(false); });
+  $("#noticeReadAll").addEventListener("click", function () { markNotices([]); });
+  $("#noticeList").addEventListener("click", function (e) {
+    var item = e.target.closest ? e.target.closest("[data-notice]") : null;
+    if (!item) return;
+    var id = Number(item.getAttribute("data-notice"));
+    var obj = item.getAttribute("data-object") || "";
+    markNotices([id]);
+    if (obj.indexOf("roster:") === 0) {
+      openNoticePanel(false);
+      location.hash = "#/roster/" + obj.split(":")[1];
+    }
+  });
+  $("#alertRead").addEventListener("click", function () { closeAlert(true); });
+  $("#alertClose").addEventListener("click", function () { closeAlert(false); });
+  // 点空白处收起列表，但紧急弹窗不在此列
+  document.addEventListener("click", function (e) {
+    var panel = $("#noticePanel");
+    if (!panel || panel.hidden) return;
+    if (panel.contains(e.target) || e.target.closest("#bellBtn")) return;
+    openNoticePanel(false);
   });
 
   $("#approvalsTable").addEventListener("click", function (e) {
@@ -3987,10 +4111,12 @@
         if (!before || before.panel === undefined) return;
         if (revs.panel === before.panel) return;
         scheduleReload();
+        loadNotices();
       });
       // a reload keeps an elevation that has not run out yet
       setSudo(d.sudoUntil, d.now);
       return reloadAll().then(function () {
+        loadNotices();
         loadApprovals();
         startHostPolling();
         onRoute();

@@ -294,6 +294,7 @@ def create_roster(conn, owner_id, name, note="", visibility="private",
 
 
 def update_roster(conn, roster_id, **fields):
+    current = roster(conn, roster_id)
     sets, vals = [], []
     for key in ("name", "note", "visibility", "grant_mode", "approve_mode"):
         if key not in fields or fields[key] is None:
@@ -316,13 +317,16 @@ def update_roster(conn, roster_id, **fields):
                 raise model.ApiError("审批人只能是拥有者或可写的人")
         else:
             value = str(value)[:200]
+        if current is not None and key in current.keys() and current[key] == value:
+            continue                      # 值没变就不写
         sets.append("%s=?" % key)
         vals.append(value)
     if not sets:
-        return
+        return False
     sets.append("updated_at=?")
     vals.append(time.time())
     conn.execute("UPDATE rosters SET %s WHERE id=?" % ",".join(sets), vals + [roster_id])
+    return True
 
 
 def delete_roster(conn, roster_id):
@@ -888,6 +892,8 @@ def update_signup(conn, signup_id, data):
     sets, vals = [], []
 
     def put(key, value):
+        if key in row.keys() and row[key] == value:
+            return                        # 值没变就不写
         sets.append("%s=?" % key)
         vals.append(value)
 
@@ -929,10 +935,11 @@ def update_signup(conn, signup_id, data):
         put("fields", json.dumps(normalize_fields(data.get("fields")),
                                  ensure_ascii=False))
     if not sets:
-        return
+        return False
     put("updated_at", time.time())
     conn.execute("UPDATE signups SET %s WHERE id=?" % ",".join(sets),
                  vals + [signup_id])
+    return True
 
 
 def signup(conn, signup_id):

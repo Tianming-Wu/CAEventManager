@@ -2079,19 +2079,20 @@ class Handler(BaseHTTPRequestHandler):
             rid = int(data.get("id") or 0)
             open_roster(rid, write=True)
             with lists.tx() as lx:
-                lists.update_roster(
+                changed = lists.update_roster(
                     lx, rid,
                     name=data.get("name"), note=data.get("note"),
                     visibility=data.get("visibility"),
                     grant_mode=data.get("grant_mode"),
                     approve_mode=data.get("approve_mode"))
-            with panel.tx() as tx:
-                panel.audit(tx, acc["username"], "roster_update", str(rid),
-                            json.dumps({k: data.get(k) for k in
-                                        ("name", "visibility", "grant_mode",
-                                         "approve_mode")
-                                        if k in data}, ensure_ascii=False))
-            return self._json({"ok": True})
+            if changed:
+                with panel.tx() as tx:
+                    panel.audit(tx, acc["username"], "roster_update", str(rid),
+                                json.dumps({k: data.get(k) for k in
+                                            ("name", "visibility", "grant_mode",
+                                             "approve_mode")
+                                            if k in data}, ensure_ascii=False))
+            return self._json({"ok": True, "changed": bool(changed)})
 
         if path == "/roster/delete" and method == "POST":
             data = body()
@@ -2263,13 +2264,14 @@ class Handler(BaseHTTPRequestHandler):
             sid = int(data.get("id") or 0)
             open_signup(sid, write=True)
             with lists.tx() as lx:
-                lists.update_signup(lx, sid, data)
-            with panel.tx() as tx:
-                panel.audit(tx, acc["username"], "signup_update", str(sid),
-                            json.dumps({k: data.get(k) for k in
-                                        ("title", "state", "capacity")
-                                        if k in data}, ensure_ascii=False))
-            return self._json({"ok": True})
+                changed = lists.update_signup(lx, sid, data)
+            if changed:
+                with panel.tx() as tx:
+                    panel.audit(tx, acc["username"], "signup_update", str(sid),
+                                json.dumps({k: data.get(k) for k in
+                                            ("title", "state", "capacity")
+                                            if k in data}, ensure_ascii=False))
+            return self._json({"ok": True, "changed": bool(changed)})
 
         if path == "/signup/delete" and method == "POST":
             data = body()

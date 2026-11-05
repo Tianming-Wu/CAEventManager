@@ -216,6 +216,9 @@
   var overlayKind = null;
   var overlayOpener = null;
 
+  // 允许点遮罩关闭的弹窗（都是没有输入、关掉不丢东西的）
+  var OVERLAY_OUTSIDE_CLOSE = { presets: true, info: true };
+
   function openOverlay(kind, title, html) {
     overlayKind = kind;
     var card = $("#overlay").firstElementChild;
@@ -254,7 +257,10 @@
 
   $("#overlayClose").addEventListener("click", closeOverlay);
   $("#overlay").addEventListener("click", function (e) {
-    if (e.target === $("#overlay")) closeOverlay();   // click the scrim
+    // 点遮罩默认什么都不做：多数弹窗里有正在编辑的内容，关掉就是丢东西。
+    // 需要"点外面关闭"的弹窗自己带 data-outside-close。
+    if (e.target !== $("#overlay")) return;
+    if (overlayKind && OVERLAY_OUTSIDE_CLOSE[overlayKind]) closeOverlay();
   });
 
   /* ------------------------------------------------------------ sudo mode */
@@ -1423,6 +1429,9 @@
       qr.addData(url);
       qr.make();
       holder.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 1, scalable: true });
+      // 库会在最外层塞一块 fill="white" 的 rect，压着码的边看着像黑框；白底由容器给
+      var bg = holder.querySelector('svg > rect');
+      if (bg) bg.parentNode.removeChild(bg);
     } catch (e) {
       holder.innerHTML = '<span class="hint">二维码生成失败</span>';
     }
@@ -1578,8 +1587,8 @@
       fields: collectFields()
     };
     PX.api("/signup/update", { method: "POST", body: body })
-      .then(function () {
-        PX.toast("已保存");
+      .then(function (d) {
+        PX.toast(d && d.changed === false ? "没有改动" : "已保存");
         S.signupDirty = false;
         return loadSignup(S.signup.id).then(drawSignup);
       })
@@ -1724,12 +1733,15 @@
     badge.hidden = !S.approvalsCount;
   }
 
-  function drawApprovals() {
+  function syncBackButton() {
     var back = $("#approvalsBack");
-    if (back) {
-      back.hidden = !S.backTo;
-      back.setAttribute("data-back", S.backTo || "");
-    }
+    if (!back) return;
+    back.hidden = !S.backTo;
+    back.setAttribute("data-back", S.backTo || "");
+  }
+
+  function drawApprovals() {
+    syncBackButton();
     $("#approvalsCount").textContent = S.approvalsCount
       ? "共 " + S.approvalsCount + " 条" : "";
     $("#approvalsTable tbody").innerHTML = S.approvals.length
@@ -1822,6 +1834,10 @@
       }
       req.then(function (out) {
         closeOverlay();
+        if (out && out.changed === false) {
+          PX.toast("没有改动");
+          return loadRoster(row.id).then(drawRoster);
+        }
         PX.toast(row ? "已保存" : "已创建名单");
         if (row) {
           return loadRoster(row.id).then(drawRoster);
@@ -2083,9 +2099,12 @@
     }
     if (wanted === "write-approvals") {
       S.backTo = hashQuery().back || null;
+      // 返回键属于"这一页有没有上一级"，路由一确定就画出来，别等数据回来
+      syncBackButton();
       loadApprovals().then(drawApprovals);
     } else {
       S.backTo = null;
+      syncBackButton();
     }
     if (wanted === "roster") {
       if (!S.rosterId) {
@@ -3115,6 +3134,20 @@
     if (d) return d + " 天 " + h + " 小时";
     if (h) return h + " 小时 " + m + " 分";
     return m + " 分";
+  }
+
+  /* 审计里的 target 只是一个 id，光看数字没意义：按动作前缀补上对象类型 */
+  function auditTarget(a) {
+    var t = (a.target || "").trim();
+    if (!t) return "";
+    var action = (a.action || "");
+    var kind = action.indexOf("roster_") === 0 ? "roster"
+      : action.indexOf("signup_") === 0 ? "signup"
+      : action.indexOf("preset") === 0 ? "preset"
+      : action.indexOf("event") === 0 ? "event"
+      : action.indexOf("account") === 0 ? "account"
+      : action.indexOf("module") === 0 ? "module" : "";
+    return kind ? kind + "@" + t : t;
   }
 
   function drawAudit() {

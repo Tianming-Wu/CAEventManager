@@ -13,6 +13,7 @@
 
 /* Fallback for browsers without light-dark(): light values only. */
 :root {
+  --ctrl-h: 38px;              /* 一行里所有控件的高度，别各写各的 */
   color-scheme: light dark;
 
   --bg: #f5f2ee;
@@ -439,7 +440,9 @@ button.nav-item {
 .head-title h1 { min-width: 0; }
 /* the 30px button overhangs the 24px title line symmetrically: it centres on
    the title without making the header taller than the other pages */
+.page-head .crumb-back[hidden] { display: none; }
 .page-head .crumb-back {
+  animation: crumb-in .16s ease-out;
   width: 30px;
   height: 30px;
   margin: -3px 0 -3px -4px;
@@ -1405,7 +1408,11 @@ select:invalid { color: var(--dim); }
 /* 卡片头里的搜索框与按钮同高：输入框自带内边距，按钮没有，混在一起会显得参差 */
 .card-head .searchbox .search,
 .card-head > .btn,
-.card-head .row > .btn { min-height: 34px; }
+.card-head .row > .btn,
+.row > .btn, .row > input, .row > select, .row > .searchbox .search {
+  min-height: var(--ctrl-h, 38px);
+  height: var(--ctrl-h, 38px);
+}
 .searchbox {
   position: relative;
   flex: 1 1 180px;
@@ -1554,6 +1561,8 @@ input[type="color"] {
 
 /* 日期与时刻分成两格：平台原生 datetime-local 的占位符是中英混排，看着很怪 */
 .dt-pair { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.dt-pair > * { height: var(--ctrl-h, 38px); min-height: var(--ctrl-h, 38px); }
+.dt-pair .dt-cal { width: var(--ctrl-h, 38px); padding: 0; }
 .dt-pair .dt-date { flex: 1 1 150px; min-width: 140px; }
 .dt-pair .dt-time { flex: 0 0 110px; }
 .dt-cal-wrap { position: relative; display: inline-flex; flex: none; }
@@ -1660,11 +1669,9 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   display: flex;
   align-items: center;
   justify-content: center;
-  /* 圆角白底本身就是框：不描边，边线交给投影，深色下也不会出现一条黑框 */
   background: #fff;
-  border: 0;
+  border: 1px solid var(--line);
   border-radius: var(--radius-sm);
-  box-shadow: 0 2px 6px rgba(40, 28, 12, .12);
   padding: 6px;
 }
 #signupQr svg { width: 100%; height: 100%; display: block; }
@@ -1715,6 +1722,16 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
 #rosterTable th:nth-child(4), #rosterTable td:nth-child(4) { width: 24%; }
 #rosterTable th:nth-child(5), #rosterTable td:nth-child(5) { width: 14%; }
 /* 名单成员表：八列，操作列要放得下两个按钮，所以给它留够宽度 */
+#auditTable th:nth-child(1), #auditTable td:nth-child(1) { width: 17%; }
+#auditTable th:nth-child(2), #auditTable td:nth-child(2) { width: 12%; }
+#auditTable th:nth-child(3), #auditTable td:nth-child(3) { width: 13%; }
+#auditTable th:nth-child(4), #auditTable td:nth-child(4) { width: 14%; }
+#auditTable th:nth-child(5), #auditTable td:nth-child(5) { width: 44%; }
+
+/* 搜索框里的占位文字不能被裁：给足内边距与最小宽度 */
+.searchbox { min-width: 200px; }
+.searchbox .search { min-width: 170px; padding-right: 30px; }
+
 #rosterEntryTable th:nth-child(1), #rosterEntryTable td:nth-child(1) { width: 12%; }
 #rosterEntryTable th:nth-child(2), #rosterEntryTable td:nth-child(2) { width: 13%; }
 #rosterEntryTable th:nth-child(3), #rosterEntryTable td:nth-child(3) { width: 15%; }
@@ -1822,6 +1839,15 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   line-height: 18px;
   border-radius: 4px;
   cursor: pointer;
+}
+.toast .toast-x svg {
+  width: 12px;
+  height: 12px;
+  display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
 }
 .toast .toast-x:hover { color: var(--text); background: var(--surface-2); }
 .toast.bad { border-color: var(--danger-line); }
@@ -1991,7 +2017,11 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   /* 卡片头里的搜索框与按钮同高：输入框自带内边距，按钮没有，混在一起会显得参差 */
 .card-head .searchbox .search,
 .card-head > .btn,
-.card-head .row > .btn { min-height: 34px; }
+.card-head .row > .btn,
+.row > .btn, .row > input, .row > select, .row > .searchbox .search {
+  min-height: var(--ctrl-h, 38px);
+  height: var(--ctrl-h, 38px);
+}
 .searchbox { flex-basis: 100%; max-width: none; margin-left: 0; }
 
   .hoststats { display: none; }        /* no room in a phone title bar */
@@ -2236,6 +2266,17 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   background: var(--accent-soft);
   color: var(--accent-strong);
 }
+
+@keyframes crumb-in {
+  from { opacity: 0; transform: translateX(-6px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* 弹窗里的字段不要挤在一起：上一行的输入框与下一行的标题之间留出呼吸 */
+#overlayBody .field { margin-bottom: 12px; }
+#overlayBody .field + .field { margin-top: 0; }
+#overlayBody .field label { margin-bottom: 6px; }
+#overlayBody .row { margin-bottom: 0; }
 
 /* ---------- 通知中心：右上角铃铛 ---------- */
 .bell {

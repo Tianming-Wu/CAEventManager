@@ -729,6 +729,19 @@ def main():
           and "学号".encode() in sheet and "高勇".encode() in sheet,
           (sheet or b"")[:40])
 
+    print("== 名单：什么都没改就不算保存 ==")
+    same = post(owner, "/api/panel/roster/update",
+                {"id": roster_id, "name": "动漫社 2026 秋"})
+    check("saving without a change reports that nothing changed",
+          same and same.get("changed") is False, same)
+    audit_now = call(owner, "/api/panel/audit?limit=5")["audit"]
+    check("and leaves no audit row",
+          not any(a["action"] == "roster_update" for a in audit_now[:1]),
+          [a["action"] for a in audit_now[:3]])
+    real = post(owner, "/api/panel/roster/update",
+                {"id": roster_id, "note": "社团成员名单"})
+    check("a real change still saves", real and real.get("changed") is True, real)
+
     print("== 名单：看得见 ≠ 改得动 ==")
     helper = session()
     post(anon, "/api/panel/register", {"username": "alice", "name": "王同学",

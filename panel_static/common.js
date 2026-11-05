@@ -170,7 +170,9 @@
     el.innerHTML =
       '<span class="toast-mark" aria-hidden="true">' + (bad ? "!" : "✓") + "</span>" +
       '<span class="toast-text">' + msg + "</span>" +
-      '<button class="toast-x" type="button" aria-label="关闭通知">×</button>';
+      '<button class="toast-x" type="button" aria-label="关闭通知">' +
+      '<svg viewBox="0 0 12 12" aria-hidden="true">' +
+      '<path d="M3 3l6 6M9 3l-6 6"/></svg></button>';
     stack.appendChild(el);
     void el.offsetWidth;
     el.classList.add("show");

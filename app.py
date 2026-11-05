@@ -1913,21 +1913,8 @@ class Handler(BaseHTTPRequestHandler):
                               [("Cache-Control", "private, max-age=86400")])
 
         if path == "/screen_packs" and method == "GET":
-            packs = _screen_packs()
-            active = panel.get_setting(conn, "screen_pack", "") or "classic"
-            return self._json({"ok": True, "packs": packs, "active": active,
-                               "canEdit": acc["role"] in ("owner", "superadmin")})
-
-        if path == "/screen_pack" and method == "POST":
-            need("owner", "superadmin")
-            data = body()
-            want = (data.get("id") or "").strip()
-            if want not in {p["id"] for p in _screen_packs()}:
-                raise model.ApiError("没有这个屏幕包", 404)
-            with panel.tx() as tx:
-                panel.set_setting(tx, "screen_pack", want, acc["username"])
-                panel.audit(tx, acc["username"], "screen_pack", want, "")
-            return self._json({"ok": True, "active": want})
+            # 只读的资源清单：这些是活动可以引用的外部资源，没有"平台默认值"
+            return self._json({"ok": True, "packs": _screen_packs()})
 
         if path == "/notices" and method == "GET":
             items = panel.notices_for(conn, acc)
@@ -2449,9 +2436,8 @@ class Handler(BaseHTTPRequestHandler):
         包名放在活动配置的 screen_pack 里，缺省用 classic。
         """
         conn = db.connect()
-        want = (db.get_config(conn, "screen_pack", "") or "").strip()
-        if not want:
-            want = panel.get_setting(panel.connect(), "screen_pack", "") or "classic"
+        # 活动自己没指定就用自己的内置屏幕；外部资源只被"引用"，不设平台默认值
+        want = (db.get_config(conn, "screen_pack", "") or "").strip() or "classic"
         tail = path[len("/screen"):].lstrip("/")
         if ".." in tail or ".." in want:
             return self._err("bad path", 400)

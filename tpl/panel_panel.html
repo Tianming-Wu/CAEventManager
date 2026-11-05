@@ -133,7 +133,29 @@
         </div>
       </div>
 
-      <div class="nav-sep" role="separator"></div>
+            <!-- 外部资源：给用户用的东西，不藏在站长页里 -->
+      <div class="nav-group" data-group="resources">
+        <button class="nav-item nav-group-head" type="button"
+                aria-expanded="false" aria-controls="nav-resources" data-toggle="resources">
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <rect x="2.8" y="3.6" width="14.4" height="10.2" rx="1.6"/>
+            <path d="M7 16.4h6"/>
+          </svg>
+          <span class="nav-text">外部资源</span>
+          <svg class="nav-caret" viewBox="0 0 20 20" aria-hidden="true">
+            <path d="M7.5 5l5 5-5 5"/>
+          </svg>
+        </button>
+        <div class="nav-sub" id="nav-resources">
+          <div class="nav-sub-inner">
+            <a class="nav-item nav-sub-item" href="#/screens" data-nav="screens">
+              <span class="nav-text">展示屏幕</span>
+            </a>
+          </div>
+        </div>
+      </div>
+
+<div class="nav-sep" role="separator"></div>
 
       <a class="nav-item" href="#/users" data-nav="users" data-min-role="superadmin">
         <svg viewBox="0 0 20 20" aria-hidden="true">
@@ -177,28 +199,6 @@
       </div>
 
       <div class="nav-sep" role="separator"></div>
-
-      <!-- 外部资源：给用户用的东西，不藏在站长页里 -->
-      <div class="nav-group" data-group="resources">
-        <button class="nav-item nav-group-head" type="button"
-                aria-expanded="false" aria-controls="nav-resources" data-toggle="resources">
-          <svg viewBox="0 0 20 20" aria-hidden="true">
-            <rect x="2.8" y="3.6" width="14.4" height="10.2" rx="1.6"/>
-            <path d="M7 16.4h6"/>
-          </svg>
-          <span class="nav-text">外部资源</span>
-          <svg class="nav-caret" viewBox="0 0 20 20" aria-hidden="true">
-            <path d="M7.5 5l5 5-5 5"/>
-          </svg>
-        </button>
-        <div class="nav-sub" id="nav-resources">
-          <div class="nav-sub-inner">
-            <a class="nav-item nav-sub-item" href="#/screens" data-nav="screens">
-              <span class="nav-text">展示屏幕</span>
-            </a>
-          </div>
-        </div>
-      </div>
 
       <a class="nav-item" href="#/server" data-nav="server" data-min-role="owner">
         <svg viewBox="0 0 20 20" aria-hidden="true">
@@ -751,21 +751,21 @@
     <section class="page" data-page="screens" hidden>
       <header class="page-head">
         <h1>展示屏幕</h1>
-        <p class="page-sub">大屏页面是可替换的包；活动自己没有指定时用这里的默认值</p>
+        <p class="page-sub">活动可以引用的展示页面</p>
       </header>
       <div class="card">
         <div class="card-head">
-          <h2>可用的屏幕包</h2>
+          <h2>可用的屏幕</h2>
           <span class="hint" id="screenPackHint"></span>
         </div>
         <div id="screenPackList" class="pack-grid"></div>
       </div>
       <div class="card">
-        <div class="card-head"><h2>放一份新的</h2></div>
+        <div class="card-head"><h2>引用方式</h2></div>
         <p class="note">
-          在服务端的 <code>screen_packs/&lt;名字&gt;/</code> 里放一个 <code>screen.html</code>
-          （以及它自己的 js/css），这里就会多出一个可选的包，不需要重启。
-          数据仍从 <code>/&lt;活动&gt;/api/board</code> 与 <code>/api/stream</code> 取。
+          活动如需使用某一份屏幕，在活动配置中写入该项的标识即可；未写入时活动使用自带的展示页，
+          不受此处影响。屏幕所需的脚本与样式随该项一同存放，数据由活动的
+          <code>/api/board</code> 与 <code>/api/stream</code> 提供。
         </p>
       </div>
     </section>

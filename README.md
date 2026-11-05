@@ -33,10 +33,14 @@
 
 ## 展示屏幕
 
-大屏是一个可替换的插接件：`/<token>/screen` 提供活动配置里 `screen_pack` 指定的那份页面，
-查找顺序是实例目录 `screen_packs/<名字>/` → 内置 `builtin/screen_packs/<名字>/`，
-都找不到时退回内置的 `classic`。一份包只需要 `screen.html`（和它自己的 js/css），
-不需要 `module.json`，也不声明任何能力；数据仍从 `/<token>/api/board` 与 `/api/stream` 取。
+大屏是一个可替换的插接件。活动默认使用自带的展示页（内置的 `classic`）；如需换成别的，
+在活动配置里写入 `screen_pack: <标识>`，`/<token>/screen` 就改为提供那一份。
+
+- 资源目录：实例目录 `screen_packs/<标识>/` → 内置 `builtin/screen_packs/<标识>/`
+- 一份资源只需要 `screen.html`（以及它自己的 js/css），不需要 `module.json`，不声明能力
+- 数据仍从 `/<token>/api/board` 与 `/api/stream` 取
+- 「外部资源 › 展示屏幕」是只读清单：列出服务上有哪些可用，以及各自的标识。
+  **平台不设默认值**——活动不写就用自己的那份
 
 ## 活动页面
 

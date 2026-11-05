@@ -724,12 +724,11 @@ def screens_page(page):
     check("the page lists the built-in pack",
           page.locator('.pack-card').count() >= 1,
           page.locator('.pack-card').count())
-    check("it shows which pack is active now",
-          "当前默认" in page.inner_text("#screenPackHint"),
-          page.inner_text("#screenPackHint"))
-    check("the active pack is marked",
-          "使用中" in page.inner_text("#screenPackList"),
+    check("it names the file each one is referenced by",
+          "screen_pack" in page.inner_text("#screenPackList"),
           page.inner_text("#screenPackList"))
+    check("there is no platform-wide default to switch",
+          page.locator(".pack-card button, .pack-card[data-pack]").count() == 0)
 
 
 def nav_keys_page(page):

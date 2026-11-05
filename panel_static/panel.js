@@ -87,8 +87,6 @@
     history: [],            // 表单快照栈：Ctrl+Z / Ctrl+Shift+Z
     historyPos: -1,
     screenPacks: [],
-    screenPackActive: "",
-    screenPackEditable: false,
     notices: [],
     noticeUnread: 0,
     alertOpen: false,
@@ -744,6 +742,41 @@
   }
 
   /* -------------------------------------------------------- role visibility */
+  /* 角色过滤之后，空的节会留下两条相邻的分隔线（看起来更粗）与一段空白：
+     规则是——节里没有任何可见项，就连同它后面的分隔线一起去掉。 */
+  function tidyNavSeparators() {
+    var scroll = document.querySelector("#sidebar .nav-scroll");
+    if (!scroll) return;
+    var kids = Array.prototype.slice.call(scroll.children);
+    var seenItem = false;
+    var pending = [];
+    kids.forEach(function (el) {
+      var visible = el.offsetParent !== null;
+      if (el.classList.contains("nav-sep")) {
+        if (visible) pending.push(el);
+        return;
+      }
+      if (!visible) return;
+      // 这一段里出现了可见项：之前攒下的分隔线才有意义
+      pending.forEach(function (sep) { sep.hidden = !seenItem; });
+      pending = [];
+      seenItem = true;
+    });
+    // 末尾的分隔线后面什么都没有：藏掉
+    pending.forEach(function (sep) { sep.hidden = true; });
+    // 再收一遍：连续两条可见分隔线只留一条
+    var lastWasSep = false;
+    Array.prototype.forEach.call(scroll.children, function (el) {
+      if (el.offsetParent === null) return;
+      if (el.classList.contains("nav-sep")) {
+        if (lastWasSep) el.hidden = true;
+        lastWasSep = true;
+        return;
+      }
+      lastWasSep = false;
+    });
+  }
+
   function applyRoleVisibility() {
     $$("[data-min-role]").forEach(function (el) {
       el.hidden = myRank() < rank(el.getAttribute("data-min-role"));
@@ -1242,11 +1275,7 @@
   /* ------------------------------------------------------------------ 屏幕包 --- */
   function loadScreenPacks() {
     return PX.api("/screen_packs")
-      .then(function (d) {
-        S.screenPacks = d.packs || [];
-        S.screenPackActive = d.active || "classic";
-        S.screenPackEditable = !!d.canEdit;
-      })
+      .then(function (d) { S.screenPacks = d.packs || []; })
       .catch(function (e) { PX.toast(PX.esc(e.message), true); });
   }
 
@@ -1254,27 +1283,15 @@
     var box = $("#screenPackList");
     if (!box) return;
     var hint = $("#screenPackHint");
-    if (hint) hint.textContent = S.screenPackActive
-      ? "当前默认：" + S.screenPackActive : "";
     var packs = S.screenPacks || [];
+    if (hint) hint.textContent = packs.length ? "共 " + packs.length + " 项" : "";
     box.innerHTML = packs.length ? packs.map(function (pk) {
-      var on = pk.id === S.screenPackActive;
-      return '<button class="pack-card' + (on ? " on" : "") + '" type="button"' +
-        ' data-pack="' + PX.esc(pk.id) + '"' + (S.screenPackEditable ? "" : " disabled") + '>' +
-        '<span class="pack-name">' + PX.esc(pk.name) + "</span>" +
+      return '<div class="pack-card" role="listitem">' +
+        '<span class="pack-name">' + PX.esc(pk.id) + "</span>" +
         '<span class="pack-src">' + PX.esc(pk.source) + "</span>" +
-        (on ? '<span class="pack-badge">使用中</span>' : "") + "</button>";
-    }).join("") : '<p class="hint">还没有可用的屏幕包</p>';
-  }
-
-  function pickScreenPack(id) {
-    PX.api("/screen_pack", { method: "POST", body: { id: id } })
-      .then(function (d) {
-        S.screenPackActive = d.active;
-        PX.toast("已切换展示屏幕");
-        return loadScreenPacks().then(drawScreens);
-      })
-      .catch(function (e) { PX.toast(PX.esc(e.message), true); });
+        '<span class="pack-src mono">screen_pack: ' + PX.esc(pk.id) + "</span>" +
+        "</div>";
+    }).join("") : '<p class="hint">暂无可用屏幕</p>';
   }
 
   /* ------------------------------------------------------------------ 报名 --- */
@@ -4137,11 +4154,6 @@
     loadSignupEntries(false).then(drawSignupEntries);
   });
 
-  $("#screenPackList").addEventListener("click", function (e) {
-    var card = e.target.closest ? e.target.closest("[data-pack]") : null;
-    if (!card || card.disabled) return;
-    pickScreenPack(card.getAttribute("data-pack"));
-  });
   $("#bellBtn").addEventListener("click", function () {
     openNoticePanel();
   });
@@ -4340,6 +4352,7 @@
       renderIdentity();
       applyRoleVisibility();
       labelNav();
+      tidyNavSeparators();
       bindSidebarKeys();
       // another session's writes come back through the stream
       PX.watch(function (revs, before) {

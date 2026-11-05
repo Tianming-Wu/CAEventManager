@@ -22,10 +22,13 @@
     "overview": { min: "admin" },
     "events": { min: "admin" },
     "rosters": { min: "admin", group: "lists" },
-    "roster": { min: "admin", group: "lists" },
+    "roster": { min: "admin", group: "lists",
+                parent: { href: "#/rosters", label: "我的名单" } },
     "signups": { min: "admin", group: "lists" },
-    "signup": { min: "admin", group: "lists" },
-    "write-approvals": { min: "admin", group: "lists" },
+    "signup": { min: "admin", group: "lists",
+                parent: { href: "#/signups", label: "我的报名" } },
+    "write-approvals": { min: "admin", group: "lists",
+                         parent: { href: "#/rosters", label: "我的名单" } },
     "templates": { min: "admin" },
     "users": { min: "superadmin" },
     "all-events": { min: "superadmin" },
@@ -1733,12 +1736,54 @@
     badge.hidden = !S.approvalsCount;
   }
 
+  /* 有没有返回键只看路由表里有没有 parent：
+     有上一级的页面（详情页、挂在某一节下面的汇总页）永远有返回键；
+     ?back= 只决定"返回到哪里"，不决定"有没有返回键"。 */
+  function routeParent(route) {
+    var r = route ? ROUTES[route] : null;
+    return (r && r.parent) || null;
+  }
+
+  function routeHasBack(route) {
+    return !!routeParent(route);
+  }
+
+  /* 切换页面时给标题与返回键放一次入场动画：
+     上一页与这一页都有（或都没有）返回键时不动，否则标题滑、按钮淡入放大。 */
+  function animateCrumb(wanted, prevHadBack) {
+    var page = document.querySelector('.page[data-page="' + wanted + '"]');
+    var head = page ? page.querySelector(".head-title") : null;
+    if (!head) return;
+    var want = routeHasBack(wanted);
+    var root = document.documentElement;
+    if (prevHadBack === want) {
+      root.classList.add("no-crumb-anim");
+      head.classList.toggle("has-back", want);
+      void head.offsetWidth;
+      requestAnimationFrame(function () { root.classList.remove("no-crumb-anim"); });
+      return;
+    }
+    // 先摆成"上一页的样子"，再切到这一页的样子，过渡才有起点
+    root.classList.add("no-crumb-anim");
+    head.classList.toggle("has-back", !!prevHadBack);
+    void head.offsetWidth;
+    root.classList.remove("no-crumb-anim");
+    head.classList.toggle("has-back", want);
+  }
+
   function syncBackButton() {
     var back = $("#approvalsBack");
-    if (!back) return;
-    back.setAttribute("data-back", S.backTo || "");
-    var head = back.closest(".head-title");
-    if (head) head.classList.toggle("has-back", !!S.backTo);
+    if (back) back.setAttribute("data-back", S.backTo || "");
+  }
+
+  /* 当前页面的面包屑：上一段来自路由表，当前段就是这一页的标题 */
+  function syncCrumb(wanted) {
+    var parent = routeParent(wanted);
+    var page = document.querySelector('.page[data-page="' + wanted + '"]');
+    var crumb = page ? page.querySelector(".crumb-title .crumb") : null;
+    if (!crumb || !parent) return;
+    crumb.setAttribute("href", parent.href);
+    crumb.textContent = parent.label;
   }
 
   function drawApprovals() {
@@ -2040,6 +2085,7 @@
   var guardBypass = false;
 
   function onRoute() {
+    var prevRoute = S.route;                 // 上一页有没有返回键，全靠它
     var wanted = routeFromHash() || FALLBACK_ROUTE;
     if (!guardBypass && S.route === "new-event" && wanted !== "new-event" && S.dirty) {
       // put the address back where the form is, then ask what to do with it
@@ -2054,6 +2100,9 @@
       return;
     }
     S.route = wanted;
+    // 返回键属于"这一页有没有上一级"：先定下来，动画与渲染都靠它
+    var parent = routeParent(wanted);
+    S.backTo = (hashQuery().back || (parent ? parent.href.replace(/^#/, "") : null));
     S.denied = null;
     $("#denied").hidden = true;
     $("#siteFoot").hidden = false;
@@ -2063,6 +2112,7 @@
     if (parent) S.openGroups[parent] = true;
     syncGroups();
 
+    var prevHadBack = routeHasBack(prevRoute);
     $$(".page").forEach(function (p) {
       p.hidden = p.getAttribute("data-page") !== wanted;
     });
@@ -2078,6 +2128,8 @@
     closePane();
     $("#content").scrollTop = 0;
     draw();
+    syncCrumb(wanted);
+    animateCrumb(wanted, prevHadBack);
     loadNotices();
     syncSudo();
     if (wanted === "server" || wanted === "overview") refreshHost();
@@ -2099,13 +2151,8 @@
         .then(drawSignup);
     }
     if (wanted === "write-approvals") {
-      S.backTo = hashQuery().back || null;
-      // 返回键属于"这一页有没有上一级"，路由一确定就画出来，别等数据回来
       syncBackButton();
       loadApprovals().then(drawApprovals);
-    } else {
-      S.backTo = null;
-      syncBackButton();
     }
     if (wanted === "roster") {
       if (!S.rosterId) {
@@ -4009,8 +4056,9 @@
   });
 
   $("#approvalsBack").addEventListener("click", function () {
-    var to = this.getAttribute("data-back") || "";
-    if (to) location.hash = "#" + to;
+    var to = this.getAttribute("data-back") ||
+             (routeParent("write-approvals") || {}).href || "";
+    if (to) location.hash = to.charAt(0) === "#" ? to : "#" + to;
   });
   $("#approvalsTable").addEventListener("click", function (e) {
     var t = e.target.closest ? e.target.closest("[data-approve],[data-reject]") : null;

@@ -356,8 +356,13 @@ def roster_page(page):
           page.locator('.page[data-page="roster"]').is_visible())
     page.goto(BASE + "/panel#/write-approvals")
     page.wait_for_timeout(900)
-    check("opened directly, the centre has no back button",
-          page.locator("#approvalsBack").is_hidden())
+    check("a page with a parent always has a back button",
+          page.locator("#approvalsBack").is_visible())
+    page.click("#approvalsBack")
+    page.wait_for_timeout(800)
+    check("without ?back it returns to its parent section",
+          page.locator('.page[data-page="rosters"]').is_visible())
+    page.goto(BASE + "/panel#/write-approvals")
     check("the centre explains both lists",
           "暂无待审批的申请" in page.inner_text("#approvalsTable tbody")
           or page.locator("#approvalsTable tbody tr").count() >= 1,

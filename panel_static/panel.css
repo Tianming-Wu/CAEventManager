@@ -2266,21 +2266,32 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   color: var(--accent-strong);
 }
 
-/* 返回键像 sudo 标签那样"长出来"：宽度 0 → 34px，标题随之滑到右边 */
+/* 标题让位、返回键自己升上来：两者互不牵连。
+   - 标题：left padding 0 ↔ 36px，滑动的是文字
+   - 返回键：绝对定位在左侧，淡入 + 放大 / 淡出 + 缩小 */
+.head-title { position: relative; padding-left: 0; transition: padding-left .2s ease; }
+.head-title.has-back { padding-left: 36px; }
 .head-title .crumb-back {
-  width: 0;
+  position: absolute;
+  left: 0;
+  top: 50%;
+  margin: 0;
+  transform: translateY(-50%) scale(.62);
   opacity: 0;
-  margin-right: 0;
-  padding: 0;
-  border: 0;
-  overflow: hidden;
-  transition: width .18s ease, opacity .18s ease, margin-right .18s ease;
+  pointer-events: none;
+  visibility: hidden;      /* 没有返回键的页面：连可点区域都不留 */
+  transition: opacity .18s ease, transform .18s ease;
 }
 .head-title.has-back .crumb-back {
-  width: 34px;
+  transform: translateY(-50%) scale(1);
   opacity: 1;
-  margin-right: 2px;
+  pointer-events: auto;
+  visibility: visible;
 }
+/* 进出都没有返回键的页面之间切换时不放动画 */
+.no-crumb-anim .head-title,
+.no-crumb-anim .head-title.has-back,
+.no-crumb-anim .head-title .crumb-back { transition: none !important; }
 
 /* 弹窗里的字段不要挤在一起：上一行的输入框与下一行的标题之间留出呼吸 */
 #overlayBody .field { margin-bottom: 12px; }

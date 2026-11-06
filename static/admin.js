@@ -527,6 +527,7 @@
       $("#setShowTimes").checked = !!c.show_times;
       $("#setShowSid").checked = !!c.show_sid;
       $("#setScreenWall").checked = !!c.screen_show_wall;
+      renderScreenPackChoices(c.screen_pack || "");
       $("#setPoolMode").value = c.pool_mode || "auto";
       $("#setPool").value = c.pool_size;
       $("#setPoolExpr").value = c.pool_expr || "";
@@ -542,6 +543,22 @@
     $("#secretUrl").textContent = S.publicBaseUrl + "/";
     updatePoolPreview();
     renderQR();
+  }
+
+  // 展示屏幕：可选的服务端清单，来自「外部资源 › 展示屏幕」
+  function renderScreenPackChoices(current) {
+    var box = $("#setScreenPack");
+    if (!box) return;
+    var packs = S.screenPacks || [];
+    box.innerHTML = '<option value="">活动自带</option>' + packs.map(function (id) {
+      return '<option value="' + LT.esc(id) + '">' + LT.esc(id) + "</option>";
+    }).join("");
+    // 引用的那份要是已经被删掉，仍然把它列出来，别让选择悄悄地变回"自带"
+    if (current && packs.indexOf(current) < 0) {
+      box.insertAdjacentHTML("beforeend",
+        '<option value="' + LT.esc(current) + '">' + LT.esc(current) + "（已不存在）</option>");
+    }
+    box.value = current || "";
   }
 
   function updatePoolPreview() {
@@ -597,6 +614,7 @@
   function applyState(d) {
     S.config = d.config || {};
     S.prizes = d.prizes || [];
+    S.screenPacks = d.screenPacks || [];
     S.roster = d.roster || null;
     S.publicBaseUrl = (d.publicBaseUrl || S.config.public_base_url || "").replace(/\/+$/, "");
     S.students = d.students || [];
@@ -1169,6 +1187,7 @@
       show_times: $("#setShowTimes").checked,
       show_sid: $("#setShowSid").checked,
       screen_show_wall: $("#setScreenWall").checked,
+      screen_pack: $("#setScreenPack").value,
       pool_mode: $("#setPoolMode").value,
       pool_size: Number($("#setPool").value),
       pool_expr: $("#setPoolExpr").value.trim(),

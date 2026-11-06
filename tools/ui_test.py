@@ -657,6 +657,10 @@ def main():
         page.wait_for_timeout(800)
         check("the module's own page still draws the QR",
               page.locator("#qrHolder svg").count() == 1)
+        options = page.eval_on_selector_all(
+            "#setScreenPack option", "els => els.map(e => e.textContent.trim())")
+        check("展示屏幕有一个「活动自带」的选项",
+              options and options[0] == "活动自带", options)
         shot(page, "19-config", full=True)
 
         # 活动设置 is the platform's page: members, and the activity itself

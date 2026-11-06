@@ -116,6 +116,7 @@
   var ICON_PENCIL = '<svg viewBox="0 0 20 20" aria-hidden="true">' +
     '<path d="M4.2 15.8h3.1l7.5-7.5a1.6 1.6 0 0 0-2.3-2.3l-7.5 7.5v2.3Z"/>' +
     '<path d="M11.5 7l2.3 2.3"/></svg>';
+  var ICON_TRASH = '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 5.6h12M8 3.4h4M6.2 5.6l.7 9.4a1.6 1.6 0 0 0 1.6 1.5h3a1.6 1.6 0 0 0 1.6-1.5l.7-9.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
   /* ---------------------------------------------------------------- helpers */
   function rank(role) {
@@ -2420,7 +2421,7 @@
     if (wanted === "account") loadTokens().then(drawTokens);
     if (wanted === "assistant") {
       loadAssistant();
-      loadAssistantSession();
+      resumeAssistant();
     }
     if (wanted === "write-approvals") {
       syncBackButton();
@@ -3866,6 +3867,12 @@
       '<p class="hint">留空表示保持现状；清除请点下面的按钮</p></div>' +
       '<p class="hint">端点需兼容 OpenAI 的 <code>/chat/completions</code>；' +
       '地址与模型留空时使用默认值</p>' +
+      '<div class="row" style="margin-top:14px">' +
+      '<label class="switch" title="从侧栏进入时接着上次那段会话">' +
+      '<input type="checkbox" id="asResume"' +
+      ((cfg.resume === false) ? "" : " checked") + '>' +
+      '<span class="track"></span></label>' +
+      '<span class="hint">进入时接着上次的会话；关掉则每次都从新会话开始</span></div>' +
       '<div class="row" style="margin-top:16px;justify-content:flex-end">' +
       '<button class="btn" id="asClearKey" type="button">清除密钥</button>' +
       '<button class="btn" data-close-overlay="1" type="button">取消</button>' +
@@ -3928,9 +3935,13 @@
       method: "POST",
       body: { id: S.assistantSessionId || 0, title: currentTitle(), messages: msgs }
     }).then(function (d) {
+      var fresh = !S.assistantSessionId;
       S.assistantSessionId = d.id;
       S.assistantUsed = d.used;
       S.assistantQuota = d.quota;
+      try { localStorage.setItem("as:lastSession", String(d.id)); } catch (e) {}
+      if (fresh) setSessionInHash(d.id);
+      setSessionName(currentTitle());
       drawAssistantQuota();
     }).catch(function (e) {
       // 满了就说清楚，别默默丢掉用户的对话
@@ -3954,35 +3965,152 @@
     sub.textContent = bits.join(" · ");
   }
 
-  // 打开这一页时把最近一段会话接上
-  function loadAssistantSession() {
-    return PX.api("/assistant/sessions").then(function (d) {
-      S.assistantQuota = d.quota;
-      S.assistantUsed = d.used;
-      var first = (d.sessions || [])[0];
-      if (!first) { drawAssistantQuota(); return; }
-      return PX.api("/assistant/session?id=" + first.id).then(function (r) {
-        S.assistantSessionId = first.id;
-        S.assistantMsgs = (r.session && r.session.messages) || [];
-        drawAssistant();
-        drawAssistantQuota();
-      });
-    }).catch(function () { drawAssistantQuota(); });
+  // 会话：地址里带着 id（#/assistant/<id>），所以开几个标签页就各是各的会话
+  function sessionIdFromHash() {
+    var m = (location.hash || "").match(/^#\/assistant\/(\d+)/);
+    return m ? Number(m[1]) : 0;
   }
 
-  function clearAssistantSession() {
-    var sid = S.assistantSessionId;
+  function setSessionInHash(id) {
+    if (!id) return;
+    var want = "#/assistant/" + id;
+    if (location.hash !== want) location.replace(want);
+  }
+
+  function openAssistantSession(id) {
+    S.assistantSessionId = id;
     S.assistantMsgs = [];
-    S.assistantSessionId = 0;
     drawAssistant();
-    if (!sid) return;
-    PX.api("/assistant/session/delete", { method: "POST", body: { id: sid } })
-      .then(function (d) {
-        S.assistantUsed = d.used;
-        S.assistantQuota = d.quota;
-        drawAssistantQuota();
-      })
-      .catch(function (e) { PX.toast(PX.esc(e.message), true); });
+    if (!id) {
+      drawAssistantQuota();
+      setSessionName("新会话");
+      return Promise.resolve();
+    }
+    return PX.api("/assistant/session?id=" + id).then(function (r) {
+      S.assistantMsgs = (r.session && r.session.messages) || [];
+      setSessionName((r.session && r.session.title) || "会话");
+      try { localStorage.setItem("as:lastSession", String(id)); } catch (e) {}
+      drawAssistant();
+      drawAssistantQuota();
+    }).catch(function () {
+      S.assistantSessionId = 0;
+      drawAssistantQuota();
+    });
+  }
+
+  function setSessionName(text) {
+    var el = $("#asSessionName");
+    if (el) el.textContent = text || "新会话";
+  }
+
+  // 从侧栏进来时：恢复上次打开的那段（记在本机），或者直接开一段新的
+  function resumeAssistant() {
+    var id = sessionIdFromHash();
+    if (id) return openAssistantSession(id);
+    var resume = (S.assistantCfg || {}).resume !== false;
+    if (!resume) return openAssistantSession(0);
+    var last = "";
+    try { last = localStorage.getItem("as:lastSession") || ""; } catch (e) {}
+    if (last) return openAssistantSession(Number(last));
+    return openAssistantSession(0);
+  }
+
+  // 会话列表：桌面从会话条点开，手机从标题栏的 Pancake 点开
+  function assistantSessionsDialog() {
+    PX.api("/assistant/sessions").then(function (d) {
+      S.assistantQuota = d.quota;
+      S.assistantUsed = d.used;
+      var rows = d.sessions || [];
+      S.assistantList = rows;
+      openOverlay("as-sessions", "会话",
+        (rows.length ? '<div class="as-slist">' + rows.map(function (s) {
+          return '<div class="as-srow' +
+            (s.id === S.assistantSessionId ? " on" : "") + '" data-sid="' + s.id + '">' +
+            '<button class="as-sopen" type="button" data-open="' + s.id + '">' +
+            PX.esc(s.title) + '<span>' + PX.when(s.updatedAt) + " · " +
+            Math.max(1, Math.round(s.size / 1024)) + " KB</span></button>" +
+            '<button class="as-sicon" type="button" data-rename="' + s.id +
+            '" title="重命名" aria-label="重命名">' + ICON_PENCIL + "</button>" +
+            '<button class="as-sicon danger" type="button" data-del="' + s.id +
+            '" title="删除" aria-label="删除">' + ICON_TRASH + "</button>" +
+            "</div>";
+        }).join("") + "</div>"
+          : '<p class="page-sub">还没有会话。发一条消息就会存下来。</p>') +
+        '<p class="hint">存档 ' + Math.round(d.used / 1024) + " / " +
+        Math.round(d.quota / 1024) + " KB</p>" +
+        '<div class="row" style="margin-top:14px;justify-content:flex-end">' +
+        '<button class="btn primary" data-close-overlay="1" type="button">关闭</button></div>');
+      $("#overlayBody").addEventListener("click", sessionDialogClick);
+      drawAssistantQuota();
+    }).catch(function (e) { PX.toast(PX.esc(e.message), true); });
+  }
+
+  function sessionDialogClick(e) {
+    var open = e.target.closest("[data-open]");
+    if (open) {
+      closeOverlay();
+      location.hash = "#/assistant/" + open.getAttribute("data-open");
+      return;
+    }
+    var rename = e.target.closest("[data-rename]");
+    if (rename) {
+      var id = Number(rename.getAttribute("data-rename"));
+      renameSession(id);
+      return;
+    }
+    var del = e.target.closest("[data-del]");
+    if (del) {
+      deleteSession(Number(del.getAttribute("data-del")));
+    }
+  }
+
+  function renameSession(id) {
+    var row = ((S.assistantList || []).filter(function (s) { return s.id === id; })[0]) || {};
+    openOverlay("as-rename", "重命名会话",
+      '<div class="field"><label for="asRename">名称</label>' +
+      '<input id="asRename" type="text" maxlength="60" value="' +
+      PX.esc(row.title || "") + '"></div>' +
+      '<div class="row" style="margin-top:16px;justify-content:flex-end">' +
+      '<button class="btn" data-close-overlay="1" type="button">取消</button>' +
+      '<button class="btn primary" id="asRenameGo" type="button">保存</button></div>');
+    $("#asRenameGo").addEventListener("click", function () {
+      var name = ($("#asRename").value || "").trim();
+      if (!name) { PX.toast("请填一个名称", true); return; }
+      PX.api("/assistant/session/rename", { method: "POST", body: { id: id, title: name } })
+        .then(function () {
+          closeOverlay();
+          if (S.assistantSessionId === id) setSessionName(name);
+          PX.toast("已重命名");
+        })
+        .catch(function (e) { PX.toast(PX.esc(e.message), true); });
+    });
+    $("#asRename").focus();
+  }
+
+  function deleteSession(id) {
+    openOverlay("as-del", "删除会话",
+      '<p class="page-sub">删掉之后这段对话就找不回来了。</p>' +
+      '<div class="row" style="margin-top:18px;justify-content:flex-end">' +
+      '<button class="btn" data-close-overlay="1" type="button">取消</button>' +
+      '<button class="btn danger" id="asDelGo" type="button">删除</button></div>');
+    $("#asDelGo").addEventListener("click", function () {
+      closeOverlay();
+      PX.api("/assistant/session/delete", { method: "POST", body: { id: id } })
+        .then(function (d) {
+          S.assistantUsed = d.used;
+          S.assistantQuota = d.quota;
+          if (S.assistantSessionId === id) {
+            S.assistantSessionId = 0;
+            S.assistantMsgs = [];
+            setSessionName("新会话");
+            location.replace("#/assistant");
+            drawAssistant();
+          }
+          drawAssistantQuota();
+          PX.toast("已删除");
+        })
+        .catch(function (e) { PX.toast(PX.esc(e.message), true); });
+    });
   }
 
   function exportAssistantSession() {
@@ -4131,7 +4259,8 @@
   }
 
   function saveAssistantConfig() {
-    var body = { base: $("#asBase").value.trim(), model: $("#asModel").value.trim() };
+    var body = { base: $("#asBase").value.trim(), model: $("#asModel").value.trim(),
+                 resume: !!($("#asResume") && $("#asResume").checked) };
     // 框里还是那串星号 = 没动过密钥，别把已有的覆盖成空
     if (!keyFieldMasked()) body.key = $("#asKey").value;
     PX.api("/assistant/config", { method: "POST", body: body })
@@ -4622,8 +4751,11 @@
   $("#asSettings").addEventListener("click", assistantConfigDialog);
   $("#asExpand").addEventListener("click", assistantFullscreenDialog);
   $("#assistantReset").addEventListener("click", function () {
-    clearAssistantSession();
+    location.hash = "#/assistant";      // 新会话：点开就是初始页，发消息才落库
+    openAssistantSession(0);
   });
+  $("#asSessionBar").addEventListener("click", assistantSessionsDialog);
+  $("#asSessions").addEventListener("click", assistantSessionsDialog);
   $("#asExport").addEventListener("click", exportAssistantSession);
   $("#assistantAsks").addEventListener("click", function (e) {
     var btn = e.target.closest(".assistant-ask");

@@ -327,6 +327,13 @@
               <circle cx="10" cy="10" r="1.95"/>
             </svg>
           </button>
+          <button class="icon-btn as-only-narrow" id="asSessions" type="button"
+                  title="会话" aria-label="会话">
+            <svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor"
+                 stroke-width="1.6" stroke-linecap="round">
+              <path d="M3.4 5.6h13.2M3.4 10h13.2M3.4 14.4h8.4"/>
+            </svg>
+          </button>
           <button class="icon-btn" id="asExport" type="button"
                   title="导出这段对话" aria-label="导出这段对话">
             <svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor"
@@ -336,17 +343,24 @@
             </svg>
           </button>
           <button class="icon-btn" id="assistantReset" type="button"
-                  title="清空对话" aria-label="清空对话">
+                  title="新建会话" aria-label="新建会话">
             <svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor"
                  stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M4 6h12M8 3.6h4M6.2 6l.7 9.2a1.6 1.6 0 0 0 1.6 1.5h3a1.6 1.6 0 0 0 1.6-1.5L13.8 6"/>
-              <path d="M8.6 8.8v5.2M11.4 8.8v5.2"/>
+              <path d="M6.1 3.8h7.8a3 3 0 0 1 3 3v3.7a3 3 0 0 1-3 3h-3.2l-3.1 2.7a.45.45 0 0 1-.73-.48l.9-2.22H6.1a3 3 0 0 1-3-3V6.8a3 3 0 0 1 3-3Z"/>
+              <path d="M10 6.1v5.4M7.3 8.8h5.4"/>
             </svg>
           </button>
         </div>
       </header>
 
       <div class="assistant-shell">
+        <button class="as-sessionbar" id="asSessionBar" type="button">
+          <svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor"
+               stroke-width="1.6" stroke-linecap="round">
+            <path d="M3.4 5.6h13.2M3.4 10h13.2M3.4 14.4h8.4"/>
+          </svg>
+          <span id="asSessionName">新会话</span>
+        </button>
         <div class="assistant-scroll" id="assistantScroll">
           <div class="assistant-log" id="assistantLog"></div>
           <div class="assistant-empty" id="assistantEmpty">

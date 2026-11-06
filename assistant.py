@@ -39,6 +39,9 @@ def config_of(acc):
     stored_base = (row["model_base"] or "").strip() if "model_base" in _keys(row) else ""
     stored_model = (row["model_name"] or "").strip() if "model_name" in _keys(row) else ""
     key = (row["model_key"] or "").strip() if "model_key" in _keys(row) else ""
+    resume = True
+    if "chat_resume" in _keys(row):
+        resume = bool(row["chat_resume"])
     return {"base": stored_base or DEFAULT_BASE,
             "model": stored_model or DEFAULT_MODEL,
             "storedBase": stored_base,
@@ -47,7 +50,9 @@ def config_of(acc):
             # 接口地址与模型名都有默认值，所以只差一把密钥就算配好了
             "ready": bool(key),
             "defaultBase": DEFAULT_BASE,
-            "defaultModel": DEFAULT_MODEL}
+            "defaultModel": DEFAULT_MODEL,
+            # 从侧栏进来时：接着上次那段，还是开一段新的
+            "resume": resume}
 
 
 def _keys(row):
@@ -57,7 +62,7 @@ def _keys(row):
         return ()
 
 
-def save_config(conn, account_id, base, model, key, clear=False):
+def save_config(conn, account_id, base, model, key, clear=False, resume=None):
     """Empty key keeps the stored one: 界面上只显示"已配置"，不该逼人每次重填。"""
     sets, args = [], []
     if base is not None:
@@ -66,6 +71,9 @@ def save_config(conn, account_id, base, model, key, clear=False):
     if model is not None:
         sets.append("model_name=?")
         args.append((model or "").strip()[:80])
+    if resume is not None:
+        sets.append("chat_resume=?")
+        args.append(1 if resume else 0)
     if clear:
         sets.append("model_key=?")
         args.append("")

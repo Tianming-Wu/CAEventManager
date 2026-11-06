@@ -2012,6 +2012,11 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
 
 /* ---------- drawer: the sidebar leaves the flow on a phone ---------- */
 @media (max-width: 760px) {
+  /* 手机上：会话入口在标题栏，会话条让位 */
+  .as-only-narrow { display: inline-flex; }
+  .as-sessionbar { display: none; }
+  .assistant-page .page-head { flex-wrap: wrap; }
+  .assistant-page .page-actions { margin-left: auto; }
   /* 手机上输入框一开始就是两行，全屏编辑就在框内右上角 */
   .as-composer { padding-top: 10px; }
   .shell {
@@ -2561,10 +2566,43 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.assistant-page .page-actions { flex: none; margin-left: auto; flex-wrap: nowrap; gap: 4px; }
+.assistant-page .page-actions { flex: none; margin-left: auto; flex-wrap: nowrap; gap: 2px; }
 .assistant-page .page-actions .icon-btn {
   flex: none;
-  border-radius: 999px;      /* 两个都是圆钮，不是圆角矩形 */
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+}
+/* 图标占满按钮：之前偏小是因为图形本身在 20 网格里只占 60% */
+.assistant-page .page-actions .icon-btn svg {
+  width: 18px;
+  height: 18px;
+}
+.as-only-narrow { display: none; }
+
+/* 会话条：输入框上方左侧，一行小字，点开是会话列表 */
+.as-sessionbar {
+  appearance: none;
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 2px 8px 2px 4px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: .78rem;
+  cursor: pointer;
+}
+.as-sessionbar:hover { background: var(--surface-2); color: var(--text); }
+.as-sessionbar svg { width: 14px; height: 14px; flex: none; }
+.as-sessionbar span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .assistant-page {
   display: flex;
@@ -2820,6 +2858,29 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   line-height: 1.6;
   resize: none;
 }
+
+
+/* 会话列表（弹窗里） */
+.as-slist { display: flex; flex-direction: column; gap: 4px; max-height: min(52vh, 420px); overflow-y: auto; }
+.as-srow { display: flex; align-items: center; gap: 4px; border-radius: var(--radius-sm); }
+.as-srow.on { background: var(--accent-soft); }
+.as-sopen {
+  flex: 1 1 auto; min-width: 0; text-align: left; appearance: none; border: 0;
+  background: transparent; color: var(--text); font: inherit; font-size: .86rem;
+  padding: 8px 10px; border-radius: var(--radius-sm); cursor: pointer;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.as-sopen span { display: block; color: var(--muted); font-size: .74rem; }
+.as-sopen:hover { background: var(--surface-2); }
+.as-sicon {
+  appearance: none; flex: none; width: 26px; height: 26px; display: grid;
+  place-items: center; padding: 0; border: 0; border-radius: 999px;
+  background: transparent; color: var(--muted); cursor: pointer;
+}
+.as-sicon svg { width: 14px; height: 14px; fill: none; stroke: currentColor;
+  stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.as-sicon:hover { background: var(--surface-2); color: var(--text); }
+.as-sicon.danger:hover { color: var(--danger); background: var(--danger-soft); }
 
 /* ---------- 服务已更新 ---------- */
 /* 重新部署后旧页面还在跑旧脚本：能立刻刷就自己刷，正在填东西就在这里说一声 */

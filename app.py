@@ -55,7 +55,7 @@ TPL_DIR = os.path.join(BASE_DIR, "tpl")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.7.0.13"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.7.0.14"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 
@@ -2102,9 +2102,11 @@ class Handler(BaseHTTPRequestHandler):
             if base and not re.match(r"^https?://", base):
                 raise model.ApiError("接口地址要以 http:// 或 https:// 开头")
             with panel.tx() as tx:
+                resume = data.get("resume")
                 assistant.save_config(tx, acc["id"], data.get("base"),
                                       data.get("model"), data.get("key") or "",
-                                      clear=bool(data.get("clear")))
+                                      clear=bool(data.get("clear")),
+                                      resume=None if resume is None else bool(resume))
                 panel.audit(tx, acc["username"], "assistant_config", None,
                             "%s / %s" % (base or "—", (data.get("model") or "—")))
             row = conn.execute("SELECT * FROM accounts WHERE id=?",
@@ -2176,6 +2178,21 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True, "id": sid,
                                "used": panel.chat_used(conn, acc["id"]),
                                "quota": panel.chat_quota(acc)})
+
+        if path == "/assistant/session/rename" and method == "POST":
+            data = body()
+            title = (data.get("title") or "").strip()[:60]
+            if not title:
+                raise model.ApiError("请填一个名称")
+            row = conn.execute(
+                "SELECT * FROM assistant_sessions WHERE id=? AND account_id=? AND deleted_at=0",
+                (int(data.get("id") or 0), acc["id"])).fetchone()
+            if row is None:
+                raise model.ApiError("找不到这段会话", 404)
+            with panel.tx() as tx:
+                tx.execute("UPDATE assistant_sessions SET title=?, updated_at=? WHERE id=?",
+                           (title, time.time(), row["id"]))
+            return self._json({"ok": True, "id": row["id"], "title": title})
 
         if path == "/assistant/session/delete" and method == "POST":
             data = body()

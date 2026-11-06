@@ -273,6 +273,8 @@ LATE_COLUMNS = (
     ("accounts", "model_key", "TEXT NOT NULL DEFAULT ''"),
     # 对话存档的容量配额（字节）。0 表示用默认值；站点管理员可以按人调整
     ("accounts", "chat_quota", "INTEGER NOT NULL DEFAULT 0"),
+    # 从侧栏进入运维助手时，是否接着上次那段（具体哪一段记在各自设备上）
+    ("accounts", "chat_resume", "INTEGER NOT NULL DEFAULT 1"),
     ("sessions", "sudo_until", "REAL NOT NULL DEFAULT 0"),
     ("sessions", "unlock_until", "REAL NOT NULL DEFAULT 0"),
     # 最近一次带着这个会话发出请求的时刻：在线人数由此得来（见 presence()）

@@ -4755,7 +4755,6 @@
     openAssistantSession(0);
   });
   $("#asSessionBar").addEventListener("click", assistantSessionsDialog);
-  $("#asSessions").addEventListener("click", assistantSessionsDialog);
   $("#asExport").addEventListener("click", exportAssistantSession);
   $("#assistantAsks").addEventListener("click", function (e) {
     var btn = e.target.closest(".assistant-ask");

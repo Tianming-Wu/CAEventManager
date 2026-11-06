@@ -2013,10 +2013,14 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
 /* ---------- drawer: the sidebar leaves the flow on a phone ---------- */
 @media (max-width: 760px) {
   /* 手机上：会话入口在标题栏，会话条让位 */
-  .as-only-narrow { display: inline-flex; }
-  .as-sessionbar { display: none; }
-  .assistant-page .page-head { flex-wrap: wrap; }
-  .assistant-page .page-actions { margin-left: auto; }
+  /* 手机上也用输入框上方那条会话入口，标题栏只留按钮 */
+  .assistant-page .page-head { flex-wrap: wrap; align-items: center; }
+  .assistant-page .page-sub {
+    order: 3;
+    flex: 1 1 100%;
+    white-space: normal;
+  }
+  .assistant-page .page-actions { margin-left: auto; flex: none; }
   /* 手机上输入框一开始就是两行，全屏编辑就在框内右上角 */
   .as-composer { padding-top: 10px; }
   .shell {
@@ -2584,6 +2588,7 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
 .as-sessionbar {
   appearance: none;
   align-self: flex-start;
+  margin: 0 0 -2px;          /* 贴着输入框 */
   display: inline-flex;
   align-items: center;
   gap: 6px;

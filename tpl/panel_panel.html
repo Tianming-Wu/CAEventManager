@@ -327,13 +327,6 @@
               <circle cx="10" cy="10" r="1.95"/>
             </svg>
           </button>
-          <button class="icon-btn as-only-narrow" id="asSessions" type="button"
-                  title="会话" aria-label="会话">
-            <svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor"
-                 stroke-width="1.6" stroke-linecap="round">
-              <path d="M3.4 5.6h13.2M3.4 10h13.2M3.4 14.4h8.4"/>
-            </svg>
-          </button>
           <button class="icon-btn" id="asExport" type="button"
                   title="导出这段对话" aria-label="导出这段对话">
             <svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor"
@@ -354,13 +347,6 @@
       </header>
 
       <div class="assistant-shell">
-        <button class="as-sessionbar" id="asSessionBar" type="button">
-          <svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor"
-               stroke-width="1.6" stroke-linecap="round">
-            <path d="M3.4 5.6h13.2M3.4 10h13.2M3.4 14.4h8.4"/>
-          </svg>
-          <span id="asSessionName">新会话</span>
-        </button>
         <div class="assistant-scroll" id="assistantScroll">
           <div class="assistant-log" id="assistantLog"></div>
           <div class="assistant-empty" id="assistantEmpty">
@@ -370,6 +356,13 @@
           </div>
         </div>
 
+        <button class="as-sessionbar" id="asSessionBar" type="button">
+          <svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor"
+               stroke-width="1.6" stroke-linecap="round">
+            <path d="M3.4 5.6h13.2M3.4 10h13.2M3.4 14.4h8.4"/>
+          </svg>
+          <span id="asSessionName">新会话</span>
+        </button>
         <form class="as-composer" id="assistantForm" autocomplete="off">
           <button class="as-expand" id="asExpand" type="button"
                   title="全屏编辑" aria-label="全屏编辑">

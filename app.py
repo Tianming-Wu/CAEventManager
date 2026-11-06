@@ -55,7 +55,7 @@ TPL_DIR = os.path.join(BASE_DIR, "tpl")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.7.0.12"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.7.0.13"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 
@@ -2143,6 +2143,92 @@ class Handler(BaseHTTPRequestHandler):
             if err:
                 raise model.ApiError("拿不到模型列表：%s" % err, 502)
             return self._json({"ok": True, "models": items})
+
+        # ---- 对话存档 ----
+        if path == "/assistant/sessions" and method == "GET":
+            return self._json({"ok": True,
+                               "sessions": panel.chat_sessions(conn, acc["id"]),
+                               "quota": panel.chat_quota(acc),
+                               "used": panel.chat_used(conn, acc["id"])})
+
+        if path == "/assistant/session" and method == "GET":
+            sid = _int_arg(query, "id", 0, 0, 100000000)
+            row = panel.chat_session(conn, acc["id"], sid)
+            if row is None:
+                raise model.ApiError("找不到这段会话", 404)
+            return self._json({"ok": True, "session": row})
+
+        if path == "/assistant/session/save" and method == "POST":
+            data = body()
+            messages = data.get("messages")
+            if not isinstance(messages, list):
+                raise model.ApiError("对话内容格式不对")
+            if len(messages) > 400:
+                messages = messages[-400:]
+            try:
+                with panel.tx() as tx:
+                    sid = panel.chat_save(tx, acc, int(data.get("id") or 0),
+                                          data.get("title") or "", messages)
+            except ValueError as exc:
+                raise model.ApiError(str(exc), 413)
+            except LookupError as exc:
+                raise model.ApiError(str(exc), 404)
+            return self._json({"ok": True, "id": sid,
+                               "used": panel.chat_used(conn, acc["id"]),
+                               "quota": panel.chat_quota(acc)})
+
+        if path == "/assistant/session/delete" and method == "POST":
+            data = body()
+            try:
+                with panel.tx() as tx:
+                    panel.chat_delete(tx, acc["id"], data.get("id"))
+            except LookupError as exc:
+                raise model.ApiError(str(exc), 404)
+            return self._json({"ok": True,
+                               "used": panel.chat_used(conn, acc["id"]),
+                               "quota": panel.chat_quota(acc)})
+
+        if path == "/assistant/session/export" and method == "GET":
+            sid = _int_arg(query, "id", 0, 0, 100000000)
+            row = panel.chat_session(conn, acc["id"], sid)
+            if row is None:
+                raise model.ApiError("找不到这段会话", 404)
+            lines = ["# %s" % row["title"], ""]
+            for m in row["messages"]:
+                who = "我" if m.get("role") == "user" else "助手"
+                tools = [s.get("tool") for s in (m.get("steps") or [])]
+                lines.append("**%s**%s" % (who, ("（工具：%s）" % "、".join(tools))
+                                           if tools else ""))
+                lines.append("")
+                lines.append(str(m.get("content") or ""))
+                lines.append("")
+            text = "\n".join(lines).encode("utf-8")
+            return self._send(200, text, "text/markdown; charset=utf-8",
+                              [_attachment_header("%s.md" % (row["title"] or "会话"))])
+
+        if path == "/account/quota" and method == "POST":
+            # 存档配额是平台资源：谁把谁的配额调成了多少，要留在审计里
+            need("superadmin", "owner")
+            data = body()
+            target = conn.execute("SELECT * FROM accounts WHERE id=?",
+                                  (int(data.get("id") or 0),)).fetchone()
+            if target is None:
+                raise model.ApiError("账号不存在", 404)
+            try:
+                quota = int(data.get("quota") or 0)
+            except (TypeError, ValueError):
+                raise model.ApiError("配额需要一个字节数")
+            if quota < 0 or quota > panel.CHAT_QUOTA_MAX:
+                raise model.ApiError("配额需在 0 到 %d 之间" % panel.CHAT_QUOTA_MAX)
+            before = int(target["chat_quota"] or 0)
+            with panel.tx() as tx:
+                tx.execute("UPDATE accounts SET chat_quota=? WHERE id=?",
+                           (quota, target["id"]))
+                panel.audit(tx, acc["username"], "account_quota", target["username"],
+                            "%d -> %d（字节）" % (before, quota))
+            row = conn.execute("SELECT * FROM accounts WHERE id=?",
+                               (target["id"],)).fetchone()
+            return self._json({"ok": True, "account": panel.view(row)})
 
         # ---- API 令牌：一人一张或多张，明文只在创建时出现一次 ----
         if path == "/tokens" and method == "GET":

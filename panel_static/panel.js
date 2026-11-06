@@ -2418,7 +2418,10 @@
     }
     if (wanted === "screens") loadScreenPacks().then(drawScreens);
     if (wanted === "account") loadTokens().then(drawTokens);
-    if (wanted === "assistant") loadAssistant();
+    if (wanted === "assistant") {
+      loadAssistant();
+      loadAssistantSession();
+    }
     if (wanted === "write-approvals") {
       syncBackButton();
       loadApprovals().then(drawApprovals);
@@ -3910,13 +3913,93 @@
     });
   }
 
+  // 对话存档：每轮回答落地后存一次（改动过才存），刷新回来接着聊
+  function currentTitle() {
+    var first = (S.assistantMsgs || []).filter(function (m) {
+      return m.role === "user";
+    })[0];
+    return first ? String(first.content).slice(0, 40) : "未命名会话";
+  }
+
+  function saveAssistantSession() {
+    var msgs = S.assistantMsgs || [];
+    if (!msgs.length) return Promise.resolve();
+    return PX.api("/assistant/session/save", {
+      method: "POST",
+      body: { id: S.assistantSessionId || 0, title: currentTitle(), messages: msgs }
+    }).then(function (d) {
+      S.assistantSessionId = d.id;
+      S.assistantUsed = d.used;
+      S.assistantQuota = d.quota;
+      drawAssistantQuota();
+    }).catch(function (e) {
+      // 满了就说清楚，别默默丢掉用户的对话
+      if (e.status === 413) PX.toast(PX.esc(e.message), true);
+    });
+  }
+
+  function drawAssistantQuota() {
+    var sub = $("#assistantSub");
+    if (!sub) return;
+    var cfg = S.assistantCfg || {};
+    if (!cfg.ready) {
+      sub.textContent = "还没有密钥：点右上角的设置图标填一把，地址与模型有默认值";
+      return;
+    }
+    var bits = ["当前模型：" + (cfg.model || "—")];
+    if (S.assistantUsed !== undefined && S.assistantQuota) {
+      bits.push("存档 " + Math.round(S.assistantUsed / 1024) + " / " +
+                Math.round(S.assistantQuota / 1024) + " KB");
+    }
+    sub.textContent = bits.join(" · ");
+  }
+
+  // 打开这一页时把最近一段会话接上
+  function loadAssistantSession() {
+    return PX.api("/assistant/sessions").then(function (d) {
+      S.assistantQuota = d.quota;
+      S.assistantUsed = d.used;
+      var first = (d.sessions || [])[0];
+      if (!first) { drawAssistantQuota(); return; }
+      return PX.api("/assistant/session?id=" + first.id).then(function (r) {
+        S.assistantSessionId = first.id;
+        S.assistantMsgs = (r.session && r.session.messages) || [];
+        drawAssistant();
+        drawAssistantQuota();
+      });
+    }).catch(function () { drawAssistantQuota(); });
+  }
+
+  function clearAssistantSession() {
+    var sid = S.assistantSessionId;
+    S.assistantMsgs = [];
+    S.assistantSessionId = 0;
+    drawAssistant();
+    if (!sid) return;
+    PX.api("/assistant/session/delete", { method: "POST", body: { id: sid } })
+      .then(function (d) {
+        S.assistantUsed = d.used;
+        S.assistantQuota = d.quota;
+        drawAssistantQuota();
+      })
+      .catch(function (e) { PX.toast(PX.esc(e.message), true); });
+  }
+
+  function exportAssistantSession() {
+    if (!S.assistantSessionId) {
+      PX.toast("这段对话还没有存档", true);
+      return;
+    }
+    window.open(PX.PREFIX + "/api/panel/assistant/session/export?id=" +
+                S.assistantSessionId, "_blank", "noopener");
+  }
+
   function drawAssistant() {
     var cfg = S.assistantCfg || { ready: false };
+    drawAssistantQuota();
     var sub = $("#assistantSub");
-    if (sub) {
-      sub.textContent = cfg.ready
-        ? "当前模型：" + (cfg.model || "—")
-        : "还没有密钥：点右上角的设置图标填一把，地址与模型有默认值";
+    if (sub && !S.assistantQuota && !cfg.ready) {
+      sub.textContent = "还没有密钥：点右上角的设置图标填一把，地址与模型有默认值";
     }
     var asks = $("#assistantAsks");
     if (asks && !asks.children.length) {
@@ -4036,6 +4119,7 @@
       hideThinking();
       setAssistantRunning(false);
       drawAssistant();
+      saveAssistantSession();
     });
   }
 
@@ -4538,9 +4622,9 @@
   $("#asSettings").addEventListener("click", assistantConfigDialog);
   $("#asExpand").addEventListener("click", assistantFullscreenDialog);
   $("#assistantReset").addEventListener("click", function () {
-    S.assistantMsgs = [];
-    drawAssistant();
+    clearAssistantSession();
   });
+  $("#asExport").addEventListener("click", exportAssistantSession);
   $("#assistantAsks").addEventListener("click", function (e) {
     var btn = e.target.closest(".assistant-ask");
     if (btn) sendAssistant(btn.textContent);

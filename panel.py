@@ -202,6 +202,20 @@ CREATE TABLE IF NOT EXISTS api_tokens (
     revoked_at   REAL    NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS api_tokens_owner ON api_tokens(account_id, created_at);
+
+-- 运维助手的对话存档：一次会话一行，内容是一段 JSON（便于整体导出与算体积）
+CREATE TABLE IF NOT EXISTS assistant_sessions (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id  INTEGER NOT NULL,
+    title       TEXT    NOT NULL DEFAULT '',
+    messages    TEXT    NOT NULL DEFAULT '[]',
+    size        INTEGER NOT NULL DEFAULT 0,     -- 这段 JSON 的字节数，用来算配额
+    created_at  REAL    NOT NULL,
+    updated_at  REAL    NOT NULL,
+    deleted_at  REAL    NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS assistant_sessions_owner
+    ON assistant_sessions(account_id, updated_at);
 """
 
 _local = threading.local()
@@ -257,6 +271,8 @@ LATE_COLUMNS = (
     ("accounts", "model_base", "TEXT NOT NULL DEFAULT ''"),
     ("accounts", "model_name", "TEXT NOT NULL DEFAULT ''"),
     ("accounts", "model_key", "TEXT NOT NULL DEFAULT ''"),
+    # 对话存档的容量配额（字节）。0 表示用默认值；站点管理员可以按人调整
+    ("accounts", "chat_quota", "INTEGER NOT NULL DEFAULT 0"),
     ("sessions", "sudo_until", "REAL NOT NULL DEFAULT 0"),
     ("sessions", "unlock_until", "REAL NOT NULL DEFAULT 0"),
     # 最近一次带着这个会话发出请求的时刻：在线人数由此得来（见 presence()）
@@ -755,6 +771,96 @@ def touch_token(conn, token_id):
                  (time.time(), int(token_id)))
 
 
+# --------------------------------------------------------------------------- #
+# 对话存档
+# --------------------------------------------------------------------------- #
+CHAT_QUOTA_DEFAULT = 512 * 1024      # 512 KB；不够的人向站长申请
+CHAT_QUOTA_MAX = 64 * 1024 * 1024
+
+
+def chat_quota(acc):
+    try:
+        want = int(acc["chat_quota"] or 0)
+    except (TypeError, KeyError, IndexError):
+        want = 0
+    if want <= 0:
+        return CHAT_QUOTA_DEFAULT
+    return min(want, CHAT_QUOTA_MAX)
+
+
+def chat_used(conn, account_id, skip_id=0):
+    row = conn.execute(
+        "SELECT COALESCE(SUM(size), 0) AS n FROM assistant_sessions"
+        " WHERE account_id=? AND deleted_at=0 AND id<>?",
+        (int(account_id), int(skip_id or 0))).fetchone()
+    return int(row["n"] or 0)
+
+
+def chat_session_view(row, with_messages=False):
+    out = {"id": row["id"], "title": row["title"] or "未命名会话",
+           "size": row["size"], "createdAt": row["created_at"],
+           "updatedAt": row["updated_at"]}
+    if with_messages:
+        try:
+            out["messages"] = json.loads(row["messages"] or "[]")
+        except ValueError:
+            out["messages"] = []
+    return out
+
+
+def chat_sessions(conn, account_id, limit=50):
+    rows = conn.execute(
+        "SELECT * FROM assistant_sessions WHERE account_id=? AND deleted_at=0"
+        " ORDER BY updated_at DESC LIMIT ?", (int(account_id), int(limit))).fetchall()
+    return [chat_session_view(r) for r in rows]
+
+
+def chat_session(conn, account_id, sid):
+    row = conn.execute(
+        "SELECT * FROM assistant_sessions WHERE id=? AND account_id=? AND deleted_at=0",
+        (int(sid or 0), int(account_id))).fetchone()
+    return chat_session_view(row, with_messages=True) if row else None
+
+
+def chat_save(conn, acc, sid, title, messages):
+    """Create or update one session.  Raises ValueError when over quota."""
+    blob = json.dumps(messages or [], ensure_ascii=False)
+    size = len(blob.encode("utf-8"))
+    quota = chat_quota(acc)
+    used = chat_used(conn, acc["id"], skip_id=sid or 0)
+    if used + size > quota:
+        raise ValueError("对话存档已满（%d / %d 字节），删掉一些旧会话再保存"
+                         % (used + size, quota))
+    now = time.time()
+    title = (title or "").strip()[:60]
+    if sid:
+        row = conn.execute(
+            "SELECT * FROM assistant_sessions WHERE id=? AND account_id=? AND deleted_at=0",
+            (int(sid), int(acc["id"]))).fetchone()
+        if row is None:
+            raise LookupError("找不到这段会话")
+        conn.execute(
+            "UPDATE assistant_sessions SET title=?, messages=?, size=?, updated_at=?"
+            " WHERE id=?", (title or row["title"], blob, size, now, row["id"]))
+        return row["id"]
+    cur = conn.execute(
+        "INSERT INTO assistant_sessions (account_id, title, messages, size,"
+        " created_at, updated_at) VALUES (?,?,?,?,?,?)",
+        (int(acc["id"]), title or "未命名会话", blob, size, now, now))
+    return conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
+
+
+def chat_delete(conn, account_id, sid):
+    row = conn.execute(
+        "SELECT * FROM assistant_sessions WHERE id=? AND account_id=? AND deleted_at=0",
+        (int(sid or 0), int(account_id))).fetchone()
+    if row is None:
+        raise LookupError("找不到这段会话")
+    conn.execute("UPDATE assistant_sessions SET deleted_at=? WHERE id=?",
+                 (time.time(), row["id"]))
+    return row
+
+
 AVATAR_DIR = "avatars"
 AVATAR_TYPES = {
     b"\x89PNG\r\n\x1a\n": ("png", "image/png"),
@@ -847,6 +953,8 @@ def view(row):
         "banReason": row["ban_reason"] if "ban_reason" in row.keys() else "",
         "avatar": row["avatar"] or "",
         "avatarAt": row["avatar_at"] or 0,
+        # 0 表示用默认配额；界面据此显示"默认 / 已单独调整"
+        "chatQuota": int(row["chat_quota"] or 0) if "chat_quota" in row.keys() else 0,
     }
 
 

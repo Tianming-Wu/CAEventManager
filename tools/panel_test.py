@@ -1437,6 +1437,51 @@ def main():
     finally:
         stub.stop()
 
+    print("== 对话存档：存、取、配额、删除、导出 ==")
+    saved = post(owner, "/api/panel/assistant/session/save",
+                 {"title": "第一次", "messages": [
+                     {"role": "user", "content": "平台上现在有多少活动？"},
+                     {"role": "assistant", "content": "你有 1 场活动。",
+                      "steps": [{"tool": "list_events", "ok": True}]}]})
+    sid = (saved or {}).get("id")
+    check("存下来了", bool(sid), saved)
+    check("按账号算出了用量", saved and saved["used"] > 0 and saved["quota"] > 0, saved)
+    listed = call(owner, "/api/panel/assistant/sessions")
+    check("列表里有它",
+          [s["id"] for s in listed["sessions"]][:1] == [sid], listed["sessions"])
+    back = call(owner, "/api/panel/assistant/session?id=%d" % sid)
+    check("取回来的消息是两条",
+          len((back or {}).get("session", {}).get("messages") or []) == 2, back)
+
+    # 配额是平台资源：超管调别人的配额要留痕
+    target_id = [a for a in call(owner, "/api/panel/accounts")["accounts"]
+                 if a["username"] == "asprobe"][0]["id"]
+    quota = post(owner, "/api/panel/account/quota", {"id": target_id, "quota": 1024})
+    check("能改某个账号的配额",
+          quota and quota["account"]["chatQuota"] == 1024, quota)
+    rows = json.dumps(call(owner, "/api/panel/audit?limit=40").get("audit") or [],
+                      ensure_ascii=False)
+    check("改配额写进了审计", "account_quota" in rows and "1024" in rows, rows[:200])
+    post(probe, "/api/panel/account/quota", {"id": target_id, "quota": 4096}, expect=403)
+    check("普通管理员改不了别人的配额", True)
+
+    # 配额很小的时候，超了就拒收
+    post(owner, "/api/panel/account/quota", {"id": target_id, "quota": 200})
+    big = post(probe, "/api/panel/assistant/session/save",
+               {"title": "超了", "messages": [
+                   {"role": "user", "content": "x" * 400}]}, expect=413)
+    check("超过配额时明确拒绝", big and "存档" in (big.get("error") or ""), big)
+
+    export = call(owner, "/api/panel/assistant/session/export?id=%d" % sid)
+    check("导出的是一份 Markdown",
+          isinstance(export, bytes) and "你有 1 场活动" in export.decode("utf-8"),
+          (export or b"")[:60])
+    gone = post(owner, "/api/panel/assistant/session/delete", {"id": sid})
+    check("删除后用量归零", gone and gone["used"] == 0, gone)
+    check("列表里也没有了",
+          not [s for s in call(owner, "/api/panel/assistant/sessions")["sessions"]
+               if s["id"] == sid])
+
     print("== event pages still reachable ==")
     token = events[0]["id"]
     board = call(anon, "/%s/api/board" % token)

@@ -1165,6 +1165,20 @@ def cookie_path_for(raw_path, route):
     return (prefix + "/") if prefix else "/"
 
 
+def collapse_mount(mount):
+    """还原被拼重一次的挂载前缀：``…/panel`` 其实是 ``…``。
+
+    面板的地址是 ``<mount>/panel``，而 ``classify`` 允许任意前缀，所以一份写成
+    ``<mount>/panel/panel`` 的地址照样能打开页面——只是页面把自己认成了另一处挂载，
+    于是接口、Cookie 都跟着错。这里把多出来的那一段认出来。
+    """
+    m = (mount or "").rstrip("/")
+    tail = "/panel"
+    if m.endswith(tail):
+        return m[: -len(tail)]
+    return m
+
+
 def mount_prefix(raw_path, token):
     """Everything in front of the token segment: where the panel lives here.
 

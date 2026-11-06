@@ -253,6 +253,22 @@
 
   <div class="scrim" id="scrim" hidden></div>
 
+  <!-- 会话抽屉：和主侧栏一样从左边拉出来，点外面、按 Esc、换一页都会收回去 -->
+  <aside class="as-drawer" id="asDrawer" aria-label="会话">
+    <div class="as-drawer-head">
+      <h2>会话</h2>
+      <button class="icon-btn" id="asDrawerClose" type="button"
+              title="关闭" aria-label="关闭">
+        <svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor"
+             stroke-width="1.7" stroke-linecap="round">
+          <path d="M5.8 5.8l8.4 8.4M14.2 5.8l-8.4 8.4"/>
+        </svg>
+      </button>
+    </div>
+    <div class="as-drawer-body" id="asDrawerBody"></div>
+    <p class="as-drawer-foot" id="asDrawerFoot"></p>
+  </aside>
+
   <!-- ------------------------------------------------------------- content -->
   <main class="content" id="content">
 
@@ -352,7 +368,7 @@
           <div class="assistant-empty" id="assistantEmpty">
             <p class="assistant-lead">平台上的事，也可以让我替你查。</p>
             <div class="assistant-asks" id="assistantAsks"></div>
-            <p class="hint">对话不会保存在平台上：刷新或离开这一页即消失。</p>
+            <p class="hint" id="asKeepNote">对话会存档在账户上，下次回来接着聊。</p>
           </div>
         </div>
 

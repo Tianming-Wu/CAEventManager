@@ -55,7 +55,7 @@ TPL_DIR = os.path.join(BASE_DIR, "tpl")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.7.0.16"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.7.0.17"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 
@@ -610,6 +610,39 @@ def quote_path(value):
     return quote(value, safe="/")
 
 
+def _return_to(back, mount):
+    """登录页的 ``s_return`` 换成一个地址；什么都不说的时候是空串。
+
+    只认两种：面板里某个页面的名字（在面板里被拒，回到那一页），以及本机上的
+    单斜杠路径（活动控制台）。别的都不给，免得被拿去跳到本站之外。
+    """
+    back = (back or "").strip()
+    if re.fullmatch(r"[a-z][a-z-]{0,30}", back):
+        return "%s/panel#/%s" % (mount, back)
+    if re.fullmatch(r"/(?!/)[\w\-./%~]*", back):
+        return back
+    return ""
+
+
+def _accounts_with_usage(conn, rows):
+    """用户管理那张表要的账号：带上各自存了多少对话。
+
+    配额是平台资源，谁用了多少得一眼看见，不然调配额就是猜。一次聚合查询，
+    不按账号各查一次。
+    """
+    used = {}
+    for row in conn.execute(
+            "SELECT account_id, COALESCE(SUM(size), 0) AS n FROM assistant_sessions"
+            " WHERE deleted_at=0 GROUP BY account_id"):
+        used[int(row["account_id"])] = int(row["n"] or 0)
+    out = []
+    for row in rows:
+        view = panel.view(row)
+        view["chatUsed"] = used.get(int(row["id"]), 0)
+        out.append(view)
+    return out
+
+
 class ConsoleUser:
     """Who is at an activity console: a panel account with a seat on it.
 
@@ -1044,21 +1077,17 @@ class Handler(BaseHTTPRequestHandler):
             name = panel.PANEL_PAGES.get(route)
             if name is None:
                 return self._err("not found", 404)
+            # 挂载前缀被拼重过的旧地址（…/panel/panel）送回正主，别在错地址上待着
+            mount = panel.cookie_path_for(raw_path, route).rstrip("/")
+            home = panel.collapse_mount(mount)
+            if route == "/panel" and home != mount:
+                return self._redirect(home + "/panel")
             # signed-in users go straight to the console from the auth pages
             if acc is not None and route in ("/", "/register", "/login"):
-                prefix = panel.cookie_path_for(raw_path, route).rstrip("/")
-                self.send_response(302)
-                self.send_header("Location", (prefix + "/panel") or "panel")
-                self.send_header("Content-Length", "0")
-                self.end_headers()
-                return
+                back = (query.get("s_return") or [""])[0]
+                return self._redirect(_return_to(back, home) or (home + "/panel") or "panel")
             if acc is None and route == "/panel":
-                prefix = panel.cookie_path_for(raw_path, route).rstrip("/")
-                self.send_response(302)
-                self.send_header("Location", (prefix + "/login") or "login")
-                self.send_header("Content-Length", "0")
-                self.end_headers()
-                return
+                return self._redirect((home + "/login") or "login")
             return self._serve_panel_page(name)
 
         return self._panel_api(method, route, raw_path, query)
@@ -1399,7 +1428,9 @@ class Handler(BaseHTTPRequestHandler):
                 " created_at LIMIT ? OFFSET ?", args + [limit, offset]).fetchall()
             return self._json({"ok": True, "me": panel.view(acc), "total": int(total or 0),
                                "offset": offset, "limit": limit,
-                               "accounts": [panel.view(r) for r in rows]})
+                               "quotaDefault": panel.CHAT_QUOTA_DEFAULT,
+                               "quotaMax": panel.CHAT_QUOTA_MAX,
+                               "accounts": _accounts_with_usage(conn, rows)})
 
         if path == "/events" and method == "GET":
             archived = (query.get("archived") or ["0"])[0] in ("1", "true", "yes")
@@ -2150,6 +2181,14 @@ class Handler(BaseHTTPRequestHandler):
             # 助手真正改了东西时，那次写入自己会记一条，detail 里带「经助手」。
             return self._json({"ok": True, "reply": result["reply"],
                                "steps": result["steps"]})
+
+        if path == "/assistant/title" and method == "POST":
+            # 给会话起个名字：纯装饰，起不出来前端照旧用第一句话，所以不写审计
+            data = body()
+            full = dict(assistant.config_of(acc), key=acc["model_key"] or "")
+            return self._json({"ok": True,
+                               "title": assistant.suggest_title(full,
+                                                                data.get("text") or "")})
 
         if path == "/assistant/models" and method == "POST":
             data = body()

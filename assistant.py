@@ -9,7 +9,7 @@
    浏览器永远拿不到它。
 3. **放行只走一个口**：每个动作先问 `policy.verdict()`，默认拒绝。
 
-对话本身不落库：只留"调了什么、改了什么"的审计（在接口那一侧自然写下的）。
+对话本身按会话存进数据库（每人有配额），这里只负责一问一答。
 """
 
 import json
@@ -22,6 +22,11 @@ import policy
 MAX_STEPS = 6
 TIMEOUT = 60
 UA = "CAEventManager-assistant/1"
+
+# 给会话起名：只要一个短标题，多一个字都是浪费
+TITLE_RULE = ("给下面这段话起个标题：不超过 12 个字，只回标题本身，"
+              "不要引号、不要标点、不要解释。")
+TITLE_MAX = 24
 
 
 # --------------------------------------------------------------------------- #
@@ -395,6 +400,37 @@ def _parse_arguments(raw):
         return data if isinstance(data, dict) else {}
     except Exception:
         return {}
+
+
+def suggest_title(cfg, text):
+    """给一段对话起个短标题。
+
+    名字只是好看一点：模型不给、调不通、回一段废话，都当没有，前端照旧用第一句话。
+    所以这里既不抛错，也不写审计。
+    """
+    if not cfg.get("ready") or not str(text or "").strip():
+        return ""
+    base = (cfg.get("base") or "").rstrip("/")
+    if not base.endswith("/chat/completions"):
+        base = base + "/chat/completions"
+    body = {"model": cfg.get("model"), "temperature": 0.2, "max_tokens": 32,
+            "stream": False,
+            "messages": [{"role": "system", "content": TITLE_RULE},
+                         {"role": "user", "content": str(text)[:800]}]}
+    try:
+        req = urllib.request.Request(
+            base, data=json.dumps(body).encode("utf-8"), method="POST",
+            headers={"Content-Type": "application/json",
+                     "Authorization": "Bearer " + cfg["key"],
+                     "User-Agent": UA})
+        with urllib.request.urlopen(req, timeout=TIMEOUT) as res:
+            payload = json.loads(res.read().decode("utf-8") or "{}")
+        choice = (payload.get("choices") or [{}])[0]
+        raw = ((choice.get("message") or {}).get("content") or "")
+    except Exception:
+        return ""
+    title = " ".join(str(raw).split()).strip(" \t\"'“”‘’。，、！？：:,.!?-—")
+    return title[:TITLE_MAX]
 
 
 def run(conn, acc, client, cfg, messages, log=print):

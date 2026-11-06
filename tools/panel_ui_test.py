@@ -754,6 +754,22 @@ def assistant_page(page):
           and page.input_value("#asModel") != "",
           (page.input_value("#asBase"), page.input_value("#asModel")))
     check("密钥框是密码型", page.get_attribute("#asKey", "type") == "password")
+
+    print("== 开关：和 micula 的一样是 40×20 ==")
+    sw = switch_metrics(page)
+    check("轨道 40×20", abs(sw["w"] - 40) < 1 and abs(sw["h"] - 20) < 1, sw)
+    check("圆点直径 12", abs(sw["knob"] - 12) < 1, sw)
+    check("文字与轨道一条中线上", abs(sw["textMid"] - sw["trackMid"]) <= 2, sw)
+    was_on = knob_offset(page)
+    page.click("#asResumeRow .track")
+    page.wait_for_timeout(320)
+    turned_off = knob_offset(page)
+    check("关掉后圆点回到左边", abs(was_on - 20) < 1 and abs(turned_off) < 1,
+          (was_on, turned_off))
+    page.click("#asResumeRow .track")      # 复位，后面还要用这颗开关
+    page.wait_for_timeout(320)
+    check("再点一下走回右边", abs(knob_offset(page) - 20) < 1, knob_offset(page))
+
     page.fill("#asKey", "sk-not-a-real-key")
     page.click("#asSave")
     page.wait_for_timeout(800)
@@ -806,6 +822,132 @@ def assistant_page(page):
     check("只放行 http(s) 链接",
           'href="https://' in page.evaluate("() => PX.md('[a](https://e.com)')")
           and "href" not in page.evaluate("() => PX.md('[a](javascript:alert(1))')"))
+
+
+def switch_metrics(page):
+    return page.evaluate("""() => {
+        const label = document.getElementById('asResumeRow');
+        const t = label.querySelector('.track');
+        const r = t.getBoundingClientRect();
+        const k = getComputedStyle(t, '::after');
+        const txt = label.querySelector('.switch-text').getBoundingClientRect();
+        const cs = getComputedStyle(label);
+        return {w: +r.width.toFixed(1), h: +r.height.toFixed(1),
+                knob: parseFloat(k.width), round: parseFloat(k.borderTopLeftRadius),
+                textMid: (txt.top + txt.bottom) / 2,
+                trackMid: (r.top + r.bottom) / 2, align: cs.alignItems};
+    }""")
+
+
+def knob_offset(page):
+    """The knob's horizontal travel, in px (the hover scale does not touch it)."""
+    return page.evaluate("""() => {
+        const m = getComputedStyle(
+            document.querySelector('#asResumeRow .track'), '::after').transform;
+        if (!m || m === 'none') return 0;
+        return Math.round(parseFloat(m.split(',')[4] || '0'));
+    }""")
+
+
+def assistant_drawer(browser):
+    """会话列表是左侧抽屉：点开、选中、重命名、删除，换一页不会把它留在屏幕上。"""
+    print("== 会话抽屉 ==")
+    owner = owner_opener()
+    made = call(owner, "/api/panel/assistant/session/save", {
+        "id": 0, "title": "抽屉里的会话",
+        "messages": [{"role": "user", "content": "抽屉里的一问"},
+                     {"role": "assistant", "content": "抽屉里的一答"}]})
+    sid = made["id"]
+    ctx, page = new_page(browser, 1440, 900)
+    try:
+        ui_login(page)
+        page.goto(BASE + "/panel#/assistant")
+        page.wait_for_timeout(900)
+        page.click("#asSessionBar")
+        page.wait_for_timeout(400)
+        opened = page.evaluate("""() => {
+            const shell = document.getElementById('shell');
+            const d = document.getElementById('asDrawer').getBoundingClientRect();
+            const s = document.getElementById('scrim');
+            return {open: shell.classList.contains('as-drawer-open'),
+                    left: Math.round(d.left), width: Math.round(d.width),
+                    top: Math.round(d.top), visible: d.width > 0,
+                    scrim: !s.hidden && getComputedStyle(s).display !== 'none',
+                    rows: document.querySelectorAll('#asDrawerBody .as-srow').length};
+        }""")
+        check("会话列表从左边拉出来", opened["open"] and opened["visible"], opened)
+        check("贴着左上角、和侧栏一样窄", opened["left"] == 0 and opened["width"] <= 322,
+              opened)
+        check("外面压着一层遮罩", opened["scrim"], opened)
+        check("存档的会话都在里面", opened["rows"] >= 1, opened)
+        check("列表里认得出是哪一段",
+              page.locator('#asDrawerBody .as-srow[data-sid="%d"]' % sid).count() == 1)
+
+        print("== 选中一段会话 ==")
+        page.click('#asDrawerBody .as-srow[data-sid="%d"] .as-sopen' % sid)
+        page.wait_for_timeout(700)
+        picked = page.evaluate("""() => ({
+            open: document.getElementById('shell').classList.contains('as-drawer-open'),
+            hash: location.hash,
+            log: document.getElementById('assistantLog').innerText,
+            name: document.getElementById('asSessionName').textContent.trim()})""")
+        check("点一下就收回抽屉", not picked["open"], picked)
+        check("落在这一段会话的地址上", picked["hash"] == "#/assistant/%d" % sid, picked)
+        check("对话内容回来了", "抽屉里的一问" in picked["log"], picked["log"][:80])
+        check("会话条上是它的名字", picked["name"] == "抽屉里的会话", picked["name"])
+
+        print("== 重命名、再收起来 ==")
+        page.click("#asSessionBar")
+        page.wait_for_timeout(400)
+        page.click('#asDrawerBody .as-srow[data-sid="%d"] [data-as-rename]' % sid)
+        page.wait_for_timeout(350)
+        check("重命名还是弹窗", page.locator("#overlay").is_visible())
+        page.fill("#asRename", "改过的名字")
+        page.click("#asRenameGo")
+        page.wait_for_timeout(600)
+        check("抽屉里立刻是新名字",
+              page.locator('#asDrawerBody .as-srow[data-sid="%d"]' % sid).inner_text()
+              .startswith("改过的名字"),
+              page.locator('#asDrawerBody .as-srow[data-sid="%d"]' % sid).inner_text())
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(400)
+        shut = page.evaluate("""() => {
+            const shell = document.getElementById('shell');
+            const d = document.getElementById('asDrawer').getBoundingClientRect();
+            return {open: shell.classList.contains('as-drawer-open'),
+                    onScreen: d.right > 1};
+        }""")
+        check("Esc 一按就收回去，而且真的移出屏幕", not shut["open"] and not shut["onScreen"],
+              shut)
+
+        print("== 换一页它不会留在屏幕上 ==")
+        page.click("#asSessionBar")
+        page.wait_for_timeout(400)
+        page.evaluate("() => { location.hash = '#/overview'; }")
+        page.wait_for_timeout(500)
+        gone = page.evaluate("""() => ({
+            open: document.getElementById('shell').classList.contains('as-drawer-open'),
+            overview: !document.querySelector('.page[data-page=overview]').hidden})""")
+        check("回到总览时抽屉已经收了", not gone["open"] and gone["overview"], gone)
+
+        print("== 删除 ==")
+        page.goto(BASE + "/panel#/assistant")
+        page.wait_for_timeout(800)
+        page.click("#asSessionBar")
+        page.wait_for_timeout(400)
+        page.click('#asDrawerBody .as-srow[data-sid="%d"] [data-as-del]' % sid)
+        page.wait_for_timeout(350)
+        check("删除先问一句", page.locator("#overlay").is_visible())
+        page.click("#asDelGo")
+        page.wait_for_timeout(700)
+        check("删掉的会话不在列表里了",
+              page.locator('#asDrawerBody .as-srow[data-sid="%d"]' % sid).count() == 0)
+        check("删完抽屉还开着", page.evaluate(
+            "() => document.getElementById('shell').classList.contains('as-drawer-open')"))
+        check("这一段自己没有 javascript 错误", not page._errors,
+              "; ".join(page._errors)[:200])
+    finally:
+        ctx.close()
 
 
 def title_row(page):
@@ -1310,6 +1452,37 @@ def users_table(page):
           "没有匹配" in page.locator("#accountsTable tbody").inner_text())
     page.fill("#userSearch", "")
     page.wait_for_timeout(260)
+
+    print("== 存档配额在账号弹窗里调 ==")
+    page.goto(BASE + "/panel#/users")
+    page.wait_for_timeout(500)
+    page.click('#accountsTable tbody tr:first-child [data-acct]')
+    page.wait_for_timeout(400)
+    shown = page.inner_text("#overlayBody")
+    check("账号弹窗说得出现在的配额", "存档配额" in shown, shown[:120])
+    check("也说得出用了多少", "已用" in shown, shown[:120])
+    page.click("[data-quota]")
+    page.wait_for_timeout(350)
+    check("调配额是一个带上限的输入框",
+          page.locator("#qKb").is_visible()
+          and page.get_attribute("#qKb", "type") == "number")
+    check("并说清楚 0 表示用默认值", "默认值" in page.inner_text("#overlayBody"),
+          page.inner_text("#overlayBody")[:200])
+    page.fill("#qKb", "1024")
+    page.click("#qGo")
+    page.wait_for_timeout(900)
+    check("保存后配额写进去了", "1 MB" in page.inner_text("#overlayBody"),
+          page.inner_text("#overlayBody")[:160])
+    print("== 恢复默认配额 ==")
+    page.click("[data-quota]")
+    page.wait_for_timeout(350)
+    page.fill("#qKb", "0")
+    page.click("#qGo")
+    page.wait_for_timeout(900)
+    check("填 0 就回到默认", "默认" in page.inner_text("#overlayBody"),
+          page.inner_text("#overlayBody")[:160])
+    page.evaluate("() => document.getElementById('overlayClose').click()")
+    page.wait_for_timeout(300)
 
 
 def events_table(page):
@@ -2059,6 +2232,60 @@ def denied_flow(browser):
 
 
 # --------------------------------------------------------------------------- #
+MOUNT = "/u/laffey/xlottery"
+
+
+def booted(page):
+    page.wait_for_function(
+        "() => document.documentElement.getAttribute('data-booted') === '1'",
+        timeout=25000)
+    page.wait_for_timeout(200)
+
+
+def mount_page(browser):
+    """挂载前缀下的地址：登录回来不该变成 …/panel/panel。"""
+    print("== 面板挂在 /u/laffey/xlottery 下时地址是对的 ==")
+    ctx, page = new_page(browser, 1280, 800)
+    seen = []
+    page.on("request", lambda r: seen.append(r.url))
+    try:
+        page.goto(BASE + MOUNT + "/panel", wait_until="domcontentloaded")
+        page.wait_for_selector("#loginForm", timeout=20000)
+        check("未登录访问面板会去登录页",
+              page.url.startswith(BASE + MOUNT + "/login"), page.url)
+        page.fill("#username", LOGIN)
+        page.fill("#password", PASSWORD)
+        page.click("#go")
+        booted(page)
+        check("登录后回到 …/panel", page.url == BASE + MOUNT + "/panel", page.url)
+        check("没有把挂载前缀拼重",
+              not [u for u in seen if "/panel/panel" in u],
+              "; ".join(u for u in seen if "/panel/panel" in u)[:200])
+        check("接口走的是挂载前缀下的地址",
+              not [u for u in seen if "/panel/api/panel" in u],
+              "; ".join(u for u in seen if "/panel/api/panel" in u)[:200])
+
+        print("== 带结尾斜杠、地址被拼重的旧链接都能回到正主 ==")
+        for path in ("/panel/", "/panel/panel", "/panel/panel#/overview"):
+            page.goto(BASE + MOUNT + path, wait_until="domcontentloaded")
+            seen[:] = []          # 只数这一跳之后的请求，导航本身不算
+            booted(page)
+            check("%s 回到 …/panel" % path,
+                  page.url.split("#")[0] == BASE + MOUNT + "/panel", page.url)
+            check("%s 之后没有再拼重" % path,
+                  not [u for u in seen if "/panel/panel" in u],
+                  "; ".join(u for u in seen if "/panel/panel" in u)[:200])
+
+        print("== 被拒之后回来，落在原来那一页 ==")
+        page.goto(BASE + MOUNT + "/login?s_return=overview", wait_until="domcontentloaded")
+        booted(page)
+        check("已登录的人从登录页直接进去",
+              page.url == BASE + MOUNT + "/panel#/overview", page.url)
+    finally:
+        ctx.close()
+
+
+# --------------------------------------------------------------------------- #
 def sudo_expiry(browser):
     """The deadline is real: the last seconds blink, then the mode ends itself.
 
@@ -2139,6 +2366,7 @@ def main():
                 group_page(page)
                 nav_keys_page(page)
                 assistant_page(page)
+                assistant_drawer(browser)
                 screens_page(page)
                 roster_page(page)
                 signup_page(page, browser)
@@ -2162,6 +2390,7 @@ def main():
 
             layout_page(browser)
             touch_page(browser)
+            mount_page(browser)
             sudo_expiry(browser)
             if WITH_ACCOUNTS:
                 role_page(browser)

@@ -1307,9 +1307,15 @@ def main():
                     body = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
                     stub.requests.append({"auth": self.headers.get("Authorization"),
                                           "body": body})
+                    system = " ".join(m.get("content") or ""
+                                      for m in body.get("messages", [])
+                                      if m.get("role") == "system")
                     tool_msgs = [m for m in body.get("messages", [])
                                  if m.get("role") == "tool"]
-                    if tool_msgs:
+                    if "标题" in system:
+                        # 起名字那一路：不给工具，只要一句短标题
+                        message = {"role": "assistant", "content": "活动报名排查。"}
+                    elif tool_msgs:
                         titles = re.findall(r'"title": "([^"]+)"',
                                             tool_msgs[-1].get("content") or "")
                         message = {"role": "assistant",
@@ -1404,6 +1410,13 @@ def main():
         names = [t["function"]["name"] for t in
                  (stub.requests[0]["body"].get("tools") or [])]
         check("站长拿得到全部工具", "host_stats" in names and "recent_audit" in names, names)
+
+        titled = post(owner, "/api/panel/assistant/title",
+                      {"text": "我最近的活动为什么没人报名？"})
+        check("能给会话起个短名字",
+              titled and titled.get("title") == "活动报名排查", titled)
+        check("起名字那一路不要工具", not (stub.requests[-1]["body"].get("tools")),
+              stub.requests[-1]["body"])
 
         # 普通管理员：模型连"有服务器状态这个工具"都不该知道
         post(anon2, "/api/panel/register", {"username": "asprobe", "name": "助手权限",

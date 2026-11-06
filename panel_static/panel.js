@@ -861,15 +861,21 @@
   }
 
   /* -------------------------------------------------------------- pane/scrim */
+  // 遮罩是侧栏和会话抽屉共用的：两个都收干净了才拿掉
+  function syncScrim() {
+    var shell = $("#shell");
+    $("#scrim").hidden = !(shell.classList.contains("nav-open") ||
+                           shell.classList.contains("as-drawer-open"));
+  }
   function openPane() {
     $("#shell").classList.add("nav-open");
-    $("#scrim").hidden = false;
     $("#menuBtn").setAttribute("aria-expanded", "true");
+    syncScrim();
   }
   function closePane() {
     $("#shell").classList.remove("nav-open");
-    $("#scrim").hidden = true;
     $("#menuBtn").setAttribute("aria-expanded", "false");
+    syncScrim();
   }
 
   /* 侧栏用方向键走：整栏只占一个 Tab 位，上下键在可见项之间移动
@@ -2307,6 +2313,8 @@
         S.signupId = Number(tail) || 0;
         return head;
       }
+      // 会话 id 也进地址（#/assistant/<id>），换一段会话就是换一个地址
+      if (head === "assistant" && ROUTES[head]) return head;
     }
     return null;
   }
@@ -2339,6 +2347,8 @@
   function onRoute() {
     var prevRoute = S.route;                 // 上一页有没有返回键，全靠它
     var wanted = routeFromHash() || FALLBACK_ROUTE;
+    // 换一页就把会话抽屉收回去：返回键回到别处时，它不该还浮在上面
+    closeAssistantDrawer();
     if (!guardBypass && S.route === "new-event" && wanted !== "new-event" && S.dirty) {
       // put the address back where the form is, then ask what to do with it
       var here = "#/" + S.route + (S.templateId ? "/" + encodeURIComponent(S.templateId) : "");
@@ -2421,7 +2431,7 @@
     if (wanted === "account") loadTokens().then(drawTokens);
     if (wanted === "assistant") {
       loadAssistant();
-      resumeAssistant();
+      resumeAssistant(prevRoute);
     }
     if (wanted === "write-approvals") {
       syncBackButton();
@@ -3267,6 +3277,8 @@
         S.me = d.me || S.me;
         S.accounts = S.accounts.concat(d.accounts || []);
         S.accountsTotal = d.total || 0;
+        if (d.quotaDefault) S.quotaDefault = d.quotaDefault;
+        if (d.quotaMax) S.quotaMax = d.quotaMax;
       })
       .catch(function (e) { PX.toast(PX.esc(e.message), true); })
       .then(function () {
@@ -3287,6 +3299,7 @@
       ["称呼", a.name || "—"],
       ["角色", a.roleLabel],
       ["状态", a.statusLabel],
+      ["存档配额", quotaText(a)],
       ["注册时间", PX.when(a.createdAt)],
       ["最近登录", PX.when(a.lastLogin)]
     ];
@@ -3316,6 +3329,9 @@
       btns.push(a.role === "superadmin"
         ? '<button class="btn ghost" data-role="admin" data-id="' + a.id + '">降为管理员</button>'
         : '<button class="btn ghost" data-role="superadmin" data-id="' + a.id + '">升为超级管理员</button>');
+    }
+    if (isSuper()) {
+      btns.push('<button class="btn ghost" data-quota="' + a.id + '">调整存档配额</button>');
     }
 
     openOverlay("account", a.username,
@@ -3790,7 +3806,7 @@
   }
 
   /* ---------------------------------------------------------------- 运维助手 --- */
-  /* 对话本身不进数据库：只在这个页面里，刷新即消失。
+  /* 对话按会话存进数据库（有配额），地址里带着会话 id；
      模型配置在账号上，密钥只写不读——画面上永远只有"已配置"。 */
   var ASSISTANT_ASKS = [
     "我最近的活动为什么没人报名？帮我看看名单与报名的情况",
@@ -3867,12 +3883,11 @@
       '<p class="hint">留空表示保持现状；清除请点下面的按钮</p></div>' +
       '<p class="hint">端点需兼容 OpenAI 的 <code>/chat/completions</code>；' +
       '地址与模型留空时使用默认值</p>' +
-      '<div class="row" style="margin-top:14px">' +
-      '<label class="switch" title="从侧栏进入时接着上次那段会话">' +
+      '<label class="switch" id="asResumeRow" style="margin-top:14px">' +
       '<input type="checkbox" id="asResume"' +
       ((cfg.resume === false) ? "" : " checked") + '>' +
-      '<span class="track"></span></label>' +
-      '<span class="hint">进入时接着上次的会话；关掉则每次都从新会话开始</span></div>' +
+      '<span class="track"></span>' +
+      '<span class="switch-text">进入时接着上次的会话</span></label>' +
       '<div class="row" style="margin-top:16px;justify-content:flex-end">' +
       '<button class="btn" id="asClearKey" type="button">清除密钥</button>' +
       '<button class="btn" data-close-overlay="1" type="button">取消</button>' +
@@ -3928,6 +3943,24 @@
     return first ? String(first.content).slice(0, 40) : "未命名会话";
   }
 
+  // 新会话存下之后，请模型起个短名字；起不出来就留着第一句话
+  function autoTitleSession(id) {
+    var first = (S.assistantMsgs || []).filter(function (m) {
+      return m.role === "user";
+    })[0];
+    if (!first) return;
+    PX.api("/assistant/title", { method: "POST", body: { text: first.content } })
+      .then(function (d) {
+        var title = (d.title || "").trim();
+        if (!title) return;
+        if (S.assistantSessionId === id) setSessionName(title);
+        return PX.api("/assistant/session/rename",
+                      { method: "POST", body: { id: id, title: title } })
+          .then(refreshAssistantDrawer);
+      })
+      .catch(function () { /* 名字只是好看：安静地算了 */ });
+  }
+
   function saveAssistantSession() {
     var msgs = S.assistantMsgs || [];
     if (!msgs.length) return Promise.resolve();
@@ -3943,6 +3976,7 @@
       if (fresh) setSessionInHash(d.id);
       setSessionName(currentTitle());
       drawAssistantQuota();
+      if (fresh) autoTitleSession(d.id);
     }).catch(function (e) {
       // 满了就说清楚，别默默丢掉用户的对话
       if (e.status === 413) PX.toast(PX.esc(e.message), true);
@@ -4003,11 +4037,12 @@
     if (el) el.textContent = text || "新会话";
   }
 
-  // 从侧栏进来时：恢复上次打开的那段（记在本机），或者直接开一段新的
-  function resumeAssistant() {
+  // 从侧栏进来时：恢复上次打开的那段（记在本机），或者直接开一段新的。
+  // 已经在这一页里换会话（比如点了新建）就照地址来，不要再把上一段捞回来。
+  function resumeAssistant(prevRoute) {
     var id = sessionIdFromHash();
     if (id) return openAssistantSession(id);
-    var resume = (S.assistantCfg || {}).resume !== false;
+    var resume = (S.assistantCfg || {}).resume !== false && prevRoute !== "assistant";
     if (!resume) return openAssistantSession(0);
     var last = "";
     try { last = localStorage.getItem("as:lastSession") || ""; } catch (e) {}
@@ -4015,53 +4050,82 @@
     return openAssistantSession(0);
   }
 
-  // 会话列表：桌面从会话条点开，手机从标题栏的 Pancake 点开
-  function assistantSessionsDialog() {
+  // 会话列表：输入框上方那条点开，从左边拉出抽屉（和主侧栏一样）
+  function openAssistantDrawer() {
+    var shell = $("#shell");
+    if (shell.classList.contains("as-drawer-open")) return;
     PX.api("/assistant/sessions").then(function (d) {
-      S.assistantQuota = d.quota;
-      S.assistantUsed = d.used;
-      var rows = d.sessions || [];
-      S.assistantList = rows;
-      openOverlay("as-sessions", "会话",
-        (rows.length ? '<div class="as-slist">' + rows.map(function (s) {
-          return '<div class="as-srow' +
-            (s.id === S.assistantSessionId ? " on" : "") + '" data-sid="' + s.id + '">' +
-            '<button class="as-sopen" type="button" data-open="' + s.id + '">' +
-            PX.esc(s.title) + '<span>' + PX.when(s.updatedAt) + " · " +
-            Math.max(1, Math.round(s.size / 1024)) + " KB</span></button>" +
-            '<button class="as-sicon" type="button" data-rename="' + s.id +
-            '" title="重命名" aria-label="重命名">' + ICON_PENCIL + "</button>" +
-            '<button class="as-sicon danger" type="button" data-del="' + s.id +
-            '" title="删除" aria-label="删除">' + ICON_TRASH + "</button>" +
-            "</div>";
-        }).join("") + "</div>"
-          : '<p class="page-sub">还没有会话。发一条消息就会存下来。</p>') +
-        '<p class="hint">存档 ' + Math.round(d.used / 1024) + " / " +
-        Math.round(d.quota / 1024) + " KB</p>" +
-        '<div class="row" style="margin-top:14px;justify-content:flex-end">' +
-        '<button class="btn primary" data-close-overlay="1" type="button">关闭</button></div>');
-      $("#overlayBody").addEventListener("click", sessionDialogClick);
-      drawAssistantQuota();
+      drawAssistantDrawer(d);
+      shell.classList.add("as-drawer-open");
+      syncScrim();
+      $("#asDrawerClose").focus();
     }).catch(function (e) { PX.toast(PX.esc(e.message), true); });
   }
 
-  function sessionDialogClick(e) {
-    var open = e.target.closest("[data-open]");
+  function closeAssistantDrawer() {
+    $("#shell").classList.remove("as-drawer-open");
+    syncScrim();
+  }
+
+  function assistantDrawerOpen() {
+    return $("#shell").classList.contains("as-drawer-open");
+  }
+
+  // 抽屉开着的时候，重命名、删除之后把列表重新画一遍
+  function refreshAssistantDrawer() {
+    if (!assistantDrawerOpen()) return Promise.resolve();
+    return PX.api("/assistant/sessions").then(drawAssistantDrawer)
+      .catch(function () {});
+  }
+
+  function drawAssistantDrawer(d) {
+    S.assistantQuota = d.quota;
+    S.assistantUsed = d.used;
+    var rows = d.sessions || [];
+    S.assistantList = rows;
+    var body = $("#asDrawerBody");
+    if (body) {
+      body.innerHTML = rows.length ? '<div class="as-slist">' + rows.map(function (s) {
+        // 属性都带 as- 前缀：页面里那套 data-rename / data-del 是活动的，别撞上
+        return '<div class="as-srow' +
+          (s.id === S.assistantSessionId ? " on" : "") + '" data-sid="' + s.id + '">' +
+          '<button class="as-sopen" type="button" data-as-open="' + s.id + '">' +
+          PX.esc(s.title) + '<span>' + PX.when(s.updatedAt) + " · " +
+          Math.max(1, Math.round(s.size / 1024)) + " KB</span></button>" +
+          '<button class="as-sicon" type="button" data-as-rename="' + s.id +
+          '" title="重命名" aria-label="重命名">' + ICON_PENCIL + "</button>" +
+          '<button class="as-sicon danger" type="button" data-as-del="' + s.id +
+          '" title="删除" aria-label="删除">' + ICON_TRASH + "</button>" +
+          "</div>";
+      }).join("") + "</div>"
+        : '<p class="page-sub">还没有会话。发一条消息就会存下来。</p>';
+    }
+    var foot = $("#asDrawerFoot");
+    if (foot) {
+      foot.textContent = "存档 " + Math.round(d.used / 1024) + " / " +
+        Math.round(d.quota / 1024) + " KB";
+    }
+    drawAssistantQuota();
+  }
+
+  function assistantDrawerClick(e) {
+    var open = e.target.closest("[data-as-open]");
     if (open) {
-      closeOverlay();
-      location.hash = "#/assistant/" + open.getAttribute("data-open");
+      var id = Number(open.getAttribute("data-as-open"));
+      var want = "#/assistant/" + id;
+      closeAssistantDrawer();
+      // 换一页会走 onRoute；同一条会话就把地址省了，直接打开
+      if (location.hash === want) openAssistantSession(id);
+      else location.hash = want;
       return;
     }
-    var rename = e.target.closest("[data-rename]");
+    var rename = e.target.closest("[data-as-rename]");
     if (rename) {
-      var id = Number(rename.getAttribute("data-rename"));
-      renameSession(id);
+      renameSession(Number(rename.getAttribute("data-as-rename")));
       return;
     }
-    var del = e.target.closest("[data-del]");
-    if (del) {
-      deleteSession(Number(del.getAttribute("data-del")));
-    }
+    var del = e.target.closest("[data-as-del]");
+    if (del) deleteSession(Number(del.getAttribute("data-as-del")));
   }
 
   function renameSession(id) {
@@ -4080,6 +4144,7 @@
         .then(function () {
           closeOverlay();
           if (S.assistantSessionId === id) setSessionName(name);
+          refreshAssistantDrawer();
           PX.toast("已重命名");
         })
         .catch(function (e) { PX.toast(PX.esc(e.message), true); });
@@ -4107,6 +4172,7 @@
             drawAssistant();
           }
           drawAssistantQuota();
+          refreshAssistantDrawer();
           PX.toast("已删除");
         })
         .catch(function (e) { PX.toast(PX.esc(e.message), true); });
@@ -4137,6 +4203,12 @@
     }
     var empty = $("#assistantEmpty");
     if (empty) empty.hidden = (S.assistantMsgs || []).length > 0;
+    var keep = $("#asKeepNote");
+    if (keep) {
+      keep.textContent = ((S.assistantCfg || {}).resume === false)
+        ? "这段对话不存档，刷新后即消失。"
+        : "对话会存档在账户上，下次回来接着聊。";
+    }
     drawAssistantLog();
     growAssistantBox();
   }
@@ -4276,7 +4348,7 @@
   function fetchAssistantModels() {
     var btn = $("#asModels");
     btn.disabled = true;
-    btn.textContent = "拉取中…";
+    btn.textContent = "获取中…";
     var body = { base: $("#asBase").value.trim() };
     if (!keyFieldMasked() && $("#asKey").value) body.key = $("#asKey").value;
     PX.api("/assistant/models", { method: "POST", body: body })
@@ -4295,7 +4367,7 @@
       .catch(function (e) { PX.toast(PX.esc(e.message), true); })
       .then(function () {
         btn.disabled = false;
-        btn.textContent = "拉取模型";
+        btn.textContent = "获取模型";
       });
   }
 
@@ -4454,6 +4526,48 @@
       .catch(fail);
   }
 
+  // 对话存档配额：按账号给，0 表示用默认值
+  function sizeText(bytes) {
+    var kb = Math.round((bytes || 0) / 1024);
+    return kb >= 1024 ? (Math.round(kb / 10.24) / 100) + " MB" : kb + " KB";
+  }
+
+  function quotaText(a) {
+    var cap = a.chatQuota > 0 ? a.chatQuota : (S.quotaDefault || 0);
+    return (a.chatQuota > 0 ? "" : "默认 ") + sizeText(cap) +
+      " · 已用 " + sizeText(a.chatUsed);
+  }
+
+  function quotaDialog(id) {
+    var a = S.accounts.filter(function (x) { return x.id === id; })[0];
+    if (!a) return;
+    var def = S.quotaDefault || 512 * 1024;
+    var cap = a.chatQuota > 0 ? a.chatQuota : def;
+    var maxKb = Math.max(1, Math.floor((S.quotaMax || def) / 1024));
+    openOverlay("as-quota", "调整存档配额",
+      '<div class="field"><label for="qKb">上限（KB）</label>' +
+      '<input id="qKb" type="number" min="0" max="' + maxKb + '" value="' +
+      Math.round(cap / 1024) + '"></div>' +
+      '<p class="hint">填 0 表示用默认值（' + Math.round(def / 1024) + ' KB）；' +
+      '当前已用 ' + sizeText(a.chatUsed) + "</p>" +
+      '<div class="row" style="margin-top:16px;justify-content:flex-end">' +
+      '<button class="btn" data-close-overlay="1" type="button">取消</button>' +
+      '<button class="btn primary" id="qGo" type="button">保存</button></div>');
+    $("#qKb").focus();
+    $("#qKb").select();
+    $("#qGo").addEventListener("click", function () {
+      var kb = Math.max(0, Math.round(Number($("#qKb").value) || 0));
+      apiSudo("/account/quota", { method: "POST", body: { id: a.id, quota: kb * 1024 } },
+              "调整存档配额")
+        .then(function () {
+          PX.toast("配额已更新");
+          closeOverlay();
+          return reloadAll().then(function () { openAccountOverlay(a.id); });
+        })
+        .catch(fail);
+    });
+  }
+
   // keep an open account dialog in sync with the data behind it
   function afterMutation() {
     if ($("#overlay").hidden || overlayKind !== "account") return;
@@ -4515,6 +4629,9 @@
 
     var acct = t.closest("[data-acct]");
     if (acct) return openAccountOverlay(Number(acct.getAttribute("data-acct")));
+
+    var quota = t.closest("[data-quota]");
+    if (quota) return quotaDialog(Number(quota.getAttribute("data-quota")));
 
     var toggle = t.closest("[data-toggle]");
     if (toggle) return onGroupHead(toggle.getAttribute("data-toggle"));
@@ -4637,7 +4754,10 @@
     if ($("#shell").classList.contains("nav-open")) closePane();
     else openPane();
   });
-  $("#scrim").addEventListener("click", closePane);
+  $("#scrim").addEventListener("click", function () {
+    closeAssistantDrawer();
+    closePane();
+  });
   $("#sidebar").addEventListener("click", function (e) {
     if (e.target.closest && e.target.closest("[data-nav]")) closePane();
   });
@@ -4658,7 +4778,7 @@
 
   function logout(returnRoute) {
     var back = returnRoute ? "?s_return=" + encodeURIComponent(returnRoute) : "";
-    var leave = function () { location.href = "login" + back; };
+    var leave = function () { location.href = PX.PREFIX + "/login" + back; };
     PX.api("/logout", { method: "POST" }).then(leave).catch(leave);
   }
 
@@ -4754,7 +4874,9 @@
     location.hash = "#/assistant";      // 新会话：点开就是初始页，发消息才落库
     openAssistantSession(0);
   });
-  $("#asSessionBar").addEventListener("click", assistantSessionsDialog);
+  $("#asSessionBar").addEventListener("click", openAssistantDrawer);
+  $("#asDrawerClose").addEventListener("click", closeAssistantDrawer);
+  $("#asDrawerBody").addEventListener("click", assistantDrawerClick);
   $("#asExport").addEventListener("click", exportAssistantSession);
   $("#assistantAsks").addEventListener("click", function (e) {
     var btn = e.target.closest(".assistant-ask");
@@ -5272,6 +5394,7 @@
     if (e.key === "Escape") {
       if (cardMenuEl) return closeCardMenu();
       if (!$("#overlay").hidden) return closeOverlay();
+      if (assistantDrawerOpen()) return closeAssistantDrawer();
       closePane();
     }
     // keep Tab inside the dialog while it is open
@@ -5366,7 +5489,7 @@
     bindUpdateBar();
     PX.api("/me").then(function (d) {
       if (!d.authed) {
-        location.href = "login";
+        location.href = PX.PREFIX + "/login";
         return;
       }
       S.me = d.me;
@@ -5394,7 +5517,7 @@
         document.documentElement.setAttribute("data-booted", "1");
       });
     }).catch(function (e) {
-      if (e.status === 401) location.href = "login";
+      if (e.status === 401) location.href = PX.PREFIX + "/login";
       else PX.toast(PX.esc(e.message || "加载失败"), true);
     });
   }

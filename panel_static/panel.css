@@ -1382,12 +1382,50 @@ a.crumb, a.crumb:hover, .nav-item, .nav-item:hover { text-decoration: none; }
 .only-narrow { display: none; }
 .scrim { display: none; }
 /* used by both the phone drawer and the icon-rail pane */
-.shell.nav-open .scrim {
+.shell.nav-open .scrim,
+.shell.as-drawer-open .scrim {
   display: block;
   position: fixed;
   inset: var(--titlebar) 0 0 0;
   background: rgba(28, 25, 23, .38);
   z-index: 45;
+}
+
+/* ---------- 会话抽屉：从左边拉出来，和主侧栏同一套观感 ---------- */
+.as-drawer {
+  position: fixed;
+  top: var(--titlebar);
+  bottom: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  width: min(86vw, 320px);
+  padding: 12px 10px calc(12px + env(safe-area-inset-bottom));
+  background: var(--surface);
+  border-right: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  transform: translateX(-101%);
+  visibility: hidden;
+  transition: transform .22s ease, visibility .22s;
+  z-index: 50;
+}
+.shell.as-drawer-open .as-drawer { transform: translateX(0); visibility: visible; }
+.as-drawer-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 2px 8px 6px;
+}
+.as-drawer-head h2 { font-size: .95rem; margin: 0; flex: 1 1 auto; }
+.as-drawer-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding-right: 2px; }
+.as-drawer-body .as-slist { max-height: none; overflow: visible; }
+.as-drawer-body .page-sub { padding: 4px 6px; }
+.as-drawer-foot {
+  margin: 8px 0 0;
+  padding: 8px 6px 0;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: .74rem;
 }
 
 .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
@@ -1594,42 +1632,60 @@ input[type="color"] {
 .dt-pair .dt-clear { flex: none; }
 .dt-pair .dt-clear:disabled { opacity: .45; cursor: default; }
 
-/* ---------- switch: one card's worth of功能 on or off ---------- */
-.switch { display: inline-flex; align-items: center; gap: 9px; cursor: pointer; }
+/* ---------- switch: 一件小事的开与关 ----------
+   micula 的 ToggleSwitch：轨道 40×20，圆点直径 12，在中间那 20 的距离上来回；
+   值的变化用 167ms 的 Fluent 减速曲线（cubic-bezier(0,0,0,1)），
+   指针状态（悬停放大、按下压扁）83ms，圆点始终绕自己的中心变。 */
+.switch { display: inline-flex; align-items: center; gap: 9px; cursor: pointer; flex: none; }
 .switch input { position: absolute; opacity: 0; width: 0; height: 0; }
 .switch .track {
   position: relative;
-  width: 44px;
-  height: 26px;
+  width: 40px;
+  height: 20px;
   border-radius: 999px;
   background: var(--surface-3);
-  border: 1px solid var(--line);
-  transition: background .18s, border-color .18s;
+  box-shadow: inset 0 0 0 1px var(--line);
+  transition: background-color .167s cubic-bezier(0, 0, 0, 1),
+              box-shadow .167s cubic-bezier(0, 0, 0, 1);
   flex: none;
 }
 .switch .track::after {
   content: "";
   position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 20px;
-  height: 20px;
+  top: 4px;
+  left: 4px;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
   background: var(--surface);
-  box-shadow: 0 1px 3px rgba(30, 20, 8, .22);
-  transition: transform .18s;
+  box-shadow: 0 1px 2px rgba(30, 20, 8, .3);
+  transition: transform .167s cubic-bezier(0, 0, 0, 1),
+              background-color .167s cubic-bezier(0, 0, 0, 1),
+              box-shadow .083s linear;
 }
 /* 暗色下 --surface-3 与卡片底色太接近，开关的关态要自己发亮一点 */
 html[data-theme="dark"] .switch .track {
   background: #565049;
-  border-color: #7b736a;
+  box-shadow: inset 0 0 0 1px #7b736a;
 }
 html[data-theme="dark"] .switch .track::after { background: #f3efe9; }
-.switch input:checked + .track { background: var(--accent); border-color: var(--accent); }
-.switch input:checked + .track::after { transform: translateX(18px); }
+.switch input:checked + .track {
+  background: var(--accent);
+  box-shadow: inset 0 0 0 1px transparent;   /* 填满之后描边让位 */
+}
+.switch input:checked + .track::after { transform: translateX(20px); }
+/* 悬停时圆点胖一圈、按下时压扁：中心不动，所以只缩放 */
+@media (hover: hover) and (pointer: fine) {
+  .switch:hover .track::after { transform: scale(1.167); }
+  .switch:hover input:checked + .track::after { transform: translateX(20px) scale(1.167); }
+  .switch:active .track::after { transform: scale(1.167, .833); }
+  .switch:active input:checked + .track::after {
+    transform: translateX(20px) scale(1.167, .833);
+  }
+}
 .switch input:focus-visible + .track { outline: 2px solid var(--accent-line); outline-offset: 2px; }
 .switch input:disabled + .track { opacity: .5; }
-.switch .switch-text { font-size: .8rem; color: var(--muted); }
+.switch .switch-text { font-size: .85rem; color: var(--muted); }
 /* a card whose feature is switched off dims as a whole -- title included --
    while the switch itself stays fully legible, because that is how you turn it back on.
    浅色下卡片比底色亮，所以关掉的卡片要用比底色还淡一档的底，而不是更深的 --surface-2 */

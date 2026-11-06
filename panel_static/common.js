@@ -48,6 +48,8 @@
       init.headers["Content-Type"] = "application/json";
       init.body = JSON.stringify(options.body);
     }
+    // 长请求要能被"停止"打断：调用方传一个 AbortController 的 signal 就行
+    if (options.signal) init.signal = options.signal;
     return fetch(PREFIX + "/api/panel" + path, init).then(function (res) {
       return res.text().then(function (text) {
         var data;
@@ -75,6 +77,68 @@
     return String(s === null || s === undefined ? "" : s)
       .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  }
+
+  /* 一点点 Markdown：助手回答常带列表和代码，原样显示很难读。
+     规矩是"先转义，再套样式"——除了下面这几条，其它一律当纯文本，
+     所以模型吐出来的 HTML 不会变成 DOM。链接只认 http(s)。 */
+  function mdInline(text) {
+    var out = text
+      .replace(/`([^`]+)`/g, "<code>$1</code>")
+      .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+      .replace(/(^|[\s(])\*([^*\n]+)\*/g, "$1<em>$2</em>");
+    out = out.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
+      '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+    return out;
+  }
+
+  function md(text) {
+    var raw = String(text === null || text === undefined ? "" : text);
+    var lines = raw.replace(/\r\n?/g, "\n").split("\n");
+    var out = [];
+    var list = null;          // "ul" / "ol" / null
+    var fence = false;
+    var code = [];
+    var closeList = function () {
+      if (list) { out.push("</" + list + ">"); list = null; }
+    };
+    lines.forEach(function (line) {
+      if (/^\s*```/.test(line)) {
+        if (fence) {
+          out.push("<pre><code>" + esc(code.join("\n")) + "</code></pre>");
+          code = [];
+        } else {
+          closeList();
+        }
+        fence = !fence;
+        return;
+      }
+      if (fence) { code.push(line); return; }
+      var bullet = line.match(/^\s*[-*+]\s+(.*)$/);
+      var numbered = line.match(/^\s*\d+[.)]\s+(.*)$/);
+      var heading = line.match(/^\s*#{1,6}\s+(.*)$/);
+      if (bullet || numbered) {
+        var want = bullet ? "ul" : "ol";
+        if (list !== want) { closeList(); out.push("<" + want + ">"); list = want; }
+        out.push("<li>" + mdInline(esc(bullet ? bullet[1] : numbered[1])) + "</li>");
+        return;
+      }
+      closeList();
+      if (!line.trim()) { out.push(""); return; }
+      if (heading) {
+        out.push("<p><strong>" + mdInline(esc(heading[1])) + "</strong></p>");
+        return;
+      }
+      out.push("<p>" + mdInline(esc(line)) + "</p>");
+    });
+    if (fence && code.length) {
+      out.push("<pre><code>" + esc(code.join("\n")) + "</code></pre>");
+    }
+    closeList();
+    return out.filter(function (s, i, arr) {
+      // 连续空行只留一个
+      return !(s === "" && (i === 0 || arr[i - 1] === ""));
+    }).join("\n");
   }
 
   function pad(n) { return n < 10 ? "0" + n : "" + n; }
@@ -252,6 +316,7 @@
     guardAutofill: guardAutofill,
     pad: pad,
     toast: toast,
+    md: md,
     onUpdate: onUpdate,
     version: function () { return bootVersion; }
   };

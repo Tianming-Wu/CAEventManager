@@ -95,6 +95,7 @@
     tokenMeta: null,       // 可选的权限与它们的说明
     assistantCfg: null,    // 这个账号的模型配置（不含密钥）
     assistantMsgs: [],     // 本次对话，只在这里，不进库
+    assistantAbort: null,  // 正在等回答时的中止器：这颗按钮此刻是"停止"
     overviewCounts: {},    // 总览上的"我的名单 / 我的报名"数
     updateTo: "",          // 服务端换了版本，等一个能安全刷新的时机
     typed: false,          // 这一页里敲过字：别在人家填表的时候刷新页面
@@ -2351,13 +2352,16 @@
     }
     S.route = wanted;
     S.typed = false;         // 换了一页，"这一页敲过字"重新算
+    // 助手页把输入框钉在底部，页脚就不跟它抢这点高度了
+    var foot = $("#siteFoot");
+    if (foot) foot.hidden = (wanted === "assistant");
     // 返回键属于"这一页有没有上一级"：先定下来，动画与渲染都靠它
     var parent = routeParent(wanted);
     S.explicitBack = hashQuery().back || null;
     S.backTo = S.explicitBack || (parent ? parent.href.replace(/^#/, "") : null);
     S.denied = null;
     $("#denied").hidden = true;
-    $("#siteFoot").hidden = false;
+    $("#siteFoot").hidden = (wanted === "assistant");
 
     // a child route keeps its group expanded
     var parent = ROUTES[wanted].group;
@@ -3820,7 +3824,8 @@
   var KEY_MASK = "••••••••••••••••••";
 
   function keyFieldMasked() {
-    return $("#asKey").value === KEY_MASK;
+    var box = $("#asKey");
+    return !!box && box.value === KEY_MASK;
   }
 
   function showKeyMask(cfg) {
@@ -3833,8 +3838,68 @@
     } else {
       box.value = "";
       delete box.dataset.masked;
-      box.placeholder = "sk-…（只写不读，保存后不会再显示）";
+      box.placeholder = "sk-…（只写不读）";
     }
+  }
+
+  // 模型设置放在弹窗里：输入框常驻底部，原来那张内嵌卡片会把对话挤走
+  function assistantConfigDialog() {
+    var cfg = S.assistantCfg || {};
+    openOverlay("assistant-cfg", "模型设置",
+      '<div class="field"><label for="asBase">接口地址</label>' +
+      '<input id="asBase" type="text" autocomplete="off" spellcheck="false" value="' +
+      PX.esc(cfg.base || "") + '"></div>' +
+      '<div class="field"><label for="asModel">模型</label>' +
+      '<div class="row" style="gap:8px;align-items:center">' +
+      '<input id="asModel" type="text" autocomplete="off" spellcheck="false" ' +
+      'list="asModelList" value="' + PX.esc(cfg.model || "") + '">' +
+      '<button class="btn sm" id="asModels" type="button">拉取模型</button></div>' +
+      '<datalist id="asModelList"></datalist></div>' +
+      '<div class="field"><label for="asKey">密钥</label>' +
+      '<input id="asKey" type="password" autocomplete="off" spellcheck="false">' +
+      '<p class="hint">只写不读：保存后这里只会显示一串星号，接口也不会再回传它</p></div>' +
+      '<p class="hint">接口需兼容 OpenAI 的 <code>/chat/completions</code>；地址与模型留空就用默认值。</p>' +
+      '<div class="row" style="margin-top:16px;justify-content:flex-end">' +
+      '<button class="btn" id="asClearKey" type="button">清除密钥</button>' +
+      '<button class="btn" data-close-overlay="1" type="button">取消</button>' +
+      '<button class="btn primary" id="asSave" type="button">保存</button></div>');
+    showKeyMask(cfg);
+    $("#asSave").addEventListener("click", saveAssistantConfig);
+    $("#asModels").addEventListener("click", fetchAssistantModels);
+    $("#asClearKey").addEventListener("click", function () {
+      PX.api("/assistant/config", { method: "POST", body: { clear: true } })
+        .then(function (d) {
+          S.assistantCfg = d.config || S.assistantCfg;
+          showKeyMask(S.assistantCfg);
+          drawAssistant();
+          PX.toast("密钥已清除");
+        })
+        .catch(function (e) { PX.toast(PX.esc(e.message), true); });
+    });
+    // 星号是假的：一聚焦就清掉，让人能直接覆盖
+    $("#asKey").addEventListener("focus", function () {
+      if (keyFieldMasked()) this.value = "";
+    });
+    $("#asKey").addEventListener("blur", function () {
+      if (!this.value && (S.assistantCfg || {}).hasKey) this.value = KEY_MASK;
+    });
+  }
+
+  // 全屏编辑：打进来时带上现有的内容，改的同时就写回去，退出不用再同步一次
+  function assistantFullscreenDialog() {
+    var box = $("#assistantText");
+    openOverlay("assistant-full", "写长一点",
+      '<textarea class="as-full" id="asFull" maxlength="2000"></textarea>' +
+      '<div class="row" style="margin-top:14px;justify-content:flex-end">' +
+      '<button class="btn primary" data-close-overlay="1" type="button">完成</button></div>');
+    var full = $("#asFull");
+    full.value = box.value;
+    full.focus();
+    full.selectionStart = full.selectionEnd = full.value.length;
+    full.addEventListener("input", function () {
+      box.value = full.value;
+      growAssistantBox();
+    });
   }
 
   function drawAssistant() {
@@ -3843,20 +3908,7 @@
     if (sub) {
       sub.textContent = cfg.ready
         ? "当前模型：" + (cfg.model || "—")
-        : "还没有密钥：点右上「模型配置」填一把，接口地址与模型名有默认值";
-    }
-    var hint = $("#assistantCfgHint");
-    if (hint) hint.textContent = cfg.hasKey ? "密钥已配置（只写不读）" : "还没有密钥";
-    if ($("#asBase") && document.activeElement !== $("#asBase")) {
-      $("#asBase").value = cfg.base || "";
-      $("#asBase").placeholder = cfg.defaultBase || "";
-    }
-    if ($("#asModel") && document.activeElement !== $("#asModel")) {
-      $("#asModel").value = cfg.model || "";
-      $("#asModel").placeholder = cfg.defaultModel || "";
-    }
-    if (document.activeElement !== $("#asKey") || keyFieldMasked()) {
-      showKeyMask(cfg);
+        : "还没有密钥：点输入框右侧的设置图标填一把，地址与模型有默认值";
     }
     var asks = $("#assistantAsks");
     if (asks && !asks.children.length) {
@@ -3867,6 +3919,7 @@
     var empty = $("#assistantEmpty");
     if (empty) empty.hidden = (S.assistantMsgs || []).length > 0;
     drawAssistantLog();
+    growAssistantBox();
   }
 
   function drawAssistantLog() {
@@ -3883,10 +3936,58 @@
       }).join("");
       return '<div class="as-msg as-bot">' +
         (steps ? '<div class="as-steps">' + steps + "</div>" : "") +
-        '<div class="as-text">' + PX.esc(m.content || "").replace(/\n/g, "<br>") +
-        "</div></div>";
+        '<div class="as-text md">' + PX.md(m.content || "") + "</div></div>";
     }).join("");
-    log.scrollTop = log.scrollHeight;
+    scrollAssistant();
+  }
+
+  function scrollAssistant() {
+    var box = $("#assistantScroll");
+    if (box) box.scrollTop = box.scrollHeight;
+  }
+
+  /* 正在思考：动态的三个点，写在对话流末尾，回答落地时移除 */
+  function showThinking() {
+    var log = $("#assistantLog");
+    if (!log || $("#asThinking")) return;
+    var el = document.createElement("div");
+    el.className = "as-msg as-bot";
+    el.id = "asThinking";
+    el.innerHTML = '<span class="as-thinking">正在思考<i></i><i></i><i></i></span>';
+    log.appendChild(el);
+    scrollAssistant();
+  }
+
+  function hideThinking() {
+    var el = $("#asThinking");
+    if (el) el.remove();
+  }
+
+  /* 输入框按内容长高：一行起，五行封顶，再多就在框里滚。
+     手机上一开始就是两行。 */
+  function assistantLines() {
+    return window.innerWidth <= 760 ? 2 : 1;
+  }
+
+  function growAssistantBox() {
+    var box = $("#assistantText");
+    if (!box) return;
+    var line = 24;                       // 与 CSS 的 line-height 对齐
+    var pad = 8;                         // 上下内边距
+    var maxLines = 5;
+    box.style.height = "auto";
+    var need = box.scrollHeight - pad;   // 去掉内边距后的内容高度
+    var lines = Math.min(maxLines, Math.max(assistantLines(), Math.ceil(need / line) || 1));
+    box.style.height = (lines * line + pad) + "px";
+    box.style.overflowY = (need > maxLines * line) ? "auto" : "hidden";
+  }
+
+  function setAssistantRunning(running) {
+    var btn = $("#assistantSend");
+    if (!btn) return;
+    btn.classList.toggle("is-running", !!running);
+    btn.title = running ? "停止" : "发送";
+    btn.setAttribute("aria-label", running ? "停止" : "发送");
   }
 
   function sendAssistant(text) {
@@ -3894,31 +3995,47 @@
     if (!question) return;
     var cfg = S.assistantCfg || {};
     if (!cfg.ready) {
-      PX.toast("先配置模型再问", true);
-      var card = $("#assistantCfgCard");
-      if (card) card.hidden = false;
+      PX.toast("先在设置里填一把密钥", true);
+      assistantConfigDialog();
       return;
     }
     S.assistantMsgs = S.assistantMsgs || [];
     S.assistantMsgs.push({ role: "user", content: question });
     drawAssistant();
-    var send = $("#assistantSend");
-    send.disabled = true;
-    send.textContent = "思考中…";
-    PX.api("/assistant/chat", { method: "POST", body: { messages: S.assistantMsgs } })
-      .then(function (d) {
-        S.assistantMsgs.push({ role: "assistant", content: d.reply || "",
-                               steps: d.steps || [] });
-      })
-      .catch(function (e) {
+    var box = $("#assistantText");
+    box.value = "";
+    growAssistantBox();
+    setAssistantRunning(true);
+    showThinking();
+    var controller = window.AbortController ? new AbortController() : null;
+    S.assistantAbort = controller;
+    PX.api("/assistant/chat", {
+      method: "POST",
+      body: { messages: S.assistantMsgs },
+      signal: controller ? controller.signal : undefined
+    }).then(function (d) {
+      S.assistantMsgs.push({ role: "assistant", content: d.reply || "",
+                             steps: d.steps || [] });
+    }).catch(function (e) {
+      if (e && (e.name === "AbortError" || /abort/i.test(String(e.message)))) {
+        S.assistantMsgs.push({ role: "assistant", content: "（已停止）", steps: [] });
+      } else {
         S.assistantMsgs.push({ role: "assistant", content: "出错了：" + e.message,
                                steps: [] });
-      })
-      .then(function () {
-        send.disabled = false;
-        send.textContent = "发送";
-        drawAssistant();
-      });
+      }
+    }).then(function () {
+      S.assistantAbort = null;
+      hideThinking();
+      setAssistantRunning(false);
+      drawAssistant();
+    });
+  }
+
+  function stopAssistant() {
+    if (S.assistantAbort) {
+      try { S.assistantAbort.abort(); } catch (e) { /* 已经结束了 */ }
+      S.assistantAbort = null;
+    }
   }
 
   function saveAssistantConfig() {
@@ -3928,6 +4045,7 @@
     PX.api("/assistant/config", { method: "POST", body: body })
       .then(function (d) {
         S.assistantCfg = d.config || S.assistantCfg;
+        closeOverlay();
         drawAssistant();
         PX.toast(d.config && d.config.ready ? "已保存" : "已保存，还差密钥", !d.config.ready);
       }).catch(function (e) { PX.toast(PX.esc(e.message), true); });
@@ -4399,32 +4517,9 @@
   $("#auditMore").addEventListener("click", loadMoreAudit);
 
   $("#pfSave").addEventListener("click", saveProfile);
-  // 运维助手
-  $("#assistantCfgBtn").addEventListener("click", function () {
-    var card = $("#assistantCfgCard");
-    card.hidden = !card.hidden;
-    if (!card.hidden) $("#asBase").focus();
-  });
-  $("#asSave").addEventListener("click", saveAssistantConfig);
-  $("#asModels").addEventListener("click", fetchAssistantModels);
-  // 星号是假的：一聚焦就清掉，让人能直接覆盖
-  $("#asKey").addEventListener("focus", function () {
-    if (keyFieldMasked()) this.value = "";
-  });
-  $("#asKey").addEventListener("blur", function () {
-    if (!this.value && (S.assistantCfg || {}).hasKey) {
-      this.value = KEY_MASK;
-    }
-  });
-  $("#asClearKey").addEventListener("click", function () {
-    PX.api("/assistant/config", { method: "POST", body: { clear: true } })
-      .then(function (d) {
-        S.assistantCfg = d.config || S.assistantCfg;
-        drawAssistant();
-        PX.toast("密钥已清除");
-      })
-      .catch(function (e) { PX.toast(PX.esc(e.message), true); });
-  });
+  // 运维助手：输入框常驻底部，设置与全屏编辑都在框里
+  $("#asSettings").addEventListener("click", assistantConfigDialog);
+  $("#asExpand").addEventListener("click", assistantFullscreenDialog);
   $("#assistantReset").addEventListener("click", function () {
     S.assistantMsgs = [];
     drawAssistant();
@@ -4435,10 +4530,12 @@
   });
   $("#assistantForm").addEventListener("submit", function (e) {
     e.preventDefault();
+    // 正在等回答时这颗按钮是"停止"
+    if (S.assistantAbort) { stopAssistant(); return; }
     var box = $("#assistantText");
     var text = box.value;
     box.value = "";
-    box.style.height = "";
+    growAssistantBox();
     sendAssistant(text);
   });
   $("#assistantText").addEventListener("keydown", function (e) {
@@ -4447,10 +4544,8 @@
       $("#assistantForm").dispatchEvent(new Event("submit", { cancelable: true }));
     }
   });
-  $("#assistantText").addEventListener("input", function () {
-    this.style.height = "auto";
-    this.style.height = Math.min(this.scrollHeight, 160) + "px";
-  });
+  $("#assistantText").addEventListener("input", growAssistantBox);
+  window.addEventListener("resize", growAssistantBox);
   $("#tokenNew").addEventListener("click", tokenDialog);
   $("#tokenTable").addEventListener("click", function (e) {
     var btn = e.target.closest("[data-token-revoke]");

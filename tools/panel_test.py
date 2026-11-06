@@ -1401,8 +1401,11 @@ def main():
               stub.requests[0]["auth"] if stub.requests else None)
         check("请求里带了工具清单",
               stub.requests and stub.requests[0]["body"].get("tools"))
+        names = [t["function"]["name"] for t in
+                 (stub.requests[0]["body"].get("tools") or [])]
+        check("站长拿得到全部工具", "host_stats" in names and "recent_audit" in names, names)
 
-        # 普通管理员的助手只能做他自己能做的事
+        # 普通管理员：模型连"有服务器状态这个工具"都不该知道
         post(anon2, "/api/panel/register", {"username": "asprobe", "name": "助手权限",
                                             "password": "asprobe-pass-1"})
         probe_id = [a for a in call(owner, "/api/panel/accounts")["accounts"]
@@ -1413,14 +1416,20 @@ def main():
              {"username": "asprobe", "password": "asprobe-pass-1"})
         post(probe, "/api/panel/assistant/config",
              {"base": stub.url(), "model": "stub-model", "key": "sk-other"})
+        before = len(stub.requests)
         denied = post(probe, "/api/panel/assistant/chat",
                       {"messages": [{"role": "user", "content": "看看审计日志"}]})
+        sent = [t["function"]["name"] for t in
+                (stub.requests[before]["body"].get("tools") or [])]
+        check("普通管理员根本看不到站长的工具",
+              "host_stats" not in sent and "recent_audit" not in sent, sent)
+        check("他看得到的那些还在", "list_events" in sent and "host_stats" not in sent, sent)
         steps = {s["tool"]: s["ok"] for s in (denied or {}).get("steps") or []}
-        check("普通管理员的助手调不动审计日志", steps.get("recent_audit") is False, steps)
+        check("他也调不动审计日志", steps.get("recent_audit") is not True, steps)
         server_ask = post(probe, "/api/panel/assistant/chat",
                           {"messages": [{"role": "user", "content": "服务器状态怎么样"}]})
         steps2 = {s["tool"]: s["ok"] for s in (server_ask or {}).get("steps") or []}
-        check("也调不动服务器状态", steps2.get("host_stats") is False, steps2)
+        check("也调不动服务器状态", steps2.get("host_stats") is not True, steps2)
 
         rows = json.dumps(call(owner, "/api/panel/audit?limit=60").get("audit") or [],
                           ensure_ascii=False)

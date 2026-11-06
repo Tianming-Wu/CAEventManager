@@ -1891,11 +1891,10 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
 
 .site-foot {
   max-width: 1120px;
-  margin: 26px auto 0;
-  padding: 14px 0 6px;
-  border-top: 1px solid var(--line-soft);
+  margin: 10px auto 0;
+  padding: 2px 0 0;
   text-align: center;
-  font-size: .74rem;
+  font-size: .7rem;
   color: var(--dim);
 }
 
@@ -2547,14 +2546,30 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
 }
 
 /* ---------- 运维助手 ---------- */
-.assistant-card { display: flex; flex-direction: column; gap: 12px; }
-.assistant-log {
+/* 整页撑满可视区：对话在中间滚，输入框永远贴在页面底部 */
+.assistant-page {
+  display: flex;
+  flex-direction: column;
+  /* 撑满可视区：对话在中间滚，输入框贴着页面底部（这一页不显示页脚） */
+  min-height: calc(100dvh - var(--titlebar) - 16px);
+}
+.assistant-shell {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  max-height: min(52vh, 520px);
-  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
 }
+.assistant-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1 1 auto;
+  min-height: 160px;
+  overflow-y: auto;
+  padding: 2px 2px 4px;
+}
+.assistant-log { display: flex; flex-direction: column; gap: 10px; }
 .assistant-log:empty { display: none; }
 .as-msg { display: flex; }
 .as-user { justify-content: flex-end; }
@@ -2570,6 +2585,28 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   word-break: break-word;
 }
 .as-user .as-text { background: var(--accent-soft); border-color: var(--accent-line); }
+/* 助手回答会带一点点 Markdown：列表、行内代码、强调 */
+.as-text.md { white-space: normal; }
+.as-text.md p { margin: 0 0 6px; }
+.as-text.md p:last-child { margin-bottom: 0; }
+.as-text.md ul, .as-text.md ol { margin: 0 0 6px; padding-left: 20px; }
+.as-text.md li { margin: 2px 0; }
+.as-text.md code {
+  font-family: var(--mono);
+  font-size: .92em;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--surface-2);
+}
+.as-text.md pre {
+  margin: 6px 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  overflow-x: auto;
+}
+.as-text.md pre code { padding: 0; background: transparent; font-size: .84rem; }
+.as-text.md a { color: var(--accent-strong); }
 .as-bot { flex-direction: column; gap: 6px; align-items: flex-start; }
 .as-steps { display: flex; flex-wrap: wrap; gap: 6px; }
 .as-step {
@@ -2596,22 +2633,136 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   cursor: pointer;
 }
 .assistant-ask:hover { background: var(--surface-2); border-color: var(--accent-line); }
-.assistant-input { display: flex; gap: 10px; align-items: flex-end; }
-.assistant-input textarea {
+
+/* 正在思考：三个点依次亮，比"按钮变成思考中"安静也更像在干活 */
+.as-thinking {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: .82rem;
+}
+.as-thinking i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: as-think 1.1s infinite ease-in-out;
+}
+.as-thinking i:nth-child(2) { animation-delay: .16s; }
+.as-thinking i:nth-child(3) { animation-delay: .32s; }
+@keyframes as-think {
+  0%, 80%, 100% { opacity: .25; transform: translateY(0); }
+  40% { opacity: 1; transform: translateY(-2px); }
+}
+
+/* ---------- 输入框：常驻底部，工具都嵌在里面 ---------- */
+.as-composer {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 9px 10px 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .06);
+}
+.as-composer:focus-within { border-color: var(--accent-line); }
+.as-composer textarea {
   flex: 1 1 auto;
-  min-height: var(--ctrl-h);
-  max-height: 160px;
-  padding: 9px 11px;
+  min-width: 0;
+  min-height: 24px;
+  max-height: 160px;         /* 五行封顶，再长就在框里滚 */
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: .92rem;
+  line-height: 24px;
+  resize: none;
+  overflow-y: hidden;
+}
+.as-composer textarea:focus { outline: none; }
+.as-expand {
+  position: absolute;
+  top: -11px;
+  right: 8px;
+  appearance: none;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+}
+.as-expand:hover { color: var(--text); border-color: var(--accent-line); }
+.as-expand svg { width: 12px; height: 12px; }
+.as-tools { display: flex; align-items: center; gap: 4px; flex: none; }
+.as-icon {
+  appearance: none;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.as-icon:hover { background: var(--surface-2); color: var(--text); }
+.as-send {
+  appearance: none;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+.as-send:hover:not(:disabled) { background: var(--accent-strong); }
+.as-send:disabled { opacity: .5; cursor: default; }
+.as-send svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.as-send .as-ic-stop { display: none; fill: currentColor; stroke: none; }
+.as-send.is-running .as-ic-send { display: none; }
+.as-send.is-running .as-ic-stop { display: block; }
+.as-expand svg, .as-icon svg { fill: none; stroke: currentColor; stroke-width: 1.6;
+  stroke-linecap: round; stroke-linejoin: round; }
+
+/* 全屏编辑：占满整屏的文本框 */
+.as-full {
+  width: 100%;
+  height: min(60vh, 520px);
+  padding: 12px 14px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: var(--surface);
   color: var(--text);
   font: inherit;
-  font-size: .9rem;
-  line-height: 1.5;
+  font-size: .95rem;
+  line-height: 1.6;
   resize: none;
 }
-.assistant-input .btn { flex: none; height: var(--ctrl-h); }
 
 /* ---------- 服务已更新 ---------- */
 /* 重新部署后旧页面还在跑旧脚本：能立刻刷就自己刷，正在填东西就在这里说一声 */

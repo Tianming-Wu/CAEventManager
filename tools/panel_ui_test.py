@@ -701,49 +701,109 @@ def assistant_page(page):
     page.wait_for_timeout(900)
     check("总览下面有这一页", page.locator('[data-page="assistant"]').is_visible())
     check("没配密钥时说清楚该去配什么",
-          "模型配置" in page.inner_text("#assistantSub"),
+          "密钥" in page.inner_text("#assistantSub"),
           page.inner_text("#assistantSub"))
     check("给了几个可以直接点的问法",
           page.locator(".assistant-ask").count() >= 3,
           page.locator(".assistant-ask").count())
-    check("模型配置默认收着", not page.locator("#assistantCfgCard").is_visible())
-    page.click("#assistantCfgBtn")
-    page.wait_for_timeout(300)
-    check("点一下展开配置", page.locator("#assistantCfgCard").is_visible())
-    check("三个必填项都在",
-          page.locator("#asBase").count() == 1 and page.locator("#asModel").count() == 1
-          and page.locator("#asKey").count() == 1)
-    check("密钥框是密码型",
-          page.get_attribute("#asKey", "type") == "password")
+    box = page.evaluate("""() => {
+        const form = document.getElementById('assistantForm');
+        const r = form.getBoundingClientRect();
+        const send = document.getElementById('assistantSend').getBoundingClientRect();
+        return {bottomGap: Math.round(window.innerHeight - r.bottom),
+                insideSend: send.right <= r.right + 1 && send.left >= r.left,
+                round: Math.round(send.width) === Math.round(send.height),
+                expand: !!document.getElementById('asExpand'),
+                gear: !!document.getElementById('asSettings')};
+    }""")
+    check("输入框常驻在页面底部", box["bottomGap"] <= 40, box)
+    check("发送按钮嵌在框内，而且是圆的", box["insideSend"] and box["round"], box)
+    check("框里有设置与全屏编辑入口", box["expand"] and box["gear"], box)
+    rows = page.evaluate("""() => {
+        const t = document.getElementById('assistantText');
+        return {h: Math.round(t.getBoundingClientRect().height),
+                lh: parseFloat(getComputedStyle(t).lineHeight)};
+    }""")
+    check("初始是一行高（桌面上）", rows["h"] <= rows["lh"] + 12, rows)
+    page.fill("#assistantText", "一\n二\n三\n四\n五\n六\n七\n八")
+    page.evaluate("() => document.getElementById('assistantText')"
+                  ".dispatchEvent(new Event('input'))")
+    page.wait_for_timeout(200)
+    grown = page.evaluate("""() => {
+        const t = document.getElementById('assistantText');
+        const cs = getComputedStyle(t);
+        return {h: Math.round(t.getBoundingClientRect().height),
+                lh: parseFloat(cs.lineHeight), scroll: cs.overflowY};
+    }""")
+    check("长到五行就封顶，再长在框里滚动",
+          grown["h"] <= grown["lh"] * 5 + 12 and grown["scroll"] == "auto", grown)
+    page.evaluate("() => { document.getElementById('assistantText').value = '';"
+                  ".dispatchEvent".replace(".dispatchEvent", "") + "}")
+    page.fill("#assistantText", "")
+    page.evaluate("() => document.getElementById('assistantText')"
+                  ".dispatchEvent(new Event('input'))")
+
+    print("== 模型设置弹窗 ==")
+    page.click("#asSettings")
+    page.wait_for_timeout(350)
+    check("设置是弹窗，不是内嵌卡片",
+          page.locator("#overlay").is_visible()
+          and "模型设置" in page.inner_text("#overlayTitle"))
     check("接口地址与模型已经填好默认值",
           page.input_value("#asBase").startswith("http")
           and page.input_value("#asModel") != "",
           (page.input_value("#asBase"), page.input_value("#asModel")))
-    # 保存一把假密钥：之后框里应该是"假内容"，而且再保存不会把它清掉
+    check("密钥框是密码型", page.get_attribute("#asKey", "type") == "password")
     page.fill("#asKey", "sk-not-a-real-key")
     page.click("#asSave")
-    page.wait_for_timeout(700)
-    masked = page.evaluate("() => ({v: document.getElementById('asKey').value,"
-                           " t: document.getElementById('asKey').type})")
-    check("保存后框里是假内容，不是真密钥",
-          masked["v"] and "sk-not-a-real-key" not in masked["v"], masked)
-    check("假内容就是一串星号", set(masked["v"]) == {"•"}, masked["v"][:8])
+    page.wait_for_timeout(800)
+    check("保存后弹窗自己关掉", page.locator("#overlay").is_hidden())
+    check("副标题改成当前模型", "当前模型" in page.inner_text("#assistantSub"),
+          page.inner_text("#assistantSub"))
+    page.click("#asSettings")
+    page.wait_for_timeout(350)
+    masked = page.evaluate("() => document.getElementById('asKey').value")
+    check("再打开时密钥位置是一串星号，不是真东西",
+          masked and "sk-not-a-real-key" not in masked and set(masked) == {"•"},
+          masked[:12])
     page.click("#asSave")
     page.wait_for_timeout(700)
-    still = page.evaluate("""() => ({hint: document.getElementById('assistantCfgHint').textContent,
-                                     sub: document.getElementById('assistantSub').textContent})""")
-    check("再保存一次不会把密钥清掉", "已配置" in still["hint"], still)
-    check("副标题改成「当前模型」", "当前模型" in still["sub"], still["sub"])
-    # 收拾干净：清掉密钥，别影响后面的用例
+    page.click("#asSettings")
+    page.wait_for_timeout(300)
+    again = page.evaluate("() => document.getElementById('asKey').value")
+    check("再保存一次也不会把密钥弄丢", again and set(again) == {"•"}, again[:12])
     page.click("#asClearKey")
-    page.wait_for_timeout(500)
-    check("清除密钥之后又回到未配置",
-          "还没有密钥" in page.inner_text("#assistantCfgHint"),
-          page.inner_text("#assistantCfgHint"))
-    check("没配密钥时按发送只提示，不发请求", page.evaluate(
-        "() => !document.getElementById('assistantSend').disabled"))
-    page.click("#assistantCfgBtn")
+    page.wait_for_timeout(600)
+    check("清除密钥后回到未配置",
+          "密钥" in page.inner_text("#assistantSub"), page.inner_text("#assistantSub"))
+    page.evaluate("() => document.getElementById('overlayClose').click()")
+    page.wait_for_timeout(300)
+
+    print("== 全屏编辑 ==")
+    page.fill("#assistantText", "先把问题写在这里")
+    page.click("#asExpand")
+    page.wait_for_timeout(400)
+    check("打开后带上了现有内容",
+          page.input_value("#asFull") == "先把问题写在这里",
+          page.input_value("#asFull"))
+    page.fill("#asFull", "写到全屏里的一句话")
     page.wait_for_timeout(200)
+    check("在全屏里改的内容同步回输入框",
+          page.input_value("#assistantText") == "写到全屏里的一句话",
+          page.input_value("#assistantText"))
+    page.evaluate("() => document.getElementById('overlayClose').click()")
+    page.wait_for_timeout(300)
+
+    print("== 回答里的 Markdown ==")
+    html = page.evaluate("""() => PX.md("**重点**：`pid 1`\\n- 甲\\n- 乙")""")
+    check("列表与行内代码都认", "<ul>" in html and "<code>pid 1</code>" in html,
+          html[:80])
+    check("强调也认", "<strong>重点</strong>" in html, html[:80])
+    check("原样的 HTML 被转义",
+          "<img" not in page.evaluate("() => PX.md('<img src=x>')"))
+    check("只放行 http(s) 链接",
+          'href="https://' in page.evaluate("() => PX.md('[a](https://e.com)')")
+          and "href" not in page.evaluate("() => PX.md('[a](javascript:alert(1))')"))
 
 
 def title_row(page):

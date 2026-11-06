@@ -33,10 +33,20 @@ WRITE_ACTIONS = {}
 ROLE_RANK = {"admin": 1, "superadmin": 2, "owner": 3}
 
 
+def _role(account):
+    """sqlite 的 Row 不是 dict：两种都要能读出角色，否则人人被当成 admin。"""
+    if account is None:
+        return "admin"
+    try:
+        role = account["role"]
+    except (TypeError, KeyError, IndexError):
+        role = None
+    return role or "admin"
+
+
 def verdict(account, action, params=None):
     """(allow, reason)。拒绝时 reason 是给人看的一句话。"""
-    role = (account or {}).get("role") if isinstance(account, dict) else None
-    role = role or "admin"
+    role = _role(account)
     if action in READ_ACTIONS:
         need = READ_ACTIONS[action]
         if need and ROLE_RANK.get(role, 0) < ROLE_RANK.get(need, 99):
@@ -49,6 +59,22 @@ def verdict(account, action, params=None):
 
 def is_write(action):
     return action in WRITE_ACTIONS
+
+
+def visible(account):
+    """这个账号**看得见**的动作名集合。
+
+    只读白名单里按角色筛：普通管理员的模型根本不会知道有"看服务器状态""看审计"这回事——
+    与其让它调一次然后被告知无权，不如一开始就不给它这个工具。
+    """
+    role = _role(account)
+    out = []
+    for action, need in READ_ACTIONS.items():
+        if need and ROLE_RANK.get(role, 0) < ROLE_RANK.get(need, 99):
+            continue
+        out.append(action)
+    out.extend(WRITE_ACTIONS.keys())
+    return out
 
 
 def describe(action):

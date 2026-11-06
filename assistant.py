@@ -341,26 +341,36 @@ SYSTEM_PROMPT = (
 )
 
 
-def tool_schema():
-    """The `tools` array an OpenAI-compatible endpoint expects."""
-    return [{"type": "function",
-             "function": {"name": t["name"], "description": t["description"],
-                          "parameters": t["parameters"] or {"type": "object",
-                                                            "properties": {}}}}
-            for t in TOOLS]
+def tool_schema(account=None):
+    """The `tools` array an OpenAI-compatible endpoint expects.
+
+    ``account`` 给了就只发它用得上的那些：看得见的权限才看得见工具，
+    别让模型先去撞一次"你无权查看"再学会。
+    """
+    allow = set(policy.visible(account)) if account is not None else None
+    out = []
+    for tool in TOOLS:
+        if allow is not None and tool["name"] not in allow:
+            continue
+        out.append({"type": "function",
+                    "function": {"name": tool["name"], "description": tool["description"],
+                                 "parameters": tool["parameters"] or {"type": "object",
+                                                                      "properties": {}}}})
+    return out
 
 
 # --------------------------------------------------------------------------- #
 # 与模型对话
 # --------------------------------------------------------------------------- #
-def _post_chat(cfg, messages, tools=True):
+def _post_chat(cfg, messages, account=None):
     base = (cfg.get("base") or "").rstrip("/")
     if not base.endswith("/chat/completions"):
         base = base + "/chat/completions"
     body = {"model": cfg.get("model"), "messages": messages, "temperature": 0.2,
             "stream": False}
+    tools = tool_schema(account)
     if tools:
-        body["tools"] = tool_schema()
+        body["tools"] = tools
         body["tool_choice"] = "auto"
     req = urllib.request.Request(
         base, data=json.dumps(body).encode("utf-8"), method="POST",
@@ -391,7 +401,7 @@ def run(conn, acc, client, cfg, messages, log=print):
 
     steps = []
     for _ in range(MAX_STEPS):
-        payload = _post_chat(cfg, convo)
+        payload = _post_chat(cfg, convo, account=acc)
         choice = (payload.get("choices") or [{}])[0]
         msg = choice.get("message") or {}
         calls = msg.get("tool_calls") or []
@@ -414,6 +424,10 @@ def run(conn, acc, client, cfg, messages, log=print):
                     result = tool["run"](client, args)
                 except Exception as exc:                    # 工具自己出错不该炸整轮
                     result = {"error": "工具执行失败：%s" % exc}
+            # 接口那边的 403 不必原样转述：模型只要知道"这条路走不通"就够了
+            err = str(result.get("error") or "")
+            if "403" in err or "无权" in err or "权限" in err:
+                result = {"error": "这一步没有权限，换一种问法或者换个账号试试"}
             steps.append({"tool": name, "ok": "error" not in result,
                           "note": result.get("error") or ""})
             convo.append({"role": "tool", "tool_call_id": call.get("id") or name,

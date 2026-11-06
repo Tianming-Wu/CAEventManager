@@ -55,7 +55,7 @@ TPL_DIR = os.path.join(BASE_DIR, "tpl")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.7.0.7"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.7.0.8"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 
@@ -2093,7 +2093,7 @@ class Handler(BaseHTTPRequestHandler):
         # ---- 运维助手：模型配置与一次对话 ----
         if path == "/assistant" and method == "GET":
             return self._json({"ok": True, "config": assistant.config_of(acc),
-                               "tools": [t["name"] for t in assistant.TOOLS],
+                               "tools": sorted(policy.visible(acc)),
                                "writes": sorted(policy.WRITE_ACTIONS)})
 
         if path == "/assistant/config" and method == "POST":

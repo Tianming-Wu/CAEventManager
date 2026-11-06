@@ -2546,6 +2546,73 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   font-size: .74rem;
 }
 
+/* ---------- 运维助手 ---------- */
+.assistant-card { display: flex; flex-direction: column; gap: 12px; }
+.assistant-log {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: min(52vh, 520px);
+  overflow-y: auto;
+}
+.assistant-log:empty { display: none; }
+.as-msg { display: flex; }
+.as-user { justify-content: flex-end; }
+.as-text {
+  max-width: min(100%, 620px);
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line-soft);
+  background: var(--surface);
+  font-size: .88rem;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.as-user .as-text { background: var(--accent-soft); border-color: var(--accent-line); }
+.as-bot { flex-direction: column; gap: 6px; align-items: flex-start; }
+.as-steps { display: flex; flex-wrap: wrap; gap: 6px; }
+.as-step {
+  font-size: .72rem;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+.as-step.bad { border-color: var(--danger-line); color: var(--danger); }
+.assistant-empty { display: flex; flex-direction: column; gap: 10px; }
+.assistant-lead { margin: 0; font-weight: 650; }
+.assistant-asks { display: flex; flex-wrap: wrap; gap: 8px; }
+.assistant-ask {
+  appearance: none;
+  text-align: left;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: .84rem;
+  cursor: pointer;
+}
+.assistant-ask:hover { background: var(--surface-2); border-color: var(--accent-line); }
+.assistant-input { display: flex; gap: 10px; align-items: flex-end; }
+.assistant-input textarea {
+  flex: 1 1 auto;
+  min-height: var(--ctrl-h);
+  max-height: 160px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: .9rem;
+  line-height: 1.5;
+  resize: none;
+}
+.assistant-input .btn { flex: none; height: var(--ctrl-h); }
+
 /* ---------- 服务已更新 ---------- */
 /* 重新部署后旧页面还在跑旧脚本：能立刻刷就自己刷，正在填东西就在这里说一声 */
 .update-bar {

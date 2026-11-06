@@ -35,12 +35,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs, quote
 
 import auth
+import assistant
 import bus
 import checkin
 import db
 import expr
 import exporter
 import modules
+import policy
 import presets
 import localconfig
 import lists
@@ -53,7 +55,7 @@ TPL_DIR = os.path.join(BASE_DIR, "tpl")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.6.0.2"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.7.0.4"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 
@@ -509,13 +511,19 @@ TOKEN_ADMIN_ROUTES = (
     "/register",       # 令牌不该能注册新账号
 )
 
+# 令牌管不了自己的账号：改昵称、换头像、改登录名、改密码、进出 sudo、发/吊销令牌。
+# 这几件事都要求"人在这里"，令牌背后没有人可以问，出问题也没法自证。
+TOKEN_FORBIDDEN = (
+    "/token", "/profile", "/avatar", "/password", "/sudo", "/logout", "/switch",
+    "/assistant",      # 里面存着这个人自己的模型密钥，属于账号隐私
+)
+
 
 def _check_token_scope(path, method, token_row):
     """Refuse a token request its scopes do not cover.  The account's own role still applies."""
     scopes = [s for s in (token_row["scopes"] or "").split(",") if s]
-    if path.startswith("/token"):
-        # 发令牌、吊销令牌只能由登录着的人来做，令牌自己不行（否则泄露一张等于永久续期）
-        raise model.ApiError("令牌不能管理令牌，请在面板里操作", 403)
+    if any(path.startswith(prefix) for prefix in TOKEN_FORBIDDEN):
+        raise model.ApiError("令牌不能改账号自己的信息，也不能管理令牌，请登录面板操作", 403)
     needs = "read" if method == "GET" else "write"
     if any(path.startswith(prefix) for prefix in TOKEN_ADMIN_ROUTES):
         needs = "admin"
@@ -2077,6 +2085,49 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True, "host": host_stats(),
                                "users": panel.presence(conn)})
 
+        # ---- 运维助手：模型配置与一次对话 ----
+        if path == "/assistant" and method == "GET":
+            return self._json({"ok": True, "config": assistant.config_of(acc),
+                               "tools": [t["name"] for t in assistant.TOOLS],
+                               "writes": sorted(policy.WRITE_ACTIONS)})
+
+        if path == "/assistant/config" and method == "POST":
+            data = body()
+            base = (data.get("base") or "").strip()
+            if base and not re.match(r"^https?://", base):
+                raise model.ApiError("接口地址要以 http:// 或 https:// 开头")
+            with panel.tx() as tx:
+                assistant.save_config(tx, acc["id"], data.get("base"),
+                                      data.get("model"), data.get("key") or "",
+                                      clear=bool(data.get("clear")))
+                panel.audit(tx, acc["username"], "assistant_config", None,
+                            "%s / %s" % (base or "—", (data.get("model") or "—")))
+            row = conn.execute("SELECT * FROM accounts WHERE id=?",
+                               (acc["id"],)).fetchone()
+            return self._json({"ok": True, "config": assistant.config_of(row)})
+
+        if path == "/assistant/chat" and method == "POST":
+            data = body()
+            cfg = assistant.config_of(acc)
+            if not cfg["ready"]:
+                raise model.ApiError("还没有配置模型：先在「运维助手」页填接口地址、模型名与密钥")
+            messages = data.get("messages")
+            if not isinstance(messages, list):
+                raise model.ApiError("对话内容格式不对")
+            full = dict(cfg, key=acc["model_key"] or "")
+            prefix = (raw_path or "").split("/api/panel")[0].rstrip("/")
+            client = assistant.PanelClient(self.server.server_address[1], prefix,
+                                           self.headers.get("Cookie") or "")
+            try:
+                result = assistant.run(conn, acc, client, full, messages)
+            except Exception as exc:
+                raise model.ApiError("调用模型失败：%s" % str(exc)[:120], 502)
+            with panel.tx() as tx:
+                panel.audit(tx, acc["username"], "assistant_ask", None,
+                            "%d 次工具调用" % len(result.get("steps") or []))
+            return self._json({"ok": True, "reply": result["reply"],
+                               "steps": result["steps"]})
+
         # ---- API 令牌：一人一张或多张，明文只在创建时出现一次 ----
         if path == "/tokens" and method == "GET":
             return self._json({"ok": True, "tokens": panel.tokens_of(conn, acc["id"]),
@@ -2096,8 +2147,24 @@ class Handler(BaseHTTPRequestHandler):
                 raise model.ApiError("有效期格式不对")
             if days < 0 or days > 3650:
                 raise model.ApiError("有效期最长 10 年")
+            # 首选：令牌在浏览器里生成，只把 sha256 与前四位/后五位送过来——
+            # 明文既没经过网络，也没在服务端的内存里落过脚。
+            digest = (data.get("hash") or "").strip().lower()
+            plain = ""
             with panel.tx() as tx:
-                plain, tid = panel.create_token(tx, acc["id"], name, scopes, days)
+                if digest:
+                    head = (data.get("head") or "").strip()
+                    tail = (data.get("tail") or "").strip()
+                    if not re.fullmatch(r"[0-9a-f]{64}", digest):
+                        raise model.ApiError("令牌摘要格式不对")
+                    if not (re.fullmatch(r"[A-Za-z0-9_-]{4}", head)
+                            and re.fullmatch(r"[A-Za-z0-9_-]{5}", tail)):
+                        raise model.ApiError("令牌首尾几位不完整")
+                    tid = panel.create_token_hash(tx, acc["id"], name, scopes, days,
+                                                  digest, head, tail)
+                else:
+                    # 没有 WebCrypto（比如用 http 从局域网访问）时退回服务端生成
+                    plain, tid = panel.create_token(tx, acc["id"], name, scopes, days)
                 panel.audit(tx, acc["username"], "token_create", str(tid),
                             "%s / %s" % (name, "、".join(
                                 panel.TOKEN_SCOPE_LABEL.get(s, s) for s in scopes)))

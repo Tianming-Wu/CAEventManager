@@ -253,6 +253,10 @@ LATE_COLUMNS = (
     ("accounts", "avatar", "TEXT NOT NULL DEFAULT ''"),
     ("accounts", "avatar_at", "REAL NOT NULL DEFAULT 0"),
     ("accounts", "ban_reason", "TEXT NOT NULL DEFAULT ''"),
+    # 每个账号自己的模型配置（运维助手用）：key 只写不读，接口里不会回传
+    ("accounts", "model_base", "TEXT NOT NULL DEFAULT ''"),
+    ("accounts", "model_name", "TEXT NOT NULL DEFAULT ''"),
+    ("accounts", "model_key", "TEXT NOT NULL DEFAULT ''"),
     ("sessions", "sudo_until", "REAL NOT NULL DEFAULT 0"),
     ("sessions", "unlock_until", "REAL NOT NULL DEFAULT 0"),
     # 最近一次带着这个会话发出请求的时刻：在线人数由此得来（见 presence()）
@@ -666,15 +670,23 @@ def normalize_scopes(raw):
 
 
 def create_token(conn, account_id, name, scopes, days=0):
+    """Server-generated token (used only where the browser has no WebCrypto)."""
     plain, head, tail = new_token()
+    tid = create_token_hash(conn, account_id, name, scopes, days,
+                            _token_hash(plain), head, tail)
+    return plain, tid
+
+
+def create_token_hash(conn, account_id, name, scopes, days, hash_hex, head, tail):
+    """Store a token whose plaintext only ever existed in the user's browser."""
     now = time.time()
     conn.execute(
         "INSERT INTO api_tokens (account_id, name, head, tail, hash, scopes,"
         " created_at, expires_at) VALUES (?,?,?,?,?,?,?,?)",
         (int(account_id), (name or "").strip()[:40] or "未命名",
-         head, tail, _token_hash(plain), ",".join(normalize_scopes(scopes)),
+         head, tail, hash_hex, ",".join(normalize_scopes(scopes)),
          now, now + days * 86400 if days else 0))
-    return plain, conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
+    return conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
 
 
 def token_view(row):

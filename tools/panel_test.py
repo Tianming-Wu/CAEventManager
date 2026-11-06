@@ -11,6 +11,7 @@ import http.cookiejar
 import io
 import json
 import os
+import re
 import socket
 import sys
 import time
@@ -1284,6 +1285,117 @@ def main():
         post(taker, "/api/panel/register", {
             "username": bad, "name": "丁", "password": "name-pass-1"}, expect=400)
     check("点和中文、过短过长都不收", True)
+
+    print("== 运维助手：配置、一轮对话、权限 ==")
+
+    class StubModel:
+        """一个最小的 OpenAI 兼容端点：先要工具，再说人话。"""
+
+        def __init__(self):
+            import threading
+            from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+            self.requests = []
+            stub = self
+
+            class Handler(BaseHTTPRequestHandler):
+                def log_message(self, *args):
+                    pass
+
+                def do_POST(self):
+                    length = int(self.headers.get("Content-Length") or 0)
+                    body = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+                    stub.requests.append({"auth": self.headers.get("Authorization"),
+                                          "body": body})
+                    tool_msgs = [m for m in body.get("messages", [])
+                                 if m.get("role") == "tool"]
+                    if tool_msgs:
+                        titles = re.findall(r'"title": "([^"]+)"',
+                                            tool_msgs[-1].get("content") or "")
+                        message = {"role": "assistant",
+                                   "content": "你能看到的活动：" + ("、".join(titles) or "（没有）")}
+                    else:
+                        asked = ""
+                        for m in body.get("messages", []):
+                            if m.get("role") == "user":
+                                asked = m.get("content") or ""
+                        name = "list_events"
+                        if "审计" in asked:
+                            name = "recent_audit"
+                        elif "服务器" in asked:
+                            name = "host_stats"
+                        message = {"role": "assistant", "content": "",
+                                   "tool_calls": [{"id": "call_1", "type": "function",
+                                                   "function": {"name": name,
+                                                                "arguments": "{}"}}]}
+                    raw = json.dumps({"choices": [{"message": message}]}).encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(raw)))
+                    self.end_headers()
+                    self.wfile.write(raw)
+
+            self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+            self.port = self.server.server_address[1]
+            threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+        def url(self):
+            return "http://127.0.0.1:%d/v1" % self.port
+
+        def stop(self):
+            self.server.shutdown()
+
+    stub = StubModel()
+    try:
+        state = call(owner, "/api/panel/assistant")
+        check("助手一开始没有配置模型",
+              state and state["config"]["ready"] is False, state)
+        early = post(owner, "/api/panel/assistant/chat",
+                     {"messages": [{"role": "user", "content": "你好"}]}, expect=400)
+        check("没配置时问不了，并说明去配什么",
+              early and "配置" in (early.get("error") or ""), early)
+        saved = post(owner, "/api/panel/assistant/config",
+                     {"base": stub.url(), "model": "stub-model", "key": "sk-test-123"})
+        check("保存配置后进入就绪", saved and saved["config"]["ready"] is True, saved)
+        check("接口不回传密钥", "sk-test-123" not in json.dumps(saved), saved["config"])
+        post(owner, "/api/panel/assistant/config", {"base": "ftp://nope"}, expect=400)
+        check("接口地址必须是 http(s)", True)
+
+        answer = post(owner, "/api/panel/assistant/chat",
+                      {"messages": [{"role": "user", "content": "我有哪些活动？"}]})
+        check("拿到了回答", bool(answer and answer.get("reply")), answer)
+        check("回答里带上了活动名", bool(answer and answer.get("reply", "")
+                                         .startswith("你能看到的活动：")
+                                         and "（没有）" not in answer["reply"]), answer)
+        check("过程里记下了调过的工具",
+              answer and any(s["tool"] == "list_events" for s in answer["steps"]), answer)
+        check("密钥在服务端填进请求头",
+              stub.requests and stub.requests[0]["auth"] == "Bearer sk-test-123",
+              stub.requests[0]["auth"] if stub.requests else None)
+        check("请求里带了工具清单",
+              stub.requests and stub.requests[0]["body"].get("tools"))
+
+        # 普通管理员的助手只能做他自己能做的事
+        post(anon2, "/api/panel/register", {"username": "asprobe", "name": "助手权限",
+                                            "password": "asprobe-pass-1"})
+        probe_id = [a for a in call(owner, "/api/panel/accounts")["accounts"]
+                    if a["username"] == "asprobe"][0]["id"]
+        post(owner, "/api/panel/account/decide", {"id": probe_id, "action": "approve"})
+        probe = session()
+        post(probe, "/api/panel/login",
+             {"username": "asprobe", "password": "asprobe-pass-1"})
+        post(probe, "/api/panel/assistant/config",
+             {"base": stub.url(), "model": "stub-model", "key": "sk-other"})
+        denied = post(probe, "/api/panel/assistant/chat",
+                      {"messages": [{"role": "user", "content": "看看审计日志"}]})
+        steps = {s["tool"]: s["ok"] for s in (denied or {}).get("steps") or []}
+        check("普通管理员的助手调不动审计日志", steps.get("recent_audit") is False, steps)
+        server_ask = post(probe, "/api/panel/assistant/chat",
+                          {"messages": [{"role": "user", "content": "服务器状态怎么样"}]})
+        steps2 = {s["tool"]: s["ok"] for s in (server_ask or {}).get("steps") or []}
+        check("也调不动服务器状态", steps2.get("host_stats") is False, steps2)
+    finally:
+        stub.stop()
 
     print("== event pages still reachable ==")
     token = events[0]["id"]

@@ -86,6 +86,13 @@
         </svg>
         <span class="nav-text">总览</span>
       </a>
+      <a class="nav-item" href="#/assistant" data-nav="assistant">
+        <svg viewBox="0 0 20 20" aria-hidden="true">
+          <path d="M3.4 5.6a1.8 1.8 0 0 1 1.8-1.8h9.6a1.8 1.8 0 0 1 1.8 1.8v6.1a1.8 1.8 0 0 1-1.8 1.8H8.2L4.6 16.4v-2.9a1.8 1.8 0 0 1-1.2-1.7Z"/>
+          <path d="M7.4 8.2h5.2M7.4 10.6h3.2"/>
+        </svg>
+        <span class="nav-text">运维助手</span>
+      </a>
       <a class="nav-item" href="#/events" data-nav="events">
         <svg viewBox="0 0 20 20" aria-hidden="true">
           <path d="M4 6.5h12M4 13.5h12"/>
@@ -295,6 +302,59 @@
           <button class="btn sm" data-go="audit">审计日志</button>
         </div>
         <ul class="feed" id="overviewAudit"></ul>
+      </div>
+    </section>
+
+    <!-- ====================================================== 运维助手 -->
+    <section class="page" data-page="assistant" hidden>
+      <header class="page-head">
+        <h1>运维助手</h1>
+        <p class="page-sub" id="assistantSub">用对话查平台上的事</p>
+        <div class="page-actions">
+          <button class="btn" id="assistantCfgBtn" type="button">模型配置</button>
+          <button class="btn" id="assistantReset" type="button">清空对话</button>
+        </div>
+      </header>
+
+      <div class="card" id="assistantCfgCard" hidden>
+        <div class="card-head"><h2>模型</h2><span class="hint" id="assistantCfgHint"></span></div>
+        <div class="row" style="gap:12px;align-items:flex-end;flex-wrap:wrap">
+          <div class="field" style="flex:1 1 260px">
+            <label for="asBase">接口地址</label>
+            <input id="asBase" type="text" autocomplete="off" spellcheck="false"
+                   placeholder="https://api.deepseek.com/v1">
+          </div>
+          <div class="field" style="flex:1 1 160px">
+            <label for="asModel">模型</label>
+            <input id="asModel" type="text" autocomplete="off" spellcheck="false"
+                   placeholder="deepseek-chat">
+          </div>
+        </div>
+        <div class="row" style="gap:12px;align-items:flex-end;flex-wrap:wrap;margin-top:12px">
+          <div class="field" style="flex:1 1 260px">
+            <label for="asKey">密钥</label>
+            <input id="asKey" type="password" autocomplete="off"
+                   placeholder="只写不读，保存后不会再显示">
+          </div>
+          <button class="btn primary" id="asSave" type="button">保存</button>
+          <button class="btn" id="asClearKey" type="button">清除密钥</button>
+        </div>
+        <p class="hint">接口需兼容 OpenAI 的 <code>/chat/completions</code>。密钥只存在服务端这个账号名下，
+          浏览器与对话内容都不会再拿到它。</p>
+      </div>
+
+      <div class="card assistant-card">
+        <div class="assistant-log" id="assistantLog"></div>
+        <div class="assistant-empty" id="assistantEmpty">
+          <p class="assistant-lead">平台上的事，也可以让我替你查。</p>
+          <div class="assistant-asks" id="assistantAsks"></div>
+          <p class="hint">对话不会保存在平台上：刷新或离开这一页即消失。</p>
+        </div>
+        <form class="assistant-input" id="assistantForm" autocomplete="off">
+          <textarea id="assistantText" rows="1" maxlength="2000"
+                    placeholder="描述你的问题（Enter 发送，Shift+Enter 换行）"></textarea>
+          <button class="btn primary" id="assistantSend" type="submit">发送</button>
+        </form>
       </div>
     </section>
 

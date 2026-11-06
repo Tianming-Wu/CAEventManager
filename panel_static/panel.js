@@ -20,6 +20,7 @@
   // min: the cheapest role that may open the page
   var ROUTES = {
     "overview": { min: "admin" },
+    "assistant": { min: "admin" },
     "events": { min: "admin" },
     "rosters": { min: "admin", group: "lists" },
     "roster": { min: "admin", group: "lists",
@@ -92,6 +93,8 @@
     users: null,           // 在线/注册，随 /host 一起回来
     tokens: [],            // 我的 API 令牌
     tokenMeta: null,       // 可选的权限与它们的说明
+    assistantCfg: null,    // 这个账号的模型配置（不含密钥）
+    assistantMsgs: [],     // 本次对话，只在这里，不进库
     updateTo: "",          // 服务端换了版本，等一个能安全刷新的时机
     typed: false,          // 这一页里敲过字：别在人家填表的时候刷新页面
     notices: [],
@@ -2407,6 +2410,7 @@
     }
     if (wanted === "screens") loadScreenPacks().then(drawScreens);
     if (wanted === "account") loadTokens().then(drawTokens);
+    if (wanted === "assistant") loadAssistant();
     if (wanted === "write-approvals") {
       syncBackButton();
       loadApprovals().then(drawApprovals);
@@ -2443,6 +2447,7 @@
       case "server": return drawServer();
       case "audit": return drawAudit();
       case "account": return drawAccount();
+      case "assistant": return drawAssistant();
       case "appearance": return drawAppearance();
     }
   }
@@ -3576,36 +3581,88 @@
     admin: "账号、活动生命周期、外部资源这类平台级操作"
   };
 
+  // 令牌在浏览器里生成：明文不经过网络，服务端只收到它的 sha256 与首尾几位。
+  function makeTokenText() {
+    var bytes = new Uint8Array(32);
+    crypto.getRandomValues(bytes);
+    var raw = "";
+    for (var i = 0; i < bytes.length; i++) raw += String.fromCharCode(bytes[i]);
+    var b64 = btoa(raw).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    return "cae-" + b64;
+  }
+
+  function sha256Hex(text) {
+    return crypto.subtle.digest("SHA-256", new TextEncoder().encode(text))
+      .then(function (buffer) {
+        return Array.prototype.map.call(new Uint8Array(buffer), function (b) {
+          return ("0" + b.toString(16)).slice(-2);
+        }).join("");
+      });
+  }
+
+  function browserCanMint() {
+    return !!(window.crypto && crypto.getRandomValues && crypto.subtle && window.TextEncoder);
+  }
+
   function createToken() {
     var name = ($("#tkName").value || "").trim();
     if (!name) { PX.toast("请给这张令牌起个名字", true); return; }
     var scopes = Array.prototype.map.call(
       document.querySelectorAll(".tk-scope:checked"), function (el) { return el.value; });
     if (!scopes.length) { PX.toast("至少给一项权限", true); return; }
-    PX.api("/token/create", {
-      method: "POST",
-      body: { name: name, scopes: scopes, days: Number($("#tkDays").value) || 0 }
-    }).then(function (d) {
-      closeOverlay();
-      tokenOnceDialog(d.token, d.item);
-      return loadTokens().then(drawTokens);
-    }).catch(function (e) { PX.toast(PX.esc(e.message), true); });
+    var body = { name: name, scopes: scopes, days: Number($("#tkDays").value) || 0 };
+    var plain = "";
+    if (browserCanMint()) {
+      plain = makeTokenText();
+      var secret = plain.slice(4);          // cae- 之后的部分
+      body.hash = "";
+      body.head = secret.slice(0, 4);
+      body.tail = secret.slice(-5);
+      sha256Hex(plain).then(function (digest) {
+        body.hash = digest;
+        sendTokenCreate(body, plain);
+      }).catch(function () {
+        // 极少数环境算不出摘要：退回服务端生成，但要说清楚
+        PX.toast("本机算不出摘要，改由服务端生成", true);
+        delete body.hash;
+        delete body.head;
+        delete body.tail;
+        sendTokenCreate(body, "");
+      });
+      return;
+    }
+    sendTokenCreate(body, "");
+  }
+
+  function sendTokenCreate(body, plain) {
+    PX.api("/token/create", { method: "POST", body: body })
+      .then(function (d) {
+        closeOverlay();
+        tokenOnceDialog(plain || d.token || "", d.item);
+        return loadTokens().then(drawTokens);
+      })
+      .catch(function (e) { PX.toast(PX.esc(e.message), true); });
   }
 
   // 明文只有这一次机会：给一个能直接选中的框 + 复制按钮
   function tokenOnceDialog(plain, item) {
     openOverlay("token-once", "令牌已创建",
       '<p class="page-sub">这张令牌只会显示这一次。关掉之后，任何地方都只能看到首尾几位。</p>' +
-      '<div class="token-once"><code id="tkOnce">' + PX.esc(plain) + "</code></div>" +
+      (plain
+        ? '<div class="token-once"><code id="tkOnce">' + PX.esc(plain) + "</code></div>"
+        : '<div class="unwired-note">这一次是由服务端生成的，但明文没能带回来。' +
+          "请吊销这一张重新建一次。</div>") +
       '<p class="hint">' + PX.esc((item && item.name) || "") +
       " · " + PX.esc(((item && item.scopeLabels) || []).join("、")) +
       " · 用法：请求头 <code>Authorization: Bearer …</code></p>" +
       '<div class="row" style="margin-top:18px;justify-content:flex-end">' +
-      '<button class="btn" type="button" id="tkCopy">复制</button>' +
+      (plain ? '<button class="btn" type="button" id="tkCopy">复制</button>' : "") +
       '<button class="btn primary" type="button" data-close-overlay="1">我已保存</button></div>');
-    $("#tkCopy").addEventListener("click", function () {
-      copyTokenText(plain);
-    });
+    if (plain) {
+      $("#tkCopy").addEventListener("click", function () {
+        copyTokenText(plain);
+      });
+    }
     var box = $("#tkOnce");
     if (box && window.getSelection) {
       var range = document.createRange();
@@ -3709,7 +3766,135 @@
     });
   }
 
-  /* ------------------------------------------------------------------ host */
+  /* ---------------------------------------------------------------- 运维助手 --- */
+  /* 对话本身不进数据库：只在这个页面里，刷新即消失。
+     模型配置在账号上，密钥只写不读——画面上永远只有"已配置"。 */
+  var ASSISTANT_ASKS = [
+    "我最近的活动为什么没人报名？帮我看看名单与报名的情况",
+    "平台现在有多少人、签到了几个？",
+    "帮我查一下某个学号在不在某份名单里",
+    "最近谁改过东西？有没有异常"
+  ];
+
+  var STEP_LABEL = {
+    list_events: "看了活动列表",
+    event_board: "看了活动数据",
+    list_rosters: "看了名单列表",
+    roster_entries: "看了名单成员",
+    list_signups: "看了报名列表",
+    signup_entries: "看了报名记录",
+    search_people: "查了人员库",
+    recent_audit: "看了审计日志",
+    host_stats: "看了服务器状态"
+  };
+
+  function stepLabel(step) {
+    var label = STEP_LABEL[step.tool] || step.tool;
+    return step.ok ? label : label + "（未获准）";
+  }
+
+  function loadAssistant() {
+    return PX.api("/assistant")
+      .then(function (d) {
+        S.assistantCfg = d.config || { ready: false };
+        drawAssistant();
+      })
+      .catch(function (e) { PX.toast(PX.esc(e.message), true); });
+  }
+
+  function drawAssistant() {
+    var cfg = S.assistantCfg || { ready: false };
+    var sub = $("#assistantSub");
+    if (sub) {
+      sub.textContent = cfg.ready
+        ? "当前模型：" + (cfg.model || "—")
+        : "尚未配置模型：点右上「模型配置」填接口地址、模型与密钥";
+    }
+    var hint = $("#assistantCfgHint");
+    if (hint) hint.textContent = cfg.hasKey ? "密钥已配置" : "还没有密钥";
+    if ($("#asBase") && document.activeElement !== $("#asBase")) {
+      $("#asBase").value = cfg.base || "";
+    }
+    if ($("#asModel") && document.activeElement !== $("#asModel")) {
+      $("#asModel").value = cfg.model || "";
+    }
+    var asks = $("#assistantAsks");
+    if (asks && !asks.children.length) {
+      asks.innerHTML = ASSISTANT_ASKS.map(function (q) {
+        return '<button class="assistant-ask" type="button">' + PX.esc(q) + "</button>";
+      }).join("");
+    }
+    var empty = $("#assistantEmpty");
+    if (empty) empty.hidden = (S.assistantMsgs || []).length > 0;
+    drawAssistantLog();
+  }
+
+  function drawAssistantLog() {
+    var log = $("#assistantLog");
+    if (!log) return;
+    log.innerHTML = (S.assistantMsgs || []).map(function (m) {
+      if (m.role === "user") {
+        return '<div class="as-msg as-user"><div class="as-text">' +
+          PX.esc(m.content).replace(/\n/g, "<br>") + "</div></div>";
+      }
+      var steps = (m.steps || []).map(function (s) {
+        return '<span class="as-step' + (s.ok ? "" : " bad") + '">' +
+          PX.esc(stepLabel(s)) + "</span>";
+      }).join("");
+      return '<div class="as-msg as-bot">' +
+        (steps ? '<div class="as-steps">' + steps + "</div>" : "") +
+        '<div class="as-text">' + PX.esc(m.content || "").replace(/\n/g, "<br>") +
+        "</div></div>";
+    }).join("");
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function sendAssistant(text) {
+    var question = String(text || "").trim();
+    if (!question) return;
+    var cfg = S.assistantCfg || {};
+    if (!cfg.ready) {
+      PX.toast("先配置模型再问", true);
+      var card = $("#assistantCfgCard");
+      if (card) card.hidden = false;
+      return;
+    }
+    S.assistantMsgs = S.assistantMsgs || [];
+    S.assistantMsgs.push({ role: "user", content: question });
+    drawAssistant();
+    var send = $("#assistantSend");
+    send.disabled = true;
+    send.textContent = "思考中…";
+    PX.api("/assistant/chat", { method: "POST", body: { messages: S.assistantMsgs } })
+      .then(function (d) {
+        S.assistantMsgs.push({ role: "assistant", content: d.reply || "",
+                               steps: d.steps || [] });
+      })
+      .catch(function (e) {
+        S.assistantMsgs.push({ role: "assistant", content: "出错了：" + e.message,
+                               steps: [] });
+      })
+      .then(function () {
+        send.disabled = false;
+        send.textContent = "发送";
+        drawAssistant();
+      });
+  }
+
+  function saveAssistantConfig() {
+    PX.api("/assistant/config", {
+      method: "POST",
+      body: { base: $("#asBase").value.trim(), model: $("#asModel").value.trim(),
+              key: $("#asKey").value }
+    }).then(function (d) {
+      S.assistantCfg = d.config || S.assistantCfg;
+      $("#asKey").value = "";
+      drawAssistant();
+      PX.toast(d.config && d.config.ready ? "已保存" : "已保存，还缺密钥或模型名");
+    }).catch(function (e) { PX.toast(PX.esc(e.message), true); });
+  }
+
+  /* ------------------------------------------------------------------- host */
   function applyHost(h) {
     S.host = h;
     $("#hostStats").hidden = !isOwner() || !h;
@@ -4128,6 +4313,48 @@
   $("#auditMore").addEventListener("click", loadMoreAudit);
 
   $("#pfSave").addEventListener("click", saveProfile);
+  // 运维助手
+  $("#assistantCfgBtn").addEventListener("click", function () {
+    var card = $("#assistantCfgCard");
+    card.hidden = !card.hidden;
+    if (!card.hidden) $("#asBase").focus();
+  });
+  $("#asSave").addEventListener("click", saveAssistantConfig);
+  $("#asClearKey").addEventListener("click", function () {
+    PX.api("/assistant/config", { method: "POST", body: { clear: true } })
+      .then(function (d) {
+        S.assistantCfg = d.config || S.assistantCfg;
+        drawAssistant();
+        PX.toast("密钥已清除");
+      })
+      .catch(function (e) { PX.toast(PX.esc(e.message), true); });
+  });
+  $("#assistantReset").addEventListener("click", function () {
+    S.assistantMsgs = [];
+    drawAssistant();
+  });
+  $("#assistantAsks").addEventListener("click", function (e) {
+    var btn = e.target.closest(".assistant-ask");
+    if (btn) sendAssistant(btn.textContent);
+  });
+  $("#assistantForm").addEventListener("submit", function (e) {
+    e.preventDefault();
+    var box = $("#assistantText");
+    var text = box.value;
+    box.value = "";
+    box.style.height = "";
+    sendAssistant(text);
+  });
+  $("#assistantText").addEventListener("keydown", function (e) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      $("#assistantForm").dispatchEvent(new Event("submit", { cancelable: true }));
+    }
+  });
+  $("#assistantText").addEventListener("input", function () {
+    this.style.height = "auto";
+    this.style.height = Math.min(this.scrollHeight, 160) + "px";
+  });
   $("#tokenNew").addEventListener("click", tokenDialog);
   $("#tokenTable").addEventListener("click", function (e) {
     var btn = e.target.closest("[data-token-revoke]");

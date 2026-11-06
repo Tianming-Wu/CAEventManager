@@ -670,7 +670,8 @@ def notice_page(page):
 def routes_page(page):
     print("== every route renders its own page ==")
     for route, expect in [
-            ("overview", "总览"), ("events", "我的活动"), ("rosters", "我的名单"),
+            ("overview", "总览"), ("assistant", "运维助手"), ("events", "我的活动"),
+            ("rosters", "我的名单"),
             ("signups", "我的报名"), ("write-approvals", "写入审批"),
             ("screens", "展示屏幕"),
             ("templates", "预设管理"),
@@ -682,6 +683,44 @@ def routes_page(page):
         page.wait_for_timeout(230)
         title = page.locator('.page[data-page="%s"] h1' % route).inner_text()
         check("%-16s -> %s" % (route, title), expect in title, title)
+
+
+def assistant_page(page):
+    print("== 运维助手 ==")
+    page.goto(BASE + "/panel#/assistant")
+    page.wait_for_timeout(900)
+    check("总览下面有这一页", page.locator('[data-page="assistant"]').is_visible())
+    check("没配模型时说清楚该去配什么",
+          "配置模型" in page.inner_text("#assistantSub"),
+          page.inner_text("#assistantSub"))
+    check("给了几个可以直接点的问法",
+          page.locator(".assistant-ask").count() >= 3,
+          page.locator(".assistant-ask").count())
+    check("模型配置默认收着", not page.locator("#assistantCfgCard").is_visible())
+    page.click("#assistantCfgBtn")
+    page.wait_for_timeout(300)
+    check("点一下展开配置", page.locator("#assistantCfgCard").is_visible())
+    check("三个必填项都在",
+          page.locator("#asBase").count() == 1 and page.locator("#asModel").count() == 1
+          and page.locator("#asKey").count() == 1)
+    check("密钥框是密码型",
+          page.get_attribute("#asKey", "type") == "password")
+    check("没配模型时按发送会提示，而不是发出去",
+          page.evaluate("() => { const b = document.getElementById('assistantSend');"
+                        " return !b.disabled; }"))
+    page.fill("#assistantText", "平台上现在有多少活动？")
+    page.evaluate("() => document.getElementById('assistantText')"
+                  ".dispatchEvent(new Event('input'))")
+    page.click("#assistantSend")
+    page.wait_for_timeout(600)
+    check("提示先配置模型",
+          page.locator(".toast").count() >= 1
+          and "配置模型" in page.inner_text(".toast-stack"),
+          page.inner_text(".toast-stack") if page.locator(".toast").count() else "")
+    check("对话里没有留下半条消息", page.evaluate(
+        "() => document.getElementById('assistantLog').children.length === 0"))
+    page.click("#assistantCfgBtn")
+    page.wait_for_timeout(200)
 
 
 def title_row(page):
@@ -797,7 +836,7 @@ def nav_keys_page(page):
     first = page.evaluate(
         "() => document.activeElement.getAttribute('data-nav') || "
         "document.activeElement.getAttribute('data-toggle')")
-    check("the down arrow moves to the next item", first == "events", first)
+    check("the down arrow moves to the next item", first == "assistant", first)
     page.keyboard.press("End")
     page.wait_for_timeout(120)
     last = page.evaluate("() => document.activeElement.getAttribute('data-nav')")
@@ -1087,14 +1126,29 @@ def profile_page(page):
     page.goto(BASE + "/panel#/account")
     page.wait_for_timeout(700)
     check("账户页上有令牌卡片", page.locator("#tokenTable").count() == 1)
+    seen = {}
+
+    def watch_token_request(request):
+        if request.url.endswith("/api/panel/token/create"):
+            try:
+                seen.update(json.loads(request.post_data or "{}"))
+            except Exception:
+                pass
+
+    page.on("request", watch_token_request)
     page.click("#tokenNew")
     page.wait_for_timeout(350)
     page.fill("#tkName", "界面测试")
     page.click("#tkGo")
     page.wait_for_timeout(900)
+    page.remove_listener("request", watch_token_request)
     token = page.evaluate("() => { const el = document.getElementById('tkOnce');"
                           " return el ? el.textContent.trim() : ''; }")
     check("创建后明文显示一次", token.startswith("cae-") and len(token) > 40, token)
+    check("明文是浏览器自己生成的：请求里只有摘要",
+          len(seen.get("hash", "")) == 64 and "token" not in seen, sorted(seen))
+    check("请求里带上了首尾几位",
+          len(seen.get("head", "")) == 4 and len(seen.get("tail", "")) == 5, seen)
     page.click("[data-close-overlay]")
     page.wait_for_timeout(400)
     row_text = page.inner_text("#tokenTable")
@@ -1991,6 +2045,7 @@ def main():
                 title_row(page)
                 group_page(page)
                 nav_keys_page(page)
+                assistant_page(page)
                 screens_page(page)
                 roster_page(page)
                 signup_page(page, browser)

@@ -2013,7 +2013,6 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
 /* ---------- drawer: the sidebar leaves the flow on a phone ---------- */
 @media (max-width: 760px) {
   /* 手机上输入框一开始就是两行，全屏编辑就在框内右上角 */
-  .as-expand { display: grid; }
   .as-composer { padding-top: 10px; }
   .shell {
     grid-template-columns: minmax(0, 1fr);
@@ -2552,6 +2551,21 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
 /* 这一页不滚整页：标题与输入框都固定，只有中间的对话滚 */
 .content.is-chat { overflow: hidden; display: flex; flex-direction: column; }
 .content.is-chat > .page { flex: 1 1 auto; min-height: 0; }
+/* 标题一行到底：图标按钮钉在右边，不去挤副标题 */
+.assistant-page .page-head { flex-wrap: nowrap; align-items: center; gap: 10px; }
+.assistant-page .page-head h1 { flex: 0 0 auto; }
+.assistant-page .page-sub {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.assistant-page .page-actions { flex: none; margin-left: auto; flex-wrap: nowrap; gap: 4px; }
+.assistant-page .page-actions .icon-btn {
+  flex: none;
+  border-radius: 999px;      /* 两个都是圆钮，不是圆角矩形 */
+}
 .assistant-page {
   display: flex;
   flex-direction: column;
@@ -2575,10 +2589,12 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
 }
 .assistant-log { display: flex; flex-direction: column; gap: 10px; }
 .assistant-log:empty { display: none; }
-.as-msg { display: flex; }
+.as-msg { display: flex; min-width: 0; }
 .as-user { justify-content: flex-end; }
 .as-text {
   max-width: min(100%, 620px);
+  min-width: 0;
+  overflow-wrap: anywhere;
   padding: 9px 12px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--line-soft);
@@ -2667,6 +2683,8 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   display: flex;
   align-items: flex-end;
   gap: 8px;
+  width: 100%;
+  box-sizing: border-box;
   padding: 9px 10px 9px 12px;
   border: 1px solid var(--line);
   border-radius: 14px;
@@ -2710,6 +2728,10 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
 }
 .as-expand:hover { color: var(--text); background: var(--surface-2); }
 .as-expand svg { width: 12px; height: 12px; }
+/* 手机上才给全屏入口：这一条必须写在上面那条之后，否则被 display:none 盖住 */
+@media (max-width: 760px) {
+  .as-expand { display: grid; }
+}
 .as-tools { display: flex; align-items: center; gap: 4px; flex: none; }
 .as-icon {
   appearance: none;

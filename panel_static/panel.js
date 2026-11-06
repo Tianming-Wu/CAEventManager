@@ -3853,10 +3853,10 @@
       '<input id="asBase" type="text" autocomplete="off" spellcheck="false" value="' +
       PX.esc(cfg.base || "") + '"></div>' +
       '<div class="field"><label for="asModel">模型</label>' +
-      '<div class="row" style="gap:8px;align-items:center">' +
+      '<div class="row" style="gap:8px;align-items:center;flex-wrap:nowrap">' +
       '<input id="asModel" type="text" autocomplete="off" spellcheck="false" ' +
-      'value="' + PX.esc(cfg.model || "") + '">' +
-      '<button class="btn sm" id="asModels" type="button">拉取模型</button></div>' +
+      'style="max-width:300px" value="' + PX.esc(cfg.model || "") + '">' +
+      '<button class="btn sm" id="asModels" type="button">获取模型</button></div>' +
       '<div class="as-models" id="asModelList" hidden></div></div>' +
       '<div class="field"><label for="asKey">密钥</label>' +
       '<input id="asKey" type="password" autocomplete="off" spellcheck="false">' +
@@ -4556,10 +4556,11 @@
     sendAssistant(text);
   });
   $("#assistantText").addEventListener("keydown", function (e) {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      $("#assistantForm").dispatchEvent(new Event("submit", { cancelable: true }));
-    }
+    // 触屏上 Enter 属于输入法（换行），不能当作发送：手机上就多点一下发送键
+    if (e.key !== "Enter" || e.shiftKey || e.isComposing) return;
+    if (window.matchMedia && window.matchMedia("(pointer: coarse)").matches) return;
+    e.preventDefault();
+    $("#assistantForm").dispatchEvent(new Event("submit", { cancelable: true }));
   });
   $("#assistantText").addEventListener("input", growAssistantBox);
   window.addEventListener("resize", growAssistantBox);

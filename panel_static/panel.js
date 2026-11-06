@@ -90,6 +90,8 @@
     packManage: false,     // 站长/超级管理员才能导入与删除
     packLimits: null,      // 导入的限制，由服务端给出
     users: null,           // 在线/注册，随 /host 一起回来
+    tokens: [],            // 我的 API 令牌
+    tokenMeta: null,       // 可选的权限与它们的说明
     updateTo: "",          // 服务端换了版本，等一个能安全刷新的时机
     typed: false,          // 这一页里敲过字：别在人家填表的时候刷新页面
     notices: [],
@@ -1808,7 +1810,13 @@
     };
     PX.api("/signup/update", { method: "POST", body: body })
       .then(function (d) {
-        PX.toast(d && d.changed === false ? "没有改动" : "已保存");
+        var changed = !(d && d.changed === false);
+        var url = (S.signup && S.signup.url) || "";
+        PX.toast(changed ? "已保存" : "没有改动", false, 3600,
+                 changed && url ? {
+                   icon: "open", title: "打开报名页",
+                   run: function () { window.open(url, "_blank", "noopener"); }
+                 } : null);
         S.signupDirty = false;
         return loadSignup(S.signup.id).then(drawSignup);
       })
@@ -2177,7 +2185,11 @@
       PX.api("/roster/import", { method: "POST", body: body })
         .then(function (d) {
           PX.toast("导入完成：新增 " + d.added + " 人，名单内已有 " + d.unchanged +
-                   " 人" + (d.failed ? "，无法读取 " + d.failed + " 行" : ""));
+                   " 人" + (d.failed ? "，无法读取 " + d.failed + " 行" : ""),
+                   false, 6000, {
+                     icon: "open", title: "打开名单",
+                     run: function () { location.hash = "#/roster/" + d.id; }
+                   });
           if (rosterId) return loadRoster(rosterId).then(function () {
             return loadEntries(false);
           }).then(drawRoster);
@@ -2394,6 +2406,7 @@
         .then(drawSignup);
     }
     if (wanted === "screens") loadScreenPacks().then(drawScreens);
+    if (wanted === "account") loadTokens().then(drawTokens);
     if (wanted === "write-approvals") {
       syncBackButton();
       loadApprovals().then(drawApprovals);
@@ -3480,7 +3493,7 @@
     user.classList.toggle("readonly", ownerLocked);
     $("#pfUserHint").textContent = ownerLocked
       ? "站长的登录名由 config.json 的 owner_username 决定"
-      : "用于登录，3~24 位，只能用字母数字和 . _ -";
+      : "用于登录，3~24 位，只能用字母、数字、_ 和 -";
 
     var rows = [
       ["角色", me.roleLabel],
@@ -3493,8 +3506,143 @@
     }).join("");
   }
 
-  function applyMe(me) {
-    if (!me) return;
+  /* ---------------------------------------------------------------- API 令牌 --- */
+  /* 明文只在创建那一刻出现一次：之后服务端只有哈希与前四位/后五位。
+     所以"复制"这一步要做得顺手，错过就只能重建一张。 */
+  function loadTokens() {
+    return PX.api("/tokens")
+      .then(function (d) {
+        S.tokens = d.tokens || [];
+        S.tokenMeta = { scopes: d.scopes || [], labels: d.scopeLabels || {} };
+      })
+      .catch(function (e) { PX.toast(PX.esc(e.message), true); });
+  }
+
+  function drawTokens() {
+    var body = $("#tokenTable tbody");
+    if (!body) return;
+    var rows = S.tokens || [];
+    var hint = $("#tokenHint");
+    if (hint) hint.textContent = rows.length ? "共 " + rows.length + " 张" : "";
+    body.innerHTML = rows.length ? rows.map(function (t) {
+      var live = !t.revokedAt && t.state === "可用";
+      return "<tr>" +
+        "<td><b>" + PX.esc(t.name) + "</b></td>" +
+        '<td class="mono">' + PX.esc(t.masked) + "</td>" +
+        '<td class="wrap">' + (t.scopeLabels || []).map(function (s) {
+          return '<span class="tag">' + PX.esc(s) + "</span>";
+        }).join(" ") + "</td>" +
+        '<td class="mono">' + PX.when(t.createdAt) + "</td>" +
+        '<td class="mono">' + (t.lastUsedAt ? PX.when(t.lastUsedAt) : "从未") + "</td>" +
+        '<td class="actions">' +
+        (live
+          ? '<button class="btn sm danger" type="button" data-token-revoke="' +
+            t.id + '">吊销</button>'
+          : '<span class="tag">' + PX.esc(t.state) + "</span>") +
+        "</td></tr>";
+    }).join("") : emptyRow(6, "还没有令牌");
+  }
+
+  function tokenDialog() {
+    var meta = S.tokenMeta || { scopes: [], labels: {} };
+    var rows = meta.scopes.map(function (s) {
+      return '<label class="check-row"><input type="checkbox" class="tk-scope" value="' +
+        PX.esc(s) + '"' + (s === "read" ? " checked" : "") + "> " +
+        PX.esc(meta.labels[s] || s) +
+        '<span class="hint">' + PX.esc(TOKEN_SCOPE_HINT[s] || "") + "</span></label>";
+    }).join("");
+    openOverlay("token", "新建 API 令牌",
+      '<div class="field"><label for="tkName">名称</label>' +
+      '<input id="tkName" type="text" maxlength="40" placeholder="比如：群机器人">' +
+      '<p class="hint">取一个以后能认出用途的名字</p></div>' +
+      '<div class="field"><label>权限</label>' + rows +
+      '<p class="hint">账号本身的权限仍然生效，令牌只能在它之下再收窄</p></div>' +
+      '<div class="field"><label for="tkDays">有效期</label>' +
+      '<select id="tkDays">' +
+      '<option value="0">永不过期</option>' +
+      '<option value="30">30 天</option>' +
+      '<option value="90">90 天</option>' +
+      '<option value="365">一年</option></select></div>' +
+      '<div class="row" style="margin-top:18px;justify-content:flex-end">' +
+      '<button class="btn" type="button" data-close-overlay="1">取消</button>' +
+      '<button class="btn primary" type="button" id="tkGo">创建</button></div>');
+    $("#tkName").focus();
+    $("#tkGo").addEventListener("click", createToken);
+  }
+
+  var TOKEN_SCOPE_HINT = {
+    read: "列表、详情、导出这类只读操作",
+    write: "名单、报名、活动设置的日常改动",
+    admin: "账号、活动生命周期、外部资源这类平台级操作"
+  };
+
+  function createToken() {
+    var name = ($("#tkName").value || "").trim();
+    if (!name) { PX.toast("请给这张令牌起个名字", true); return; }
+    var scopes = Array.prototype.map.call(
+      document.querySelectorAll(".tk-scope:checked"), function (el) { return el.value; });
+    if (!scopes.length) { PX.toast("至少给一项权限", true); return; }
+    PX.api("/token/create", {
+      method: "POST",
+      body: { name: name, scopes: scopes, days: Number($("#tkDays").value) || 0 }
+    }).then(function (d) {
+      closeOverlay();
+      tokenOnceDialog(d.token, d.item);
+      return loadTokens().then(drawTokens);
+    }).catch(function (e) { PX.toast(PX.esc(e.message), true); });
+  }
+
+  // 明文只有这一次机会：给一个能直接选中的框 + 复制按钮
+  function tokenOnceDialog(plain, item) {
+    openOverlay("token-once", "令牌已创建",
+      '<p class="page-sub">这张令牌只会显示这一次。关掉之后，任何地方都只能看到首尾几位。</p>' +
+      '<div class="token-once"><code id="tkOnce">' + PX.esc(plain) + "</code></div>" +
+      '<p class="hint">' + PX.esc((item && item.name) || "") +
+      " · " + PX.esc(((item && item.scopeLabels) || []).join("、")) +
+      " · 用法：请求头 <code>Authorization: Bearer …</code></p>" +
+      '<div class="row" style="margin-top:18px;justify-content:flex-end">' +
+      '<button class="btn" type="button" id="tkCopy">复制</button>' +
+      '<button class="btn primary" type="button" data-close-overlay="1">我已保存</button></div>');
+    $("#tkCopy").addEventListener("click", function () {
+      copyTokenText(plain);
+    });
+    var box = $("#tkOnce");
+    if (box && window.getSelection) {
+      var range = document.createRange();
+      range.selectNodeContents(box);
+      var sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+  }
+
+  function revokeToken(id) {
+    var t = (S.tokens || []).filter(function (x) { return x.id === id; })[0];
+    openOverlay("token-revoke", "吊销令牌",
+      '<p class="page-sub">吊销后立刻失效，正在用它的一方会被拒绝。这个动作不能撤销。</p>' +
+      (t ? '<p class="page-sub"><b>' + PX.esc(t.name) + "</b> · " +
+           PX.esc(t.masked) + "</p>" : "") +
+      '<div class="row" style="margin-top:18px;justify-content:flex-end">' +
+      '<button class="btn" type="button" data-close-overlay="1">取消</button>' +
+      '<button class="btn danger" type="button" id="tkRevokeGo">吊销</button></div>');
+    $("#tkRevokeGo").addEventListener("click", function () {
+      closeOverlay();
+      PX.api("/token/revoke", { method: "POST", body: { id: id } })
+        .then(function (d) {
+          S.tokens = d.tokens || [];
+          drawTokens();
+          PX.toast("已吊销");
+        })
+        .catch(function (e) { PX.toast(PX.esc(e.message), true); });
+    });
+  }
+
+  function copyTokenText(text) {
+    // 复用页面里已有的复制助手：它会自己弹一条 toast，并给按钮加 .copied 反馈
+    copyText(text, $("#tkCopy"));
+  }
+
+  function applyMe(me) {    if (!me) return;
     S.me = me;
     var mine = S.accounts.filter(function (a) { return a.id === me.id; })[0];
     if (mine) {
@@ -3980,6 +4128,11 @@
   $("#auditMore").addEventListener("click", loadMoreAudit);
 
   $("#pfSave").addEventListener("click", saveProfile);
+  $("#tokenNew").addEventListener("click", tokenDialog);
+  $("#tokenTable").addEventListener("click", function (e) {
+    var btn = e.target.closest("[data-token-revoke]");
+    if (btn) revokeToken(Number(btn.getAttribute("data-token-revoke")));
+  });
   $("#avatarPick").addEventListener("click", openAvatarDialog);
   $("#avatarFile").addEventListener("change", function (e) {
     var file = e.target.files && e.target.files[0];
@@ -4519,10 +4672,25 @@
     if (S.updateTo === version) return;
     S.updateTo = version;
     if (canSwapNow()) {
+      // 自己换的页面，换完要说一声：不然人只会觉得"刚才好像闪了一下"
+      try { sessionStorage.setItem("px:updatedTo", version); } catch (e) { /* 无痕模式 */ }
       location.reload();
       return;
     }
     showUpdateBar(version);
+  }
+
+  // 刷新之后把上一页留下的版本号取出来，说明这次是自更新而不是人手刷的
+  function announceUpdate() {
+    var version = "";
+    try {
+      version = sessionStorage.getItem("px:updatedTo") || "";
+      if (version) sessionStorage.removeItem("px:updatedTo");
+    } catch (e) {
+      return;
+    }
+    if (!version) return;
+    PX.toast("无感更新完成：v" + PX.esc(version), false, 3600);
   }
 
   function bindUpdateBar() {
@@ -4570,6 +4738,7 @@
         loadApprovals();
         startHostPolling();
         onRoute();
+        announceUpdate();
         // a real readiness signal: tests used to poll the placeholder text
         document.documentElement.setAttribute("data-booted", "1");
       });

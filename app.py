@@ -51,9 +51,9 @@ import panel
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TPL_DIR = os.path.join(BASE_DIR, "tpl")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
-# 四段：主.次.修.构。每次上线都要动，至少动「修」或「构」——见 tools/bump_version.py
+# 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.5.0.1"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.6.0.2"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 
@@ -78,6 +78,20 @@ LOCAL_CFG = {}
 
 _PANEL_FAILS = {}
 EVENT_TOKENS = set()
+
+# 注册口是最容易被拿来做"这个名字在不在"的探针：同一个人连着试几个就说明不对劲
+_REGISTER_HITS = {}      # ip -> 冷却到什么时候
+REGISTER_HIT_MAX = 8     # 十分钟内这么多次"不可用"就歇一会
+REGISTER_COOL = 600
+
+
+def _note_register_hit(ip):
+    now = time.time()
+    hits = _REGISTER_HITS.get(ip + ":n", 0) + 1
+    _REGISTER_HITS[ip + ":n"] = hits
+    if hits >= REGISTER_HIT_MAX:
+        _REGISTER_HITS[ip] = now + REGISTER_COOL
+        _REGISTER_HITS[ip + ":n"] = 0
 
 # Very small guard against somebody hammering the short-code space.
 _SHORT_MISS = {"count": 0, "since": 0.0}
@@ -480,6 +494,34 @@ def _scope_of(revs, scope):
     if not scope:
         return revs
     return {k: v for k, v in revs.items() if k == scope}
+
+
+# 令牌能碰的边界。分三档比给每个接口写一遍判断靠谱：默认就是"读写按方法分"，
+# 平台级的东西单独列出来，要 admin 范围才放行。
+TOKEN_ADMIN_ROUTES = (
+    "/account/",       # 审批、停用、改角色
+    "/event/",         # 活动创建、改名、重置地址、归档、成员
+    "/module/",        # 模块开关
+    "/screen_pack",    # 外部资源导入/删除
+    "/preset/import",
+    "/preset/delete",
+    "/host",           # 机器与在线人数
+    "/register",       # 令牌不该能注册新账号
+)
+
+
+def _check_token_scope(path, method, token_row):
+    """Refuse a token request its scopes do not cover.  The account's own role still applies."""
+    scopes = [s for s in (token_row["scopes"] or "").split(",") if s]
+    if path.startswith("/token"):
+        # 发令牌、吊销令牌只能由登录着的人来做，令牌自己不行（否则泄露一张等于永久续期）
+        raise model.ApiError("令牌不能管理令牌，请在面板里操作", 403)
+    needs = "read" if method == "GET" else "write"
+    if any(path.startswith(prefix) for prefix in TOKEN_ADMIN_ROUTES):
+        needs = "admin"
+    if needs not in scopes:
+        raise model.ApiError("这张令牌没有「%s」权限" % panel.TOKEN_SCOPE_LABEL.get(needs, needs),
+                             403)
 
 
 def _attachment_header(filename):
@@ -1015,14 +1057,26 @@ class Handler(BaseHTTPRequestHandler):
                 return part.split("=", 1)[1]
         return None
 
+    def _bearer(self):
+        """The API token presented in Authorization, if any."""
+        raw = (self.headers.get("Authorization") or "").strip()
+        if not raw.lower().startswith("bearer "):
+            return ""
+        return raw[7:].strip()
+
     def _panel_api(self, method, route, raw_path, query=None):
         conn = panel.connect()
         ip = self.client_address[0]
         path = route[len("/api/panel"):] or "/"
         query = query or {}
+        # 每条请求自己负责把"经由令牌"的标记清掉：同一个线程会连着服务好几个请求
+        panel.via("")
+        self._via_token = None
 
         def body():
-            if self.headers.get("X-Requested-With") != "CAEventManager":
+            # 令牌不会被人顺手带上（那是 cookie 才有的问题），所以不必要求标记头
+            if getattr(self, "_via_token", None) is None and \
+                    self.headers.get("X-Requested-With") != "CAEventManager":
                 raise model.ApiError("缺少请求标记", 403)
             return self._body()
 
@@ -1045,10 +1099,21 @@ class Handler(BaseHTTPRequestHandler):
             token = self._panel_token()
             acc = panel.session_account(conn, token)
             sudo_until = panel.session_sudo(conn, token) if acc else 0
+            token_row = None
+            if acc is None:
+                # 令牌也可以问这一句：外部程序用它可以确认令牌好不好、是谁的
+                presented = self._bearer()
+                if presented:
+                    acc, token_row = panel.token_account(conn, presented)
+                    if acc is not None:
+                        panel.touch_token(conn, token_row["id"])
             return self._json({"ok": True, "authed": acc is not None,
                                "me": panel.view(acc) if acc else None,
                                "sudoUntil": sudo_until,
                                "sudoTtl": panel.SUDO_TTL,
+                               "viaToken": token_row["name"] if token_row else "",
+                               "scopes": ([s for s in (token_row["scopes"] or "").split(",") if s]
+                                          if token_row else []),
                                "now": time.time(),
                                "version": VERSION})
 
@@ -1076,21 +1141,28 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/register" and method == "POST":
             data = body()
+            block = _REGISTER_HITS.get(ip)
+            if block and block > time.time():
+                raise model.ApiError("提交过于频繁，请稍后再试", 429)
             username = (data.get("username") or "").strip()
             name = (data.get("name") or "").strip()
             password = data.get("password") or ""
             note = (data.get("note") or "").strip()[:200]
-            if not (3 <= len(username) <= 24) or not all(
-                    c.isalnum() or c in "._-" for c in username):
-                raise model.ApiError("用户名需 3~24 位，只能用字母数字和 . _ -")
+            problem = panel.username_problem(username)
+            if problem:
+                # 「被占用」与「被保留」连状态码都一样，否则一看就知道是哪种
+                if problem == panel.USERNAME_TAKEN:
+                    _note_register_hit(ip)
+                raise model.ApiError(problem, 400 if problem != panel.USERNAME_TAKEN else 409)
             if not name:
                 raise model.ApiError("请填写称呼")
             if len(password) < 8:
                 raise model.ApiError("密码至少 8 位")
             with panel.tx() as tx:
-                if tx.execute("SELECT 1 FROM accounts WHERE lower(username)=lower(?)",
-                              (username,)).fetchone():
-                    raise model.ApiError("用户名已被占用", 409)
+                # 被占用与被保留是同一句话：注册口不该成为"哪些名字存在"的探针
+                if panel.username_taken(tx, username):
+                    _note_register_hit(ip)
+                    raise model.ApiError(panel.USERNAME_TAKEN, 409)
                 tx.execute(
                     "INSERT INTO accounts (username, name, role, status, pass, note, created_at) "
                     "VALUES (?,?,?,?,?,?,?)",
@@ -1147,14 +1219,29 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True}, headers=[("Set-Cookie", cookie)])
 
         # ---- everything below needs a signed-in account ----
-        # named sess and not token: /event/rotate rebinds `token` to the new
-        # access credential further down
+        # 两种凭据：面板会话 cookie，或 Authorization: Bearer cae-…（API 令牌）。
+        # 令牌背后还是同一个账号，所以权限判断、审计一处都不用改；区别只有三点：
+        # 没有 CSRF 标记这回事、走不到需要重新输密码的动作、只做令牌声明的范围。
         sess = self._panel_token()
         acc = panel.session_account(conn, sess)
+        token_row = None
+        if acc is not None:
+            # 一次带登录态的请求就是「这个人还在」的证据，在线人数据此统计（内部按分钟节流）
+            panel.touch_session(conn, sess)
+        else:
+            presented = self._bearer()
+            if presented:
+                acc, token_row = panel.token_account(conn, presented)
+                if acc is None:
+                    raise model.ApiError("令牌无效或已吊销", 401)
+                panel.touch_token(conn, token_row["id"])
+                self._via_token = token_row
+                panel.via("令牌「%s」" % token_row["name"])
         if acc is None:
             raise model.ApiError("未登录或登录已过期", 401)
-        # 一次带登录态的请求就是「这个人还在」的证据，在线人数据此统计（内部按分钟节流）
-        panel.touch_session(conn, sess)
+
+        if token_row is not None:
+            _check_token_scope(path, method, token_row)
 
         # A conflict is only ever about the object this write touches: a change
         # to the same thing that the client has not seen yet.  Everything else
@@ -1190,6 +1277,9 @@ class Handler(BaseHTTPRequestHandler):
 
         def need_sudo():
             """Elevation is per session, so this is the only place it is checked."""
+            if getattr(self, "_via_token", None) is not None:
+                # 提权靠的是"人再输一次密码"，令牌背后没有人可以问
+                raise model.ApiError("这个操作需要重新输入密码，令牌做不到", 403)
             if panel.session_sudo(conn, sess) <= time.time():
                 raise SudoRequired()
 
@@ -1826,15 +1916,13 @@ class Handler(BaseHTTPRequestHandler):
                     raise model.ApiError(
                         "站长的登录名由 config.json 的 "
                         "owner_username 决定", 403)
-                if not (3 <= len(username) <= 24) or not all(
-                        c.isalnum() or c in "._-" for c in username):
-                    raise model.ApiError(
-                        "登录名需 3~24 位，只能用字母数字和 . _ -")
-                taken = conn.execute(
-                    "SELECT 1 FROM accounts WHERE lower(username)=lower(?) AND id<>?",
-                    (username, acc["id"])).fetchone()
+                problem = panel.username_problem(username)
+                if problem:
+                    raise model.ApiError(problem,
+                                         400 if problem != panel.USERNAME_TAKEN else 409)
+                taken = panel.username_taken(conn, username, acc["id"])
                 if taken:
-                    raise model.ApiError("登录名已被占用", 409)
+                    raise model.ApiError(panel.USERNAME_TAKEN, 409)
             else:
                 username = acc["username"]
             with panel.tx() as tx:
@@ -1988,6 +2076,46 @@ class Handler(BaseHTTPRequestHandler):
             # 设备占用只有 Linux 读得到；用户数是面板自己的账，哪里都算得出
             return self._json({"ok": True, "host": host_stats(),
                                "users": panel.presence(conn)})
+
+        # ---- API 令牌：一人一张或多张，明文只在创建时出现一次 ----
+        if path == "/tokens" and method == "GET":
+            return self._json({"ok": True, "tokens": panel.tokens_of(conn, acc["id"]),
+                               "scopes": list(panel.TOKEN_SCOPES),
+                               "scopeLabels": panel.TOKEN_SCOPE_LABEL,
+                               "prefix": panel.TOKEN_PREFIX})
+
+        if path == "/token/create" and method == "POST":
+            data = body()
+            name = (data.get("name") or "").strip()
+            if not name:
+                raise model.ApiError("请给这张令牌起个名字，方便日后认出它")
+            scopes = panel.normalize_scopes(data.get("scopes"))
+            try:
+                days = int(data.get("days") or 0)
+            except (TypeError, ValueError):
+                raise model.ApiError("有效期格式不对")
+            if days < 0 or days > 3650:
+                raise model.ApiError("有效期最长 10 年")
+            with panel.tx() as tx:
+                plain, tid = panel.create_token(tx, acc["id"], name, scopes, days)
+                panel.audit(tx, acc["username"], "token_create", str(tid),
+                            "%s / %s" % (name, "、".join(
+                                panel.TOKEN_SCOPE_LABEL.get(s, s) for s in scopes)))
+            item = [t for t in panel.tokens_of(conn, acc["id"]) if t["id"] == tid]
+            return self._json({"ok": True, "token": plain,
+                               "item": item[0] if item else None})
+
+        if path == "/token/revoke" and method == "POST":
+            data = body()
+            try:
+                with panel.tx() as tx:
+                    row = panel.revoke_token(tx, acc["id"], data.get("id"))
+                    panel.audit(tx, acc["username"], "token_revoke", str(row["id"]),
+                                row["name"])
+            except LookupError as exc:
+                raise model.ApiError(str(exc), 404)
+            return self._json({"ok": True, "tokens": panel.tokens_of(conn, acc["id"])})
+
 
         # ---- 名单：与活动并列的一层，存在自己的库里 ----
         def roster_owner_names(ids):

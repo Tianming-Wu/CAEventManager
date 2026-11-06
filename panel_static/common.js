@@ -183,13 +183,29 @@
     return toastStack;
   }
 
-  function toast(msg, bad, ms) {
+  /* action 可选：{icon, title, run}。图标是一个小方块按钮，放在关闭键左边同一行，
+     所以不会把这条通知撑高——它只是替人省下"再去别处点一次"。 */
+  var TOAST_ICONS = {
+    open: "M7 3.4v1.6M3.4 7H1.8M6.2 6.2L2.4 10M2.4 6.4v3.2h3.2",   // 跳过去
+    reload: "M2.6 6a3.4 3.4 0 1 1 1 2.4M2.6 3.4V6h2.6",            // 重新载入
+    copy: "M3 1.8h4.4v4.4M5 4.2H1.8v4.4H6V6.2"
+  };
+
+  function toast(msg, bad, ms, action) {
     var stack = toastBox();
     var el = document.createElement("div");
     el.className = "toast" + (bad ? " bad" : "");
+    var actHtml = "";
+    if (action && TOAST_ICONS[action.icon]) {
+      actHtml = '<button class="toast-act" type="button" title="' +
+        esc(action.title || "执行") + '" aria-label="' + esc(action.title || "执行") + '">' +
+        '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="' +
+        TOAST_ICONS[action.icon] + '"/></svg></button>';
+    }
     el.innerHTML =
       '<span class="toast-mark" aria-hidden="true">' + (bad ? "!" : "✓") + "</span>" +
       '<span class="toast-text">' + msg + "</span>" +
+      actHtml +
       '<button class="toast-x" type="button" aria-label="关闭通知">' +
       '<svg viewBox="0 0 12 12" aria-hidden="true">' +
       '<path d="M3 3l6 6M9 3l-6 6"/></svg></button>';
@@ -210,6 +226,15 @@
         close();
       });
     });
+    var act = el.querySelector(".toast-act");
+    if (act) {
+      act.addEventListener("click", function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        close();
+        try { action.run(); } catch (err) { /* 动作失败不影响通知消失 */ }
+      });
+    }
     setTimeout(close, ms || (bad ? 4200 : 2600));
     // 只留最近四条，别把屏幕堆满
     while (stack.children.length > 4) stack.removeChild(stack.firstChild);

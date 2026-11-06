@@ -16,6 +16,7 @@ Registration always creates admin + pending; only approval flips it to active.
 
 import json
 import os
+import re
 import secrets
 import sqlite3
 import threading
@@ -185,6 +186,22 @@ CREATE TABLE IF NOT EXISTS audit (
     target  TEXT,
     detail  TEXT
 );
+
+-- API 令牌：明文只在创建那一刻出现，库里只留 sha256 与前四位/后五位（用来辨认是哪一张）
+CREATE TABLE IF NOT EXISTS api_tokens (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id   INTEGER NOT NULL,
+    name         TEXT    NOT NULL DEFAULT '',
+    head         TEXT    NOT NULL DEFAULT '',    -- 明文的前四位
+    tail         TEXT    NOT NULL DEFAULT '',    -- 明文的末五位
+    hash         TEXT    NOT NULL,               -- sha256(完整令牌)，不存明文
+    scopes       TEXT    NOT NULL DEFAULT 'read',
+    created_at   REAL    NOT NULL,
+    last_used_at REAL    NOT NULL DEFAULT 0,
+    expires_at   REAL    NOT NULL DEFAULT 0,     -- 0 = 永不过期
+    revoked_at   REAL    NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS api_tokens_owner ON api_tokens(account_id, created_at);
 """
 
 _local = threading.local()
@@ -251,6 +268,43 @@ LATE_COLUMNS = (
 
 LEVEL_LABEL = {"info": "通知", "important": "重要", "critical": "紧急"}
 LEVELS = ("info", "important", "critical")
+
+# --------------------------------------------------------------------------- #
+# 登录名
+# --------------------------------------------------------------------------- #
+# 只收这些字符：中文、空格、点号都容易在别处（URL、脚本、日志）出岔子
+USERNAME_RE = re.compile(r"^[0-9A-Za-z_-]{3,24}$")
+USERNAME_RULE = "登录名需 3~24 位，只能用字母、数字、_ 和 -"
+
+# 看着像官方、或者会被人当真的名字一律留着。宁可拒错，不留后门。
+USERNAME_RESERVED = (
+    "admin", "administrator", "root", "system", "sysadmin", "support", "help",
+    "owner", "staff", "official", "service", "api", "bot", "security", "moderator",
+    "superadmin", "caeventmanager", "caevent", "lottery", "eventmanager",
+    "null", "undefined", "anonymous", "nobody", "me", "self", "test", "guest",
+)
+
+# 对外只有两句话：格式不对讲清楚怎么填，"不能用"不解释为什么——
+# 分辨"被占用"与"被保留"等于告诉试探的人哪些名字值得抢。
+USERNAME_TAKEN = "这个登录名不可用"
+
+
+def username_problem(name):
+    """登录名本身的毛病；格式之外的都不细说（见上面 USERNAME_TAKEN）。"""
+    text = str(name or "")
+    if not USERNAME_RE.match(text):
+        return USERNAME_RULE
+    if text.lower() in USERNAME_RESERVED:
+        return USERNAME_TAKEN
+    return ""
+
+
+def username_taken(conn, name, skip_id=0):
+    row = conn.execute(
+        "SELECT 1 FROM accounts WHERE lower(username)=lower(?) AND id<>?",
+        (str(name or ""), int(skip_id or 0))).fetchone()
+    return row is not None
+
 
 DEFAULT_KIND = "nwuca.lottery"
 
@@ -565,10 +619,128 @@ def owners_of(conn, seq):
 
 
 def audit(conn, actor, action, target=None, detail=None):
+    extra = getattr(_local, "via", "")
+    if extra:
+        # 同一个人可以既用面板也用令牌：审计里分开写，事后才分得清是谁的手
+        detail = ("%s（%s）" % (detail, extra)) if detail else extra
     conn.execute(
         "INSERT INTO audit (ts, actor, action, target, detail) VALUES (?,?,?,?,?)",
         (time.time(), actor, action, target, detail),
     )
+
+
+def via(text=""):
+    """Mark how this thread was authenticated ("令牌「笔记本」"); empty clears it."""
+    _local.via = text
+
+
+# --------------------------------------------------------------------------- #
+# API 令牌
+# --------------------------------------------------------------------------- #
+TOKEN_PREFIX = "cae-"
+TOKEN_SCOPES = ("read", "write", "admin")
+TOKEN_SCOPE_LABEL = {"read": "读取", "write": "写入", "admin": "平台管理"}
+
+
+def _token_hash(plain):
+    import hashlib
+    return hashlib.sha256(str(plain or "").encode("utf-8")).hexdigest()
+
+
+def new_token():
+    """(明文, 前四位, 末五位)。前缀让人一眼看出这串东西是什么，也方便以后换算法。"""
+    secret = secrets.token_urlsafe(32)
+    plain = TOKEN_PREFIX + secret
+    return plain, secret[:4], secret[-5:]
+
+
+def mask_token(head, tail):
+    return "%s%s•••••%s" % (TOKEN_PREFIX, head or "????", tail or "?????")
+
+
+def normalize_scopes(raw):
+    if isinstance(raw, str):
+        raw = [p.strip() for p in raw.split(",")]
+    out = [s for s in TOKEN_SCOPES if s in (raw or [])]
+    return out or ["read"]
+
+
+def create_token(conn, account_id, name, scopes, days=0):
+    plain, head, tail = new_token()
+    now = time.time()
+    conn.execute(
+        "INSERT INTO api_tokens (account_id, name, head, tail, hash, scopes,"
+        " created_at, expires_at) VALUES (?,?,?,?,?,?,?,?)",
+        (int(account_id), (name or "").strip()[:40] or "未命名",
+         head, tail, _token_hash(plain), ",".join(normalize_scopes(scopes)),
+         now, now + days * 86400 if days else 0))
+    return plain, conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
+
+
+def token_view(row):
+    """What the panel may see: never the hash, never the plaintext."""
+    expired = bool(row["expires_at"]) and row["expires_at"] < time.time()
+    return {"id": row["id"],
+            "name": row["name"],
+            "masked": mask_token(row["head"], row["tail"]),
+            "scopes": [s for s in (row["scopes"] or "").split(",") if s],
+            "scopeLabels": [TOKEN_SCOPE_LABEL.get(s, s)
+                            for s in (row["scopes"] or "").split(",") if s],
+            "createdAt": row["created_at"],
+            "lastUsedAt": row["last_used_at"],
+            "expiresAt": row["expires_at"],
+            "revokedAt": row["revoked_at"],
+            "state": ("已吊销" if row["revoked_at"]
+                      else "已过期" if expired else "可用")}
+
+
+def tokens_of(conn, account_id):
+    return [token_view(r) for r in conn.execute(
+        "SELECT * FROM api_tokens WHERE account_id=? ORDER BY created_at DESC",
+        (int(account_id),))]
+
+
+def revoke_token(conn, account_id, token_id):
+    row = conn.execute("SELECT * FROM api_tokens WHERE id=?",
+                       (int(token_id or 0),)).fetchone()
+    if row is None or row["account_id"] != int(account_id):
+        raise LookupError("找不到这张令牌")
+    if not row["revoked_at"]:
+        conn.execute("UPDATE api_tokens SET revoked_at=? WHERE id=?",
+                     (time.time(), row["id"]))
+    return row
+
+
+def token_account(conn, plain):
+    """(账号行, 令牌行) for a presented token, or (None, None).
+
+    明文不落库：现算 sha256 再逐位比较（compare_digest 不泄露"前几位对了"）。
+    """
+    import hmac
+    text = str(plain or "").strip()
+    if not text.startswith(TOKEN_PREFIX):
+        return None, None
+    digest = _token_hash(text)
+    row = conn.execute("SELECT * FROM api_tokens WHERE hash=?",
+                       (digest,)).fetchone()
+    if row is None:
+        # 索引查不到就等于没有这张；仍然走一次常量时间比较，不给计时留线索
+        hmac.compare_digest(digest, "0" * 64)
+        return None, None
+    if not hmac.compare_digest(digest, row["hash"]):
+        return None, None
+    if row["revoked_at"] or (row["expires_at"] and row["expires_at"] < time.time()):
+        return None, None
+    acc = conn.execute("SELECT * FROM accounts WHERE id=?",
+                       (row["account_id"],)).fetchone()
+    if acc is None or acc["status"] != "active":
+        return None, None
+    return acc, row
+
+
+def touch_token(conn, token_id):
+    conn.execute("UPDATE api_tokens SET last_used_at=? WHERE id=?",
+                 (time.time(), int(token_id)))
 
 
 AVATAR_DIR = "avatars"

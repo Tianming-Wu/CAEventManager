@@ -1083,6 +1083,59 @@ def profile_page(page):
     # the refusal above is logged by the browser as a 400 on purpose
     page._errors = []
 
+    print("== API 令牌：建一张、看首尾、吊销 ==")
+    page.goto(BASE + "/panel#/account")
+    page.wait_for_timeout(700)
+    check("账户页上有令牌卡片", page.locator("#tokenTable").count() == 1)
+    page.click("#tokenNew")
+    page.wait_for_timeout(350)
+    page.fill("#tkName", "界面测试")
+    page.click("#tkGo")
+    page.wait_for_timeout(900)
+    token = page.evaluate("() => { const el = document.getElementById('tkOnce');"
+                          " return el ? el.textContent.trim() : ''; }")
+    check("创建后明文显示一次", token.startswith("cae-") and len(token) > 40, token)
+    page.click("[data-close-overlay]")
+    page.wait_for_timeout(400)
+    row_text = page.inner_text("#tokenTable")
+    check("列表里只留首尾几位",
+          "•••••" in row_text and token not in row_text, row_text[:120])
+    check("权限也写在行里", "读取" in row_text, row_text[:120])
+    page.click('[data-token-revoke]')
+    page.wait_for_timeout(400)
+    check("吊销前先确认", page.locator("#overlay").is_visible())
+    page.click("#tkRevokeGo")
+    page.wait_for_timeout(800)
+    check("吊销后标为已吊销", "已吊销" in page.inner_text("#tokenTable"),
+          page.inner_text("#tokenTable")[:120])
+
+    print("== 通知上的小动作 ==")
+    page.evaluate("""() => {
+        window.__acted = false;
+        PX.toast("试试带动作的通知", false, 9000, {
+            icon: "open", title: "去看看", run: function () { window.__acted = true; }
+        });
+        const all = document.querySelectorAll('.toast');
+        all[all.length - 1].setAttribute('data-probe', '1');
+    }""")
+    page.wait_for_timeout(300)
+    check("通知里出现了动作按钮", page.locator(".toast .toast-act").count() >= 1)
+    shape = page.evaluate("""() => {
+        const toast = document.querySelector('.toast[data-probe]');
+        const act = toast.querySelector('.toast-act').getBoundingClientRect();
+        const x = toast.querySelector('.toast-x').getBoundingClientRect();
+        const t = toast.getBoundingClientRect();
+        return {act: Math.round(act.height), x: Math.round(x.height),
+                toast: Math.round(t.height), sameLine: Math.abs(act.top - x.top) < 3};
+    }""")
+    check("动作按钮不会把通知撑高", shape["toast"] <= 46, shape)
+    check("与关闭键同一行同高", shape["sameLine"] and shape["act"] == shape["x"], shape)
+    page.click(".toast[data-probe] .toast-act")
+    page.wait_for_timeout(400)
+    check("点一下就执行", page.evaluate("() => window.__acted") is True)
+    check("执行后这一条自己消失",
+          page.evaluate("() => !document.querySelector('.toast[data-probe]')"))
+
 
 def write_png(path):
     """A 4x4 amber png, written by hand so the test needs no fixtures."""

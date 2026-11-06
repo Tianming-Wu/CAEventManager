@@ -400,6 +400,35 @@ def screen_packs():
           packs.slug("拍照 大屏.zip") == "", packs.slug("拍照 大屏.zip"))
 
 
+def accounts_and_tokens():
+    """登录名规则与 API 令牌的纯函数部分。"""
+    import panel
+
+    print("== 登录名 ==")
+    for good in ("abc", "Zhang_2025", "a-b_c", "A1" * 6):
+        check("收下 %r" % good, panel.username_problem(good) == "", good)
+    for bad in ("ab", "a" * 25, "a.b", "张老师", "has space", "a+b", ""):
+        check("拒绝 %r" % bad, panel.username_problem(bad) != "", bad)
+    check("保留词被当成「不可用」",
+          panel.username_problem("admin") == panel.USERNAME_TAKEN)
+    check("大小写不影响保留词",
+          panel.username_problem("ADMIN") == panel.USERNAME_TAKEN)
+    check("格式问题与「不可用」是两句话",
+          panel.username_problem("a.b") != panel.USERNAME_TAKEN)
+
+    print("== 令牌 ==")
+    header, head, tail = panel.new_token()
+    check("带 cae- 前缀", header.startswith(panel.TOKEN_PREFIX), header)
+    check("明文中段不落库的形状", len(head) == 4 and len(tail) == 5, (head, tail))
+    masked = panel.mask_token(head, tail)
+    check("打码只看得到首尾", head in masked and tail in masked
+          and header[4:-5] not in masked, masked)
+    check("权限只认已知的几档",
+          panel.normalize_scopes(["write", "nonsense"]) == ["write"],
+          panel.normalize_scopes(["write", "nonsense"]))
+    check("什么都没给就是只读", panel.normalize_scopes([]) == ["read"])
+
+
 def main():
     print("== host_stats reads a Linux /proc ==")
     # cpu lines: user nice system idle iowait irq softirq steal
@@ -452,6 +481,9 @@ def main():
 
     print("== 展示屏幕的导入 ==")
     screen_packs()
+
+    print("== 登录名与令牌 ==")
+    accounts_and_tokens()
 
     print("== the panel's own helpers ==")
     check("view() maps the role label",

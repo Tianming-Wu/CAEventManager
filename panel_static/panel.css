@@ -1854,6 +1854,35 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   stroke-linecap: round;
 }
 .toast .toast-x:hover { color: var(--text); background: var(--surface-2); }
+/* 通知里的小动作：与关闭键同级同尺寸，不改变这一条的高度 */
+.toast .toast-act {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  flex: none;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 4px;
+  cursor: pointer;
+  pointer-events: auto;
+  touch-action: manipulation;
+}
+.toast .toast-act svg {
+  width: 12px;
+  height: 12px;
+  display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.toast .toast-act:hover { background: var(--accent-soft); }
 .toast.bad { border-color: var(--danger-line); }
 .toast.bad .toast-mark { background: var(--danger); }
 @media (max-width: 640px) {
@@ -2537,6 +2566,37 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
 }
 .update-bar .update-text { flex: 1 1 auto; }
 .update-bar .btn { flex: none; }
+
+/* ---------- API 令牌 ---------- */
+.check-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 0;
+  flex-wrap: wrap;
+}
+.check-row input { flex: none; }
+.check-row .hint { flex: 1 1 100%; margin: 0 0 0 22px; }
+.token-once {
+  margin: 14px 0 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  overflow-x: auto;
+}
+.token-once code {
+  font-family: var(--mono);
+  font-size: .84rem;
+  white-space: pre;
+  user-select: all;
+}
+#tokenTable th:nth-child(1) { width: 20%; }
+#tokenTable th:nth-child(2) { width: 24%; }
+#tokenTable th:nth-child(3) { width: 18%; }
+#tokenTable th:nth-child(4) { width: 12%; }
+#tokenTable th:nth-child(5) { width: 12%; }
+#tokenTable th:nth-child(6) { width: 14%; }
 
 /* ---------- 屏幕包 ---------- */
 .pack-grid { display: flex; flex-wrap: wrap; gap: 12px; }

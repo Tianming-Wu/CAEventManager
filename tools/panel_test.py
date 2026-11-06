@@ -1194,6 +1194,97 @@ def main():
     post(owner, "/api/panel/screen_pack/delete", {"id": "mixed"})
     check("测试导入的第二份也清掉了", True)
 
+    print("== API 令牌：创建、按范围使用、吊销 ==")
+
+    def bearer(path, token, body=None, expect=200):
+        """一个不带 cookie、也不带 CSRF 标记的外部程序。"""
+        payload = json.dumps(body).encode() if body is not None else None
+        headers = {"Authorization": "Bearer " + token}
+        if payload:
+            headers["Content-Type"] = "application/json"
+        req = urllib.request.Request(ROOT + path, data=payload, headers=headers,
+                                     method="POST" if payload else "GET")
+        try:
+            with urllib.request.urlopen(req, timeout=20) as res:
+                status, raw = res.status, res.read()
+        except urllib.error.HTTPError as exc:
+            status, raw = exc.code, exc.read()
+        if status != expect:
+            problems.append("%s(bearer) -> %d (expected %d): %s"
+                            % (path, status, expect, raw[:160]))
+            return None
+        try:
+            return json.loads(raw.decode("utf-8"))
+        except Exception:
+            return raw
+
+    made = post(owner, "/api/panel/token/create",
+                {"name": "测试脚本", "scopes": ["read"], "days": 0})
+    plain = (made or {}).get("token") or ""
+    check("拿到 cae- 开头的明文", plain.startswith("cae-") and len(plain) > 40, plain)
+    check("列表里只有首尾几位",
+          (made or {}).get("item", {}).get("masked", "").find("•••••") >= 0, made)
+    shelf = call(owner, "/api/panel/tokens")
+    check("清单里能看到它",
+          any(t["id"] == made["item"]["id"] for t in shelf["tokens"]), shelf)
+    check("清单里既没有明文也没有哈希",
+          plain not in json.dumps(shelf) and "hash" not in json.dumps(shelf))
+
+    who = bearer("/api/panel/me", plain)
+    check("令牌可以问「我是谁」", who and who.get("authed") is True, who)
+    check("并且说出这是哪张令牌", (who or {}).get("viaToken") == "测试脚本", who)
+    check("读接口放行",
+          bearer("/api/panel/events", plain) is not None)
+    bearer("/api/panel/roster/import", plain,
+           {"name": "x", "text": "学号,姓名\n1,甲"}, expect=403)
+    check("只有「读取」的令牌写不了东西", True)
+    bearer("/api/panel/host", plain, expect=403)
+    check("平台级接口要「平台管理」范围", True)
+    bearer("/api/panel/tokens", plain, expect=403)
+    check("令牌不能管理令牌", True)
+    bearer("/api/panel/events", "cae-not-a-real-token", expect=401)
+    check("乱写的令牌一律 401", True)
+
+    writer = post(owner, "/api/panel/token/create",
+                  {"name": "写入脚本", "scopes": ["read", "write"], "days": 30})
+    plain2 = writer["token"]
+    made_roster = bearer("/api/panel/roster/import", plain2,
+                         {"name": "令牌建的名单",
+                          "text": "学号,姓名,院系\n20259001,甲一,计算机学院"})
+    check("有「写入」就能写", made_roster and made_roster.get("id"), made_roster)
+    bearer("/api/panel/host", plain2, expect=403)
+    check("仍然碰不到平台级接口", True)
+    bearer("/api/panel/account/role", plain2, {"id": 1, "role": "admin"}, expect=403)
+    check("要重新输密码的动作令牌做不到", True)
+
+    entries = call(owner, "/api/panel/audit?limit=40")
+    rows = json.dumps(entries.get("audit") or [], ensure_ascii=False)
+    check("审计里写明经过哪张令牌", "令牌「写入脚本」" in rows, rows[:200])
+    check("操作人仍是本人", "owner" in rows, rows[:200])
+    check("创建令牌本身也留痕", "token_create" in rows, rows[:400])
+
+    post(owner, "/api/panel/token/revoke", {"id": writer["item"]["id"]})
+    bearer("/api/panel/events", plain2, expect=401)
+    check("吊销之后立刻失效", True)
+    check("另一张不受影响", (bearer("/api/panel/me", plain) or {}).get("authed") is True)
+
+    print("== 登录名：字符、保留词、被占用 ==")
+    taker = session()
+    post(taker, "/api/panel/register", {
+        "username": "nameclash", "name": "甲", "password": "name-pass-1"}, expect=200)
+    again = post(taker, "/api/panel/register", {
+        "username": "NameClash", "name": "乙", "password": "name-pass-1"}, expect=409)
+    check("重名（不分大小写）只说「不可用」",
+          again and again.get("error") == "这个登录名不可用", again)
+    reserved = post(taker, "/api/panel/register", {
+        "username": "admin", "name": "丙", "password": "name-pass-1"}, expect=409)
+    check("保留词与被占用是同一句话",
+          reserved and reserved.get("error") == again.get("error"), reserved)
+    for bad in ("a.b", "张老师", "ab", "a" * 25, "has space"):
+        post(taker, "/api/panel/register", {
+            "username": bad, "name": "丁", "password": "name-pass-1"}, expect=400)
+    check("点和中文、过短过长都不收", True)
+
     print("== event pages still reachable ==")
     token = events[0]["id"]
     board = call(anon, "/%s/api/board" % token)

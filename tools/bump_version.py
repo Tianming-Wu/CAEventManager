@@ -3,9 +3,9 @@
 """推进版本号。
 
     python tools/bump_version.py             # 只推进第四段（构）——每次上线都动它
-    python tools/bump_version.py patch       # 第三段（修）+1，第四段归零
-    python tools/bump_version.py minor       # 第二段（次）+1，后面归零
-    python tools/bump_version.py major       # 第一段（主）+1，后面归零
+    python tools/bump_version.py patch       # 第三段（修）+1
+    python tools/bump_version.py minor       # 第二段（次）+1
+    python tools/bump_version.py major       # 第一段（主）+1
     python tools/bump_version.py --show      # 只看现在是几
 
 版本号写成四段 ``主.次.修.构``：
@@ -13,9 +13,10 @@
 * **主** 架构或兼容性变了（老的模块、预设、数据库要跟着动）
 * **次** 一批新功能落地
 * **修** 行为变化或一批修复
-* **构** 每次上线递增，用来认出"页面上跑的是哪一次部署"
+* **构** **只增不减**：任何一段推进它都跟着 +1，永远不会被清零。所以它是这台机器上
+  "第几次发布"，可以当作唯一的部署序号（大致等于提交数，但不依赖版本控制系统）
 
-规矩：每次提交并上线都要推进，至少推进「修」或「构」。
+规矩：每次提交并上线都要推进，至少推进「构」。
 """
 import os
 import re
@@ -43,17 +44,18 @@ def main(argv):
         print(".".join(str(p) for p in parts))
         return 0
     which = (argv[1] if len(argv) > 1 else "build").lower()
+    # 第四段只增不减：它是"第几次发布"，推进任何一段都要 +1
+    parts[3] += 1
     if which in ("build", "b", "构"):
-        parts[3] += 1
+        pass
     elif which in ("patch", "p", "修"):
         parts[2] += 1
-        parts[3] = 0
     elif which in ("minor", "m", "次"):
         parts[1] += 1
-        parts[2] = parts[3] = 0
+        parts[2] = 0
     elif which in ("major", "M", "主"):
         parts[0] += 1
-        parts[1] = parts[2] = parts[3] = 0
+        parts[1] = parts[2] = 0
     else:
         raise SystemExit("推进哪一段？major / minor / patch / build")
     new = ".".join(str(p) for p in parts)

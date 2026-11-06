@@ -1195,6 +1195,27 @@
       </div>
 
       <div class="card">
+        <div class="card-head">
+          <h2>API 令牌</h2>
+          <span class="hint" id="tokenHint"></span>
+          <button class="btn sm" id="tokenNew" type="button">新建令牌</button>
+        </div>
+        <p class="page-sub">
+          给平台之外的程序用：脚本、群机器人、别的 Agent。令牌等同你本人的权限，
+          创建后只显示一次，之后只能看到首尾几位。
+        </p>
+        <div class="tblwrap">
+          <table class="tbl fixed" id="tokenTable">
+            <thead><tr>
+              <th>名称</th><th>令牌</th><th>权限</th><th>创建</th>
+              <th>最后使用</th><th class="actions">操作</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
         <div class="card-head"><h2>安全</h2></div>
         <div class="row">
           <div class="field grow">

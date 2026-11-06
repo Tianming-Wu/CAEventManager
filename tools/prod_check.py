@@ -58,15 +58,16 @@ def show(path, expect=200, want=None):
     return text
 
 
-def redirect(path, want="login"):
+def redirect(path, want="login", anywhere=False):
     conn = connect()
     try:
         conn.request("GET", BASE + path, headers={"User-Agent": "curl/8"})
         res = conn.getresponse()
         res.read()
         loc = res.getheader("Location") or ""
+        hit = want in loc if anywhere else loc.endswith(want)
         check("%-42s %d -> %s" % (path, res.status, loc or "(none)"),
-              res.status == 302 and loc.endswith(want), loc)
+              res.status == 302 and hit, loc)
     finally:
         conn.close()
 
@@ -78,8 +79,11 @@ show("/register", 200, "\u53bb\u767b\u5f55")
 redirect("/panel")
 show("/panel_static/login.js", 200, "loginForm")
 show("/panel_static/panel.css", 200, "auth-card")
-for page in ("", "/screen", "/checkin", "/admin", "/login"):
+for page in ("", "/screen", "/checkin"):
     show("/" + TOKEN + page, 200)
+# 没有会话的活动后台与旧的登录页都交给主面板，所以这里是 302 而不是 200
+for page in ("/admin", "/login"):
+    redirect("/" + TOKEN + page, "/login?", anywhere=True)
 show("/whatever/" + TOKEN + "/", 200)
 show("/nope-not-a-route", 404)
 

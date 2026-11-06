@@ -7,6 +7,10 @@
 # secret URL id) are never touched.  The remote step verifies that every file
 # landed and that the modules import before restarting, so a forgotten file can
 # never leave a broken service running.
+#
+# Runs under either shell: the upload goes through `cmd /c type`, not a PowerShell
+# string pipe, because Windows PowerShell 5.1 hands native commands an empty stdin
+# for a large string.
 param(
     [Parameter(Mandatory = $true)]
     [string]$Remote,
@@ -50,11 +54,12 @@ try {
     Write-Host ("   {0:N0} bytes -> {1}" -f (Get-Item $tarball).Length, $tarball)
 
     # The container has no sftp-server subsystem, so scp does not work here:
-    # ship the tarball as base64 over ssh stdin instead.
+    # ship the tarball over ssh stdin instead.  It goes through `cmd /c type` so
+    # the bytes are passed through untouched - handing a base64 string to ssh
+    # from Window PowerShell 5.1 reaches the far side empty.
     Write-Host "== uploading =="
-    $b64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($tarball))
     $remoteTar = "/tmp/lottery-$stamp.tgz"
-    $b64 | & ssh $Remote "tr -d '\r' | base64 -d > $remoteTar"
+    $null = & cmd /c "type `"$tarball`" | ssh $Remote `"cat > $remoteTar`""
     if ($LASTEXITCODE -ne 0) { throw "upload failed" }
 
     Write-Host "== extracting =="
@@ -69,7 +74,7 @@ sed -i 's/\r$//' run.sh service.sh 2>/dev/null || true
 chmod +x run.sh service.sh
 find . -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/null || true
 __EXISTENCE__
-python3 -c "import app, db, model, auth, localconfig, checkin, exporter, panel" || {
+python3 -c "import app, db, model, auth, localconfig, checkin, exporter, panel, packs" || {
     echo "PREFLIGHT FAILED: deployed modules do not import" >&2
     exit 1
 }
@@ -77,9 +82,18 @@ echo "ok: all files present, imports clean"
 '@
     $script = $template.Replace("__DEST__", $Dest).Replace("__TAR__", $remoteTar).Replace("__EXISTENCE__", $existence)
 
-    $out = $script | & ssh $Remote "sh -s" 2>&1
-    $out | ForEach-Object { Write-Host "   remote: $_" }
-    if ($LASTEXITCODE -ne 0) { throw "remote extract/preflight failed" }
+    # Same reason as the upload: the remote end reads this as a file, so it is
+    # written out as UTF-8 without a BOM and piped as bytes.
+    $scriptPath = Join-Path $env:TEMP "lottery-$stamp.sh"
+    [IO.File]::WriteAllText($scriptPath, $script.Replace("`r`n", "`n"),
+        (New-Object System.Text.UTF8Encoding $false))
+    try {
+        $out = & cmd /c "type `"$scriptPath`" | ssh $Remote `"sh -s`" 2>&1"
+        $out | ForEach-Object { Write-Host "   remote: $_" }
+        if ($LASTEXITCODE -ne 0) { throw "remote extract/preflight failed" }
+    } finally {
+        Remove-Item $scriptPath -Force -ErrorAction SilentlyContinue
+    }
 
     if (-not $NoRestart) {
         Write-Host "== restarting =="

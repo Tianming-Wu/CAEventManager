@@ -623,8 +623,12 @@
                   <input id="signupOpensDatePick" type="date" tabindex="-1"
                          aria-hidden="true" aria-label="开始日期选择器">
                 </span>
-                <input id="signupOpensTime" class="dt-time" type="text" inputmode="numeric"
-                       placeholder="HH:MM" aria-label="开始时刻">
+                <span class="dt-time-wrap">
+                  <input id="signupOpensTime" class="dt-time" type="text" inputmode="numeric"
+                         placeholder="HH:MM" aria-label="开始时刻">
+                  <input id="signupOpensTimePick" class="dt-native-time" type="time"
+                         tabindex="-1" aria-hidden="true" aria-label="开始时刻选择器">
+                </span>
                 <button class="btn sm dt-clear" id="signupOpensClear" type="button"
                         title="清空开始时间">清除</button>
               </div>
@@ -646,8 +650,12 @@
                   <input id="signupClosesDatePick" type="date" tabindex="-1"
                          aria-hidden="true" aria-label="结束日期选择器">
                 </span>
-                <input id="signupClosesTime" class="dt-time" type="text" inputmode="numeric"
-                       placeholder="HH:MM" aria-label="结束时刻">
+                <span class="dt-time-wrap">
+                  <input id="signupClosesTime" class="dt-time" type="text" inputmode="numeric"
+                         placeholder="HH:MM" aria-label="结束时刻">
+                  <input id="signupClosesTimePick" class="dt-native-time" type="time"
+                         tabindex="-1" aria-hidden="true" aria-label="结束时刻选择器">
+                </span>
                 <button class="btn sm dt-clear" id="signupClosesClear" type="button"
                         title="清空结束时间">清除</button>
               </div>
@@ -1077,8 +1085,8 @@
           <span class="stat-num" id="srvUptime">–</span>
         </div>
         <div class="stat">
-          <span class="stat-label">版本</span>
-          <span class="stat-num" id="srvVersion">–</span>
+          <span class="stat-label">用户（在线 / 注册）</span>
+          <span class="stat-num" id="srvUsers">–</span>
         </div>
       </div>
 

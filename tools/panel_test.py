@@ -305,11 +305,18 @@ def main():
         check("host payload is complete",
               all(k in h for k in ("cpu", "mem", "uptime", "version", "dataDir")),
               sorted(h))
+    users = (host or {}).get("users") or {}
+    check("the owner's own request counts as online", users.get("online", 0) >= 1, users)
+    check("every approved account is counted as registered",
+          users.get("registered", 0) >= 2, users)
     plain = session()
     # member's password was changed by the section above
     post(plain, "/api/panel/login", {"username": "member", "password": "member-pass-2"})
     call(plain, "/api/panel/host", expect=403)
     check("a plain admin cannot read them", True)
+    again = (call(owner, "/api/panel/host") or {}).get("users") or {}
+    check("a second account signing in raises the online count",
+          again.get("online", 0) >= 2, again)
 
     print("== presets and modules ==")
     tpls = call(owner, "/api/panel/templates")["presets"]

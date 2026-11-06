@@ -89,6 +89,7 @@
     screenPacks: [],
     packManage: false,     // 站长/超级管理员才能导入与删除
     packLimits: null,      // 导入的限制，由服务端给出
+    users: null,           // 在线/注册，随 /host 一起回来
     notices: [],
     noticeUnread: 0,
     alertOpen: false,
@@ -1537,17 +1538,33 @@
     setPair(dateSel, timeSel, clearSel, ts);
   }
 
+  function pairOf(dateSel) {
+    for (var i = 0; i < DT_PAIRS.length; i++) {
+      if (DT_PAIRS[i].date === dateSel) return DT_PAIRS[i];
+    }
+    return null;
+  }
+
+  function syncNativePair(pair, ts) {
+    if (!pair) return;
+    var full = toLocalInput(ts);
+    $(pair.datePick).value = full ? full.slice(0, 10) : "";
+    $(pair.timePick).value = full ? full.slice(11, 16) : "";
+  }
+
   function setPair(dateSel, timeSel, clearSel, ts) {
     var full = toLocalInput(ts);
     $(dateSel).value = full ? full.slice(0, 10) : "";
     $(timeSel).value = full ? full.slice(11, 16) : "";
     if (clearSel) $(clearSel).disabled = !full;
+    syncNativePair(pairOf(dateSel), ts);
   }
 
   function clearPair(dateSel, timeSel, clearSel) {
     $(dateSel).value = "";
     $(timeSel).value = "";
     if (clearSel) $(clearSel).disabled = true;
+    syncNativePair(pairOf(dateSel), 0);
     S.signupDirty = true;
     pushHistory();
   }
@@ -1874,6 +1891,10 @@
     $("#signupClosesTime").value = st.closesTime;
     $("#signupOpensClear").disabled = !(st.opensDate || st.opensTime);
     $("#signupClosesClear").disabled = !(st.closesDate || st.closesTime);
+    // 撤销/重做是直接改文本框，手机上看的那两个原生控件要跟着走
+    DT_PAIRS.forEach(function (pair) {
+      syncNativePair(pair, pairValue(pair.date, pair.time));
+    });
     $("#signupCapOn").checked = st.capOn;
     $("#signupCap").value = st.cap;
     $("#signupSelfEdit").value = st.selfEdit;
@@ -3373,11 +3394,13 @@
     $("#srvCpu").textContent = h ? pct(h.cpu) : "–";
     $("#srvMem").textContent = h ? pct(h.mem) : "–";
     $("#srvUptime").textContent = h && h.uptime ? humanUptime(h.uptime) : "–";
-    $("#srvVersion").textContent = h && h.version ? h.version : "–";
+    var u = S.users;
+    $("#srvUsers").textContent = u ? (u.online + " / " + u.registered) : "–";
 
     var rows = [];
     if (h) {
       rows.push(["主机", h.host || "—"]);
+      rows.push(["版本", h.version || "—"]);
       rows.push(["内存", (h.mem !== null && h.mem !== undefined)
         ? Math.round(h.mem) + "%" +
           (h.memTotalMB ? "（共 " + Math.round(h.memTotalMB) + " MB）" : "")
@@ -3553,7 +3576,10 @@
   function refreshHost() {
     if (!isOwner()) return;
     PX.api("/host")
-      .then(function (d) { applyHost(d && d.host ? d.host : null); })
+      .then(function (d) {
+        S.users = (d && d.users) || null;
+        applyHost(d && d.host ? d.host : null);
+      })
       .catch(function () { applyHost(null); });
   }
 
@@ -4096,10 +4122,34 @@
     }, true);
   })();
 
-  function wirePicker(pickSel, dateSel, timeSel, clearSel) {
-    $(pickSel).addEventListener("click", function () {
-      var native = $(pickSel.replace("Pick", "DatePick"));
-      native.value = $(dateSel).value || "";
+  /* 一对「日期 + 时刻」。电脑上用两个文本框配日历按钮；手机上这两个文本框被隐藏，
+     换成同样两个原生控件的可见版本（点一下就是系统日历/时间轮）。
+     保存时读的始终是文本框，原生控件只负责把值写进去，所以两边的格式不会打架。 */
+  var DT_PAIRS = [
+    { pick: "#signupOpensPick", datePick: "#signupOpensDatePick",
+      timePick: "#signupOpensTimePick", date: "#signupOpensDate",
+      time: "#signupOpensTime", clear: "#signupOpensClear" },
+    { pick: "#signupClosesPick", datePick: "#signupClosesDatePick",
+      timePick: "#signupClosesTimePick", date: "#signupClosesDate",
+      time: "#signupClosesTime", clear: "#signupClosesClear" }
+  ];
+
+  // 原生控件选完：写回文本框，标记改动，让 Ctrl+Z 也能回退
+  function nativePicked(pair) {
+    var date = $(pair.datePick).value || "";
+    var time = $(pair.timePick).value || "";
+    if (!date && !time) return;
+    $(pair.date).value = date;
+    $(pair.time).value = time || ($(pair.date).value ? "00:00" : "");
+    $(pair.clear).disabled = false;
+    S.signupDirty = true;
+    pushHistory();
+  }
+
+  function wirePicker(pair) {
+    $(pair.pick).addEventListener("click", function () {
+      var native = $(pair.datePick);
+      native.value = $(pair.date).value || "";
       // showPicker 把选择器锚在这个控件上：它就在按钮中心，看起来是"贴着按钮弹出"
       if (native.showPicker) {
         try { native.showPicker(); return; } catch (e) { /* 老浏览器退回点击 */ }
@@ -4107,18 +4157,21 @@
       native.focus();
       native.click();
     });
-    $(pickSel.replace("Pick", "DatePick")).addEventListener("change", function () {
+    $(pair.datePick).addEventListener("change", function () {
       if (this.value) {
-        $(dateSel).value = this.value;
-        if (!$(timeSel).value) $(timeSel).value = "00:00";
-        $(clearSel).disabled = false;
+        $(pair.date).value = this.value;
+        if (!$(pair.time).value) $(pair.time).value = "00:00";
+        $(pair.clear).disabled = false;
+        syncNativePair(pair, pairValue(pair.date, pair.time));
         S.signupDirty = true;
         pushHistory();
       }
     });
+    $(pair.timePick).addEventListener("change", function () {
+      nativePicked(pair);
+    });
   }
-  wirePicker("#signupOpensPick", "#signupOpensDate", "#signupOpensTime", "#signupOpensClear");
-  wirePicker("#signupClosesPick", "#signupClosesDate", "#signupClosesTime", "#signupClosesClear");
+  DT_PAIRS.forEach(wirePicker);
 
   $("#signupOpensClear").addEventListener("click", function () {
     clearPair("#signupOpensDate", "#signupOpensTime", "#signupOpensClear");

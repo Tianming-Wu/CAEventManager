@@ -1544,6 +1544,141 @@ def touch_page(browser):
     finally:
         ctx.close()
 
+    print("== phone: the drawer keeps its groups in place ==")
+    ctx, page = new_page(browser, 390, 844, touch=True, mobile=True, dpr=2)
+    try:
+        ui_login(page)
+        page.click("#menuBtn")
+        page.wait_for_timeout(420)
+        page.click('[data-toggle="lists"]')
+        page.wait_for_timeout(420)
+        geo = page.evaluate("""() => {
+            const subs = [...document.querySelectorAll('#nav-lists .nav-sub-item')];
+            const head = document.querySelector('#sidebar [data-toggle="lists"]')
+                .getBoundingClientRect();
+            const parent = document.getElementById('nav-lists').getBoundingClientRect();
+            const side = document.getElementById('sidebar').getBoundingClientRect();
+            const headText = document.querySelector('[data-toggle="lists"] .nav-text')
+                .getBoundingClientRect();
+            const subText = subs.length
+                ? document.querySelector('#nav-lists .nav-sub-item .nav-text')
+                    .getBoundingClientRect() : null;
+            return {headBottom: Math.round(head.bottom),
+                    tops: subs.map(s => Math.round(s.getBoundingClientRect().top)),
+                    parentBottom: Math.round(parent.bottom),
+                    lastBottom: subs.length
+                        ? Math.round(subs[subs.length - 1].getBoundingClientRect().bottom) : 0,
+                    // 子项文字与父项文字对齐（父项文字前面是图标），这是"属于谁"的视觉线索
+                    headTextLeft: Math.round(headText.left - side.left),
+                    subTextLeft: subText ? Math.round(subText.left - side.left) : -1};
+        }""")
+        check("子项各占一行，不叠在一起",
+              len(set(geo["tops"])) == len(geo["tops"]) == 3, geo)
+        check("子项接在分组标题下面", geo["tops"] and geo["tops"][0] >= geo["headBottom"] - 2,
+              geo)
+        check("父容器把子项包住，不会压到下一项",
+              geo["parentBottom"] >= geo["lastBottom"] - 2, geo)
+        check("子项文字与父项文字对齐",
+              abs(geo["subTextLeft"] - geo["headTextLeft"]) <= 1, geo)
+        closed = page.evaluate("""() => {
+            const g = document.getElementById('nav-approvals').getBoundingClientRect();
+            const first = document.querySelector('#nav-approvals .nav-sub-item')
+                .getBoundingClientRect();
+            return {h: Math.round(g.height), top: Math.round(first.top),
+                    boxTop: Math.round(g.top)};
+        }""")
+        check("收起的分组高度为零，子项不外露",
+              closed["h"] <= 1 and closed["top"] >= closed["boxTop"] + closed["h"] - 1, closed)
+    finally:
+        ctx.close()
+
+    print("== phone: tables scroll, actions stay reachable ==")
+    ctx, page = new_page(browser, 390, 844, touch=True, mobile=True, dpr=2)
+    try:
+        ui_login(page)
+        page.goto(BASE + "/panel#/users")
+        page.wait_for_timeout(900)
+        info = page.evaluate("""() => {
+            const t = document.getElementById('accountsTable');
+            const wrap = t.closest('.tblwrap');
+            const cell = t.querySelector('td');
+            const act = t.querySelector('td.actions');
+            return {wrapW: wrap.clientWidth, wrapScroll: wrap.scrollWidth,
+                    firstCell: Math.round(cell.getBoundingClientRect().width),
+                    actRight: Math.round(act.getBoundingClientRect().right),
+                    wrapRight: Math.round(wrap.getBoundingClientRect().right),
+                    actLeft: Math.round(act.getBoundingClientRect().left),
+                    colCount: t.querySelectorAll('thead th').length};
+        }""")
+        check("表格比容器宽：可以横向滚动",
+              info["wrapScroll"] > info["wrapW"], info)
+        check("首列不再被压成省略号", info["firstCell"] >= 60, info)
+        check("操作列贴在右边，按钮不用滑就够得着",
+              info["actRight"] <= info["wrapRight"] + 1
+              and info["actRight"] >= info["wrapRight"] - 40, info)
+        page.goto(BASE + "/panel#/all-events")
+        page.wait_for_timeout(900)
+        btn = page.evaluate("""() => {
+            const b = document.querySelector('#allEventsTable td.actions .btn');
+            if (!b) return null;
+            const wrap = b.closest('.tblwrap').getBoundingClientRect();
+            const r = b.getBoundingClientRect();
+            return {w: Math.round(r.width), right: Math.round(r.right),
+                    wrapRight: Math.round(wrap.right)};
+        }""")
+        check("活动管理的「管理」按钮整颗都在容器里",
+              btn and btn["w"] > 40 and btn["right"] <= btn["wrapRight"] + 1, btn)
+    finally:
+        ctx.close()
+
+    print("== phone: the date pair uses the system pickers ==")
+    ctx, page = new_page(browser, 390, 844, touch=True, mobile=True, dpr=2)
+    try:
+        ui_login(page)
+        opener = owner_opener()
+        roster = call(opener, "/api/panel/roster/import", {
+            "name": "手机日期测试名单", "text": "学号,姓名\n20250001,甲一"})
+        made = call(opener, "/api/panel/signup/create", {
+            "title": "手机日期测试", "roster_id": (roster or {}).get("id") or 0})
+        sid = (made or {}).get("id")
+        if not sid:
+            check("a signup to edit exists", False, made)
+        else:
+            page.goto(BASE + "/panel#/signup/%d" % sid)
+            page.wait_for_timeout(1200)
+            page.click("#signupTimeCard .switch")
+            page.wait_for_timeout(300)
+            shapes = page.evaluate("""() => {
+                const box = s => {
+                    const r = document.querySelector(s).getBoundingClientRect();
+                    return {w: Math.round(r.width), h: Math.round(r.height)};
+                };
+                return {date: box('#signupOpensDatePick'), time: box('#signupOpensTimePick'),
+                        textDate: box('#signupOpensDate'), cal: box('#signupOpensPick')};
+            }""")
+            check("原生日期控件成了可见的整行控件",
+                  shapes["date"]["w"] > 80 and shapes["date"]["h"] > 20, shapes)
+            check("原生时刻控件同上",
+                  shapes["time"]["w"] > 60 and shapes["time"]["h"] > 20, shapes)
+            check("电脑上那两个文本框在手机上让位",
+                  shapes["textDate"]["w"] == 0, shapes)
+            check("日历按钮在手机上隐去", shapes["cal"]["w"] == 0, shapes)
+            page.fill("#signupOpensDatePick", "2026-12-01")
+            page.dispatch_event("#signupOpensDatePick", "change")
+            page.fill("#signupOpensTimePick", "19:30")
+            page.dispatch_event("#signupOpensTimePick", "change")
+            page.wait_for_timeout(250)
+            got = page.evaluate("""() => ({
+                date: document.getElementById('signupOpensDate').value,
+                time: document.getElementById('signupOpensTime').value,
+                clear: document.getElementById('signupOpensClear').disabled})""")
+            check("选完写回日期文本框", got["date"] == "2026-12-01", got)
+            check("选完写回时刻文本框", got["time"] == "19:30", got)
+            check("清除按钮随之可用", got["clear"] is False, got)
+            call(opener, "/api/panel/signup/delete", {"id": sid})
+    finally:
+        ctx.close()
+
     print("== landscape phone: short viewport ==")
     ctx, page = new_page(browser, 844, 390, touch=True)
     try:

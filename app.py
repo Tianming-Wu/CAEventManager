@@ -1029,6 +1029,7 @@ class Handler(BaseHTTPRequestHandler):
             acc = panel.session_account(conn, self._panel_token())
             if acc is None:
                 raise model.ApiError("未登录或登录已过期", 401)
+            panel.touch_session(conn, self._panel_token())
             return self._stream()
 
         if path == "/me" and method == "GET":
@@ -1143,6 +1144,8 @@ class Handler(BaseHTTPRequestHandler):
         acc = panel.session_account(conn, sess)
         if acc is None:
             raise model.ApiError("未登录或登录已过期", 401)
+        # 一次带登录态的请求就是「这个人还在」的证据，在线人数据此统计（内部按分钟节流）
+        panel.touch_session(conn, sess)
 
         # A conflict is only ever about the object this write touches: a change
         # to the same thing that the client has not seen yet.  Everything else
@@ -1973,7 +1976,9 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/host" and method == "GET":
             need("owner")
-            return self._json({"ok": True, "host": host_stats()})
+            # 设备占用只有 Linux 读得到；用户数是面板自己的账，哪里都算得出
+            return self._json({"ok": True, "host": host_stats(),
+                               "users": panel.presence(conn)})
 
         # ---- 名单：与活动并列的一层，存在自己的库里 ----
         def roster_owner_names(ids):

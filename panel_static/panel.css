@@ -1564,7 +1564,9 @@ input[type="color"] {
 .dt-pair > * { height: var(--ctrl-h, 38px); min-height: var(--ctrl-h, 38px); }
 .dt-pair .dt-cal { width: var(--ctrl-h, 38px); padding: 0; }
 .dt-pair .dt-date { flex: 1 1 150px; min-width: 140px; }
-.dt-pair .dt-time { flex: 0 0 110px; }
+.dt-pair .dt-time-wrap { flex: 0 0 110px; }
+.dt-pair .dt-time { width: 100%; }
+.dt-pair .dt-native-time { display: none; }
 .dt-cal-wrap { position: relative; display: inline-flex; flex: none; }
 .dt-pair .dt-cal {
   flex: none;
@@ -1935,7 +1937,8 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   .nav-account { justify-content: center; padding: 9px 4px; }
   .nav-account-text { display: none; }
   .nav-sub { display: none; }           /* children live in the pane */
-  .nav-sub-inner { overflow: visible; }
+  /* 收起的分组必须继续裁剪：0fr 的行高里让 overflow:visible，孩子会画到下一项上 */
+  .nav-group.open > .nav-sub > .nav-sub-inner { overflow: visible; }
   .nav-badge {
     position: absolute;
     top: 4px;
@@ -1971,6 +1974,8 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   .shell.nav-open .nav-badge.count { display: inline-block; }
   .shell.nav-open .nav-sub { display: grid; }
   .shell.nav-open .nav-item { justify-content: flex-start; padding: 0 10px; gap: 11px; }
+  /* 抽屉里子项仍要比父项缩进一格，否则看不出它属于谁 */
+  .shell.nav-open .nav-sub-item { padding-left: 41px; }
   .shell.nav-open .nav-item[aria-current="page"]::before { left: -8px; }
   .shell.nav-open .nav-account { justify-content: flex-start; padding: 9px 10px; }
   .shell.nav-open .nav-account-text { display: flex; }
@@ -2038,6 +2043,64 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   }
   .overlay-head { padding-left: max(14px, env(safe-area-inset-left)); }
   .overlay-body { padding-bottom: calc(18px + env(safe-area-inset-bottom)); }
+
+  /* ---------- 手机上的表格 ----------
+     竖屏放不下五六列：与其把每列压成省略号，不如让表格横向滚动。
+     首列与操作列留在原地，中间几列用手指滑出来——常用的按钮不用滑就够得着。 */
+  .tblwrap { overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; }
+  table.tbl { min-width: 640px; }
+  table.tbl.fixed th:first-child,
+  table.tbl.fixed td:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    background: var(--surface);
+  }
+  table.tbl.fixed th.actions,
+  table.tbl.fixed td.actions {
+    position: sticky;
+    right: 0;
+    background: var(--surface);
+    box-shadow: -1px 0 0 var(--line-soft);
+  }
+  table.tbl.fixed th:first-child,
+  table.tbl.fixed th.actions { background: var(--surface-2); z-index: 3; }
+  table.tbl.fixed th.actions { top: 0; }
+
+  /* ---------- 手机上的日期与时刻 ----------
+     电脑上那两个文本框加日历按钮是为了避开原生控件的混排占位符；
+     手机上直接用系统控件，点一下就是日历/时间轮，不需要打字。 */
+  .dt-pair {
+    display: grid;
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr) auto;
+    gap: 8px;
+    align-items: center;
+  }
+  .dt-pair .dt-date,
+  .dt-pair .dt-time,
+  .dt-pair .dt-cal { display: none; }
+  .dt-pair .dt-cal-wrap,
+  .dt-pair .dt-time-wrap { flex: none; display: block; }
+  .dt-cal-wrap input[type="date"],
+  .dt-pair .dt-native-time {
+    position: static;
+    display: block;
+    width: 100%;
+    height: var(--ctrl-h);
+    min-height: var(--ctrl-h);
+    padding: 0 10px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    color: var(--text);
+    font: inherit;
+    font-size: .9rem;
+    opacity: 1;
+    pointer-events: auto;
+    -webkit-appearance: none;
+    appearance: none;
+  }
+  .dt-pair .dt-clear { justify-self: start; }
 }
 
 /* short landscape phones: nothing may be taller than the viewport */

@@ -238,6 +238,8 @@ LATE_COLUMNS = (
     ("accounts", "ban_reason", "TEXT NOT NULL DEFAULT ''"),
     ("sessions", "sudo_until", "REAL NOT NULL DEFAULT 0"),
     ("sessions", "unlock_until", "REAL NOT NULL DEFAULT 0"),
+    # 最近一次带着这个会话发出请求的时刻：在线人数由此得来（见 presence()）
+    ("sessions", "seen_at", "REAL NOT NULL DEFAULT 0"),
     ("event_members", "invited_by", "INTEGER NOT NULL DEFAULT 0"),
     ("event_members", "state_at", "REAL NOT NULL DEFAULT 0"),
     ("presets", "description", "TEXT NOT NULL DEFAULT ''"),
@@ -353,10 +355,39 @@ def create_session(conn, account_id, ip=""):
     token = secrets.token_urlsafe(32)
     now = time.time()
     conn.execute(
-        "INSERT INTO sessions (token, account_id, created_at, expires_at, ip) VALUES (?,?,?,?,?)",
-        (token, account_id, now, now + SESSION_TTL, ip),
+        "INSERT INTO sessions (token, account_id, created_at, expires_at, ip, seen_at) "
+        "VALUES (?,?,?,?,?,?)",
+        (token, account_id, now, now + SESSION_TTL, ip, now),
     )
     return token
+
+
+# 「在线」靠请求留下的痕迹判断：会话七天不过期，只看创建时间等于把七天都算成在线。
+# 每分钟最多写一次，免得每轮轮询都落一次盘。
+PRESENCE_TOUCH = 60
+PRESENCE_WINDOW = 5 * 60
+
+
+def touch_session(conn, token):
+    """Note that this session is in use, at most once a minute."""
+    if not token:
+        return
+    now = time.time()
+    conn.execute(
+        "UPDATE sessions SET seen_at=? WHERE token=? AND seen_at<?",
+        (now, token, now - PRESENCE_TOUCH),
+    )
+
+
+def presence(conn):
+    """(在线, 注册)：最近五分钟有请求的账号数，以及状态正常的账号总数。"""
+    online = conn.execute(
+        "SELECT COUNT(DISTINCT account_id) FROM sessions WHERE seen_at>=?",
+        (time.time() - PRESENCE_WINDOW,),
+    ).fetchone()[0]
+    registered = conn.execute(
+        "SELECT COUNT(*) FROM accounts WHERE status='active'").fetchone()[0]
+    return {"online": int(online or 0), "registered": int(registered or 0)}
 
 
 def session_account(conn, token):

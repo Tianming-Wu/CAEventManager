@@ -95,6 +95,7 @@
     tokenMeta: null,       // 可选的权限与它们的说明
     assistantCfg: null,    // 这个账号的模型配置（不含密钥）
     assistantMsgs: [],     // 本次对话，只在这里，不进库
+    overviewCounts: {},    // 总览上的"我的名单 / 我的报名"数
     updateTo: "",          // 服务端换了版本，等一个能安全刷新的时机
     typed: false,          // 这一页里敲过字：别在人家填表的时候刷新页面
     notices: [],
@@ -2460,12 +2461,23 @@
       ((S.me && (S.me.name || S.me.username)) || "");
 
     $("#statEvents").textContent = mine.length;
-    $("#statAccounts").textContent = S.accounts.length || "–";
+    var counts = S.overviewCounts || {};
+    $("#statRosters").textContent =
+      (counts.rosters === null || counts.rosters === undefined) ? "–" : counts.rosters;
+    $("#statSignups").textContent =
+      (counts.signups === null || counts.signups === undefined) ? "–" : counts.signups;
     $("#statInvites").textContent = S.invites.length;
 
     var showPending = canReview();
     $("#statPendingBox").hidden = !showPending;
     $("#statPending").textContent = pending.length;
+
+    // 账号总数是整台机器的事，只给能看到账号清单的人
+    var showAccounts = isSuper();
+    $("#statAccountsBox").hidden = !showAccounts;
+    if (showAccounts) {
+      $("#statAccounts").textContent = S.accountsTotal || "–";
+    }
 
     $("#overviewEvents").innerHTML = mine.length
       ? mine.slice(0, 4).map(function (e) { return eventCard(e); }).join("")
@@ -3802,21 +3814,49 @@
       .catch(function (e) { PX.toast(PX.esc(e.message), true); });
   }
 
+  /* 密钥框里放的是"假内容"：一串星号，不是真密钥。
+     这样既看得出"已经配过"，又不会把真东西塞进 DOM 里让人读走。
+     保存时如果框里还是这串星号，就当没改过；要换密钥就直接覆盖，要删就点「清除密钥」。 */
+  var KEY_MASK = "••••••••••••••••••";
+
+  function keyFieldMasked() {
+    return $("#asKey").value === KEY_MASK;
+  }
+
+  function showKeyMask(cfg) {
+    var box = $("#asKey");
+    if (!box) return;
+    if (cfg.hasKey) {
+      box.value = KEY_MASK;
+      box.dataset.masked = "1";
+      box.placeholder = "";
+    } else {
+      box.value = "";
+      delete box.dataset.masked;
+      box.placeholder = "sk-…（只写不读，保存后不会再显示）";
+    }
+  }
+
   function drawAssistant() {
     var cfg = S.assistantCfg || { ready: false };
     var sub = $("#assistantSub");
     if (sub) {
       sub.textContent = cfg.ready
         ? "当前模型：" + (cfg.model || "—")
-        : "尚未配置模型：点右上「模型配置」填接口地址、模型与密钥";
+        : "还没有密钥：点右上「模型配置」填一把，接口地址与模型名有默认值";
     }
     var hint = $("#assistantCfgHint");
-    if (hint) hint.textContent = cfg.hasKey ? "密钥已配置" : "还没有密钥";
+    if (hint) hint.textContent = cfg.hasKey ? "密钥已配置（只写不读）" : "还没有密钥";
     if ($("#asBase") && document.activeElement !== $("#asBase")) {
       $("#asBase").value = cfg.base || "";
+      $("#asBase").placeholder = cfg.defaultBase || "";
     }
     if ($("#asModel") && document.activeElement !== $("#asModel")) {
       $("#asModel").value = cfg.model || "";
+      $("#asModel").placeholder = cfg.defaultModel || "";
+    }
+    if (document.activeElement !== $("#asKey") || keyFieldMasked()) {
+      showKeyMask(cfg);
     }
     var asks = $("#assistantAsks");
     if (asks && !asks.children.length) {
@@ -3882,16 +3922,40 @@
   }
 
   function saveAssistantConfig() {
-    PX.api("/assistant/config", {
-      method: "POST",
-      body: { base: $("#asBase").value.trim(), model: $("#asModel").value.trim(),
-              key: $("#asKey").value }
-    }).then(function (d) {
-      S.assistantCfg = d.config || S.assistantCfg;
-      $("#asKey").value = "";
-      drawAssistant();
-      PX.toast(d.config && d.config.ready ? "已保存" : "已保存，还缺密钥或模型名");
-    }).catch(function (e) { PX.toast(PX.esc(e.message), true); });
+    var body = { base: $("#asBase").value.trim(), model: $("#asModel").value.trim() };
+    // 框里还是那串星号 = 没动过密钥，别把已有的覆盖成空
+    if (!keyFieldMasked()) body.key = $("#asKey").value;
+    PX.api("/assistant/config", { method: "POST", body: body })
+      .then(function (d) {
+        S.assistantCfg = d.config || S.assistantCfg;
+        drawAssistant();
+        PX.toast(d.config && d.config.ready ? "已保存" : "已保存，还差密钥", !d.config.ready);
+      }).catch(function (e) { PX.toast(PX.esc(e.message), true); });
+  }
+
+  // 从服务端问一遍有哪些模型可选（DeepSeek 的 GET /models），省得手抄错名字
+  function fetchAssistantModels() {
+    var btn = $("#asModels");
+    btn.disabled = true;
+    btn.textContent = "拉取中…";
+    var body = { base: $("#asBase").value.trim() };
+    if (!keyFieldMasked() && $("#asKey").value) body.key = $("#asKey").value;
+    PX.api("/assistant/models", { method: "POST", body: body })
+      .then(function (d) {
+        var ids = (d.models || []).map(function (m) { return m.id; });
+        if (!ids.length) { PX.toast("没有拿到模型", true); return; }
+        $("#asModelList").innerHTML = (d.models || []).map(function (m) {
+          return '<option value="' + PX.esc(m.id) + '">' + PX.esc(m.name || m.id) +
+            "</option>";
+        }).join("");
+        if (ids.indexOf($("#asModel").value) < 0) $("#asModel").value = ids[0];
+        PX.toast("可选模型：" + ids.join("、"));
+      })
+      .catch(function (e) { PX.toast(PX.esc(e.message), true); })
+      .then(function () {
+        btn.disabled = false;
+        btn.textContent = "拉取模型";
+      });
   }
 
   /* ------------------------------------------------------------------- host */
@@ -3930,6 +3994,15 @@
 
   /* ------------------------------------------------------------------ data */
   function loadAccounts() {
+    // 账号清单是超管才看得到的东西：普通管理员打开面板时不去问它
+    if (!isSuper()) {
+      S.accounts = [];
+      S.accountsTotal = 0;
+      renderIdentity();
+      applyRoleVisibility();
+      syncPendingBadge();
+      return Promise.resolve();
+    }
     return PX.api("/accounts?limit=50").then(function (d) {
       S.me = d.me || S.me;
       S.accounts = d.accounts || [];
@@ -3937,6 +4010,18 @@
       renderIdentity();
       applyRoleVisibility();
       syncPendingBadge();
+    });
+  }
+
+  // 总览上的两个"我的"数：名单与报名各问一次总量，不拉列表
+  function loadOverviewCounts() {
+    return Promise.all([
+      PX.api("/rosters?scope=joined&limit=1").then(function (d) { return d.total || 0; })
+        .catch(function () { return null; }),
+      PX.api("/signups?scope=joined&limit=1").then(function (d) { return d.total || 0; })
+        .catch(function () { return null; })
+    ]).then(function (counts) {
+      S.overviewCounts = { rosters: counts[0], signups: counts[1] };
     });
   }
 
@@ -3992,7 +4077,8 @@
 
   function reloadAll() {
     return loadAccounts().then(function () {
-      return Promise.all([loadEvents(), loadInvites(), loadAudit()]);
+      return Promise.all([loadEvents(), loadInvites(), loadAudit(),
+                          loadOverviewCounts()]);
     }).then(function () {
       applyRoleVisibility();
       draw();
@@ -4320,6 +4406,16 @@
     if (!card.hidden) $("#asBase").focus();
   });
   $("#asSave").addEventListener("click", saveAssistantConfig);
+  $("#asModels").addEventListener("click", fetchAssistantModels);
+  // 星号是假的：一聚焦就清掉，让人能直接覆盖
+  $("#asKey").addEventListener("focus", function () {
+    if (keyFieldMasked()) this.value = "";
+  });
+  $("#asKey").addEventListener("blur", function () {
+    if (!this.value && (S.assistantCfg || {}).hasKey) {
+      this.value = KEY_MASK;
+    }
+  });
   $("#asClearKey").addEventListener("click", function () {
     PX.api("/assistant/config", { method: "POST", body: { clear: true } })
       .then(function (d) {

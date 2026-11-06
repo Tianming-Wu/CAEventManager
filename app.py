@@ -55,7 +55,7 @@ TPL_DIR = os.path.join(BASE_DIR, "tpl")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.7.0.5"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.7.0.7"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 
@@ -1250,6 +1250,9 @@ class Handler(BaseHTTPRequestHandler):
 
         if token_row is not None:
             _check_token_scope(path, method, token_row)
+        elif (self.headers.get("X-Via") or "").lower() == "assistant":
+            # 助手替这个人做的写操作，审计里要能看出来（读操作本来就不进审计）
+            panel.via("经助手")
 
         # A conflict is only ever about the object this write touches: a change
         # to the same thing that the client has not seen yet.  Everything else
@@ -1355,6 +1358,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True})
 
         if path == "/accounts" and method == "GET":
+            # 账号清单是超管才看得到的东西：普通管理员不该能枚举全站的人
+            need("superadmin", "owner")
             # an installation can hold a lot of accounts: one page at a time,
             # and the search runs on the server so paging stays honest
             q = (query.get("q") or [""])[0].strip()
@@ -2122,11 +2127,22 @@ class Handler(BaseHTTPRequestHandler):
                 result = assistant.run(conn, acc, client, full, messages)
             except Exception as exc:
                 raise model.ApiError("调用模型失败：%s" % str(exc)[:120], 502)
-            with panel.tx() as tx:
-                panel.audit(tx, acc["username"], "assistant_ask", None,
-                            "%d 次工具调用" % len(result.get("steps") or []))
+            # 这里**不写审计**：问一句不是一次操作，攒在审计里会把它淹掉。
+            # 助手真正改了东西时，那次写入自己会记一条，detail 里带「经助手」。
             return self._json({"ok": True, "reply": result["reply"],
                                "steps": result["steps"]})
+
+        if path == "/assistant/models" and method == "POST":
+            data = body()
+            cfg = assistant.config_of(acc)
+            base = (data.get("base") or cfg["base"] or "").strip()
+            key = (data.get("key") or "").strip() or (acc["model_key"] or "")
+            if not key:
+                raise model.ApiError("先填密钥，再拉模型列表")
+            items, err = assistant.fetch_models(base, key)
+            if err:
+                raise model.ApiError("拿不到模型列表：%s" % err, 502)
+            return self._json({"ok": True, "models": items})
 
         # ---- API 令牌：一人一张或多张，明文只在创建时出现一次 ----
         if path == "/tokens" and method == "GET":

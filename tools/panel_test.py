@@ -1335,6 +1335,21 @@ def main():
                     self.end_headers()
                     self.wfile.write(raw)
 
+                def do_GET(self):
+                    # GET /models：拉模型列表
+                    if not self.path.endswith("/models"):
+                        self.send_response(404)
+                        self.end_headers()
+                        return
+                    raw = json.dumps({"object": "list", "data": [
+                        {"id": "stub-flash", "name": "Stub Flash"},
+                        {"id": "stub-pro", "name": "Stub Pro"}]}).encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(raw)))
+                    self.end_headers()
+                    self.wfile.write(raw)
+
             self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
             self.port = self.server.server_address[1]
             threading.Thread(target=self.server.serve_forever, daemon=True).start()
@@ -1358,8 +1373,20 @@ def main():
                      {"base": stub.url(), "model": "stub-model", "key": "sk-test-123"})
         check("保存配置后进入就绪", saved and saved["config"]["ready"] is True, saved)
         check("接口不回传密钥", "sk-test-123" not in json.dumps(saved), saved["config"])
+        bare = post(owner, "/api/panel/assistant/config", {"base": "", "model": ""})
+        check("只填密钥也算配好：地址与模型有默认值",
+              bare and bare["config"]["ready"] is True
+              and bare["config"]["base"].startswith("https://"), bare)
+        check("默认模型是 deepseek-flash",
+              bare and bare["config"]["model"] == "deepseek-flash", bare["config"]["model"]
+              if bare else None)
         post(owner, "/api/panel/assistant/config", {"base": "ftp://nope"}, expect=400)
         check("接口地址必须是 http(s)", True)
+        post(owner, "/api/panel/assistant/config",
+             {"base": stub.url(), "model": "stub-model"})
+        models = post(owner, "/api/panel/assistant/models", {})
+        ids = [m["id"] for m in (models or {}).get("models") or []]
+        check("能从服务端拉到模型清单", ids == ["stub-flash", "stub-pro"], ids)
 
         answer = post(owner, "/api/panel/assistant/chat",
                       {"messages": [{"role": "user", "content": "我有哪些活动？"}]})
@@ -1394,6 +1421,10 @@ def main():
                           {"messages": [{"role": "user", "content": "服务器状态怎么样"}]})
         steps2 = {s["tool"]: s["ok"] for s in (server_ask or {}).get("steps") or []}
         check("也调不动服务器状态", steps2.get("host_stats") is False, steps2)
+
+        rows = json.dumps(call(owner, "/api/panel/audit?limit=60").get("audit") or [],
+                          ensure_ascii=False)
+        check("问一句不往审计里塞东西", "assistant_ask" not in rows, rows[:200])
     finally:
         stub.stop()
 

@@ -27,21 +27,27 @@ UA = "CAEventManager-assistant/1"
 # --------------------------------------------------------------------------- #
 # 模型配置（挂在账号上）
 # --------------------------------------------------------------------------- #
-DEFAULT_MODELS = (
-    ("deepseek-chat", "DeepSeek"),
-    ("qwen-plus", "通义千问"),
-    ("gpt-4o-mini", "OpenAI"),
-)
+# DeepSeek 的默认值：base 不带 /v1（带了也认），模型名以 GET /models 返回的为准，
+# 目前是 deepseek-flash 与 deepseek-v4-pro。旧的 deepseek-chat 已经下线。
+DEFAULT_BASE = "https://api.deepseek.com"
+DEFAULT_MODEL = "deepseek-flash"
 
 
 def config_of(acc):
     """What the panel may know about this account's model settings (never the key)."""
     row = acc if acc is not None else {}
-    base = (row["model_base"] or "").strip() if "model_base" in _keys(row) else ""
-    model = (row["model_name"] or "").strip() if "model_name" in _keys(row) else ""
+    stored_base = (row["model_base"] or "").strip() if "model_base" in _keys(row) else ""
+    stored_model = (row["model_name"] or "").strip() if "model_name" in _keys(row) else ""
     key = (row["model_key"] or "").strip() if "model_key" in _keys(row) else ""
-    return {"base": base, "model": model, "hasKey": bool(key),
-            "ready": bool(base and model and key)}
+    return {"base": stored_base or DEFAULT_BASE,
+            "model": stored_model or DEFAULT_MODEL,
+            "storedBase": stored_base,
+            "storedModel": stored_model,
+            "hasKey": bool(key),
+            # 接口地址与模型名都有默认值，所以只差一把密钥就算配好了
+            "ready": bool(key),
+            "defaultBase": DEFAULT_BASE,
+            "defaultModel": DEFAULT_MODEL}
 
 
 def _keys(row):
@@ -73,6 +79,41 @@ def save_config(conn, account_id, base, model, key, clear=False):
     return True
 
 
+def fetch_models(base, key):
+    """GET {base}/models：把可选的模型名列出来，省得手抄错。
+
+    OpenAI 兼容的服务都实现了这一条；有的要 /v1 前缀，两种都试一下。
+    """
+    roots = [(base or DEFAULT_BASE).rstrip("/")]
+    if not roots[0].endswith("/v1"):
+        roots.append(roots[0] + "/v1")
+    last = ""
+    for root in roots:
+        req = urllib.request.Request(
+            root + "/models", method="GET",
+            headers={"Authorization": "Bearer " + str(key or ""), "User-Agent": UA,
+                     "Accept": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=20) as res:
+                payload = json.loads(res.read().decode("utf-8") or "{}")
+        except urllib.error.HTTPError as exc:
+            last = "接口返回 %d" % exc.code
+            continue
+        except Exception as exc:
+            last = str(exc)[:120]
+            continue
+        items = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(items, list):
+            last = "返回里没有模型列表"
+            continue
+        out = []
+        for item in items:
+            if isinstance(item, dict) and item.get("id"):
+                out.append({"id": item["id"], "name": item.get("name") or ""})
+        return out, ""
+    return [], last or "拿不到模型列表"
+
+
 # --------------------------------------------------------------------------- #
 # 打到自己的面板接口上：权限与审计都是现成的
 # --------------------------------------------------------------------------- #
@@ -88,7 +129,9 @@ class PanelClient:
     def _request(self, method, path, body=None, marker=None):
         url = self.origin + self.prefix + path
         data = json.dumps(body).encode("utf-8") if body is not None else None
-        headers = {"User-Agent": UA, "Accept": "application/json"}
+        headers = {"User-Agent": UA, "Accept": "application/json",
+                   # 让服务端知道这次是助手替他做的：写操作会在审计里带上这一句
+                   "X-Via": "assistant"}
         use = marker if marker is not None else self.marker
         if use:
             headers["X-Requested-With"] = use

@@ -203,6 +203,16 @@ def shell_page(page):
     check("「服务已更新」的条默认不占地方",
           page.locator("#updateBar").count() == 1
           and not page.locator("#updateBar").is_visible())
+    print("== 总览的四张牌 ==")
+    page.goto(BASE + "/panel#/overview")
+    page.wait_for_timeout(700)
+    check("「我的名单」「我的报名」都在",
+          page.locator("#statRosters").count() == 1 and page.locator("#statSignups").count() == 1)
+    check("它们能点去各自的页面", page.evaluate(
+        """() => { const a = document.querySelector('.stat[href="#/rosters"]');
+                   const b = document.querySelector('.stat[href="#/signups"]');
+                   return !!a && !!b; }"""))
+    check("站长看得到账号总数", page.locator("#statAccountsBox").is_visible())
     check("版本号是四段", len(page.inner_text(".brand-ver").strip().lstrip("v").split(".")) == 4,
           page.inner_text(".brand-ver"))
 
@@ -690,8 +700,8 @@ def assistant_page(page):
     page.goto(BASE + "/panel#/assistant")
     page.wait_for_timeout(900)
     check("总览下面有这一页", page.locator('[data-page="assistant"]').is_visible())
-    check("没配模型时说清楚该去配什么",
-          "配置模型" in page.inner_text("#assistantSub"),
+    check("没配密钥时说清楚该去配什么",
+          "模型配置" in page.inner_text("#assistantSub"),
           page.inner_text("#assistantSub"))
     check("给了几个可以直接点的问法",
           page.locator(".assistant-ask").count() >= 3,
@@ -705,20 +715,33 @@ def assistant_page(page):
           and page.locator("#asKey").count() == 1)
     check("密钥框是密码型",
           page.get_attribute("#asKey", "type") == "password")
-    check("没配模型时按发送会提示，而不是发出去",
-          page.evaluate("() => { const b = document.getElementById('assistantSend');"
-                        " return !b.disabled; }"))
-    page.fill("#assistantText", "平台上现在有多少活动？")
-    page.evaluate("() => document.getElementById('assistantText')"
-                  ".dispatchEvent(new Event('input'))")
-    page.click("#assistantSend")
-    page.wait_for_timeout(600)
-    check("提示先配置模型",
-          page.locator(".toast").count() >= 1
-          and "配置模型" in page.inner_text(".toast-stack"),
-          page.inner_text(".toast-stack") if page.locator(".toast").count() else "")
-    check("对话里没有留下半条消息", page.evaluate(
-        "() => document.getElementById('assistantLog').children.length === 0"))
+    check("接口地址与模型已经填好默认值",
+          page.input_value("#asBase").startswith("http")
+          and page.input_value("#asModel") != "",
+          (page.input_value("#asBase"), page.input_value("#asModel")))
+    # 保存一把假密钥：之后框里应该是"假内容"，而且再保存不会把它清掉
+    page.fill("#asKey", "sk-not-a-real-key")
+    page.click("#asSave")
+    page.wait_for_timeout(700)
+    masked = page.evaluate("() => ({v: document.getElementById('asKey').value,"
+                           " t: document.getElementById('asKey').type})")
+    check("保存后框里是假内容，不是真密钥",
+          masked["v"] and "sk-not-a-real-key" not in masked["v"], masked)
+    check("假内容就是一串星号", set(masked["v"]) == {"•"}, masked["v"][:8])
+    page.click("#asSave")
+    page.wait_for_timeout(700)
+    still = page.evaluate("""() => ({hint: document.getElementById('assistantCfgHint').textContent,
+                                     sub: document.getElementById('assistantSub').textContent})""")
+    check("再保存一次不会把密钥清掉", "已配置" in still["hint"], still)
+    check("副标题改成「当前模型」", "当前模型" in still["sub"], still["sub"])
+    # 收拾干净：清掉密钥，别影响后面的用例
+    page.click("#asClearKey")
+    page.wait_for_timeout(500)
+    check("清除密钥之后又回到未配置",
+          "还没有密钥" in page.inner_text("#assistantCfgHint"),
+          page.inner_text("#assistantCfgHint"))
+    check("没配密钥时按发送只提示，不发请求", page.evaluate(
+        "() => !document.getElementById('assistantSend').disabled"))
     page.click("#assistantCfgBtn")
     page.wait_for_timeout(200)
 
@@ -1876,6 +1899,14 @@ def role_page(browser):
             if role == "admin":
                 check("admin sees no approvals group",
                       "approvals" not in nav["groups"], nav["groups"])
+                page.goto(BASE + "/panel#/overview")
+                page.wait_for_timeout(700)
+                check("普通管理员看不到账号总数",
+                      not page.locator("#statAccountsBox").is_visible())
+                check("也看不到待审核申请", not page.locator("#statPendingBox").is_visible())
+                check("但看得到自己的名单与报名",
+                      page.locator("#statRosters").is_visible()
+                      and page.locator("#statSignups").is_visible())
                 # 外部资源看得见，往里放东西是站长的事
                 page.goto(BASE + "/panel#/screens")
                 page.wait_for_timeout(600)

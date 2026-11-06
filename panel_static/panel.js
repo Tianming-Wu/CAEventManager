@@ -3841,7 +3841,7 @@
     } else {
       box.value = "";
       delete box.dataset.masked;
-      box.placeholder = "sk-…（只写不读）";
+      box.placeholder = "sk-…";
     }
   }
 
@@ -3916,7 +3916,7 @@
     if (sub) {
       sub.textContent = cfg.ready
         ? "当前模型：" + (cfg.model || "—")
-        : "还没有密钥：点输入框右侧的设置图标填一把，地址与模型有默认值";
+        : "还没有密钥：点右上角的设置图标填一把，地址与模型有默认值";
     }
     var asks = $("#assistantAsks");
     if (asks && !asks.children.length) {

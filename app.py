@@ -55,7 +55,7 @@ TPL_DIR = os.path.join(BASE_DIR, "tpl")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.7.0.14"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.7.0.15"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 
@@ -489,6 +489,23 @@ def write_target(path, data):
             return None
         return template % raw
     return None
+
+
+# CPU/内存的采样要读两次 /proc 并 sleep 0.12s：多个标签页各轮询一次就是白白干活。
+# 缓存三秒，同一次轮询的人共用一份读数。
+_HOST_CACHE = {"at": 0.0, "payload": None, "ttl": 3.0}
+
+
+def host_stats_cached(ttl=None):
+    """host_stats() with a few seconds of reuse; safe to call per request."""
+    now = time.time()
+    ttl = _HOST_CACHE["ttl"] if ttl is None else ttl
+    if _HOST_CACHE["payload"] is not None and now - _HOST_CACHE["at"] < ttl:
+        return _HOST_CACHE["payload"]
+    stats = host_stats()
+    _HOST_CACHE["payload"] = stats
+    _HOST_CACHE["at"] = now
+    return stats
 
 
 def _scope_of(revs, scope):
@@ -2087,7 +2104,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/host" and method == "GET":
             need("owner")
             # 设备占用只有 Linux 读得到；用户数是面板自己的账，哪里都算得出
-            return self._json({"ok": True, "host": host_stats(),
+            return self._json({"ok": True, "host": host_stats_cached(),
                                "users": panel.presence(conn)})
 
         # ---- 运维助手：模型配置与一次对话 ----

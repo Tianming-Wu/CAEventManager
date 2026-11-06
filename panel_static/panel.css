@@ -2571,6 +2571,9 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   flex-direction: column;
   min-height: 0;
 }
+/* 这一页是 flex 列：`margin-inline: auto` 会让子项收缩成内容宽度，
+   标题行与输入框就贴不到同一条右边界。显式拉满（再用 max-width 居中）。 */
+.assistant-page > * { align-self: stretch; width: 100%; }
 .assistant-shell {
   display: flex;
   flex-direction: column;

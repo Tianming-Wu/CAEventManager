@@ -301,6 +301,105 @@ def draw_batches():
             os.environ["LOTTERY_DATA_DIR"] = previous
 
 
+def screen_packs():
+    """上传的 zip 要先变成"路径 + 字节"才允许落盘，这里逐条试拒绝分支。"""
+    import io
+    import zipfile
+
+    import packs
+
+    root = tempfile.mkdtemp(prefix="packs-")
+
+    def make(entries):
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for name, data in entries:
+                zf.writestr(name, data)
+        return buf.getvalue()
+
+    good = [("screen.html", b"<html></html>"), ("pack.css", b"body{}"),
+            ("img/bg.png", b"\x89PNG\r\n\x1a\n")]
+    got = packs.install(make(good), "Hall Screen.zip", root=root)
+    check("一包装上后有自己的标识", got["id"] == "hall-screen", got)
+    check("入口页在包里", os.path.isfile(
+        os.path.join(root, "hall-screen", "screen.html")))
+    check("包内子目录保留", os.path.isfile(
+        os.path.join(root, "hall-screen", "img", "bg.png")))
+    again = packs.install(make(good), "Hall Screen.zip", root=root)
+    check("同名不覆盖，另起一个标识", again["id"] == "hall-screen-2", again)
+    check("清单里两项都在",
+          [p["id"] for p in packs.listing(root) if not p["builtin"]]
+          == ["hall-screen", "hall-screen-2"])
+    check("清单带上文件数与体积",
+          packs.listing(root)[0]["files"] == 3 and packs.listing(root)[0]["size"] > 0,
+          packs.listing(root)[0])
+
+    print("== 危险的条目一律丢弃 ==")
+    evil = make(good + [("../up.js", b"x"), ("/abs.js", b"x"), ("c/../../d.js", b"x"),
+                        ("ads.js:zone", b"x"), (".hidden.js", b"x"),
+                        ("note.txt", b"x"), ("deeper/page.html", b"x")])
+    files, skipped = packs.check_zip(evil)
+    check("只留下认得的三份",
+          sorted(files) == ["img/bg.png", "pack.css", "screen.html"], sorted(files))
+    check("其余七份被退回", len(skipped) == 7, skipped)
+
+    print("== 符号链接不收 ==")
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("screen.html", b"ok")
+        info = zipfile.ZipInfo("link.js")
+        info.external_attr = 0o120777 << 16
+        zf.writestr(info, b"/etc/passwd")
+    files, skipped = packs.check_zip(buf.getvalue())
+    check("链接被退回", "link.js" not in files and skipped == ["link.js"], skipped)
+
+    print("== 不合要求的包直接拒收 ==")
+
+    def refused(name, blob, word):
+        try:
+            packs.check_zip(blob)
+        except packs.PackError as exc:
+            check("%s（%s）" % (name, exc), word in str(exc), str(exc))
+            return
+        check(name, False, "没有报错")
+
+    refused("缺入口页", make([("pack.css", b"x")]), "screen.html")
+    refused("不是 zip", b"this is text", "zip")
+    refused("单文件超过上限",
+            make([("screen.html", b"ok" * (packs.FILE_MAX // 2 + 1))]), "单文件上限")
+    refused("压缩包本身超过上限",
+            make([("screen.html", os.urandom(packs.ZIP_MAX + 1024))]), "压缩包超过")
+    refused("文件数过多", make([("screen.html", b"ok")]
+                            + [("f%d.js" % i, b"x") for i in range(packs.COUNT_MAX)]),
+            "文件数")
+    refused("压缩比异常", make([("screen.html", b"ok"),
+                             ("bomb.js", b"\0" * 1024 * 1024)]), "压缩比")
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("screen.html", b"1")
+        zf.writestr("screen.html", b"2")
+    refused("重名文件", buf.getvalue(), "重名")
+
+    print("== 删除只对导入的那一份有效 ==")
+    check("删得掉自己导入的",
+          packs.remove("hall-screen-2", root=root)
+          and not os.path.isdir(os.path.join(root, "hall-screen-2")))
+    for bad, word in (("..", "不合法"), ("../etc", "不合法"),
+                      ("classic", "内置"), ("nope", "找不到")):
+        try:
+            packs.remove(bad, root=root)
+            check("不该删掉 %s" % bad, False)
+        except packs.PackError as exc:
+            check("拒绝删除 %s（%s）" % (bad, exc), word in str(exc), str(exc))
+
+    print("== 标识从文件名来 ==")
+    check("转成小写并去掉空格",
+          packs.slug("My Pack.v2.ZIP") == "my-pack.v2", packs.slug("My Pack.v2.ZIP"))
+    check("没有可用字符时留空",
+          packs.slug("拍照 大屏.zip") == "", packs.slug("拍照 大屏.zip"))
+
+
 def main():
     print("== host_stats reads a Linux /proc ==")
     # cpu lines: user nice system idle iowait irq softirq steal
@@ -350,6 +449,9 @@ def main():
 
     print("== draws made in one go ==")
     draw_batches()
+
+    print("== 展示屏幕的导入 ==")
+    screen_packs()
 
     print("== the panel's own helpers ==")
     check("view() maps the role label",

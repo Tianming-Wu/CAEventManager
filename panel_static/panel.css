@@ -2466,6 +2466,23 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
 .pack-card:disabled { cursor: default; }
 .pack-name { font-weight: 650; font-size: .92rem; }
 .pack-src { font-size: .76rem; color: var(--muted); }
+.pack-card .pack-del {
+  align-self: flex-start;
+  margin-top: 4px;
+  padding: 2px 10px;
+  font-size: .76rem;
+}
+.pack-rules {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pack-rules li { font-size: .84rem; color: var(--muted); line-height: 1.6; }
+/* 一条规则里混着中文和文件名/扩展名：让 code 整体换行，别把词掰断 */
+.pack-rules code { font-size: .95em; white-space: nowrap; }
+.pack-rules .nb { white-space: nowrap; }
 .pack-badge {
   align-self: flex-start;
   margin-top: 2px;

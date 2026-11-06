@@ -45,6 +45,7 @@ import presets
 import localconfig
 import lists
 import model
+import packs
 import panel
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -493,20 +494,15 @@ def _attachment_header(filename):
 
 def _screen_packs():
     """可用的展示屏幕包：实例目录优先，内置目录补充，同名以实例为准。"""
-    root = os.path.join(os.path.dirname(os.path.abspath(__file__)))
-    seen, out = set(), []
-    for base, builtin in ((os.path.join(root, "screen_packs"), False),
-                          (os.path.join(root, "builtin", "screen_packs"), True)):
-        if not os.path.isdir(base):
-            continue
-        for name in sorted(os.listdir(base)):
-            if name in seen or not os.path.isfile(
-                    os.path.join(base, name, "screen.html")):
-                continue
-            seen.add(name)
-            out.append({"id": name, "name": name, "builtin": builtin,
-                        "source": "内置" if builtin else "实例目录"})
-    return out
+    return packs.listing()
+
+
+# 外部资源是全平台共享的代码，只有这两个角色能往里放东西
+SCREEN_PACK_ROLES = ("owner", "superadmin")
+
+
+def _can_manage_packs(acc):
+    return bool(acc) and acc["role"] in SCREEN_PACK_ROLES
 
 
 def _account_label(conn, account_id):
@@ -1914,7 +1910,50 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/screen_packs" and method == "GET":
             # 只读的资源清单：这些是活动可以引用的外部资源，没有"平台默认值"
-            return self._json({"ok": True, "packs": _screen_packs()})
+            return self._json({"ok": True, "packs": _screen_packs(),
+                               "canManage": _can_manage_packs(acc),
+                               "limits": packs.limits()})
+
+        if path == "/screen_pack/upload" and method == "POST":
+            # 外部资源是全平台共享的代码，导入与删除只留给站长与超级管理员
+            need(*SCREEN_PACK_ROLES)
+            data = body()
+            raw = data.get("data") or ""
+            if not isinstance(raw, str):
+                raise model.ApiError("文件内容无法识别", 400)
+            if "," in raw and raw.strip().lower().startswith("data:"):
+                raw = raw.split(",", 1)[1]
+            try:
+                blob = base64.b64decode(raw, validate=True)
+            except Exception:
+                raise model.ApiError("文件内容无法识别", 400)
+            if len(blob) > packs.ZIP_MAX:
+                raise model.ApiError("压缩包超过 %s" % packs.size_text(packs.ZIP_MAX), 413)
+            try:
+                got = packs.install(blob, data.get("filename") or "")
+            except packs.PackError as exc:
+                raise model.ApiError(str(exc), 400)
+            with panel.tx() as tx:
+                panel.audit(tx, acc["username"], "screen_pack_add", got["id"],
+                            "%d 个文件，%s" % (got["files"], packs.size_text(got["size"])))
+            item = None
+            for row in _screen_packs():
+                if row["id"] == got["id"]:
+                    item = row
+            return self._json({"ok": True, "pack": item,
+                               "skipped": got["skipped"]})
+
+        if path == "/screen_pack/delete" and method == "POST":
+            need(*SCREEN_PACK_ROLES)
+            data = body()
+            pack_id = str(data.get("id") or "").strip()
+            try:
+                packs.remove(pack_id)
+            except packs.PackError as exc:
+                raise model.ApiError(str(exc), 400)
+            with panel.tx() as tx:
+                panel.audit(tx, acc["username"], "screen_pack_del", pack_id)
+            return self._json({"ok": True, "id": pack_id, "packs": _screen_packs()})
 
         if path == "/notices" and method == "GET":
             items = panel.notices_for(conn, acc)
@@ -2442,8 +2481,8 @@ class Handler(BaseHTTPRequestHandler):
         if ".." in tail or ".." in want:
             return self._err("bad path", 400)
         rel = tail or "screen.html"
-        roots = [os.path.join(TPL_DIR, "..", "screen_packs", want),
-                 os.path.join(TPL_DIR, "..", "builtin", "screen_packs", want)]
+        roots = [os.path.join(packs.INSTANCE, want),
+                 os.path.join(packs.BUILTIN, want)]
         for root in roots:
             full = os.path.join(root, rel)
             if os.path.isfile(full):
@@ -2457,8 +2496,7 @@ class Handler(BaseHTTPRequestHandler):
                     body = body.replace(b"{{VERSION}}", VERSION.encode("utf-8"))
                 return self._send(200, body, ctype, [("Cache-Control", "no-store")])
         # 包不见了：退回内置的 classic，别让现场黑屏
-        with open(os.path.join(TPL_DIR, "..", "builtin", "screen_packs", "classic",
-                               "screen.html"), "rb") as fh:
+        with open(os.path.join(packs.BUILTIN, "classic", "screen.html"), "rb") as fh:
             body = fh.read()
         body = body.replace(b"{{FOOTER}}", panel.FOOTER.encode("utf-8"))
         body = body.replace(b"{{VERSION}}", VERSION.encode("utf-8"))
@@ -2976,6 +3014,7 @@ class Handler(BaseHTTPRequestHandler):
                 "screen_show_wall": bool,
                 "prizes": list,
                 "event_timezone_offset": float,
+                "screen_pack": str,
             }
             updates = {}
             for key, typ in allowed.items():
@@ -3012,6 +3051,12 @@ class Handler(BaseHTTPRequestHandler):
                     raise model.ApiError(str(exc))
             if "beta" in updates and not (-0.0 <= updates["beta"] <= 5.0):
                 raise model.ApiError("beta 需在 0..5 之间")
+            if "screen_pack" in updates:
+                # 空表示这一项不引用外部资源，用活动自带的展示页
+                want = (updates["screen_pack"] or "").strip()
+                if want and want not in {p["id"] for p in _screen_packs()}:
+                    raise model.ApiError("没有这一份屏幕：%s" % want)
+                updates["screen_pack"] = want
             with db.tx(conn):
                 for key, val in updates.items():
                     db.set_config_raw(conn, key, val)

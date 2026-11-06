@@ -757,8 +757,14 @@
         <div class="card-head">
           <h2>可用的屏幕</h2>
           <span class="hint" id="screenPackHint"></span>
+          <button class="btn sm" id="screenPackAdd" type="button" hidden>导入</button>
         </div>
         <div id="screenPackList" class="pack-grid"></div>
+        <input type="file" id="screenPackFile" accept=".zip" hidden>
+      </div>
+      <div class="card" id="screenPackRules" hidden>
+        <div class="card-head"><h2>导入说明</h2></div>
+        <ul class="pack-rules" id="screenPackRulesList"></ul>
       </div>
       <div class="card">
         <div class="card-head"><h2>引用方式</h2></div>

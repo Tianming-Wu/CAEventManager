@@ -6,7 +6,9 @@
 
 The owner password is read from data/owner_password.txt when not given.
 """
+import base64
 import http.cookiejar
+import io
 import json
 import os
 import socket
@@ -14,6 +16,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+import zipfile
 
 BASE = (sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8931").rstrip("/")
 ROOT = BASE
@@ -1104,6 +1107,85 @@ def main():
     check("the binding can be cleared", state["roster"]["id"] == 0, state["roster"])
     post(owner, base + "/roster_sync", {}, expect=409, marker="lottery")
     check("syncing without a binding is refused", True)
+
+    print("== 展示屏幕：导入、引用、删除 ==")
+
+    def make_zip(entries):
+        """A zip of static files, base64 后的样子（和面板里发出去的一样）。"""
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for name, data in entries:
+                zf.writestr(name, data)
+        return base64.b64encode(buf.getvalue()).decode("ascii")
+
+    marker = "SCREEN-PACK-PROBE"
+    # plain 是一个已登录的普通管理员（上面 banning 一节留下的会话）：能看，不能导入
+    shelf = call(owner, "/api/panel/screen_packs")
+    check("内置的屏幕在清单里", "classic" in [p["id"] for p in shelf["packs"]], shelf)
+    check("站长能管理外部资源", shelf["canManage"] is True, shelf)
+    check("普通管理员只能看",
+          call(plain, "/api/panel/screen_packs")["canManage"] is False)
+
+    post(plain, "/api/panel/screen_pack/upload", {
+        "filename": "nope.zip", "data": make_zip([("screen.html", b"x")])
+    }, expect=403)
+    check("普通管理员传不上去", True)
+
+    good = make_zip([("screen.html",
+                      ("<html><body>" + marker + "</body></html>").encode()),
+                     ("pack.css", b"body{margin:0}")])
+    added = post(owner, "/api/panel/screen_pack/upload",
+                 {"filename": "Demo Screen.zip", "data": good})
+    pack_id = (added or {}).get("pack", {}).get("id")
+    check("导入后有自己的标识", pack_id == "demo-screen", added)
+    check("导入的项标为已导入",
+          bool(added) and added["pack"]["source"] == "已导入", added)
+    check("清单里能看到它",
+          pack_id in [p["id"] for p in call(owner, "/api/panel/screen_packs")["packs"]])
+
+    base = "/%s/api/admin" % events[0]["id"]
+    post(owner, base + "/settings", {"screen_pack": pack_id}, marker="lottery")
+    page = call(anon, "/%s/screen" % events[0]["id"])
+    check("活动引用后大屏换成这一份",
+          isinstance(page, bytes) and marker.encode() in page, (page or b"")[:80])
+    sheet = call(anon, "/%s/screen/pack.css" % events[0]["id"])
+    check("包内其它文件按 screen/ 取",
+          isinstance(sheet, bytes) and b"margin:0" in sheet, (sheet or b"")[:80])
+    post(owner, base + "/settings", {"screen_pack": ""}, marker="lottery")
+    page = call(anon, "/%s/screen" % events[0]["id"])
+    check("不引用时回到活动自带的展示页",
+          isinstance(page, bytes) and marker.encode() not in page
+          and "大屏".encode() in page, (page or b"")[:80])
+    post(owner, base + "/settings", {"screen_pack": "no-such-pack"}, expect=400,
+         marker="lottery")
+    check("不存在的那一份引用不了", True)
+
+    mixed = post(owner, "/api/panel/screen_pack/upload", {
+        "filename": "Mixed.zip",
+        "data": make_zip([("screen.html", b"<html></html>"),
+                          ("../escape.js", b"alert(1)"),
+                          ("notes.txt", b"hello")])})
+    check("不认得的条目被丢掉并回报",
+          bool(mixed) and len(mixed["skipped"]) == 2, mixed)
+    check("只写进了认得的文件", mixed["pack"]["files"] == 1, mixed["pack"])
+
+    post(owner, "/api/panel/screen_pack/upload", {
+        "filename": "NoPage.zip", "data": make_zip([("pack.css", b"x")])}, expect=400)
+    check("没有入口页的包拒收", True)
+    post(owner, "/api/panel/screen_pack/upload", {
+        "filename": "Broken.zip", "data": "bm90IGEgemlw"}, expect=400)
+    check("不是 zip 的内容拒收", True)
+
+    post(plain, "/api/panel/screen_pack/delete", {"id": pack_id}, expect=403)
+    check("普通管理员删不掉", True)
+    post(owner, "/api/panel/screen_pack/delete", {"id": "classic"}, expect=400)
+    check("内置的删不掉", True)
+    gone = post(owner, "/api/panel/screen_pack/delete", {"id": pack_id})
+    check("删掉导入的那一份", (gone or {}).get("ok") is True, gone)
+    check("删完清单里就没有了",
+          pack_id not in [p["id"] for p in call(owner, "/api/panel/screen_packs")["packs"]])
+    post(owner, "/api/panel/screen_pack/delete", {"id": "mixed"})
+    check("测试导入的第二份也清掉了", True)
 
     print("== event pages still reachable ==")
     token = events[0]["id"]

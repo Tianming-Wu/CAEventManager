@@ -717,6 +717,19 @@ def group_page(page):
                  .classList.contains('has-current')"""))
 
 
+def write_pack_zip(path):
+    """一份最小的屏幕包：入口页 + 一张样式表。"""
+    import io
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("screen.html", "<html><body>ui probe</body></html>")
+        zf.writestr("pack.css", "body{margin:0}")
+    with open(path, "wb") as fh:
+        fh.write(buf.getvalue())
+
+
 def screens_page(page):
     print("== 展示屏幕 ==")
     page.goto(BASE + "/panel#/screens")
@@ -724,11 +737,46 @@ def screens_page(page):
     check("the page lists the built-in pack",
           page.locator('.pack-card').count() >= 1,
           page.locator('.pack-card').count())
-    check("it names the file each one is referenced by",
-          "screen_pack" in page.inner_text("#screenPackList"),
+    check("内置的那一份标着来源",
+          "内置" in page.inner_text("#screenPackList"),
           page.inner_text("#screenPackList"))
-    check("there is no platform-wide default to switch",
-          page.locator(".pack-card button, .pack-card[data-pack]").count() == 0)
+    check("内置的那一份删不掉",
+          page.locator('.pack-card [data-pack-del="classic"]').count() == 0)
+    check("站长看得到导入入口", page.locator("#screenPackAdd").is_visible())
+    check("导入说明写出接受的文件类型",
+          ".css" in page.inner_text("#screenPackRulesList"),
+          page.inner_text("#screenPackRulesList"))
+    check("导入说明写出入口页",
+          "screen.html" in page.inner_text("#screenPackRulesList"))
+
+    probe = os.path.abspath(os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "..", "tmp", "pack-probe.zip"))
+    os.makedirs(os.path.dirname(probe), exist_ok=True)
+    write_pack_zip(probe)
+    page.set_input_files("#screenPackFile", probe)
+    page.wait_for_function(
+        """() => (document.getElementById('screenPackList').textContent || '')
+                 .indexOf('pack-probe') >= 0""", timeout=20000)
+    page.wait_for_timeout(200)
+    check("导入的包出现在清单里",
+          "pack-probe" in page.inner_text("#screenPackList"))
+    check("导入的那一份标为已导入",
+          "已导入" in page.inner_text("#screenPackList"))
+    check("导入的那一份可以删除",
+          page.locator('[data-pack-del="pack-probe"]').count() == 1)
+
+    page.click('[data-pack-del="pack-probe"]')
+    page.wait_for_timeout(300)
+    check("删除前先确认", page.locator("#overlay").is_visible())
+    check("确认框说明了影响",
+          "自带的展示页" in page.inner_text("#overlayBody"),
+          page.inner_text("#overlayBody"))
+    page.click("#packDelGo")
+    page.wait_for_function(
+        """() => (document.getElementById('screenPackList').textContent || '')
+                 .indexOf('pack-probe') < 0""", timeout=20000)
+    check("删掉后从清单里消失",
+          "pack-probe" not in page.inner_text("#screenPackList"))
 
 
 def nav_keys_page(page):
@@ -1513,6 +1561,8 @@ def touch_page(browser):
 def role_page(browser):
     print("== role matrix ==")
     owner = owner_opener()
+    # 改角色需要 sudo：这一节直接调接口，先把会话提上去
+    call(owner, "/api/panel/sudo", {"password": PASSWORD})
     made = {}
     for name, role in (("admin", "admin"), ("super", "superadmin")):
         user = "%s%s" % (name, TAG)
@@ -1553,6 +1603,17 @@ def role_page(browser):
             if role == "admin":
                 check("admin sees no approvals group",
                       "approvals" not in nav["groups"], nav["groups"])
+                # 外部资源看得见，往里放东西是站长的事
+                page.goto(BASE + "/panel#/screens")
+                page.wait_for_timeout(600)
+                check("admin can open 外部资源",
+                      page.locator('[data-page="screens"]').is_visible())
+                check("admin gets no import button",
+                      not page.locator("#screenPackAdd").is_visible())
+                check("admin is not offered the import rules",
+                      not page.locator("#screenPackRules").is_visible())
+                check("admin sees no delete button",
+                      page.locator(".pack-card [data-pack-del]").count() == 0)
             if role == "superadmin":
                 check("superadmin sees no device stats",
                       not page.locator("#hostStats").is_visible())

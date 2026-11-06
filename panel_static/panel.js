@@ -87,6 +87,8 @@
     history: [],            // 表单快照栈：Ctrl+Z / Ctrl+Shift+Z
     historyPos: -1,
     screenPacks: [],
+    packManage: false,     // 站长/超级管理员才能导入与删除
+    packLimits: null,      // 导入的限制，由服务端给出
     notices: [],
     noticeUnread: 0,
     alertOpen: false,
@@ -1275,23 +1277,110 @@
   /* ------------------------------------------------------------------ 屏幕包 --- */
   function loadScreenPacks() {
     return PX.api("/screen_packs")
-      .then(function (d) { S.screenPacks = d.packs || []; })
+      .then(function (d) {
+        S.screenPacks = d.packs || [];
+        S.packManage = !!d.canManage;
+        S.packLimits = d.limits || null;
+      })
       .catch(function (e) { PX.toast(PX.esc(e.message), true); });
+  }
+
+  function packStamp(ts) {
+    if (!ts) return "";
+    var d = new Date(ts * 1000);
+    return d.getFullYear() + "-" + PX.pad(d.getMonth() + 1) + "-" + PX.pad(d.getDate());
+  }
+
+  // 导入的限制全部来自服务端（packs.py 里的静态配置），这里只负责摆放
+  function drawScreenRules() {
+    var card = $("#screenPackRules");
+    var box = $("#screenPackRulesList");
+    if (!card || !box) return;
+    card.hidden = !S.packManage;
+    if (!S.packManage) return;
+    var l = S.packLimits || {};
+    var ext = (l.ext || []).map(function (e) {
+      return "<code>" + PX.esc(e) + "</code>";
+    }).join(" ");
+    function nb(text) {
+      return '<span class="nb">' + PX.esc(text) + "</span>";
+    }
+    var rules = [
+      "压缩包内需有 <code>" + PX.esc(l.page || "screen.html") + "</code> 作为入口页；" +
+        "包内其它文件按 <code>screen/&lt;文件名&gt;</code> 相对引用。",
+      "接受的文件类型：" + ext + "；其余文件会被丢弃。",
+      "压缩包不超过 " + nb(l.zipText || "") + "；解开后单个文件不超过 " +
+        nb(l.fileText || "") + "，总量不超过 " + nb(l.totalText || "") +
+        "，最多 " + Number(l.countMax || 0) + " 个文件。",
+      "标识取自文件名（小写）；与已有标识重复时自动追加序号，不会覆盖已有屏幕。",
+      "删除后，仍引用该项的活动会回到自带的展示页。"
+    ];
+    box.innerHTML = rules.map(function (t) { return "<li>" + t + "</li>"; }).join("");
   }
 
   function drawScreens() {
     var box = $("#screenPackList");
     if (!box) return;
     var hint = $("#screenPackHint");
+    var add = $("#screenPackAdd");
     var packs = S.screenPacks || [];
+    if (add) add.hidden = !S.packManage;
     if (hint) hint.textContent = packs.length ? "共 " + packs.length + " 项" : "";
     box.innerHTML = packs.length ? packs.map(function (pk) {
+      var meta = (pk.files || 0) + " 个文件";
+      if (pk.sizeText) meta += " · " + pk.sizeText;
+      if (pk.at) meta += " · " + packStamp(pk.at);
       return '<div class="pack-card" role="listitem">' +
-        '<span class="pack-name">' + PX.esc(pk.id) + "</span>" +
-        '<span class="pack-src">' + PX.esc(pk.source) + "</span>" +
-        '<span class="pack-src mono">screen_pack: ' + PX.esc(pk.id) + "</span>" +
+        '<span class="pack-name mono">' + PX.esc(pk.id) + "</span>" +
+        '<span class="pack-src">' + PX.esc(pk.source) + " · " + PX.esc(meta) + "</span>" +
+        (S.packManage && !pk.builtin
+          ? '<button class="btn sm pack-del" type="button" data-pack-del="' +
+            PX.esc(pk.id) + '">删除</button>'
+          : "") +
         "</div>";
     }).join("") : '<p class="hint">暂无可用屏幕</p>';
+    drawScreenRules();
+  }
+
+  function uploadScreenPack(file) {
+    if (!file) return;
+    var l = S.packLimits || {};
+    if (l.zipMax && file.size > l.zipMax) {
+      PX.toast("压缩包超过 " + PX.esc(l.zipText || "上限"), true);
+      return;
+    }
+    var reader = new FileReader();
+    reader.onload = function () {
+      PX.api("/screen_pack/upload", {
+        method: "POST",
+        body: { filename: file.name, data: String(reader.result || "") }
+      }).then(function (d) {
+        var dropped = (d.skipped || []).length;
+        PX.toast("已导入：" + PX.esc(d.pack ? d.pack.id : "") +
+                 (dropped ? "（" + dropped + " 个文件未接受）" : ""));
+        return loadScreenPacks().then(drawScreens);
+      }).catch(function (e) { PX.toast(PX.esc(e.message), true); });
+    };
+    reader.onerror = function () { PX.toast("无法读取该文件", true); };
+    reader.readAsDataURL(file);
+  }
+
+  function deleteScreenPack(id) {
+    openOverlay("pack-del", "删除屏幕",
+      '<p class="page-sub">删除后，仍引用这项的活动会回到自带的展示页。</p>' +
+      '<p class="page-sub"><b>' + PX.esc(id) + "</b></p>" +
+      '<div class="row" style="margin-top:18px;justify-content:flex-end">' +
+      '<button class="btn" type="button" data-close-overlay="1">取消</button>' +
+      '<button class="btn danger" type="button" id="packDelGo">删除</button></div>');
+    $("#packDelGo").addEventListener("click", function () {
+      closeOverlay();
+      PX.api("/screen_pack/delete", { method: "POST", body: { id: id } })
+        .then(function () {
+          PX.toast("已删除");
+          return loadScreenPacks().then(drawScreens);
+        })
+        .catch(function (e) { PX.toast(PX.esc(e.message), true); });
+    });
   }
 
   /* ------------------------------------------------------------------ 报名 --- */
@@ -3888,6 +3977,18 @@
   $("#archivedMore").addEventListener("click", function () { loadArchived(false); });
   $("#presetImportBtn").addEventListener("click", function () {
     $("#presetImportFile").click();
+  });
+  $("#screenPackAdd").addEventListener("click", function () {
+    $("#screenPackFile").click();
+  });
+  $("#screenPackFile").addEventListener("change", function (e) {
+    var file = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (file) uploadScreenPack(file);
+  });
+  $("#screenPackList").addEventListener("click", function (e) {
+    var btn = e.target.closest("[data-pack-del]");
+    if (btn) deleteScreenPack(btn.getAttribute("data-pack-del"));
   });
   $("#presetImportFile").addEventListener("change", function (e) {
     var file = e.target.files && e.target.files[0];

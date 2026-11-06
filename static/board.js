@@ -103,7 +103,13 @@
         if (tag) etag = tag;
         return r.json();
       })
-      .then(function (d) { if (d) { data = d; render(); } })
+      .then(function (d) {
+        if (!d) return;
+        data = d;
+        render();
+        // 服务端换了版本：公示页没有要保住的东西，直接换成新的
+        LT.version(d.version);
+      })
       .catch(function () {});
   }
 

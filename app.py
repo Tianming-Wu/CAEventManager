@@ -51,7 +51,9 @@ import panel
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TPL_DIR = os.path.join(BASE_DIR, "tpl")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
-VERSION = "1.4.0"
+# 四段：主.次.修.构。每次上线都要动，至少动「修」或「构」——见 tools/bump_version.py
+# （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.5.0.1"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 
@@ -607,8 +609,12 @@ class Handler(BaseHTTPRequestHandler):
                 bus.bump(self._scope)
             if getattr(self, "_target", None):
                 bus.bump(self._target)
-        if isinstance(obj, dict) and "revs" not in obj:
-            obj = dict(obj, revs=bus.snapshot())
+        if isinstance(obj, dict):
+            # 每个回答都带上版本：页面据此发现自己跑的是重新部署前的脚本
+            if "version" not in obj:
+                obj = dict(obj, version=VERSION)
+            if "revs" not in obj:
+                obj = dict(obj, revs=bus.snapshot())
         self._send(status, json.dumps(obj, ensure_ascii=False, default=str), headers=headers)
 
     def _err(self, msg, status=400):
@@ -624,6 +630,9 @@ class Handler(BaseHTTPRequestHandler):
         """
         if "revs" not in obj:
             obj = dict(obj, revs=bus.snapshot())
+        if "version" not in obj:
+            # 带上版本：部署换了脚本，ETag 也跟着变，投影页会拿到新的一份并自行刷新
+            obj = dict(obj, version=VERSION)
         stable = {k: v for k, v in obj.items() if k != "serverTime"}
         stamp = json.dumps(stable, ensure_ascii=False, sort_keys=True, default=str)
         etag = '"%s"' % hashlib.sha1(stamp.encode("utf-8")).hexdigest()[:16]
@@ -685,7 +694,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             seen = bus.snapshot()
             sent = _scope_of(seen, scope)
-            self._sse({"revs": sent})
+            self._sse({"revs": sent, "version": VERSION})
             self.wfile.flush()
             while True:
                 revs = bus.wait_for_change(seen, timeout=25.0)
@@ -698,7 +707,7 @@ class Handler(BaseHTTPRequestHandler):
                 if mine == sent:
                     continue  # somebody else's activity moved
                 sent = mine
-                self._sse({"revs": mine})
+                self._sse({"revs": mine, "version": VERSION})
                 self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError, OSError):
             pass

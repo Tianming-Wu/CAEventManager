@@ -281,7 +281,13 @@
         if (tag) etag = tag;
         return r.json();
       })
-      .then(function (d) { if (d) { data = d; render(); } })
+      .then(function (d) {
+        if (!d) return;
+        data = d;
+        render();
+        // 服务端换了版本：抽奖动画中间不能换页面，等这一段放完再说
+        LT.version(d.version);
+      })
       .catch(function () {});
   }
 
@@ -309,6 +315,19 @@
     document.addEventListener("visibilitychange", function () {
       if (!document.hidden) load();
     });
+    // 部署换了版本：抽奖动画正在播就先记着，放完再换页面
+    var staleVersion = "";
+    var swapWhenIdle = function () {
+      if (!staleVersion) return;
+      if ($("#overlay").classList.contains("show")) return;
+      location.reload();
+    };
+    LT.outdated(function (version) {
+      staleVersion = version;
+      swapWhenIdle();
+      return true;      // 由这一页自己决定什么时候换
+    });
+    setInterval(swapWhenIdle, 1500);
     load();
     var ticks = 0;
     setInterval(function () {

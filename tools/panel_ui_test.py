@@ -200,6 +200,11 @@ def shell_page(page):
     }""")
     check("the avatar is a picture or one letter",
           avatar == "picture" or len(avatar) == 1, avatar)
+    check("「服务已更新」的条默认不占地方",
+          page.locator("#updateBar").count() == 1
+          and not page.locator("#updateBar").is_visible())
+    check("版本号是四段", len(page.inner_text(".brand-ver").strip().lstrip("v").split(".")) == 4,
+          page.inner_text(".brand-ver"))
 
     print("== the title bar keeps its right side free ==")
     bar = page.evaluate("""() => {
@@ -1589,6 +1594,16 @@ def touch_page(browser):
         }""")
         check("收起的分组高度为零，子项不外露",
               closed["h"] <= 1 and closed["top"] >= closed["boxTop"] + closed["h"] - 1, closed)
+        # 抽屉里内容比可视高度长，1px 的分隔线会被 flex 压没：每条都必须真的画出来
+        seps = page.evaluate("""() => [...document.querySelectorAll('#sidebar .nav-sep')]
+            .filter(s => !s.hidden)
+            .map(s => { const r = s.getBoundingClientRect();
+                        return {h: Math.round(r.height), w: Math.round(r.width),
+                                bg: getComputedStyle(s).backgroundColor}; })""")
+        check("分隔线没有一条被压成零高",
+              seps and all(s["h"] >= 1 and s["w"] > 10 for s in seps), seps)
+        check("分隔线都不是透明的",
+              all("rgba(0, 0, 0, 0)" not in s["bg"] for s in seps), seps)
     finally:
         ctx.close()
 
@@ -1616,6 +1631,22 @@ def touch_page(browser):
         check("操作列贴在右边，按钮不用滑就够得着",
               info["actRight"] <= info["wrapRight"] + 1
               and info["actRight"] >= info["wrapRight"] - 40, info)
+        page.goto(BASE + "/panel#/rosters")
+        page.wait_for_timeout(900)
+        narrow = page.evaluate("""() => {
+            const t = document.getElementById('rosterTable');
+            if (!t) return null;
+            const wrap = t.closest('.tblwrap');
+            const first = t.querySelector('tbody td');
+            return {wrapW: wrap.clientWidth, wrapSW: wrap.scrollWidth,
+                    firstW: first ? Math.round(first.getBoundingClientRect().width) : 0};
+        }""")
+        # 要么放得下，要么真的能滑出一段；只多出几个像素的"假滚动条"是这次的毛病
+        check("名单列表要么放得下，要么真的能滑",
+              narrow is None or narrow["wrapSW"] <= narrow["wrapW"] + 1
+              or narrow["wrapSW"] - narrow["wrapW"] >= 24, narrow)
+        check("首列没有宽到把后面几列全挡住",
+              narrow is None or narrow["firstW"] < narrow["wrapW"] * 0.7, narrow)
         page.goto(BASE + "/panel#/all-events")
         page.wait_for_timeout(900)
         btn = page.evaluate("""() => {

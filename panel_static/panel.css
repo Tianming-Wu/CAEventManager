@@ -230,8 +230,9 @@ svg {
   margin-top: 8px;
   border-top: 1px solid var(--line-soft);
 }
-.nav-sep { height: 1px; background: var(--line-soft); margin: 8px 10px; }
-.nav-foot-sep { height: 1px; background: var(--line-soft); margin: 8px 10px 10px; }
+/* 侧栏是一列 flex：内容比抽屉高时，1px 的分隔线会被压成 0（其它项有最小高度撑着） */
+.nav-sep { height: 1px; flex: none; background: var(--line-soft); margin: 8px 10px; }
+.nav-foot-sep { height: 1px; flex: none; background: var(--line-soft); margin: 8px 10px 10px; }
 
 /* round avatar, used by the sidebar card and the profile editor */
 .avatar {
@@ -2046,15 +2047,24 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
 
   /* ---------- 手机上的表格 ----------
      竖屏放不下五六列：与其把每列压成省略号，不如让表格横向滚动。
-     首列与操作列留在原地，中间几列用手指滑出来——常用的按钮不用滑就够得着。 */
+     列宽交回内容决定（fixed 布局只在桌面用），所以只在该滚的时候才滚——
+     写死 min-width 会给出一种"有条滚动条，但推不动多少东西"的假滚动。
+     首列与操作列各自贴边，常用的按钮不用滑动就够得着。 */
   .tblwrap { overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; }
-  table.tbl { min-width: 640px; }
+  table.tbl.fixed { table-layout: auto; }
+  table.tbl.fixed th,
+  table.tbl.fixed td { overflow: visible; text-overflow: clip; }
   table.tbl.fixed th:first-child,
   table.tbl.fixed td:first-child {
     position: sticky;
     left: 0;
     z-index: 2;
     background: var(--surface);
+    /* 贴边的首列要比屏幕窄：宽过屏幕后，后面的列就再也滑不出来了。
+       也不能窄到把名字挤成一列竖条，所以给一个下限、允许换行。 */
+    min-width: 45vw;
+    max-width: 60vw;
+    white-space: normal;
   }
   table.tbl.fixed th.actions,
   table.tbl.fixed td.actions {
@@ -2506,6 +2516,27 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   color: var(--danger);
   font-size: .74rem;
 }
+
+/* ---------- 服务已更新 ---------- */
+/* 重新部署后旧页面还在跑旧脚本：能立刻刷就自己刷，正在填东西就在这里说一声 */
+.update-bar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 1120px;
+  margin: 0 auto 14px;
+  padding: 8px 12px;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-size: .84rem;
+}
+.update-bar .update-text { flex: 1 1 auto; }
+.update-bar .btn { flex: none; }
 
 /* ---------- 屏幕包 ---------- */
 .pack-grid { display: flex; flex-wrap: wrap; gap: 12px; }

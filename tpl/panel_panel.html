@@ -249,6 +249,12 @@
   <!-- ------------------------------------------------------------- content -->
   <main class="content" id="content">
 
+    <!-- 服务端换了版本（重新部署）：能刷新就自己刷新，否则在这里说一声 -->
+    <div class="update-bar" id="updateBar" role="status" hidden>
+      <span class="update-text" id="updateText"></span>
+      <button class="btn sm primary" id="updateGo" type="button">刷新</button>
+    </div>
+
     <!-- ========================================================== 总览 -->
     <section class="page" data-page="overview" hidden>
       <header class="page-head">

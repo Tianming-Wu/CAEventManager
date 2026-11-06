@@ -90,6 +90,8 @@
     packManage: false,     // 站长/超级管理员才能导入与删除
     packLimits: null,      // 导入的限制，由服务端给出
     users: null,           // 在线/注册，随 /host 一起回来
+    updateTo: "",          // 服务端换了版本，等一个能安全刷新的时机
+    typed: false,          // 这一页里敲过字：别在人家填表的时候刷新页面
     notices: [],
     noticeUnread: 0,
     alertOpen: false,
@@ -2332,6 +2334,7 @@
       return;
     }
     S.route = wanted;
+    S.typed = false;         // 换了一页，"这一页敲过字"重新算
     // 返回键属于"这一页有没有上一级"：先定下来，动画与渲染都靠它
     var parent = routeParent(wanted);
     S.explicitBack = hashQuery().back || null;
@@ -4495,8 +4498,53 @@
     else if (mq.addListener) mq.addListener(onScheme);
   }
 
+  /* 重新部署之后，这个页面上的脚本已经是旧的了。能自己换掉就换，不能就先说一声：
+     这一页里已经敲过字（表单、搜索框都算）、或者开着弹窗，都算“不能说走就走”。 */
+  function canSwapNow() {
+    if (S.typed || S.signupDirty || S.dirty) return false;
+    var overlay = $("#overlay");
+    if (overlay && !overlay.hidden) return false;
+    return true;
+  }
+
+  function showUpdateBar(version) {
+    var bar = $("#updateBar");
+    var text = $("#updateText");
+    if (!bar || !text) return;
+    text.textContent = "服务已更新到 v" + version + "，刷新后使用新版本";
+    bar.hidden = false;
+  }
+
+  function serverUpdated(version) {
+    if (S.updateTo === version) return;
+    S.updateTo = version;
+    if (canSwapNow()) {
+      location.reload();
+      return;
+    }
+    showUpdateBar(version);
+  }
+
+  function bindUpdateBar() {
+    var go = $("#updateGo");
+    if (go) {
+      go.addEventListener("click", function () {
+        S.signupDirty = false;
+        S.dirty = false;
+        S.typed = false;
+        location.reload();
+      });
+    }
+    // 只要人真的在什么地方敲了字，就别在他打字的时候把页面换掉
+    document.addEventListener("input", function (e) {
+      if (e.isTrusted) S.typed = true;
+    }, true);
+    PX.onUpdate(serverUpdated);
+  }
+
   /* ------------------------------------------------------------------- boot */
   function boot() {
+    bindUpdateBar();
     PX.api("/me").then(function (d) {
       if (!d.authed) {
         location.href = "login";

@@ -17,6 +17,24 @@
   var revs = {};
   var watchers = [];
 
+  /* 服务端版本：重新部署之后，这台机器上的页面还在跑旧脚本。
+     第一次收到只记下来，之后变了才换页面；投影页正在抽奖时由页面自己延后。 */
+  var bootVersion = "";
+  var outdatedHandler = null;
+
+  function version(v) {
+    if (!v) return;
+    if (!bootVersion) { bootVersion = v; return; }
+    if (bootVersion === v) return;
+    bootVersion = v;
+    if (outdatedHandler) {
+      try { if (outdatedHandler(v) === true) return; } catch (e) { /* 退回默认 */ }
+    }
+    location.reload();
+  }
+
+  function outdated(fn) { outdatedHandler = fn; }
+
   // The activity's own address has the panel one level above it.  The console
   // has no login of its own any more: it sends people to the panel and comes
   // back here, which is what makes one account work on both surfaces.
@@ -47,6 +65,7 @@
         var data = null;
         try { data = text ? JSON.parse(text) : {}; } catch (e) { data = { ok: false, error: text || "响应无法解析" }; }
         if (data && data.revs) revs = data.revs;
+        if (data && data.version) version(data.version);
         if (!res.ok || data.ok === false) {
           var err = new Error(data && data.error ? data.error : "HTTP " + res.status);
           err.status = res.status;
@@ -213,6 +232,7 @@
         var data;
         try { data = JSON.parse(event.data); } catch (e) { return; }
         if (!data || !data.revs) return;
+        if (data.version) version(data.version);
         var before = revs;
         revs = data.revs;
         watchers.forEach(function (fn) {
@@ -242,6 +262,8 @@
   window.LT = {
     PREFIX: PREFIX,
     watch: watch,
+    version: version,
+    outdated: outdated,
     revs: function () { return revs; },
     conflictMsg: conflictMsg,
     PANEL: PANEL,

@@ -14,6 +14,24 @@
   var revs = {};
   var watchers = [];
 
+  /* 服务端版本：重新部署之后，页面上的脚本还是旧的。
+     第一次收到版本号只记下来，之后变了才算“换过版本”，交给页面自己决定怎么换。 */
+  var bootVersion = "";
+  var updateHandler = null;
+
+  function noteVersion(version) {
+    if (!version) return;
+    if (!bootVersion) { bootVersion = version; return; }
+    if (bootVersion === version) return;
+    bootVersion = version;
+    if (updateHandler) {
+      try { updateHandler(version); return; } catch (e) { /* 交给默认处理 */ }
+    }
+    document.dispatchEvent(new CustomEvent("px:server-updated", { detail: version }));
+  }
+
+  function onUpdate(fn) { updateHandler = fn; }
+
   function api(path, options) {
     options = options || {};
     var headers = { "X-Requested-With": "CAEventManager" };
@@ -37,6 +55,7 @@
           data = { ok: false, error: text || "响应无法解析" };
         }
         if (data && data.revs) revs = data.revs;
+        if (data && data.version) noteVersion(data.version);
         if (!res.ok || data.ok === false) {
           var err = new Error((data && data.error) || ("HTTP " + res.status));
           err.status = res.status;
@@ -132,6 +151,7 @@
         var data;
         try { data = JSON.parse(event.data); } catch (e) { return; }
         if (!data || !data.revs) return;
+        if (data.version) noteVersion(data.version);
         var before = revs;
         revs = data.revs;
         watchers.forEach(function (fn) {
@@ -206,6 +226,8 @@
     whenExact: whenExact,
     guardAutofill: guardAutofill,
     pad: pad,
-    toast: toast
+    toast: toast,
+    onUpdate: onUpdate,
+    version: function () { return bootVersion; }
   };
 })();

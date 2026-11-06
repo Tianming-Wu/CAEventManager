@@ -2012,6 +2012,9 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
 
 /* ---------- drawer: the sidebar leaves the flow on a phone ---------- */
 @media (max-width: 760px) {
+  /* 手机上输入框一开始就是两行，全屏编辑就在框内右上角 */
+  .as-expand { display: grid; }
+  .as-composer { padding-top: 10px; }
   .shell {
     grid-template-columns: minmax(0, 1fr);
     grid-template-areas:
@@ -2546,12 +2549,13 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
 }
 
 /* ---------- 运维助手 ---------- */
-/* 整页撑满可视区：对话在中间滚，输入框永远贴在页面底部 */
+/* 这一页不滚整页：标题与输入框都固定，只有中间的对话滚 */
+.content.is-chat { overflow: hidden; display: flex; flex-direction: column; }
+.content.is-chat > .page { flex: 1 1 auto; min-height: 0; }
 .assistant-page {
   display: flex;
   flex-direction: column;
-  /* 撑满可视区：对话在中间滚，输入框贴着页面底部（这一页不显示页脚） */
-  min-height: calc(100dvh - var(--titlebar) - 16px);
+  min-height: 0;
 }
 .assistant-shell {
   display: flex;
@@ -2565,7 +2569,7 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   flex-direction: column;
   gap: 12px;
   flex: 1 1 auto;
-  min-height: 160px;
+  min-height: 0;
   overflow-y: auto;
   padding: 2px 2px 4px;
 }
@@ -2669,7 +2673,7 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   background: var(--surface);
   box-shadow: 0 6px 20px rgba(0, 0, 0, .06);
 }
-.as-composer:focus-within { border-color: var(--accent-line); }
+.as-composer:focus-within { border-color: var(--line); }
 .as-composer textarea {
   flex: 1 1 auto;
   min-width: 0;
@@ -2684,25 +2688,27 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   line-height: 24px;
   resize: none;
   overflow-y: hidden;
+  outline: none;
 }
-.as-composer textarea:focus { outline: none; }
+.as-composer textarea:focus,
+.as-composer textarea:focus-visible { outline: none; box-shadow: none; }
 .as-expand {
+  display: none;             /* 桌面上一行就够，不给按钮；手机上才出现 */
   position: absolute;
-  top: -11px;
+  top: 6px;
   right: 8px;
   appearance: none;
   width: 22px;
   height: 22px;
-  display: grid;
   place-items: center;
   padding: 0;
-  border: 1px solid var(--line);
+  border: 0;
   border-radius: 6px;
-  background: var(--surface);
-  color: var(--muted);
+  background: transparent;
+  color: var(--dim);
   cursor: pointer;
 }
-.as-expand:hover { color: var(--text); border-color: var(--accent-line); }
+.as-expand:hover { color: var(--text); background: var(--surface-2); }
 .as-expand svg { width: 12px; height: 12px; }
 .as-tools { display: flex; align-items: center; gap: 4px; flex: none; }
 .as-icon {
@@ -2735,8 +2741,8 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
 .as-send:hover:not(:disabled) { background: var(--accent-strong); }
 .as-send:disabled { opacity: .5; cursor: default; }
 .as-send svg {
-  width: 17px;
-  height: 17px;
+  width: 19px;
+  height: 19px;
   fill: none;
   stroke: currentColor;
   stroke-width: 2;
@@ -2748,6 +2754,32 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
 .as-send.is-running .as-ic-stop { display: block; }
 .as-expand svg, .as-icon svg { fill: none; stroke: currentColor; stroke-width: 1.6;
   stroke-linecap: round; stroke-linejoin: round; }
+
+.as-models {
+  margin: 6px 0 0;
+  max-height: 168px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+.as-models button {
+  appearance: none;
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--line-soft);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: .86rem;
+  cursor: pointer;
+}
+.as-models button:last-child { border-bottom: 0; }
+.as-models button:hover { background: var(--surface-2); }
+.as-models span { display: block; color: var(--muted); font-size: .76rem; }
 
 /* 全屏编辑：占满整屏的文本框 */
 .as-full {

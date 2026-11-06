@@ -779,8 +779,10 @@ def assistant_page(page):
     page.evaluate("() => document.getElementById('overlayClose').click()")
     page.wait_for_timeout(300)
 
-    print("== 全屏编辑 ==")
+    print("== 全屏编辑（手机上才出现，桌面验行为）==")
+    check("桌面上不给全屏按钮", not page.locator("#asExpand").is_visible())
     page.fill("#assistantText", "先把问题写在这里")
+    page.evaluate("() => { document.getElementById('asExpand').style.display = 'grid'; }")
     page.click("#asExpand")
     page.wait_for_timeout(400)
     check("打开后带上了现有内容",

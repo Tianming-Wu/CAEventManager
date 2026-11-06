@@ -2362,6 +2362,9 @@
     S.denied = null;
     $("#denied").hidden = true;
     $("#siteFoot").hidden = (wanted === "assistant");
+    // 助手页不滚整页：标题与输入框固定，只有中间的对话滚
+    var main = $("#content");
+    if (main) main.classList.toggle("is-chat", wanted === "assistant");
 
     // a child route keeps its group expanded
     var parent = ROUTES[wanted].group;
@@ -3852,13 +3855,14 @@
       '<div class="field"><label for="asModel">模型</label>' +
       '<div class="row" style="gap:8px;align-items:center">' +
       '<input id="asModel" type="text" autocomplete="off" spellcheck="false" ' +
-      'list="asModelList" value="' + PX.esc(cfg.model || "") + '">' +
+      'value="' + PX.esc(cfg.model || "") + '">' +
       '<button class="btn sm" id="asModels" type="button">拉取模型</button></div>' +
-      '<datalist id="asModelList"></datalist></div>' +
+      '<div class="as-models" id="asModelList" hidden></div></div>' +
       '<div class="field"><label for="asKey">密钥</label>' +
       '<input id="asKey" type="password" autocomplete="off" spellcheck="false">' +
-      '<p class="hint">只写不读：保存后这里只会显示一串星号，接口也不会再回传它</p></div>' +
-      '<p class="hint">接口需兼容 OpenAI 的 <code>/chat/completions</code>；地址与模型留空就用默认值。</p>' +
+      '<p class="hint">留空表示保持现状；清除请点下面的按钮</p></div>' +
+      '<p class="hint">端点需兼容 OpenAI 的 <code>/chat/completions</code>；' +
+      '地址与模型留空时使用默认值</p>' +
       '<div class="row" style="margin-top:16px;justify-content:flex-end">' +
       '<button class="btn" id="asClearKey" type="button">清除密钥</button>' +
       '<button class="btn" data-close-overlay="1" type="button">取消</button>' +
@@ -3866,6 +3870,10 @@
     showKeyMask(cfg);
     $("#asSave").addEventListener("click", saveAssistantConfig);
     $("#asModels").addEventListener("click", fetchAssistantModels);
+    $("#asModelList").addEventListener("click", function (e) {
+      var btn = e.target.closest("[data-model]");
+      if (btn) pickAssistantModel(btn.getAttribute("data-model"));
+    });
     $("#asClearKey").addEventListener("click", function () {
       PX.api("/assistant/config", { method: "POST", body: { clear: true } })
         .then(function (d) {
@@ -4051,7 +4059,7 @@
       }).catch(function (e) { PX.toast(PX.esc(e.message), true); });
   }
 
-  // 从服务端问一遍有哪些模型可选（DeepSeek 的 GET /models），省得手抄错名字
+  // 从服务端问一遍有哪些模型可选（DeepSeek 的 GET /models），列在弹窗里自己画
   function fetchAssistantModels() {
     var btn = $("#asModels");
     btn.disabled = true;
@@ -4060,20 +4068,29 @@
     if (!keyFieldMasked() && $("#asKey").value) body.key = $("#asKey").value;
     PX.api("/assistant/models", { method: "POST", body: body })
       .then(function (d) {
-        var ids = (d.models || []).map(function (m) { return m.id; });
-        if (!ids.length) { PX.toast("没有拿到模型", true); return; }
-        $("#asModelList").innerHTML = (d.models || []).map(function (m) {
-          return '<option value="' + PX.esc(m.id) + '">' + PX.esc(m.name || m.id) +
-            "</option>";
+        var models = d.models || [];
+        if (!models.length) { PX.toast("没有拿到模型", true); return; }
+        var box = $("#asModelList");
+        box.innerHTML = models.map(function (m) {
+          return '<button type="button" data-model="' + PX.esc(m.id) + '">' +
+            PX.esc(m.id) + (m.name && m.name !== m.id
+              ? '<span>' + PX.esc(m.name) + "</span>" : "") + "</button>";
         }).join("");
-        if (ids.indexOf($("#asModel").value) < 0) $("#asModel").value = ids[0];
-        PX.toast("可选模型：" + ids.join("、"));
+        box.hidden = false;
+        PX.toast("已拉取 " + models.length + " 个模型");
       })
       .catch(function (e) { PX.toast(PX.esc(e.message), true); })
       .then(function () {
         btn.disabled = false;
         btn.textContent = "拉取模型";
       });
+  }
+
+  function pickAssistantModel(id) {
+    var box = $("#asModel");
+    if (box && id) box.value = id;
+    var list = $("#asModelList");
+    if (list) list.hidden = true;
   }
 
   /* ------------------------------------------------------------------- host */

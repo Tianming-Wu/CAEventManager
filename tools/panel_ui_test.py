@@ -1927,6 +1927,17 @@ def theme_page(page):
     check("back to light",
           page.evaluate("() => document.documentElement.dataset.theme") == "light")
 
+    print("== 滚动条：细滑块，槽透明 ==")
+    bar = page.evaluate("""() => {
+        const cs = getComputedStyle(document.documentElement);
+        const ta = document.getElementById('assistantText');
+        return {w: cs.scrollbarWidth, c: cs.scrollbarColor,
+                ta: ta ? getComputedStyle(ta).scrollbarColor : null};
+    }""")
+    check("滑块细、槽透明（没有箭头和白底）",
+          bar["w"] == "thin" and "rgba(0, 0, 0, 0)" in bar["c"], bar)
+    check("输入框里也是同一套", bar["ta"] and "rgba(0, 0, 0, 0)" in bar["ta"], bar)
+
 
 def layout_page(browser):
     print("== layout at six viewports ==")

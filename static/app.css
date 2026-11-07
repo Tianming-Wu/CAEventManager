@@ -73,7 +73,10 @@
 * { box-sizing: border-box; }
 
 /* 滚动条：只有一根滑块，没有箭头、没有底色（系统默认那条带上下箭头与白槽，
-   在深色页面中间会突然出现一块白） */
+   在深色页面中间会突然出现一块白）。标准属性给现代 Chromium，
+   ::-webkit-scrollbar 给老一点的：支持前者时后者会被忽略，反之正好补上。 */
+:root { scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-corner { background: transparent; }

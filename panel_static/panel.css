@@ -93,9 +93,12 @@
 
 /* ---------- 滚动条：只有一根滑块，没有箭头、没有底色 ----------
    系统默认那条带着上下箭头和白底槽，在卡片中间突然出现一块白，很扎眼。
-   这里换成自绘：槽是透明的，滑块细而圆，悬停时颜色加深一点。
-   （别同时用 scrollbar-width / scrollbar-color：一旦写了标准属性，
-   下面的 ::-webkit-scrollbar 就不再生效。） */
+   现代 Chromium（121+）走标准属性：细滑块、槽透明，箭头根本不存在；
+   老一点的浏览器走下面的 ::-webkit-scrollbar。两套同时留着——支持标准属性时
+   webkit 那套会被忽略，不支持时它正好补上。
+   （别在别处再写 scrollbar-width / scrollbar-color：一旦出现，webkit 那套就失效。） */
+:root { scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-corner { background: transparent; }

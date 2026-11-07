@@ -485,6 +485,24 @@ def main():
     print("== 登录名与令牌 ==")
     accounts_and_tokens()
 
+    print("== 服务日志轮转 ==")
+    with tempfile.TemporaryDirectory() as box:
+        path = os.path.join(box, "service.log")
+        for i in range(4):
+            name = path if i == 0 else "%s.%d" % (path, i)
+            with open(name, "w", encoding="utf-8") as fh:
+                fh.write("第 %d 份\n" % i)
+        check("轮转前只有一份是正的", os.path.isfile(path) and not
+              os.path.exists(path + ".4"))
+        app.rotate_file(path)
+        check("正在写的那份挪成 .1", not os.path.exists(path))
+        check("旧的依次往后挪",
+              open(path + ".1", encoding="utf-8").read() == "第 0 份\n"
+              and open(path + ".2", encoding="utf-8").read() == "第 1 份\n"
+              and open(path + ".3", encoding="utf-8").read() == "第 2 份\n")
+        check("最多留三份老的", not os.path.exists(path + ".4"))
+        check("文件不在就当没这回事", app.rotate_file(os.path.join(box, "nope.log")) is False)
+
     print("== the panel's own helpers ==")
     check("view() maps the role label",
           app.panel.ROLE_LABEL.get("owner") == "站长", app.panel.ROLE_LABEL)

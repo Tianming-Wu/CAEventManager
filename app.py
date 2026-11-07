@@ -29,6 +29,7 @@ import re
 import secrets
 import socket
 import sys
+import threading
 import time
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -55,7 +56,7 @@ TPL_DIR = os.path.join(BASE_DIR, "tpl")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.7.0.18"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.7.0.19"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 
@@ -102,9 +103,77 @@ SHORTLINK_MAX_MISS = 40        # wrong hits per window before cooling off
 SHORTLINK_WINDOW = 60.0
 
 
+# 服务日志：run.sh 用 `>>data/service.log` 起服务，所以轮转要在进程内做——
+# 把老文件改名之后 dup2 一个同名的新文件到 fd 1，之后照旧往 stdout 写就行。
+LOG_MAX = int(os.environ.get("LOTTERY_LOG_MAX") or 8 * 1024 * 1024)   # 0 = 不轮转
+LOG_KEEP = 3                    # service.log.1 / .2 / .3，再多就是占地方
+_log_state = {"path": None, "checked": 0}
+_log_lock = threading.Lock()
+
+
+def _stdout_file():
+    """stdout 被重定向到的那个普通文件；不是重定向（终端、管道）就返回 None。"""
+    try:
+        path = os.readlink("/proc/self/fd/1")
+    except OSError:
+        return None
+    return path if os.path.isfile(path) else None
+
+
+def rotate_file(path, keep=LOG_KEEP):
+    """把 path 换成 path.1，旧的依次往后挪，最多留 keep 份。返回是否真的转了。"""
+    if not os.path.isfile(path):
+        return False
+    for i in range(keep - 1, 0, -1):
+        older = "%s.%d" % (path, i)
+        if os.path.exists(older):
+            os.replace(older, "%s.%d" % (path, i + 1))
+    os.replace(path, path + ".1")
+    return True
+
+
+def _maybe_rotate_log(length):
+    """写日志之前看一眼文件多大，超了就换一份。每 32 行看一次，别每次 stat。"""
+    if LOG_MAX <= 0:
+        return
+    _log_state["checked"] += 1
+    if _log_state["checked"] % 32:
+        return
+    with _log_lock:
+        path = _log_state["path"] or _stdout_file()
+        _log_state["path"] = path
+        if path is None:
+            return
+        try:
+            if os.fstat(1).st_size + length < LOG_MAX:
+                return
+            sys.stdout.flush()
+            if not rotate_file(path):
+                return
+            # 同一个路径重新开一份挂到 fd 1 上：原来的 stdout 对象继续用它，
+            # 不要去换 sys.stdout —— 旧对象被回收时会把 fd 1 关掉
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+            try:
+                os.dup2(fd, 1)
+            finally:
+                os.close(fd)
+            # 这句直接写：log() 会回到这里，锁不是可重入的
+            sys.stdout.write("%s 日志超过 %d 字节，已换成 %s.1\n"
+                             % (time.strftime("%Y-%m-%d %H:%M:%S"), LOG_MAX, path))
+            sys.stdout.flush()
+        except OSError:
+            return
+
+
 def log(msg):
-    sys.stdout.write("%s %s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), msg))
-    sys.stdout.flush()
+    line = "%s %s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), msg)
+    try:
+        _maybe_rotate_log(len(line))
+        sys.stdout.write(line)
+        sys.stdout.flush()
+    except (OSError, ValueError):
+        # 日志写不出去不该把请求带塌：fd 没了就悄悄算了
+        pass
 
 
 # --------------------------------------------------------------------------- #

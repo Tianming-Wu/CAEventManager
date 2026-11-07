@@ -380,6 +380,10 @@ cd ~/apps/eventmanager
 ./service.sh log 50            # 另有 check / reset
 ```
 
+服务日志是 `data/service.log`（`run.sh` 把 stdout 追加进去）。它自己轮转：写到 8 MB 时改名为
+`service.log.1`，旧的依次往后挪，最多留三份（`.1` ~ `.3`）；`LOTTERY_LOG_MAX=0` 关掉轮转，
+也可以给一个别的字节数。日志写不出去不会让请求失败。
+
 服务不会自动拉起。挂载在 `https://example.org/mount` 时，活动页形如 `https://example.org/mount/<token>/`，
 大屏、签到、控制台是同前缀下的 `screen`、`checkin`、`admin`。部署后可用 `tools/` 下的脚本自检：`unit_test.py`
 无需服务，`panel_test.py` 打主面板接口，`smoke_test.py` 打活动接口，`panel_ui_test.py` 与 `ui_test.py`

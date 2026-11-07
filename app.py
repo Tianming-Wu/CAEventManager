@@ -56,7 +56,7 @@ TPL_DIR = os.path.join(BASE_DIR, "tpl")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.7.0.19"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.7.0.20"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 
@@ -2243,7 +2243,7 @@ class Handler(BaseHTTPRequestHandler):
             client = assistant.PanelClient(self.server.server_address[1], prefix,
                                            self.headers.get("Cookie") or "")
             try:
-                result = assistant.run(conn, acc, client, full, messages)
+                result = assistant.run(conn, acc, client, full, messages, version=VERSION)
             except Exception as exc:
                 raise model.ApiError("调用模型失败：%s" % str(exc)[:120], 502)
             # 这里**不写审计**：问一句不是一次操作，攒在审计里会把它淹掉。

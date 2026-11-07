@@ -72,6 +72,21 @@
 
 * { box-sizing: border-box; }
 
+/* 滚动条：只有一根滑块，没有箭头、没有底色（系统默认那条带上下箭头与白槽，
+   在深色页面中间会突然出现一块白） */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+::-webkit-scrollbar-thumb {
+  background: var(--line);
+  background-clip: padding-box;
+  border: 2px solid transparent;
+  border-radius: 999px;
+  min-height: 32px;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--muted); background-clip: padding-box; }
+
 html, body {
   margin: 0;
   padding: 0;

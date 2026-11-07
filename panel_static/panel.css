@@ -91,6 +91,25 @@
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 [hidden] { display: none !important; }
 
+/* ---------- 滚动条：只有一根滑块，没有箭头、没有底色 ----------
+   系统默认那条带着上下箭头和白底槽，在卡片中间突然出现一块白，很扎眼。
+   这里换成自绘：槽是透明的，滑块细而圆，悬停时颜色加深一点。
+   （别同时用 scrollbar-width / scrollbar-color：一旦写了标准属性，
+   下面的 ::-webkit-scrollbar 就不再生效。） */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+::-webkit-scrollbar-thumb {
+  background: var(--line);
+  background-clip: padding-box;
+  border: 2px solid transparent;
+  border-radius: 999px;
+  min-height: 32px;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--muted); background-clip: padding-box; }
+::-webkit-scrollbar-thumb:active { background: var(--dim, var(--muted)); background-clip: padding-box; }
+
 html, body {
   margin: 0;
   padding: 0;
@@ -2145,7 +2164,7 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
      列宽交回内容决定（fixed 布局只在桌面用），所以只在该滚的时候才滚——
      写死 min-width 会给出一种"有条滚动条，但推不动多少东西"的假滚动。
      首列与操作列各自贴边，常用的按钮不用滑动就够得着。 */
-  .tblwrap { overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; }
+  .tblwrap { overflow-x: auto; overscroll-behavior-x: contain; }
   table.tbl.fixed { table-layout: auto; }
   table.tbl.fixed th,
   table.tbl.fixed td { overflow: visible; text-overflow: clip; }
@@ -2437,14 +2456,13 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
 }
 
 /* 标题让位、返回键自己升上来：两者互不牵连。
-   - 标题：padding-left 0 ↔ 36px 一次到位（布局只做一次，页面再重也不掉帧）；
-     眼睛看到的那段位移由 panel.js 用 transform 补（合成器上走，主线程卡住也不停）
-   - 返回键：绝对定位在左侧，淡入 + 放大 / 淡出 + 缩小 */
-.head-title { position: relative; padding-left: 0; }
+   - 标题：padding-left 0 ↔ 36px。这是布局动画，副标题在同一行，所以它跟着一起挪；
+     别改成 transform——那样只有标题自己动，副标题不动，两者会叠在一起或者中间空一块
+   - 返回键：绝对定位在左侧，淡入 + 放大 / 淡出 + 缩小
+   什么时候开始由 panel.js 定：先摆成上一页的样子，等这一页的内容画完再放开
+   （一屏新表单的排版要几十毫秒，撞进去动画会被冻住再跳过去，就是"抽一下"） */
+.head-title { position: relative; padding-left: 0; transition: padding-left .2s ease; }
 .head-title.has-back { padding-left: 36px; }
-/* 让位时滑的是这块文字：给它一个自己的图层，动画才在合成器上走——
-   主线程被一屏新内容堵住（报名详情那种）时，屏幕上的文字照样在滑 */
-.head-title .crumb-title { will-change: transform; }
 /* 没有返回键时，面包屑不该还挂着一个"上一级"：只留当前名称。
    返回键只是"临时给一条回去的路"（?back=）时也一样：标题就写这一页的名字。 */
 .head-title:not(.has-back) .crumb-title .crumb,
@@ -2468,6 +2486,9 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   pointer-events: auto;
   visibility: visible;
 }
+/* 把标题摆成"上一页的样子"的那一下不要过渡：过渡要两条样式之间有间隔才算数 */
+.no-crumb-anim .head-title,
+.no-crumb-anim .head-title .crumb-back { transition: none !important; }
 
 /* 弹窗里的字段不要挤在一起：上一行的输入框与下一行的标题之间留出呼吸 */
 #overlayBody .field { margin-bottom: 12px; }

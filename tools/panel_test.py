@@ -1421,20 +1421,29 @@ def main():
               stub.requests[-1]["body"])
 
         print("== 平台自己的提示词：数据目录里放一份 markdown ==")
+        version = (call(owner, "/api/panel/me") or {}).get("version") or ""
         prompt_file = os.path.join(DATA, "assistant_prompt.md")
-        mtime_before = None
         with open(prompt_file, "w", encoding="utf-8") as fh:
-            fh.write("# 本社团的习惯\n\n- 回答里把活动称作「场次」。\n")
+            fh.write("# 本社团的习惯\n\n"
+                     "- 回答里把活动称作「场次」。\n"
+                     "- 现在说话的人是 ${user.username}（${user.role}）。\n"
+                     "- 平台版本 ${panel.version}，今天 ${time.date}。\n")
         os.utime(prompt_file, (time.time() + 1, time.time() + 1))
         before = len(stub.requests)
         post(owner, "/api/panel/assistant/chat",
              {"messages": [{"role": "user", "content": "我们有几个活动"}]})
         system = (stub.requests[before]["body"]["messages"] or [{}])[0]
+        body = system.get("content") or ""
         check("平台提示词进了系统消息",
-              system.get("role") == "system" and "把活动称作" in (system.get("content") or ""),
-              (system.get("content") or "")[-120:])
-        check("固定规则还在",
-              "只回答平台范围内的事" in (system.get("content") or ""))
+              system.get("role") == "system" and "把活动称作" in body, body[-120:])
+        check("固定规则还在", "只回答平台范围内的事" in body)
+        check("变量换成了这个人", "是 owner（站长）" in body, body[-160:])
+        check("版本与日期也换掉了",
+              version and ("平台版本 " + version) in body, body[-160:])
+        check("没有剩下没换的占位符", "${user." not in body and "${panel." not in body,
+              body[-160:])
+        check("系统提示里写明了是谁在用",
+              "当前使用者：站长（owner）" in body, body[:400])
         os.remove(prompt_file)
         before = len(stub.requests)
         post(owner, "/api/panel/assistant/chat",

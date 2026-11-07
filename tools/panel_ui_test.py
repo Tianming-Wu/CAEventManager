@@ -833,10 +833,13 @@ window.__startCrumb = function (name) {
   function tick(now) {
     const page = document.querySelector('.page[data-page="' + name + '"]');
     const el = page && page.querySelector('.head-title .crumb-title');
-    let row = {t: Math.round(now - t0), left: null, shown: false};
+    const sub = page && page.querySelector('.page-head .page-sub');
+    let row = {t: Math.round(now - t0), left: null, sub: null, shown: false};
     if (el && page && !page.hidden) {
       const r = el.getBoundingClientRect();
-      row = {t: Math.round(now - t0), left: Math.round(r.left * 10) / 10, shown: true};
+      row = {t: Math.round(now - t0), left: Math.round(r.left * 10) / 10,
+             sub: sub ? Math.round(sub.getBoundingClientRect().left * 10) / 10 : null,
+             shown: true};
     }
     out.push(row);
     if (now - t0 < 900) requestAnimationFrame(tick);
@@ -892,6 +895,22 @@ def crumb_motion(browser):
             check("%s：一路往一个方向走" % label,
                   not [s for s in back if abs(s) >= 2],
                   "回头的帧：%s" % [s for s in back if abs(s) >= 2])
+            # 副标题在同一行：它得跟着标题一起挪，否则两者会叠上或者中间空一块
+            subs = [r["sub"] for r in rows if r["sub"] is not None]
+            sub_travel = round(max(subs) - min(subs), 1) if subs else 0
+            check("%s：副标题跟着一起挪" % label, sub_travel >= 30, sub_travel)
+            # 动画开始之后，标题与副标题必须一块儿动：位移差不超过 1.5px
+            # （动画开始之前标题的字会换——数据到了，名字变长——那一段不算）
+            pairs = [(r["left"], r["sub"]) for r in rows if r["sub"] is not None]
+            start = 0
+            for i, (l, _s) in enumerate(pairs):
+                if abs(l - pairs[0][0]) >= 0.5:
+                    start = max(0, i - 1)
+                    break
+            base_l, base_s = pairs[start] if pairs else (0, 0)
+            drift = max([abs((l - base_l) - (s - base_s)) for l, s in pairs[start:]] or [0])
+            check("%s：两者之间不留缝也不叠字" % label, drift <= 1.5,
+                  "位移差最大 %.1fpx" % drift)
 
         run("名单 进", "#/rosters", "roster", "open", 1)
         run("名单 出", None, "rosters", "back", -1)

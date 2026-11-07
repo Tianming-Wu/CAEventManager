@@ -14,10 +14,13 @@
 
 import json
 import os
+import re
+import time
 import urllib.error
 import urllib.request
 
 import db
+import panel
 import policy
 
 # 一轮对话里最多来回几次工具调用，防止模型绕圈
@@ -398,12 +401,72 @@ def platform_prompt():
     return text
 
 
-def system_prompt():
-    """发给模型的那段系统提示：固定规则 + 平台自己写的那份（如果有）。"""
+def _who(values):
+    """「张三（管理员；zhangsan）」：名字、身份、登录名里不重复的那几个。"""
+    name = values.get("user.name") or ""
+    rest = [x for x in (values.get("user.role") or "", values.get("user.username") or "")
+            if x and x != name]
+    return name + ("（%s）" % "；".join(rest) if rest else "")
+
+
+def system_prompt(account=None, tools=None, version=""):
+    """发给模型的那段系统提示：固定规则 + 当前是谁 + 平台自己写的那份（如果有）。"""
+    values = prompt_values(account, tools, version)
+    parts = [SYSTEM_PROMPT]
+    if values.get("user.username"):
+        # 助手光靠工具清单看不出自己在跟谁说话：把人和身份说清楚，语气与能做的事才对得上
+        parts.append("当前使用者：%s。" % _who(values))
     extra = platform_prompt()
-    if not extra:
-        return SYSTEM_PROMPT
-    return SYSTEM_PROMPT + "\n\n平台补充说明：\n" + extra
+    if extra:
+        parts.append("平台补充说明：\n" + fill_prompt(extra, values))
+    return "\n\n".join(parts)
+
+
+# 提示词里可以写的变量：``${user.role}``、``${time.date}`` 这种。一次请求算一份。
+# 没定义的留在原样——写错了能一眼看见，好过悄悄变成空白。
+PLACEHOLDER_RE = re.compile(r"\$\{([A-Za-z][A-Za-z0-9_]*)(?:\.([A-Za-z][A-Za-z0-9_]*))?\}")
+
+
+def prompt_values(account=None, tools=None, version=""):
+    """提示词里能用的变量。`{类.名: 值}`，类与名都只认字母数字下划线。"""
+    def pick(row, name, default=""):
+        try:
+            value = row[name]
+        except (KeyError, IndexError, TypeError):
+            return default
+        return default if value is None else value
+
+    now = time.localtime()
+    values = {
+        "panel.name": "CAEventManager",
+        "panel.version": version or "",
+        "time.date": time.strftime("%Y-%m-%d", now),
+        "time.time": time.strftime("%H:%M", now),
+        "time.now": time.strftime("%Y-%m-%d %H:%M", now),
+        "tools": "、".join(tools or ()),
+    }
+    if account is not None:
+        role = pick(account, "role")
+        values["user.username"] = pick(account, "username")
+        values["user.name"] = pick(account, "name") or values["user.username"]
+        values["user.role"] = panel.ROLE_LABEL.get(role, role)
+        values["user.roleKey"] = role
+        values["user.id"] = pick(account, "id")
+    return values
+
+
+def fill_prompt(text, values):
+    """把 ``${类.名}`` 换成值；没定义的原样留着。"""
+    if not text:
+        return ""
+
+    def sub(match):
+        key = match.group(1) + ("." + match.group(2) if match.group(2) else "")
+        if key in values:
+            return str(values[key])
+        return match.group(0)
+
+    return PLACEHOLDER_RE.sub(sub, text)
 
 
 def tool_schema(account=None):
@@ -485,9 +548,10 @@ def suggest_title(cfg, text):
     return title[:TITLE_MAX]
 
 
-def run(conn, acc, client, cfg, messages, log=print):
+def run(conn, acc, client, cfg, messages, log=print, version=""):
     """One question in, one answer out.  Returns {reply, steps}."""
-    convo = [{"role": "system", "content": system_prompt()}]
+    names = [t["function"]["name"] for t in tool_schema(acc)]
+    convo = [{"role": "system", "content": system_prompt(acc, names, version)}]
     for m in (messages or [])[-20:]:
         role = m.get("role")
         if role in ("user", "assistant") and (m.get("content") or "").strip():

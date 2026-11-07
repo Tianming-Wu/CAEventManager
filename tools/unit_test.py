@@ -503,6 +503,29 @@ def main():
         check("最多留三份老的", not os.path.exists(path + ".4"))
         check("文件不在就当没这回事", app.rotate_file(os.path.join(box, "nope.log")) is False)
 
+    print("== 提示词里的变量 ==")
+    acc = {"id": 7, "username": "laffey", "name": "吴天明", "role": "owner"}
+    vals = app.assistant.prompt_values(acc, ["list_events", "host_stats"], "9.9.9.9")
+    check("账号的信息都能取到",
+          vals["user.name"] == "吴天明" and vals["user.role"] == "站长"
+          and vals["user.roleKey"] == "owner" and vals["user.id"] == 7, vals)
+    check("工具清单拼成一行", vals["tools"] == "list_events、host_stats", vals["tools"])
+    check("版本与时间都在",
+          vals["panel.version"] == "9.9.9.9" and len(vals["time.date"]) == 10
+          and ":" in vals["time.time"], vals)
+    filled = app.assistant.fill_prompt(
+        "你好 ${user.name}（${user.role}），今天 ${time.date}，工具 ${tools}", vals)
+    check("占位符换成值", "吴天明" in filled and "${" not in filled, filled)
+    check("没定义的占位符原样留着",
+          app.assistant.fill_prompt("${nope.x} 与 ${user.nope}", vals)
+          == "${nope.x} 与 ${user.nope}")
+    check("没有账号时不带 user 变量",
+          not [k for k in app.assistant.prompt_values(None) if k.startswith("user.")],
+          app.assistant.prompt_values(None))
+    check("名字缺省时用登录名",
+          app.assistant.prompt_values({"username": "owner", "role": "admin"})["user.name"]
+          == "owner")
+
     print("== the panel's own helpers ==")
     check("view() maps the role label",
           app.panel.ROLE_LABEL.get("owner") == "站长", app.panel.ROLE_LABEL)

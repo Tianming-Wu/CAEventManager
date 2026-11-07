@@ -2437,10 +2437,14 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
 }
 
 /* 标题让位、返回键自己升上来：两者互不牵连。
-   - 标题：left padding 0 ↔ 36px，滑动的是文字
+   - 标题：padding-left 0 ↔ 36px 一次到位（布局只做一次，页面再重也不掉帧）；
+     眼睛看到的那段位移由 panel.js 用 transform 补（合成器上走，主线程卡住也不停）
    - 返回键：绝对定位在左侧，淡入 + 放大 / 淡出 + 缩小 */
-.head-title { position: relative; padding-left: 0; transition: padding-left .2s ease; }
+.head-title { position: relative; padding-left: 0; }
 .head-title.has-back { padding-left: 36px; }
+/* 让位时滑的是这块文字：给它一个自己的图层，动画才在合成器上走——
+   主线程被一屏新内容堵住（报名详情那种）时，屏幕上的文字照样在滑 */
+.head-title .crumb-title { will-change: transform; }
 /* 没有返回键时，面包屑不该还挂着一个"上一级"：只留当前名称。
    返回键只是"临时给一条回去的路"（?back=）时也一样：标题就写这一页的名字。 */
 .head-title:not(.has-back) .crumb-title .crumb,
@@ -2464,10 +2468,6 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   pointer-events: auto;
   visibility: visible;
 }
-/* 进出都没有返回键的页面之间切换时不放动画 */
-.no-crumb-anim .head-title,
-.no-crumb-anim .head-title.has-back,
-.no-crumb-anim .head-title .crumb-back { transition: none !important; }
 
 /* 弹窗里的字段不要挤在一起：上一行的输入框与下一行的标题之间留出呼吸 */
 #overlayBody .field { margin-bottom: 12px; }

@@ -1993,29 +1993,66 @@
   }
 
   /* 切换页面时给标题与返回键放一次入场动画：
-     上一页与这一页都有（或都没有）返回键时不动，否则标题滑、按钮淡入放大。 */
+     上一页与这一页都有（或都没有）返回键时不动，否则标题滑、按钮淡入放大。
+
+     两件事分开做，为的是别"抽"：
+     - 让位是 padding-left（布局），一次到位、不带过渡。带过渡的话每一帧都要重排
+       整个标题行，主线程一忙就掉帧。
+     - 眼睛看到的那 36px 位移交给 transform，而且在**内容画完之后**才开始：
+       一屏新表单/表格的排版要几十毫秒，动画撞进去会被冻住再跳过去。
+       `PX.afterApi` 报告"回答落地"，据此把滑动推到最后一屏之后（另有兜底）。
+  */
+  var CRUMB = null;
+
+  function stopCrumb() {
+    if (!CRUMB) return;
+    clearTimeout(CRUMB.timer);
+    if (CRUMB.idle && window.cancelIdleCallback) window.cancelIdleCallback(CRUMB.idle);
+    CRUMB.title.style.transform = "";
+    CRUMB = null;
+  }
+
+  function playCrumb() {
+    var c = CRUMB;
+    if (!c) return;
+    CRUMB = null;
+    clearTimeout(c.timer);
+    c.title.style.transform = "";
+    // 位置由 transform 自己从"原来那处"走到"该在的地方"
+    c.title.animate([{transform: c.from}, {transform: "none"}],
+                    {duration: 200, easing: "cubic-bezier(.2, .7, .3, 1)"});
+  }
+
+  /* 又一个回答落地：把还没放的滑动往后挪，等主线程真正空下来再滑。
+     用 requestIdleCallback 是因为它在这一帧的排版、绘制之后才回调——
+     一屏新表单的排版正好卡在那段里。 */
+  function nudgeCrumb() {
+    if (!CRUMB) return;
+    clearTimeout(CRUMB.timer);
+    if (CRUMB.idle && window.cancelIdleCallback) window.cancelIdleCallback(CRUMB.idle);
+    if (window.requestIdleCallback) {
+      CRUMB.idle = window.requestIdleCallback(playCrumb, {timeout: 150});
+    } else {
+      CRUMB.timer = setTimeout(playCrumb, 48);
+    }
+  }
+
   function animateCrumb(wanted, prevHadBack) {
     var page = document.querySelector('.page[data-page="' + wanted + '"]');
     var head = page ? page.querySelector(".head-title") : null;
     if (!head) return;
     var want = routeHasBack(wanted);
-    var root = document.documentElement;
     var backOnly = want && !!S.explicitBack && !routeParent(wanted);
-    if (prevHadBack === want) {
-      root.classList.add("no-crumb-anim");
-      head.classList.toggle("has-back", want);
-      head.classList.toggle("back-only", backOnly);
-      void head.offsetWidth;
-      requestAnimationFrame(function () { root.classList.remove("no-crumb-anim"); });
-      return;
-    }
-    // 先摆成"上一页的样子"，再切到这一页的样子，过渡才有起点
-    root.classList.add("no-crumb-anim");
-    head.classList.toggle("has-back", !!prevHadBack);
-    void head.offsetWidth;
-    root.classList.remove("no-crumb-anim");
+    stopCrumb();
     head.classList.toggle("has-back", want);
     head.classList.toggle("back-only", backOnly);
+    if (prevHadBack === want || reducedMotion()) return;
+    var title = head.querySelector(".crumb-title");
+    if (!title || !title.animate) return;
+    // 布局已经让开了，先按原来的位置画着，等这一页的内容到齐再滑过去
+    title.style.transform = "translateX(" + (want ? -36 : 36) + "px)";
+    CRUMB = {title: title, from: title.style.transform, idle: 0,
+             timer: setTimeout(playCrumb, 160)};
   }
 
   function syncBackButton() {
@@ -5498,6 +5535,7 @@
       labelNav();
       tidyNavSeparators();
       bindSidebarKeys();
+      PX.afterApi(nudgeCrumb);
       // another session's writes come back through the stream
       PX.watch(function (revs, before) {
         if (!before || before.panel === undefined) return;

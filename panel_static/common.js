@@ -33,6 +33,17 @@
 
   function onUpdate(fn) { updateHandler = fn; }
 
+  /* 每个回答落地的信号。一次页面切换往往带好几个并发请求，
+     面板用它判断"内容还在往下灌，先别放那一小段入场动画"——
+     动画撞在一屏新内容的排版上，只会被冻住再跳过去（看起来就是"抽一下"）。 */
+  var apiHooks = [];
+  function afterApi(fn) { apiHooks.push(fn); }
+  function noteApi() {
+    for (var i = 0; i < apiHooks.length; i++) {
+      try { apiHooks[i](); } catch (e) { /* 一个不许连累别的 */ }
+    }
+  }
+
   function api(path, options) {
     options = options || {};
     var headers = { "X-Requested-With": "CAEventManager" };
@@ -59,6 +70,7 @@
         }
         if (data && data.revs) revs = data.revs;
         if (data && data.version) noteVersion(data.version);
+        noteApi();
         if (!res.ok || data.ok === false) {
           var err = new Error((data && data.error) || ("HTTP " + res.status));
           err.status = res.status;
@@ -319,6 +331,7 @@
     toast: toast,
     md: md,
     onUpdate: onUpdate,
+    afterApi: afterApi,
     version: function () { return bootVersion; }
   };
 })();

@@ -824,6 +824,92 @@ def assistant_page(page):
           and "href" not in page.evaluate("() => PX.md('[a](javascript:alert(1))')"))
 
 
+CRUMB_SAMPLER = r"""
+window.__crumb = null;
+window.__startCrumb = function (name) {
+  window.__crumb = null;
+  const out = [];
+  const t0 = performance.now();
+  function tick(now) {
+    const page = document.querySelector('.page[data-page="' + name + '"]');
+    const el = page && page.querySelector('.head-title .crumb-title');
+    let row = {t: Math.round(now - t0), left: null, shown: false};
+    if (el && page && !page.hidden) {
+      const r = el.getBoundingClientRect();
+      row = {t: Math.round(now - t0), left: Math.round(r.left * 10) / 10, shown: true};
+    }
+    out.push(row);
+    if (now - t0 < 900) requestAnimationFrame(tick);
+    else window.__crumb = out;
+  }
+  requestAnimationFrame(tick);
+};
+"""
+
+
+def crumb_motion(browser):
+    """标题栏让位不许"抽"：逐帧量它横向走了多少，单帧不许超过 6px。
+
+    用户报的现象：名单进详情再退出很顺，报名进编辑再退出"抽一下"。
+    根子在动画撞上一屏新内容的排版——所以这里逐帧看，而不是看起止位置。
+    """
+    print("== 标题栏让位：进出详情都不许跳 ==")
+    owner = owner_opener()
+    rid = call(owner, "/api/panel/roster/import", {
+        "name": "标题栏动画名单", "text": "学号,姓名\n20250011,甲一\n20250012,乙二"})["id"]
+    sid = call(owner, "/api/panel/signup/create", {
+        "title": "标题栏动画报名", "roster_id": rid})["id"]
+    ctx, page = new_page(browser, 1440, 900)
+    try:
+        ui_login(page)
+
+        def run(label, start, target, action, want_dir):
+            if start:
+                page.goto(BASE + "/panel" + start)
+                page.wait_for_timeout(700)
+            page.evaluate(CRUMB_SAMPLER)
+            page.evaluate("(n) => window.__startCrumb(n)", target)
+            if action == "open":
+                page.click(target == "roster"
+                          and '[data-open-roster="%d"]' % rid
+                          or '[data-open-signup="%d"]' % sid)
+            else:
+                page.click('.page[data-page="%s"] .crumb-back'
+                           % ("roster" if target == "rosters" else "signup"))
+            page.wait_for_timeout(1000)
+            rows = [s for s in page.evaluate("() => window.__crumb || []") if s["shown"]]
+            if len(rows) < 10:
+                check("%s：采到了这一段的移动" % label, False, "%d 帧" % len(rows))
+                return
+            steps = [round(b["left"] - a["left"], 1) for a, b in zip(rows, rows[1:])]
+            moved = max(abs(s) for s in steps) if steps else 0
+            travel = round(max(r["left"] for r in rows) - min(r["left"] for r in rows), 1)
+            toward = [s for s in steps if s * want_dir > 0]
+            back = [s for s in steps if s * want_dir < 0]
+            check("%s：标题确实挪了 36px" % label, travel >= 30, travel)
+            check("%s：单帧不超过 6px（不抽）" % label, moved <= 6,
+                  "最大单帧 %.1fpx，全程 %.1fpx" % (moved, travel))
+            check("%s：一路往一个方向走" % label,
+                  not [s for s in back if abs(s) >= 2],
+                  "回头的帧：%s" % [s for s in back if abs(s) >= 2])
+
+        run("名单 进", "#/rosters", "roster", "open", 1)
+        run("名单 出", None, "rosters", "back", -1)
+        run("报名 进", "#/signups", "signup", "open", 1)
+        run("报名 出", None, "signups", "back", -1)
+        check("这一段没有 javascript 错误", not page._errors,
+              "; ".join(page._errors)[:200])
+    finally:
+        ctx.close()
+        # 这两份是为了测动画造的：收干净，别让后面的用例以为列表本来就非空
+        for path, body in (("/api/panel/signup/delete", {"id": sid}),
+                           ("/api/panel/roster/delete", {"id": rid})):
+            try:
+                call(owner, path, body)
+            except Exception:
+                pass
+
+
 def switch_metrics(page):
     return page.evaluate("""() => {
         const label = document.getElementById('asResumeRow');
@@ -2367,6 +2453,7 @@ def main():
                 nav_keys_page(page)
                 assistant_page(page)
                 assistant_drawer(browser)
+                crumb_motion(browser)
                 screens_page(page)
                 roster_page(page)
                 signup_page(page, browser)

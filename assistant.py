@@ -13,9 +13,11 @@
 """
 
 import json
+import os
 import urllib.error
 import urllib.request
 
+import db
 import policy
 
 # 一轮对话里最多来回几次工具调用，防止模型绕圈
@@ -354,6 +356,56 @@ SYSTEM_PROMPT = (
 )
 
 
+# --------------------------------------------------------------------------- #
+# 平台自己的提示词：一份放在数据目录里的 markdown，手工改，改完下一句就生效
+# --------------------------------------------------------------------------- #
+# 位置可以改到别处（测试与特殊部署用）；默认就在数据目录里，和数据库作伴，
+# 重新部署不会覆盖它。内容是**追加**在下面这些固定规则之后的，不用重抄一遍规则。
+PROMPT_NAME = "assistant_prompt.md"
+PROMPT_ENV = "LOTTERY_ASSISTANT_PROMPT"
+PROMPT_MAX = 20000            # 一份提示词写成小说就没意义了，多出来的截掉
+
+_prompt = {"mtime": None, "text": ""}
+
+
+def prompt_path():
+    """平台提示词放在哪：``LOTTERY_ASSISTANT_PROMPT`` 优先，否则数据目录里那份。"""
+    where = os.environ.get(PROMPT_ENV)
+    if where:
+        return os.path.abspath(where)
+    return os.path.join(db.DATA_DIR, PROMPT_NAME)
+
+
+def platform_prompt():
+    """读一份平台提示词。文件不在、读不动、空着，都当没有。
+
+    按 mtime 缓存：改完文件不用重启，也不用每个请求都读一次磁盘。
+    """
+    path = prompt_path()
+    try:
+        stat = os.stat(path)
+    except OSError:
+        _prompt["mtime"], _prompt["text"] = None, ""
+        return ""
+    if _prompt["mtime"] == stat.st_mtime:
+        return _prompt["text"]
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            text = fh.read(PROMPT_MAX + 1)[:PROMPT_MAX].strip()
+    except OSError:
+        text = ""
+    _prompt["mtime"], _prompt["text"] = stat.st_mtime, text
+    return text
+
+
+def system_prompt():
+    """发给模型的那段系统提示：固定规则 + 平台自己写的那份（如果有）。"""
+    extra = platform_prompt()
+    if not extra:
+        return SYSTEM_PROMPT
+    return SYSTEM_PROMPT + "\n\n平台补充说明：\n" + extra
+
+
 def tool_schema(account=None):
     """The `tools` array an OpenAI-compatible endpoint expects.
 
@@ -435,7 +487,7 @@ def suggest_title(cfg, text):
 
 def run(conn, acc, client, cfg, messages, log=print):
     """One question in, one answer out.  Returns {reply, steps}."""
-    convo = [{"role": "system", "content": SYSTEM_PROMPT}]
+    convo = [{"role": "system", "content": system_prompt()}]
     for m in (messages or [])[-20:]:
         role = m.get("role")
         if role in ("user", "assistant") and (m.get("content") or "").strip():

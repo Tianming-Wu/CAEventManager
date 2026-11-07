@@ -23,6 +23,8 @@ BASE = (sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8931").rstrip("/
 ROOT = BASE
 HEADER = {"X-Requested-With": "CAEventManager"}
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# 服务实例的数据目录：跑套件时会传进来，平台提示词就写在它下面
+DATA = os.environ.get("LOTTERY_DATA_DIR") or os.path.join(HERE, "data")
 
 problems = []
 
@@ -1417,6 +1419,30 @@ def main():
               titled and titled.get("title") == "活动报名排查", titled)
         check("起名字那一路不要工具", not (stub.requests[-1]["body"].get("tools")),
               stub.requests[-1]["body"])
+
+        print("== 平台自己的提示词：数据目录里放一份 markdown ==")
+        prompt_file = os.path.join(DATA, "assistant_prompt.md")
+        mtime_before = None
+        with open(prompt_file, "w", encoding="utf-8") as fh:
+            fh.write("# 本社团的习惯\n\n- 回答里把活动称作「场次」。\n")
+        os.utime(prompt_file, (time.time() + 1, time.time() + 1))
+        before = len(stub.requests)
+        post(owner, "/api/panel/assistant/chat",
+             {"messages": [{"role": "user", "content": "我们有几个活动"}]})
+        system = (stub.requests[before]["body"]["messages"] or [{}])[0]
+        check("平台提示词进了系统消息",
+              system.get("role") == "system" and "把活动称作" in (system.get("content") or ""),
+              (system.get("content") or "")[-120:])
+        check("固定规则还在",
+              "只回答平台范围内的事" in (system.get("content") or ""))
+        os.remove(prompt_file)
+        before = len(stub.requests)
+        post(owner, "/api/panel/assistant/chat",
+             {"messages": [{"role": "user", "content": "我们有几个活动"}]})
+        system = (stub.requests[before]["body"]["messages"] or [{}])[0]
+        check("删掉文件就回到只有固定规则",
+              "把活动称作" not in (system.get("content") or ""),
+              (system.get("content") or "")[-80:])
 
         # 普通管理员：模型连"有服务器状态这个工具"都不该知道
         post(anon2, "/api/panel/register", {"username": "asprobe", "name": "助手权限",

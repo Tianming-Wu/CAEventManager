@@ -834,11 +834,16 @@ window.__startCrumb = function (name) {
     const page = document.querySelector('.page[data-page="' + name + '"]');
     const el = page && page.querySelector('.head-title .crumb-title');
     const sub = page && page.querySelector('.page-head .page-sub');
-    let row = {t: Math.round(now - t0), left: null, sub: null, shown: false};
+    const crumb = page && page.querySelector('.head-title .crumb-title .crumb');
+    const nm = page && (page.querySelector('#rosterTitle, #signupTitle') || el);
+    let row = {t: Math.round(now - t0), left: null, sub: null, name: null,
+               crumb: null, shown: false};
     if (el && page && !page.hidden) {
-      const r = el.getBoundingClientRect();
-      row = {t: Math.round(now - t0), left: Math.round(r.left * 10) / 10,
+      row = {t: Math.round(now - t0),
+             left: Math.round(el.getBoundingClientRect().left * 10) / 10,
              sub: sub ? Math.round(sub.getBoundingClientRect().left * 10) / 10 : null,
+             name: nm ? Math.round(nm.getBoundingClientRect().left * 10) / 10 : null,
+             crumb: crumb ? getComputedStyle(crumb).display !== 'none' : null,
              shown: true};
     }
     out.push(row);
@@ -911,6 +916,17 @@ def crumb_motion(browser):
             drift = max([abs((l - base_l) - (s - base_s)) for l, s in pairs[start:]] or [0])
             check("%s：两者之间不留缝也不叠字" % label, drift <= 1.5,
                   "位移差最大 %.1fpx" % drift)
+            # 标题后半截（这一页的名字）也不许跳：面包屑突然出现/消失会让它一下挪一大截
+            names = [r["name"] for r in rows if r["name"] is not None]
+            name_steps = [abs(b - a) for a, b in zip(names, names[1:])]
+            check("%s：标题文字不跳" % label,
+                  not name_steps or max(name_steps) <= 6,
+                  "最大单帧 %.1fpx" % (max(name_steps) if name_steps else 0))
+            # 进详情时，面包屑应当在第一帧就已经在那儿，而不是中途长出来
+            marks = [r["crumb"] for r in rows if r["crumb"] is not None]
+            if want_dir > 0 and marks:
+                check("%s：面包屑一上来就在" % label, all(marks),
+                      "中途缺了 %d 帧" % marks.count(False))
 
         run("名单 进", "#/rosters", "roster", "open", 1)
         run("名单 出", None, "rosters", "back", -1)
@@ -2089,6 +2105,10 @@ def touch_page(browser):
         ctx.close()
 
     print("== phone: tables scroll, actions stay reachable ==")
+    # 名单列表得有至少一行，后面的"首列多宽"才有得量
+    owner = owner_opener()
+    phone_roster = call(owner, "/api/panel/roster/import", {
+        "name": "手机表格测试名单", "text": "学号,姓名\n20250021,甲一"})["id"]
     ctx, page = new_page(browser, 390, 844, touch=True, mobile=True, dpr=2)
     try:
         ui_login(page)
@@ -2128,6 +2148,26 @@ def touch_page(browser):
               or narrow["wrapSW"] - narrow["wrapW"] >= 24, narrow)
         check("首列没有宽到把后面几列全挡住",
               narrow is None or narrow["firstW"] < narrow["wrapW"] * 0.7, narrow)
+
+        # 首列被内容撑得很大时，钉住它等于把屏幕让给一列：这时应该放它跟着滑
+        page.evaluate("""() => {
+            const t = document.getElementById('rosterTable');
+            const cell = t && t.querySelector('tbody td');
+            if (cell) cell.textContent = 'x'.repeat(120);
+            window.dispatchEvent(new Event('resize'));
+        }""")
+        page.wait_for_timeout(500)
+        wide = page.evaluate("""() => {
+            const t = document.getElementById('rosterTable');
+            const wrap = t.closest('.tblwrap');
+            const cell = t.querySelector('tbody td');
+            return {wide: wrap.classList.contains('wide-first'),
+                    share: Math.round(cell.getBoundingClientRect().width /
+                                      wrap.clientWidth * 100),
+                    pos: getComputedStyle(cell).position};
+        }""")
+        check("首列宽过大半屏时不再钉住", wide["wide"] and wide["pos"] == "static", wide)
+        check("确实是这样才放手（不是白放）", wide["share"] > 60, wide)
         page.goto(BASE + "/panel#/all-events")
         page.wait_for_timeout(900)
         btn = page.evaluate("""() => {
@@ -2142,6 +2182,10 @@ def touch_page(browser):
               btn and btn["w"] > 40 and btn["right"] <= btn["wrapRight"] + 1, btn)
     finally:
         ctx.close()
+        try:
+            call(owner, "/api/panel/roster/delete", {"id": phone_roster})
+        except Exception:
+            pass
 
     print("== phone: the date pair uses the system pickers ==")
     ctx, page = new_page(browser, 390, 844, touch=True, mobile=True, dpr=2)

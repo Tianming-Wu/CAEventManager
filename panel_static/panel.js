@@ -2055,6 +2055,31 @@
              timer: setTimeout(playCrumb, 160)};
   }
 
+  /* 手机上表格要横滚时，首列默认钉在左边，操作列钉在右边。但首列自己就占了
+     大半屏幕时（名字很长），钉住它等于把屏幕让给一列，别的列永远滑不进来——
+     这种情况给 .tblwrap 打上 .wide-first，让首列跟着一起滑。 */
+  var fitTimer = 0;
+
+  function fitTables() {
+    fitTimer = 0;
+    var wraps = document.querySelectorAll(".tblwrap");
+    for (var i = 0; i < wraps.length; i++) {
+      var wrap = wraps[i];
+      var cell = wrap.querySelector("table tbody tr td:first-child") ||
+                 wrap.querySelector("table thead th:first-child");
+      var wide = false;
+      if (cell && wrap.scrollWidth > wrap.clientWidth + 1) {
+        wide = cell.getBoundingClientRect().width > wrap.clientWidth * 0.6;
+      }
+      wrap.classList.toggle("wide-first", wide);
+    }
+  }
+
+  function scheduleFitTables() {
+    if (fitTimer) return;
+    fitTimer = setTimeout(fitTables, 80);
+  }
+
   function syncBackButton() {
     var back = $("#approvalsBack");
     if (back) back.setAttribute("data-back", S.backTo || "");
@@ -2063,7 +2088,11 @@
   /* 当前页面的面包屑：上一段来自路由表，当前段就是这一页的标题 */
   function syncCrumb(wanted) {
     var page = document.querySelector('.page[data-page="' + wanted + '"]');
-    var crumb = page ? page.querySelector(".crumb-title .crumb") : null;
+    if (!page) return;
+    var head = page.querySelector(".head-title");
+    // 有没有上一级，切到这一页就定下来：这段文字不该等"让位"那一动画
+    if (head) head.classList.toggle("has-crumb", !!routeParent(wanted));
+    var crumb = page.querySelector(".crumb-title .crumb");
     if (!crumb) return;
     var parent = routeParent(wanted);
     if (parent) {
@@ -2444,6 +2473,7 @@
     draw();
     syncCrumb(wanted);
     animateCrumb(wanted, prevHadBack);
+    scheduleFitTables();
     loadNotices();
     syncSudo();
     if (wanted === "server" || wanted === "overview") refreshHost();
@@ -4938,6 +4968,7 @@
   });
   $("#assistantText").addEventListener("input", growAssistantBox);
   window.addEventListener("resize", growAssistantBox);
+  window.addEventListener("resize", scheduleFitTables);
   $("#tokenNew").addEventListener("click", tokenDialog);
   $("#tokenTable").addEventListener("click", function (e) {
     var btn = e.target.closest("[data-token-revoke]");
@@ -5536,6 +5567,7 @@
       tidyNavSeparators();
       bindSidebarKeys();
       PX.afterApi(nudgeCrumb);
+      PX.afterApi(scheduleFitTables);
       // another session's writes come back through the stream
       PX.watch(function (revs, before) {
         if (!before || before.panel === undefined) return;

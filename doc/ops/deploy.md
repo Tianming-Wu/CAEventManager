@@ -1,0 +1,111 @@
+# 部署与运维
+
+目标是一台能 ssh 的 Linux 主机，只需要 `python3` 与 `tar`。没有数据库服务、没有 Node、没有构建步骤。
+
+## 部署
+
+```powershell
+.\deploy.ps1 -Remote user@host                  # 上传并重启
+.\deploy.ps1 -Remote user@host -NoRestart       # 只同步
+.\deploy.ps1 -Remote user@host -Dest apps/lottery
+```
+
+脚本做的事：归一化行尾 → 打包源码 → 用 `cmd /c type` 把 tarball 经 ssh stdin 送出（目标机没有
+sftp）→ 远端解包 → 逐个确认文件落地并试 import 主模块 → 全部通过才重启。
+
+**远端的 `data/` 与 `config.json` 始终不动**，所以对话存档、名单、活动、账号都跟着机器走，
+不跟着代码走。
+
+## 服务脚本
+
+```sh
+cd ~/apps/lottery
+./service.sh status            # 打印公示 / 大屏 / 控制台三个地址，活动前先跑一次
+./service.sh start|stop|restart
+./service.sh log 50            # 另外还有 check / reset
+```
+
+`run.sh` 是前台运行器：用 `flock` 保证只有一个实例，`python3 -u app.py` 的输出追加到
+`data/service.log`。服务**不会自动拉起**，重启机器之后要手动 `start`（或交给 systemd 之类的守护）。
+
+## 版本号
+
+四段 `主.次.修.构`，在 `app.py` 的 `VERSION`：
+
+| 段 | 什么时候动 |
+| --- | --- |
+| 主 | 架构或兼容性变了（老模块、老预设、老数据库要跟着动） |
+| 次 | 一批新功能落地 |
+| 修 | 行为变化，或一批修复 |
+| 构 | **只增不减**：推进任何一段它都跟着 +1。所以它是"这台机器的第几次发布" |
+
+```powershell
+python tools/bump_version.py            # 只推进「构」
+python tools/bump_version.py patch      # 「修」+1，「构」也 +1
+python tools/bump_version.py --show
+```
+
+每次上线都要推进：页面靠版本号判断"服务换了版本"，没变就不会换新脚本。
+
+## 重新部署之后
+
+服务重启不会把人踢下线，但已经开着的页面跑的还是旧脚本。所以每个回答都带着版本号：
+
+- 面板：这一页没敲过字、没有开着的弹窗就直接刷新；否则在内容上方出一条「服务已更新到 vX」，
+  点「刷新」再换。填了一半的表单不会被吞掉
+- 大屏：抽奖动画播完再刷新
+- 公示页：直接换
+
+## 日志
+
+`data/service.log`。写到 8 MB 自己换一份：改名成 `.1`，旧的依次往后挪，最多留三份（`.1`~`.3`）。
+服务是 `>>data/service.log` 起的，所以轮转是把同名文件重新开一份挂到 fd 1 上；日志写不出去不会
+让请求失败。`LOTTERY_LOG_MAX` 改上限（字节），`0` 关掉轮转。
+
+## 备份与还原
+
+需要备份的是整个 `data/` 目录，其中：
+
+| 内容 | 说明 |
+| --- | --- |
+| `panel.sqlite3` | 账号、活动索引、名单与报名索引、令牌、助手存档 |
+| `lists.sqlite3` | 名单与人员库 |
+| `events/<seq>.sqlite3` | 每场活动一个库 |
+| `owner_password.txt` | 首次启动生成的站长密码 |
+| `avatars/` | 头像 |
+
+活动**没有删除操作**，只有存档：存档之后数据库文件不动，随时可以查。所以备份就是复制 `data/`。
+
+还原：停服务 → 用备份覆盖 `data/` → `./service.sh start`。注意 SQLite 的 `-wal` 与 `-shm`
+要和主库一起复制，或者在停服务之后复制（那时 WAL 已经落盘）。
+
+`./service.sh reset` 会清空活动数据（只保留访问 id），重置前会要求输入 `yes`，并自动把旧库
+备份成 `data/backup-<时间>-*`。
+
+## 自检
+
+```sh
+python tools/panel_test.py http://127.0.0.1:8931     # 面板接口
+python tools/smoke_test.py http://127.0.0.1:8931     # 活动接口与事件流
+python tools/prod_check.py https://example.org/mount <活动 token>   # 线上巡检
+```
+
+`unit_test.py` 不需要服务；`panel_ui_test.py` 与 `ui_test.py` 用 Playwright 驱动真实页面，
+需要本机有 Edge。开发时用 `python tools/run_suites.py unit panel_test panel_ui_test smoke ui`
+一次跑完（自带空闲端口与临时数据目录）。
+
+## 配置
+
+`config.json` 位于应用根目录，首次启动时自动写入：
+
+| 键 | 作用 |
+| --- | --- |
+| `port` | 监听端口 |
+| `host` | 监听地址 |
+| `path_secret` | 首个活动的访问 token（也就是访问凭据） |
+| `public_base_prefix` | 生成绝对链接用的前缀，不参与路由 |
+| `owner_username` / `owner_name` | 站长的登录名与称呼 |
+| `self_checkin` | 是否开放自助签到 |
+
+环境变量可以覆盖：`LOTTERY_DATA_DIR`、`LOTTERY_PACKS_DIR`、`LOTTERY_PORT`、
+`LOTTERY_VERSION`（测试用）、`LOTTERY_LOG_MAX`、`LOTTERY_ASSISTANT_PROMPT`。

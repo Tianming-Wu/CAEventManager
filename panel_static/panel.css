@@ -2194,6 +2194,16 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   table.tbl.fixed th.actions { background: var(--surface-2); z-index: 3; }
   table.tbl.fixed th.actions { top: 0; }
 
+  /* 首列自己就吃掉大半屏幕时（名字很长、又只有它一列有内容），钉住它等于把屏幕
+     让给一列，剩下的列永远滑不进来。这种表格由 panel.js 打上 .wide-first，
+     首列跟着一起滑。 */
+  .tblwrap.wide-first table.tbl.fixed th:first-child,
+  .tblwrap.wide-first table.tbl.fixed td:first-child {
+    position: static;
+    min-width: 0;
+    max-width: 60vw;
+  }
+
   /* ---------- 手机上的日期与时刻 ----------
      电脑上那两个文本框加日历按钮是为了避开原生控件的混排占位符；
      手机上直接用系统控件，点一下就是日历/时间轮，不需要打字。 */
@@ -2466,10 +2476,12 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
    （一屏新表单的排版要几十毫秒，撞进去动画会被冻住再跳过去，就是"抽一下"） */
 .head-title { position: relative; padding-left: 0; transition: padding-left .2s ease; }
 .head-title.has-back { padding-left: 36px; }
-/* 没有返回键时，面包屑不该还挂着一个"上一级"：只留当前名称。
-   返回键只是"临时给一条回去的路"（?back=）时也一样：标题就写这一页的名字。 */
-.head-title:not(.has-back) .crumb-title .crumb,
-.head-title:not(.has-back) .crumb-title .crumb-sep,
+/* 面包屑只看"这一页有没有上一级"（.has-crumb，切到这一页时立刻定下），
+   和"有没有给返回键让位"（.has-back，可能等这一页内容画完才放开）分开：
+   绑在一起的话，让位一推迟，标题就先只剩后半截、再突然长出前面那段，看着就是一闪。
+   返回键只是"临时给一条回去的路"（?back=）时也不写上一级：标题就写这一页的名字。 */
+.head-title:not(.has-crumb) .crumb-title .crumb,
+.head-title:not(.has-crumb) .crumb-title .crumb-sep,
 .head-title.back-only .crumb-title .crumb,
 .head-title.back-only .crumb-title .crumb-sep { display: none; }
 .head-title .crumb-back {

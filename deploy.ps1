@@ -68,6 +68,20 @@ try {
 set -eu
 mkdir -p ~/__DEST__
 cd ~/__DEST__
+# 这次包里没有的旧文件要清掉：改过名、挪过目录的文件否则会一直留着，
+# 变成文档清单里的幽灵条目。data/ 与 config.json 不参与，实例自己装的东西也不参与。
+tar -tzf __TAR__ | sed -e 's|^\./||' -e '/\/$/d' | sort > /tmp/lottery-incoming.txt
+find . -type f \
+    -not -path './data/*' -not -path './modules/*' -not -path './templates/*' \
+    -not -path './screen_packs/*' -not -path './packs/*' -not -name 'config.json' \
+    | sed 's|^\./||' | sort > /tmp/lottery-present.txt
+comm -23 /tmp/lottery-present.txt /tmp/lottery-incoming.txt > /tmp/lottery-stale.txt || true
+while IFS= read -r stale; do
+    [ -n "$stale" ] || continue
+    rm -f "$stale"
+    echo "pruned $stale"
+done < /tmp/lottery-stale.txt
+rm -f /tmp/lottery-incoming.txt /tmp/lottery-present.txt /tmp/lottery-stale.txt
 tar -xzf __TAR__ -C ~/__DEST__
 rm -f __TAR__
 sed -i 's/\r$//' run.sh service.sh 2>/dev/null || true

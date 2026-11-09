@@ -160,10 +160,7 @@
 
   function filtered() {
     var q = S.q.trim();
-    var list = S.students;
-    if (q) {
-      list = LT.search(S.students, q, 999);
-    }
+    var list = q ? LT.queryStudents(S.students, q) : S.students.slice();
     return list.filter(function (s) {
       switch (S.filter) {
         case "in": return !!s.marks.checkin;
@@ -174,6 +171,30 @@
         default: return true;
       }
     });
+  }
+
+  /* 正在打 `#` 词的时候，把手上的标签列出来（点一下就能补全），
+     不要求谁记住语法 */
+  function renderTagHint() {
+    var box = $("#tagHint");
+    if (!box) return;
+    var q = S.q.trim();
+    var words = q.split(/\s+/);
+    var last = words[words.length - 1] || "";
+    var typing = last.charAt(0) === "#";
+    if (!typing) {
+      box.hidden = true;
+      box.innerHTML = "";
+      return;
+    }
+    var parsed = LT.parseQuery(q);
+    var known = parsed.unknown.length === 0;
+    var buttons = LT.TAGS.map(function (tag) {
+      return '<button type="button" data-tag="' + LT.esc(tag.label.split(" ")[0]) + '">' +
+        LT.esc(tag.label) + "</button>";
+    }).join("");
+    box.innerHTML = (known ? "按身份、状态筛：" : "没有这个标签。可用的有：") + buttons;
+    box.hidden = false;
   }
 
   function renderHits() {
@@ -248,8 +269,8 @@
   }
 
   function rosterRows() {
-    var q = S.rosterQ.trim().toLowerCase();
-    var list = q ? LT.search(S.students, q, 999) : S.students.slice();
+    var q = S.rosterQ.trim();
+    var list = q ? LT.queryStudents(S.students, q) : S.students.slice();
     var key = S.sortKey;
     var dir = S.sortDir;
     var rank = { participant: 0, staff: 1, volunteer: 2 };
@@ -643,8 +664,9 @@
   }
 
   function refreshHits() {
+    renderTagHint();
     if (!S.q.trim()) { S.hits = []; return; }
-    S.hits = LT.search(S.students, S.q, 8);
+    S.hits = LT.queryStudents(S.students, S.q, 8);
     if (S.sel >= S.hits.length) S.sel = Math.max(0, S.hits.length - 1);
   }
 
@@ -775,6 +797,24 @@
       renderHits();
       renderTable();
     });
+    // 点提示里的标签＝把它补进查询（省得记写法）
+    var hintBox = $("#tagHint");
+    if (hintBox) {
+      hintBox.addEventListener("click", function (e) {
+        var btn = e.target.closest("[data-tag]");
+        if (!btn) return;
+        var words = S.q.trim().split(/\s+/).filter(Boolean);
+        if (words.length && words[words.length - 1].charAt(0) === "#") words.pop();
+        words.push(btn.getAttribute("data-tag"));
+        S.q = words.join(" ") + " ";
+        q.value = S.q;
+        S.sel = 0;
+        refreshHits();
+        renderHits();
+        renderTable();
+        q.focus();
+      });
+    }
     q.addEventListener("keydown", function (e) {
       if (e.key === "ArrowDown") {
         e.preventDefault();

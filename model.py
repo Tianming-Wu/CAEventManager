@@ -35,6 +35,7 @@ import uuid
 import db
 import expr
 import pinyintable
+import surnames
 
 TASK_KINDS = ("task1", "task2")
 ROLES = ("participant", "staff", "volunteer")
@@ -425,12 +426,20 @@ def parse_role(text):
     return "participant"
 
 
+def name_syllables(name):
+    """姓名 → 逐字音节。姓那一个字用姓氏读音（曾 = zeng，不是 ceng）。"""
+    parts = pinyintable.syllables(name or "")
+    surname = surnames.surname_reading(name)
+    if surname and parts:
+        parts = [surname] + list(parts[1:])
+    return parts
+
+
 def normalize_pinyin(stu):
     name = stu.get("name") or ""
-    py = (stu.get("py") or "").strip().lower() or pinyintable.pinyin_full(name)
-    pyi = (stu.get("pyi") or "").strip().lower() or "".join(
-        s[0] for s in pinyintable.syllables(name) if s
-    )
+    parts = name_syllables(name)
+    py = (stu.get("py") or "").strip().lower() or "".join(parts)
+    pyi = (stu.get("pyi") or "").strip().lower() or "".join(s[0] for s in parts if s)
     return py, pyi
 
 

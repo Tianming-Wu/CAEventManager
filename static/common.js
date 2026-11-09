@@ -201,6 +201,7 @@
     var out = [];
     for (var i = 0; i < list.length; i++) {
       var s = score(list[i], q);
+      if (!s) s = flexScore(list[i], q);
       if (s) out.push([s, list[i]]);
     }
     out.sort(function (a, b) {
@@ -208,6 +209,173 @@
       return (a[1].sid || "").localeCompare(b[1].sid || "");
     });
     return out.slice(0, limit || 10).map(function (p) { return p[1]; });
+  }
+
+  /* ------------------------------------------------------------------ 混合搜索
+     目标只有一个：录入时快到极限。所以查询是"空格分隔的与条件"，`#标签` 筛身份与状态，
+     其余词按姓名 / 学号 / 拼音匹配，全部在前端算完（名单量级 60~200 人）。
+
+     拼音这一步是 JECh 式的：把姓名拆成逐字音节（曾萍静 = zeng/ping/jing），
+     查询按字母消费——每个音节只输入前缀也行，可以跳字也行：
+
+       zengpingjing  zpg  zengpj  zenpj  zpj   ← 都命中
+
+     这比"整串前缀"宽容得多，也比"随意子序列"严格：两个字母不能都从同一个音节里取。 */
+  var TAGS = [
+    { keys: ["w", "worker", "staff", "工作人员"], label: "#w 工作人员",
+      test: function (s) { return s.role === "staff"; } },
+    { keys: ["v", "volunteer", "志愿者"], label: "#v 志愿者",
+      test: function (s) { return s.role === "volunteer"; } },
+    { keys: ["p", "participant", "参加人员"], label: "#p 参加人员",
+      test: function (s) { return !s.role || s.role === "participant"; } },
+    { keys: ["已签到", "in"], label: "#已签到",
+      test: function (s) { return !!s.marks.checkin; } },
+    { keys: ["未签到", "out"], label: "#未签到",
+      test: function (s) { return !s.marks.checkin; } },
+    { keys: ["已完成", "done"], label: "#已完成",
+      test: function (s) { return (s.tasks || 0) >= 2; } },
+    { keys: ["未完成", "todo"], label: "#未完成",
+      test: function (s) { return (s.tasks || 0) < 2; } },
+    { keys: ["有票", "ticket"], label: "#有票",
+      test: function (s) { return ticketCount(s) > 0; } },
+    { keys: ["无票", "zeroticket"], label: "#无票",
+      test: function (s) { return ticketCount(s) === 0; } },
+    { keys: ["越序", "override"], label: "#越序",
+      test: function (s) { return !!s.override; } }
+  ];
+
+  function ticketCount(stu) {
+    var t = stu.tickets;
+    if (!t) return 0;
+    return typeof t.length === "number" ? t.length : Object.keys(t).length;
+  }
+
+  function findTag(word) {
+    var key = (word || "").toLowerCase();
+    for (var i = 0; i < TAGS.length; i++) {
+      if (TAGS[i].keys.indexOf(key) >= 0 || TAGS[i].keys.indexOf(word) >= 0) {
+        return TAGS[i];
+      }
+    }
+    return null;
+  }
+
+  // {tags: [{tag, negate, raw}], terms: ["xyh", "#..."], hint: 未完成的标签词}
+  function parseQuery(text) {
+    var out = { tags: [], terms: [], unknown: [] };
+    (text || "").trim().split(/\s+/).forEach(function (word) {
+      if (!word) return;
+      if (word.charAt(0) !== "#") {
+        out.terms.push(word.toLowerCase());
+        return;
+      }
+      var body = word.slice(1);
+      var negate = body.charAt(0) === "-";
+      if (negate) body = body.slice(1);
+      if (!body) return;                 // 只打了个 "#" 或 "#-"：还不算标签
+      var tag = findTag(body);
+      if (tag) out.tags.push({ tag: tag, negate: negate });
+      else out.unknown.push(word);
+    });
+    return out;
+  }
+
+  /* 拼音：音节前缀 + 可跳字。返回匹配到的分数（0 = 不匹配）。 */
+  function pinyinScore(syllables, query) {
+    if (!syllables || !syllables.length || !query) return 0;
+    var n = syllables.length;
+    var m = query.length;
+    var seen = {};
+    var whole = true;         // 整句都是连续前缀（更强）
+    var step = function (i, j, k) {
+      if (j === m) return true;
+      if (i >= n) return false;
+      var key = i + ":" + j + ":" + k;
+      if (seen[key] !== undefined) return seen[key];
+      var ok = false;
+      // 1) 继续在当前音节里吃一个字母
+      if (k < syllables[i].length && syllables[i].charAt(k) === query.charAt(j)) {
+        ok = step(i, j + 1, k + 1);
+      }
+      // 2) 跳到下一个音节（这一跳意味着"跳字"，强度降一档）
+      if (!ok && k === 0 && step(i + 1, j, 0)) {
+        whole = false;
+        ok = true;
+      }
+      // 3) 当前音节还没吃完也可以跳过去，从下一个音节的第一个字母重新开始
+      if (!ok && k > 0 && step(i + 1, j, 0)) {
+        whole = false;
+        ok = true;
+      }
+      seen[key] = ok;
+      return ok;
+    };
+    if (!step(0, 0, 0)) return 0;
+    return whole ? 320 : 300;
+  }
+
+  /* 一个词对一个学生的匹配分：姓名与学号直接比，拼音按上面的规则。 */
+  function termScore(stu, term) {
+    var sid = (stu.sid || "").toLowerCase();
+    var name = stu.name || "";
+    var py = (stu.py || "").toLowerCase();
+    var pyi = (stu.pyi || "").toLowerCase();
+    if (!term) return 0;
+    if (sid === term || py === term) return 1000;
+    if (name === term) return 980;
+    if (sid.indexOf(term) === 0) return 900;
+    if (py.indexOf(term) === 0) return 860;
+    if (pyi === term) return 850;
+    if (name.indexOf(term) >= 0) return 800;
+    if (pyi.indexOf(term) === 0) return 780;
+    if (py.indexOf(term) >= 0) return 600;
+    if (sid.indexOf(term) >= 0) return 400;
+    var pyScore = pinyinScore(stu.pys || [], term);
+    if (pyScore) return pyScore;
+    // 首字母子序列也算：zpg 之于 z-p-j
+    if (pyi && isSubsequence(term, pyi)) return 260;
+    return 0;
+  }
+
+  function isSubsequence(needle, hay) {
+    var i = 0;
+    for (var j = 0; j < hay.length && i < needle.length; j++) {
+      if (hay.charAt(j) === needle.charAt(i)) i++;
+    }
+    return i === needle.length;
+  }
+
+  function flexScore(stu, term) {
+    return termScore(stu, term);
+  }
+
+  /* 解析 + 求交：标签在本地过滤，词逐个匹配，取最弱的那一项当总分。 */
+  function queryStudents(list, text, limit) {
+    var parsed = parseQuery(text);
+    var out = [];
+    for (var i = 0; i < list.length; i++) {
+      var stu = list[i];
+      var ok = true;
+      for (var t = 0; t < parsed.tags.length; t++) {
+        var item = parsed.tags[t];
+        if (!!item.tag.test(stu) === item.negate) { ok = false; break; }
+      }
+      if (!ok) continue;
+      if (parsed.unknown.length) continue;      // 写错的标签当成"没有结果"
+      var weakest = 0;
+      for (var k = 0; k < parsed.terms.length; k++) {
+        var s = termScore(stu, parsed.terms[k]);
+        if (!s) { ok = false; break; }
+        weakest = weakest ? Math.min(weakest, s) : s;
+      }
+      if (!ok) continue;
+      out.push([weakest || 1, stu]);
+    }
+    out.sort(function (a, b) {
+      if (b[0] !== a[0]) return b[0] - a[0];
+      return (a[1].sid || "").localeCompare(b[1].sid || "");
+    });
+    return out.slice(0, limit || 999).map(function (p) { return p[1]; });
   }
 
   // The console hears about other people's writes instead of waiting for a poll.
@@ -280,6 +448,10 @@
     modal: modal,
     search: search,
     score: score,
+    parseQuery: parseQuery,
+    queryStudents: queryStudents,
+    termScore: termScore,
+    TAGS: TAGS,
     KIND_LABEL: KIND_LABEL
   };
 })();

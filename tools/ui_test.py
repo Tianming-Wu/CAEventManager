@@ -185,6 +185,74 @@ def main():
         shot(page, "04-chain-done")
 
         # ------------------------------------------------------- undo lock
+        print("== 混合搜索：拼音片段 + #标签 ==")
+        # 匹配器是纯函数，直接拿一份固定的名单量它（不依赖这台机器上的演示数据）
+        result = page.evaluate("""() => {
+            const list = [
+              {name: "曾萍静", sid: "2024001", py: "zengpingjing", pyi: "zpj",
+               pys: ["zeng", "ping", "jing"], role: "participant",
+               marks: {checkin: 1}, tickets: [1], tasks: 2},
+              {name: "周子墨", sid: "2024002", py: "zhouzimo", pyi: "zzm",
+               pys: ["zhou", "zi", "mo"], role: "staff",
+               marks: {}, tickets: [], tasks: 0},
+              {name: "高勇", sid: "2024003", py: "gaoyong", pyi: "gy",
+               pys: ["gao", "yong"], role: "volunteer",
+               marks: {checkin: 1}, tickets: [], tasks: 1}
+            ];
+            const names = (q) => LT.queryStudents(list, q).map(s => s.name);
+            return {
+              full: names("zengpingjing"),
+              initials: names("zpj"),
+              firstWholeRestInitial: names("zengpj"),
+              midWhole: names("zengpingj"),
+              skipMiddle: names("zengj"),
+              sid: names("2024002"),
+              hanzi: names("周子墨"),
+              staff: names("#staff"),
+              staffCn: names("#工作人员"),
+              negStaff: names("w") .length ? names("#-std") : [],
+              notStaff: names("#-工作人员"),
+              staffWithTerm: names("#w zzm"),
+              unknownTag: names("#nosuchtag"),
+              andTerms: names("gao 2024003"),
+              parsedUnknown: LT.parseQuery("#").unknown.length
+            };
+        }""")
+        check("整拼命中", result["full"] == ["曾萍静"], result["full"])
+        check("首字母命中", result["initials"] == ["曾萍静"], result["initials"])
+        check("第一段整拼 + 后面只打首字母",
+              result["firstWholeRestInitial"] == ["曾萍静"],
+              result["firstWholeRestInitial"])
+        check("中间音节可以只打前缀", result["midWhole"] == ["曾萍静"],
+              result["midWhole"])
+        check("中间音节可以整段跳过", result["skipMiddle"] == ["曾萍静"],
+              result["skipMiddle"])
+        check("学号片段命中", result["sid"] == ["周子墨"], result["sid"])
+        check("直接打汉字也命中", result["hanzi"] == ["周子墨"], result["hanzi"])
+        check("标签按身份筛（英文）", result["staff"] == ["周子墨"], result["staff"])
+        check("标签按身份筛（中文）", result["staffCn"] == ["周子墨"],
+              result["staffCn"])
+        check("标签取反", sorted(result["notStaff"]) == ["曾萍静", "高勇"],
+              result["notStaff"])
+        check("标签与词求交", result["staffWithTerm"] == ["周子墨"],
+              result["staffWithTerm"])
+        check("多个词求交", result["andTerms"] == ["高勇"], result["andTerms"])
+        check("写错的标签不命中任何人", result["unknownTag"] == [],
+              result["unknownTag"])
+        check("只打 # 不算写错标签", result["parsedUnknown"] == 0,
+              result["parsedUnknown"])
+
+        page.fill("#q", "#")
+        page.wait_for_timeout(240)
+        hint = page.evaluate("""() => {
+            const h = document.getElementById('tagHint');
+            return h && !h.hidden ? h.innerText : '';
+        }""")
+        check("打 # 就把可用的标签列出来",
+              "工作人员" in hint and "未签到" in hint, hint[:60])
+        page.fill("#q", "")
+        page.wait_for_timeout(200)
+
         print("== undo requires the unlock switch ==")
         page.keyboard.press("Escape")
         page.wait_for_timeout(300)

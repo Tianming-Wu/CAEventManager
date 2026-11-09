@@ -44,6 +44,7 @@ import db
 import expr
 import exporter
 import modules
+import pinyintable
 import policy
 import presets
 import localconfig
@@ -57,7 +58,7 @@ TPL_DIR = os.path.join(BASE_DIR, "tpl")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.7.0.28"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.7.0.29"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -375,6 +376,9 @@ def student_admin(stu):
         "name": stu["name"],
         "py": stu.get("py"),
         "pyi": stu.get("pyi"),
+        # 逐字音节：控制台的混合搜索要按音节做前缀匹配（见 ROADMAP 三b），
+        # 前端没有汉字读音表，所以由服务端带下来
+        "pys": model.name_syllables(stu.get("name") or ""),
         "grp": stu.get("grp") or "",
         "note": stu.get("note") or "",
         "marks": {k: fmt_ts(v) for k, v in (stu.get("marks") or {}).items()},

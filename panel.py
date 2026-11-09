@@ -1080,7 +1080,9 @@ def bootstrap(cfg, event_token_hint=None, log=print):
 # routing
 # --------------------------------------------------------------------------- #
 PANEL_PAGES = {"/": "panel_login.html", "/login": "panel_login.html",
-               "/register": "panel_register.html", "/panel": "panel_panel.html"}
+               "/register": "panel_register.html", "/panel": "panel_panel.html",
+               # 打印页：报名表 / 已报名单，只有一张纸，不带面板外壳
+               "/print": "panel_print.html"}
 
 
 def _is_panel_route(path):

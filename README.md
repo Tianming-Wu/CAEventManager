@@ -14,6 +14,7 @@
 /                  主面板登录页（/login 是同一页）
 /register          主面板注册（提交后待审核）
 /panel             主面板控制台
+/print             打印页：报名表 / 已报名单
 /panel_static/*    主面板静态资源
 /api/panel/*       主面板接口
 

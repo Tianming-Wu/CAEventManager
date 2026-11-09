@@ -634,6 +634,107 @@ def signup_page(page, browser):
     guest.close()
 
 
+def print_page(browser):
+    """打印报名表：空白表与已报名单，两样都要能上纸。"""
+    print("== 打印报名表 ==")
+    owner = owner_opener()
+    rid = call(owner, "/api/panel/roster/import", {
+        "name": "打印测试名单", "text": "学号,姓名\n20250031,甲一"})["id"]
+    sid = call(owner, "/api/panel/signup/create", {
+        "title": "打印测试报名", "roster_id": rid})["id"]
+    token = (call(owner, "/api/panel/signup?id=%d" % sid) or {}).get("signup", {}).get("token")
+    ctx, page = new_page(browser, 1100, 900)
+    gate = None
+    try:
+        ui_login(page)
+        page.goto(BASE + "/panel#/signup/%d" % sid)
+        page.wait_for_timeout(800)
+        check("报名详情里有打印入口", page.locator("#signupPrintBtn").count() == 1)
+
+        page.goto(BASE + "/print?kind=signup&id=%d" % sid)
+        page.wait_for_selector(".sheet-table", timeout=15000)
+        page.wait_for_timeout(300)
+        blank = page.evaluate("""() => {
+            const t = document.querySelector('.sheet-table');
+            const cols = [...t.querySelectorAll('thead th')].map(x => x.textContent.trim());
+            return {title: document.querySelector('.sheet-title h1').textContent.trim(),
+                    rows: t.querySelectorAll('tbody tr').length,
+                    cols: cols, qr: !!document.querySelector('.sheet-qr svg'),
+                    blankCls: t.classList.contains('blank')};
+        }""")
+        check("纸上有报名名称", blank["title"] == "打印测试报名", blank["title"])
+        check("空白表默认 12 行", blank["rows"] == 12, blank["rows"])
+        check("列是学号、姓名、签名这些", "学号" in blank["cols"] and "姓名" in blank["cols"]
+              and "签名" in blank["cols"], blank["cols"])
+        check("带二维码，扫码就能在线报名", blank["qr"])
+
+        page.fill("#blankRows", "20")
+        page.wait_for_timeout(350)
+        check("空行数能改，改完立刻重画",
+              page.evaluate("() => document.querySelectorAll('.sheet-table tbody tr').length")
+              == 20)
+
+        page.emulate_media(media="print")
+        page.wait_for_timeout(250)
+        check("打印时工具栏整块消失", page.locator("#toolbar").is_hidden())
+        check("也还是白底黑字",
+              page.evaluate("() => getComputedStyle(document.body).backgroundColor")
+              == "rgb(255, 255, 255)")
+        page.emulate_media(media="screen")
+
+        page.click('[data-mode="list"]')
+        page.wait_for_timeout(700)
+        listing = page.evaluate("""() => {
+            const t = document.querySelector('.sheet-table');
+            if (!t) return null;
+            const cols = [...t.querySelectorAll('thead th')].map(x => x.textContent.trim());
+            return {cols: cols, rows: t.querySelectorAll('tbody tr').length,
+                    foot: document.querySelector('.sheet-foot').textContent.trim(),
+                    rowsField: !document.getElementById('rowsField').hidden};
+        }""")
+        check("已报名单里有报名时间与签名列",
+              listing and "报名时间" in listing["cols"] and "签名" in listing["cols"],
+              listing["cols"] if listing else None)
+        check("名单模式下空行数不占地方", listing and not listing["rowsField"], listing)
+        check("没人报名时说清楚",
+              listing and listing["rows"] == 0
+              and "还没有人报名" in page.inner_text("#paper"), listing)
+
+        # 真的有人报名之后，名单里应该有他
+        gate = browser.new_context(viewport={"width": 430, "height": 900}, locale="zh-CN")
+        pub = gate.new_page()
+        pub.goto(BASE + "/join/" + str(token), wait_until="networkidle")
+        pub.wait_for_timeout(700)
+        pub.fill("#sid", "20250031")
+        pub.fill("#name", "甲一")
+        pub.click("#go")
+        pub.wait_for_timeout(1000)
+        page.click('[data-mode="blank"]')
+        page.wait_for_timeout(300)
+        page.click('[data-mode="list"]')
+        page.wait_for_timeout(800)
+        filled = page.evaluate("""() => {
+            const rows = [...document.querySelectorAll('.sheet-table tbody tr')];
+            return {rows: rows.length, first: rows[0] ? rows[0].textContent.trim() : "",
+                    foot: document.querySelector('.sheet-foot').textContent.trim()};
+        }""")
+        check("报名的人出现在名单里", filled["rows"] == 1
+              and "20250031" in filled["first"], filled)
+        check("页脚给出总人数", "共 1 人" in filled["foot"], filled["foot"])
+        check("这一段没有 javascript 错误", not page._errors,
+              "; ".join(page._errors)[:200])
+    finally:
+        if gate is not None:
+            gate.close()
+        ctx.close()
+        for path, body in (("/api/panel/signup/delete", {"id": sid}),
+                           ("/api/panel/roster/delete", {"id": rid})):
+            try:
+                call(owner, path, body)
+            except Exception:
+                pass
+
+
 def notice_page(page):
     print("== 通知中心 ==")
     import sys as _sys
@@ -839,8 +940,10 @@ window.__startCrumb = function (name) {
     let row = {t: Math.round(now - t0), left: null, sub: null, name: null,
                crumb: null, shown: false};
     if (el && page && !page.hidden) {
+      const box = el.getBoundingClientRect();
       row = {t: Math.round(now - t0),
-             left: Math.round(el.getBoundingClientRect().left * 10) / 10,
+             left: Math.round(box.left * 10) / 10,
+             w: Math.round(box.width * 10) / 10,
              sub: sub ? Math.round(sub.getBoundingClientRect().left * 10) / 10 : null,
              name: nm ? Math.round(nm.getBoundingClientRect().left * 10) / 10 : null,
              crumb: crumb ? getComputedStyle(crumb).display !== 'none' : null,
@@ -904,18 +1007,22 @@ def crumb_motion(browser):
             subs = [r["sub"] for r in rows if r["sub"] is not None]
             sub_travel = round(max(subs) - min(subs), 1) if subs else 0
             check("%s：副标题跟着一起挪" % label, sub_travel >= 30, sub_travel)
-            # 动画开始之后，标题与副标题必须一块儿动：位移差不超过 1.5px
-            # （动画开始之前标题的字会换——数据到了，名字变长——那一段不算）
-            pairs = [(r["left"], r["sub"]) for r in rows if r["sub"] is not None]
-            start = 0
-            for i, (l, _s) in enumerate(pairs):
-                if abs(l - pairs[0][0]) >= 0.5:
-                    start = max(0, i - 1)
-                    break
-            base_l, base_s = pairs[start] if pairs else (0, 0)
-            drift = max([abs((l - base_l) - (s - base_s)) for l, s in pairs[start:]] or [0])
-            check("%s：两者之间不留缝也不叠字" % label, drift <= 1.5,
-                  "位移差最大 %.1fpx" % drift)
+            # 动画开始之后，两者每一帧的位移都要一致（≤1.5px）。
+            # 标题的宽度变了说明这一帧换字了（报名/名单的名字是数据到了才填的），跳过那一帧。
+            pairs = [(r["left"], r["sub"], r["w"]) for r in rows if r["sub"] is not None]
+            worst = 0.0
+            started = False
+            for (l0, s0, w0), (l1, s1, w1) in zip(pairs, pairs[1:]):
+                if not started:
+                    if abs(l1 - pairs[0][0]) < 0.5:
+                        continue
+                    started = True
+                    continue
+                if abs(w1 - w0) > 0.5:
+                    continue
+                worst = max(worst, abs((l1 - l0) - (s1 - s0)))
+            check("%s：两者之间不留缝也不叠字" % label, worst <= 1.5,
+                  "单帧位移差最大 %.1fpx" % worst)
             # 标题后半截（这一页的名字）也不许跳：面包屑突然出现/消失会让它一下挪一大截
             names = [r["name"] for r in rows if r["name"] is not None]
             name_steps = [abs(b - a) for a, b in zip(names, names[1:])]
@@ -2531,6 +2638,7 @@ def main():
                 screens_page(page)
                 roster_page(page)
                 signup_page(page, browser)
+                print_page(browser)
                 notice_page(page)
                 card_page(page)
                 create_page(browser)

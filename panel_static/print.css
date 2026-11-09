@@ -1,0 +1,222 @@
+/* ==========================================================================
+   打印页：报名表 / 已报名单
+
+   这一页只有一件事——上纸。所以：
+   - 工具栏在打印时整块消失（.no-print）
+   - 纸上永远是白底黑字，不跟面板的主题走（暗色主题不该把纸印黑）
+   - 表头在每一页重复（thead 默认就是 table-header-group），一行不被分页切开
+   ========================================================================== */
+
+:root {
+  --ink: #111111;
+  --muted: #555555;
+  --line: #b9b3aa;
+  --line-soft: #ddd8d0;
+  --accent: #b45309;
+  --bg: #f5f2ee;
+  --sans: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB",
+          "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  --mono: ui-monospace, "Cascadia Mono", Consolas, "Courier New", monospace;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }   /* 工具栏里用它藏"空行"，别被 .toolbar-field 的 display 盖过去 */
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* ---------- 工具栏（打印时不见） ---------- */
+.toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 16px;
+  background: #fff;
+  border-bottom: 1px solid var(--line-soft);
+}
+.toolbar-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.toolbar-field { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+.toolbar-field input {
+  width: 64px;
+  height: 32px;
+  padding: 0 8px;
+  font: inherit;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+}
+.hint { color: var(--muted); font-size: .82rem; }
+#backBtn { margin-left: auto; }
+
+.btn {
+  appearance: none;
+  height: 32px;
+  padding: 0 14px;
+  font: inherit;
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  cursor: pointer;
+}
+.btn:hover { background: #f3efe9; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.primary:hover { filter: brightness(1.06); }
+
+.seg {
+  display: inline-flex;
+  padding: 2px;
+  gap: 2px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+.seg-item {
+  appearance: none;
+  height: 28px;
+  padding: 0 12px;
+  font: inherit;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.seg-item[aria-pressed="true"] { background: #17140f; color: #fff; }
+
+/* ---------- 纸 ---------- */
+.paper {
+  width: min(210mm, 100%);
+  margin: 16px auto 40px;
+  padding: 12mm 10mm;
+  background: #fff;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, .12);
+}
+
+.sheet-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding-bottom: 8px;
+  border-bottom: 2px solid var(--ink);
+}
+.sheet-title { flex: 1 1 auto; min-width: 0; }
+.sheet-title h1 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: .01em;
+}
+.sheet-title .sheet-note {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+.sheet-qr { flex: none; text-align: center; color: var(--muted); font-size: 10px; }
+.sheet-qr svg { display: block; width: 74px; height: 74px; }
+.sheet-qr .sheet-url {
+  display: block;
+  max-width: 160px;
+  margin-top: 2px;
+  font-family: var(--mono);
+  font-size: 8px;
+  word-break: break-all;
+}
+
+.sheet-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 22px;
+  margin: 8px 0 0;
+  font-size: 12px;
+}
+.sheet-meta div { display: flex; gap: 6px; }
+.sheet-meta dt { color: var(--muted); }
+.sheet-meta dd { margin: 0; }
+
+.sheet-table {
+  width: 100%;
+  margin-top: 10px;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 12px;
+}
+.sheet-table th,
+.sheet-table td {
+  border: 1px solid var(--line);
+  padding: 5px 6px;
+  text-align: left;
+  vertical-align: middle;
+  overflow: hidden;
+  word-break: break-all;
+}
+.sheet-table th {
+  background: #f1ede7;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.sheet-table tbody tr { break-inside: avoid; page-break-inside: avoid; }
+.sheet-table tbody tr:nth-child(even) { background: #fbf9f6; }
+.sheet-table td.no { text-align: center; color: var(--muted); }
+.sheet-table td.mono { font-family: var(--mono); }
+.sheet-table .w-no { width: 38px; }
+.sheet-table .w-sig { width: 84px; }
+.sheet-table .w-time { width: 108px; }
+/* 空白表要写字：行高比数据行高一些 */
+.sheet-table.blank tbody td { height: 30px; }
+
+.sheet-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.sheet-empty {
+  margin: 18px 0 0;
+  padding: 14px;
+  border: 1px dashed var(--line);
+  color: var(--muted);
+  text-align: center;
+}
+
+/* ---------- 打印 ---------- */
+@page {
+  size: A4;
+  margin: 12mm 10mm;
+}
+
+@media print {
+  html, body { background: #fff; }
+  .toolbar { display: none !important; }
+  .paper {
+    width: auto;
+    margin: 0;
+    padding: 0;
+    box-shadow: none;
+  }
+  .sheet-table th { background: #f1ede7 !important; -webkit-print-color-adjust: exact; }
+}
+
+/* 窄屏上先能看：表格横向滚，工具栏换行 */
+@media (max-width: 620px) {
+  .paper { margin: 8px 0 24px; padding: 14px 12px; box-shadow: none; }
+  .sheet-head { flex-wrap: wrap; }
+  .sheet-table { display: block; overflow-x: auto; }
+}

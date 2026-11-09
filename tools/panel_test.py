@@ -1317,6 +1317,14 @@ def main():
                     if "标题" in system:
                         # 起名字那一路：不给工具，只要一句短标题
                         message = {"role": "assistant", "content": "活动报名排查。"}
+                    elif "文档" in " ".join(m.get("content") or ""
+                                            for m in body.get("messages", [])
+                                            if m.get("role") == "user"):
+                        message = {"role": "assistant", "content": "",
+                                   "tool_calls": [{"id": "call_doc", "type": "function",
+                                                   "function": {"name": "read_doc",
+                                                                "arguments":
+                                                                    '{"path": "doc/README.md"}'}}]}
                     elif tool_msgs:
                         titles = re.findall(r'"title": "([^"]+)"',
                                             tool_msgs[-1].get("content") or "")
@@ -1419,6 +1427,20 @@ def main():
               titled and titled.get("title") == "活动报名排查", titled)
         check("起名字那一路不要工具", not (stub.requests[-1]["body"].get("tools")),
               stub.requests[-1]["body"])
+
+        print("== 助手会去读随应用装好的文档 ==")
+        before = len(stub.requests)
+        post(owner, "/api/panel/assistant/chat",
+             {"messages": [{"role": "user", "content": "文档里怎么说名单的"}]})
+        first = (stub.requests[before]["body"].get("messages") or [])
+        check("工具清单里有读文档那两个",
+              "list_docs" in json.dumps(stub.requests[before]["body"].get("tools") or [])
+              and "read_doc" in json.dumps(stub.requests[before]["body"].get("tools") or []))
+        tool_msgs = [m for m in (stub.requests[before + 1]["body"].get("messages") or [])
+                     if m.get("role") == "tool"]
+        check("读回来的正文进了上下文",
+              tool_msgs and "文档目录" in (tool_msgs[-1].get("content") or ""),
+              (tool_msgs[-1].get("content") or "")[:80] if tool_msgs else first[:1])
 
         print("== 平台自己的提示词：数据目录里放一份 markdown ==")
         version = (call(owner, "/api/panel/me") or {}).get("version") or ""

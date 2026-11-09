@@ -5275,6 +5275,11 @@
     if (!S.signup) return;
     location.href = PX.PREFIX + "/api/panel/signup/export.csv?id=" + S.signup.id;
   });
+  // 打印报名表：另开一张纸（空白表 / 已报名单），不挤在面板里
+  $("#signupPrintBtn").addEventListener("click", function () {
+    if (!S.signup) return;
+    window.open(PX.PREFIX + "/print?kind=signup&id=" + S.signup.id, "_blank", "noopener");
+  });
   $("#signupEntryMore").addEventListener("click", function () {
     loadSignupEntries(true).then(drawSignupEntries);
   });

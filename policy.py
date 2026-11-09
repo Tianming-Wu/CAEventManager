@@ -21,6 +21,9 @@ READ_ACTIONS = {
     "list_signups": None,
     "signup_entries": None,
     "search_people": None,
+    # 说明文档是随应用装过去的纯文本，里头没有凭据；谁都能读
+    "list_docs": None,
+    "read_doc": None,
     "recent_audit": "superadmin",
     "host_stats": "owner",
 }

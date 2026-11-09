@@ -302,6 +302,108 @@ def _tool_host_stats(client, args):
             "users": data.get("users") or {}}
 
 
+# --------------------------------------------------------------------------- #
+# 说明文档：随应用一起装到机器上的 doc/，以及每个模块自己的 doc.md
+# --------------------------------------------------------------------------- #
+# 为什么要让助手读文档：把全部说明塞进系统提示会白白烧 token，而助手不知道
+# "这个平台怎么用"就会瞎猜。文档是纯文本、随部署一起过去，读一份只在用到时花一次。
+DOC_DIR = "doc"
+DOC_EXTS = (".md",)
+DOC_MAX_KINDS = ("doc", "module")
+DOC_LIST_MAX = 60
+DOC_MAX_CHARS = 12000          # 一份文档一次最多回这么多字，太长就截断并说明
+DOC_ROOTS = ("builtin/modules", "modules")
+
+
+def _docs_base():
+    """文档根：这个文件所在的目录（也就是应用根）。"""
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+def _doc_title(path):
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            for _ in range(5):
+                line = fh.readline()
+                if not line:
+                    break
+                line = line.strip()
+                if line.startswith("#"):
+                    return line.lstrip("#").strip()
+    except OSError:
+        pass
+    return os.path.basename(path)
+
+
+def doc_entries():
+    """所有可读文档：``doc/`` 下的 markdown，加上每个模块自己那份 ``doc.md``。"""
+    base = _docs_base()
+    out = []
+
+    def add(full, rel):
+        try:
+            size = os.path.getsize(full)
+        except OSError:
+            return
+        out.append({"path": rel, "title": _doc_title(full), "size": size})
+
+    root = os.path.join(base, DOC_DIR)
+    for here, dirs, files in os.walk(root):
+        dirs[:] = sorted(d for d in dirs if not d.startswith("."))
+        for name in sorted(files):
+            if not name.lower().endswith(DOC_EXTS):
+                continue
+            full = os.path.join(here, name)
+            add(full, os.path.relpath(full, base).replace(os.sep, "/"))
+    for kind in DOC_ROOTS:
+        parent = os.path.join(base, kind)
+        if not os.path.isdir(parent):
+            continue
+        for module in sorted(os.listdir(parent)):
+            full = os.path.join(parent, module, "doc.md")
+            if os.path.isfile(full):
+                add(full, "%s/%s/doc.md" % (kind, module))
+    return out
+
+
+def read_doc(rel):
+    """按清单里的路径读一份文档。只认清单里出现过的那些路径，别的都拒。"""
+    want = (rel or "").strip().replace("\\", "/").lstrip("./")
+    if not want:
+        return None, "需要 path，可以先用 list_docs 看有哪些"
+    for item in doc_entries():
+        if item["path"] != want:
+            continue
+        full = os.path.join(_docs_base(), want)
+        try:
+            with open(full, "r", encoding="utf-8") as fh:
+                text = fh.read(DOC_MAX_CHARS + 1)
+        except OSError:
+            return None, "这份文档读不出来"
+        if len(text) > DOC_MAX_CHARS:
+            text = text[:DOC_MAX_CHARS] + "\n\n（后面还有，一次只回这么多字；需要的话换个更具体的问法）"
+        return text, ""
+    return None, "没有这份文档：" + want
+
+
+def _tool_list_docs(client, args):
+    q = (args.get("q") or "").strip().lower()
+    rows = [d for d in doc_entries()
+            if not q or q in d["path"].lower() or q in d["title"].lower()]
+    if not rows:
+        return {"count": 0, "docs": [], "note": "这台机器上没有装说明文档（doc/ 为空）"}
+    return {"count": len(rows), "docs": rows[:DOC_LIST_MAX],
+            "note": "用 read_doc 读其中一份的正文" if len(rows) <= DOC_LIST_MAX
+                    else "只列出前 %d 份，用 q 缩小范围" % DOC_LIST_MAX}
+
+
+def _tool_read_doc(client, args):
+    text, err = read_doc(args.get("path") or "")
+    if err:
+        return {"error": err}
+    return {"path": (args.get("path") or "").strip(), "chars": len(text), "text": text}
+
+
 # OpenAI 风格的参数描述
 TOOLS = [
     {"name": "list_events", "run": _tool_list_events,
@@ -344,6 +446,17 @@ TOOLS = [
     {"name": "host_stats", "run": _tool_host_stats,
      "description": "服务器状态与在线人数（仅站长）",
      "parameters": {"type": "object", "properties": {}}},
+    {"name": "list_docs", "run": _tool_list_docs,
+     "description": "列出随应用装好的说明文档（平台用法、界面规范、部署运维）与各模块的现场说明",
+     "parameters": {"type": "object",
+                    "properties": {"q": {"type": "string",
+                                         "description": "只看路径或标题里含这个词的"}}}},
+    {"name": "read_doc", "run": _tool_read_doc,
+     "description": "读一份说明文档的正文；路径来自 list_docs",
+     "parameters": {"type": "object",
+                    "properties": {"path": {"type": "string",
+                                            "description": "例如 doc/usage/panel.md"}},
+                    "required": ["path"]}},
 ]
 
 BY_NAME = {t["name"]: t for t in TOOLS}
@@ -355,7 +468,9 @@ SYSTEM_PROMPT = (
     "2. 你只能做当前账号有权做的事。工具报无权时照实说，别绕。\n"
     "3. 改数据的动作目前一律不开放：告诉用户去对应页面操作，并说清是哪个页面。\n"
     "4. 回答用简体中文、书面语，简洁；数字与名字要准确，不要编造。\n"
-    "5. 不要把学号、姓名等个人信息成段罗列，只给用户当下需要的那部分。"
+    "5. 不要把学号、姓名等个人信息成段罗列，只给用户当下需要的那部分。\n"
+    "6. 讲到平台怎么用时（页面在哪、字段什么意思、部署与备份怎么做），先用 list_docs / "
+    "read_doc 读随应用装好的说明文档，别凭印象说；模块自己的现场操作在模块的 doc.md 里。"
 )
 
 

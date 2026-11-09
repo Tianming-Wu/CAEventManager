@@ -5,7 +5,7 @@
   // "/<mount>/panel" -> "/<mount>", "/" -> ""
   // <mount>/panel/panel（旧地址把挂载前缀拼重过）也还原成 <mount>
   function prefix() {
-    var p = location.pathname.replace(/(?:\/(?:panel|login|register))+\/?$/, "/");
+    var p = location.pathname.replace(/(?:\/(?:panel|login|register|print))+\/?$/, "/");
     return p.replace(/\/+$/, "");
   }
   var PREFIX = prefix();

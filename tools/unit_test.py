@@ -526,6 +526,38 @@ def main():
           app.assistant.prompt_values({"username": "owner", "role": "admin"})["user.name"]
           == "owner")
 
+    print("== 助手能读的文档 ==")
+    rows = app.assistant.doc_entries()
+    paths = [r["path"] for r in rows]
+    check("doc/ 整棵树都在清单里",
+          "doc/README.md" in paths and "doc/usage/panel.md" in paths, paths[:5])
+    check("模块自己的说明也在清单里",
+          "builtin/modules/nwuca.lottery/doc.md" in paths, paths[-3:])
+    check("每份都有标题、有大小",
+          all(r["title"] and r["size"] > 0 for r in rows))
+    text, err = app.assistant.read_doc("doc/usage/panel.md")
+    check("正文读得出来", not err and text.startswith("#"), (text or "")[:20])
+    check("跳出目录的路径一律拒", bool(app.assistant.read_doc("../app.py")[1])
+          and bool(app.assistant.read_doc("doc/../../app.py")[1]))
+    check("不在清单里的路径也拒", bool(app.assistant.read_doc("doc/nope.md")[1]))
+    probe = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                         "doc", "_probe-long.md")
+    try:
+        with open(probe, "w", encoding="utf-8") as fh:
+            fh.write("# 长文\n" + "字" * (app.assistant.DOC_MAX_CHARS + 500))
+        long_text, long_err = app.assistant.read_doc("doc/_probe-long.md")
+        check("太长就截断并说明",
+              not long_err and len(long_text) <= app.assistant.DOC_MAX_CHARS + 120
+              and "后面还有" in long_text, len(long_text or ""))
+    finally:
+        if os.path.exists(probe):
+            os.remove(probe)
+    check("删掉之后就查不到了",
+          bool(app.assistant.read_doc("doc/_probe-long.md")[1]))
+    check("读文档对所有角色开放",
+          app.policy.verdict({"role": "admin"}, "read_doc", {})[0]
+          and app.policy.verdict({"role": "owner"}, "list_docs", {})[0])
+
     print("== the panel's own helpers ==")
     check("view() maps the role label",
           app.panel.ROLE_LABEL.get("owner") == "站长", app.panel.ROLE_LABEL)

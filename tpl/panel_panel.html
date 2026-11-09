@@ -1378,7 +1378,8 @@
       </div>
     </section>
 
-    <div class="notice-panel" id="noticePanel" hidden>
+    <!-- 收起时不加 hidden：靠 .open 让它缩到顶栏底下，才有滑入滑出 -->
+    <div class="notice-panel" id="noticePanel" aria-hidden="true">
       <div class="notice-list" id="noticeList"></div>
       <div class="notice-foot" id="noticeFoot" hidden>
         <button class="btn sm" id="noticeReadAll" type="button">全部已读</button>

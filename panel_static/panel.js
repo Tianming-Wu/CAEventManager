@@ -1012,12 +1012,20 @@
     if (mark && id) markNotices([id]);
   }
 
+  function noticePanelOpen() {
+    var panel = $("#noticePanel");
+    return !!panel && panel.classList.contains("open");
+  }
+
+  /* 收起时不是 display:none，而是往顶栏底下缩回去（见 CSS）：
+     这样才有滑入/滑出的过程，也不再需要 hidden 来挡点击 */
   function openNoticePanel(open) {
     var panel = $("#noticePanel");
     var btn = $("#bellBtn");
     if (!panel) return;
-    var show = open === undefined ? panel.hidden : open;
-    panel.hidden = !show;
+    var show = open === undefined ? !noticePanelOpen() : !!open;
+    panel.classList.toggle("open", show);
+    panel.setAttribute("aria-hidden", show ? "false" : "true");
     if (btn) btn.setAttribute("aria-expanded", show ? "true" : "false");
     if (show) loadNotices();
   }
@@ -5587,7 +5595,7 @@
   // 点空白处收起列表，但紧急弹窗不在此列
   document.addEventListener("click", function (e) {
     var panel = $("#noticePanel");
-    if (!panel || panel.hidden) return;
+    if (!panel || !noticePanelOpen()) return;
     if (panel.contains(e.target) || e.target.closest("#bellBtn")) return;
     openNoticePanel(false);
   });

@@ -674,6 +674,21 @@ def print_page(browser):
         check("也没有打印时间", "打印于" not in sheet["body"], sheet["body"][:80])
         check("列是学号、姓名、院系、班级",
               ["序号", "学号", "姓名", "院系", "班级"] == sheet["cols"], sheet["cols"])
+        index = page.evaluate("""() => {
+            const th = document.querySelector('.sheet-table thead th');
+            const box = th.getBoundingClientRect();
+            const range = document.createRange();
+            range.selectNodeContents(th);
+            const text = range.getBoundingClientRect();
+            return {colW: Math.round(box.width), textW: Math.round(text.width),
+                    leftGap: Math.round(text.left - box.left),
+                    rightGap: Math.round(box.right - text.right),
+                    align: getComputedStyle(th).textAlign};
+        }""")
+        check("序号列的表头居中，左右留白一样",
+              index["align"] == "center"
+              and abs(index["leftGap"] - index["rightGap"]) <= 1
+              and index["textW"] + 2 <= index["colW"], index)
         check("60 人都在表里", sheet["rows"] == 60, sheet["rows"])
         check("每页左下角标页码",
               sheet["nos"] and all("第 " in n and "/" in n for n in sheet["nos"])
@@ -994,6 +1009,51 @@ def notice_page(page):
     check("the panel has no title bar of its own",
           page.locator("#noticePanel .notice-head").count() == 0)
     page.click("#bellBtn")   # 再点铃铛收起
+    page.wait_for_timeout(90)
+    closing = page.evaluate("""() => {
+        const p = document.getElementById('noticePanel');
+        const cs = getComputedStyle(p);
+        return {open: p.classList.contains('open'), vis: cs.visibility,
+                tf: cs.transform};
+    }""")
+    page.wait_for_timeout(400)
+    shut = page.evaluate("""() => {
+        const p = document.getElementById('noticePanel');
+        const cs = getComputedStyle(p);
+        const box = p.getBoundingClientRect();
+        const bar = document.querySelector('.titlebar');
+        return {open: p.classList.contains('open'), vis: cs.visibility,
+                tf: cs.transform, top: Math.round(box.top), h: Math.round(box.height),
+                zPanel: Number(cs.zIndex),
+                zBar: Number(getComputedStyle(bar).zIndex),
+                barBottom: Math.round(bar.getBoundingClientRect().bottom)};
+    }""")
+    check("收起时缩到顶栏底下，不是直接消失",
+          not shut["open"] and shut["vis"] == "hidden"
+          and shut["tf"] != "none" and shut["top"] < shut["barBottom"], shut)
+    check("它在顶栏下面（滑入时被顶栏盖住）", shut["zPanel"] < shut["zBar"], shut)
+    check("收起的过程是滑出去的", closing["tf"] != "none", closing)
+
+    page.click("#bellBtn")
+    page.wait_for_timeout(60)
+    mid = page.evaluate("""() => {
+        const cs = getComputedStyle(document.getElementById('noticePanel'));
+        return {tf: cs.transform, vis: cs.visibility};
+    }""")
+    page.wait_for_timeout(400)
+    shown = page.evaluate("""() => {
+        const p = document.getElementById('noticePanel');
+        const cs = getComputedStyle(p);
+        const box = p.getBoundingClientRect();
+        const bar = document.querySelector('.titlebar').getBoundingClientRect();
+        return {open: p.classList.contains('open'), tf: cs.transform,
+                vis: cs.visibility, gap: Math.round(box.top - bar.bottom)};
+    }""")
+    check("滑入是从中间位置过来的", mid["tf"] != "none" and mid["vis"] == "visible", mid)
+    check("展开后停在顶栏下方 10px 处",
+          shown["open"] and shown["tf"] == "none" and shown["gap"] == 10, shown)
+    page.click("#bellBtn")
+    page.wait_for_timeout(400)
 
 
 def routes_page(page):

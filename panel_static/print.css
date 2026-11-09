@@ -168,7 +168,9 @@ html, body {
 }
 .sheet-table td.no { text-align: center; color: var(--muted); }
 .sheet-table td.mono { font-family: var(--mono); }
-.sheet-table .w-no { width: 24px; }
+/* 序号列：表头跟着居中。宽度按「序号」两个字加内边距留够——
+   窄一点点，字就会被挤到右边去，看着像偏移 */
+.sheet-table .w-no { width: 34px; text-align: center; }
 .sheet-table .w-sid { width: 26mm; }
 .sheet-table .w-state { width: 16mm; }
 /* 空白表要写字：行高比数据行高一些 */

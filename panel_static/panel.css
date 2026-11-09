@@ -170,7 +170,7 @@ svg {
   background: var(--tint);
   border-bottom: 1px solid var(--line-soft);
   position: relative;
-  z-index: 30;
+  z-index: 40;         /* 盖住通知中心：那块是从顶栏底下滑出来的 */
 }
 
 .titlebar .brand {
@@ -2579,8 +2579,22 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   border: 1px solid var(--line);
   border-radius: var(--radius);
   box-shadow: 0 18px 40px rgba(40, 28, 12, .22);
-  z-index: 350;
+  /* 与顶栏同层但要**在它下面**（顶栏 40）：收起时整块挪到顶栏上方
+     （-100% 自己高度再减掉那 10px 间距），所以看到的是"从顶栏底下滑出来" */
+  z-index: 30;
   overflow: hidden;
+  transform: translateY(calc(-100% - 10px));
+  visibility: hidden;
+  pointer-events: none;
+  transition: transform .24s cubic-bezier(.2, .7, .3, 1), visibility .24s;
+}
+.notice-panel.open {
+  transform: none;
+  visibility: visible;
+  pointer-events: auto;
+}
+@media (prefers-reduced-motion: reduce) {
+  .notice-panel { transition: none; }
 }
 .notice-foot {
   display: flex;

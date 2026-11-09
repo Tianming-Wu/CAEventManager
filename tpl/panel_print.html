@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
-<title>报名表 · CAEventManager</title>
+<title>打印 · CAEventManager</title>
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="panel_static/print.css">
 </head>
@@ -14,19 +14,21 @@
   <div class="toolbar-row">
     <button class="btn primary" id="printGo" type="button">打印</button>
     <div class="seg" id="modeSeg" role="group" aria-label="打印内容">
-      <button class="seg-item" type="button" data-mode="blank" aria-pressed="true">空白表</button>
-      <button class="seg-item" type="button" data-mode="list" aria-pressed="false">已报名单</button>
+      <button class="seg-item" type="button" data-mode="list" aria-pressed="true">已报名单</button>
+      <button class="seg-item" type="button" data-mode="blank" aria-pressed="false">空白表</button>
     </div>
-    <label class="toolbar-field" id="rowsField">空行
-      <input id="blankRows" type="number" min="0" max="40" value="12">
+    <label class="toolbar-field" id="rowsField" hidden>空行
+      <input id="blankRows" type="number" min="1" max="60" value="20">
     </label>
+    <label class="toolbar-check"><input type="checkbox" id="optTitle"> 标题</label>
+    <label class="toolbar-check" id="optQrLabel"><input type="checkbox" id="optQr"> 二维码</label>
     <span class="hint" id="countHint"></span>
   </div>
   <button class="btn" id="backBtn" type="button">回到面板</button>
 </div>
 
 <main class="paper" id="paper" aria-live="polite">
-  <p class="hint">正在读取报名…</p>
+  <p class="hint">正在读取…</p>
 </main>
 
 <script src="panel_static/qrcode.js"></script>

@@ -8,7 +8,7 @@
 /                  主面板登录页（/login 是同一页）
 /register          主面板注册
 /panel             主面板控制台
-/print             打印页：报名表 / 已报名单（?kind=signup&id=&mode=blank|list）
+/print             打印页：名单 / 报名单（?kind=roster|signup&id=，可选 mode=blank）
 /panel_static/*    面板静态资源
 /api/panel/*       面板接口
 

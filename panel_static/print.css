@@ -1,35 +1,38 @@
 /* ==========================================================================
-   打印页：报名表 / 已报名单
+   打印页：名单 / 报名单
 
-   这一页只有一件事——上纸。所以：
-   - 工具栏在打印时整块消失（.no-print）
-   - 纸上永远是白底黑字，不跟面板的主题走（暗色主题不该把纸印黑）
-   - 表头在每一页重复（thead 默认就是 table-header-group），一行不被分页切开
+   一张纸就是一张纸：纸上只有表格与页码。标题、二维码这些是**选项**，默认不开。
+   - 页块（.sheet-page）按 A4 的可打印区做成固定尺寸，JS 把行按页切好，
+     所以屏幕上看的样子就是印出来的样子，页码也就能写在每页左下角
+   - 工具栏打印时整块消失（.no-print）；纸永远白底黑字，不跟面板主题走
    ========================================================================== */
 
 :root {
   --ink: #111111;
-  --muted: #555555;
-  --line: #b9b3aa;
-  --line-soft: #ddd8d0;
+  --muted: #5c5c5c;
+  --line: #9d9d9d;
+  --line-soft: #d7d7d7;
   --accent: #b45309;
-  --bg: #f5f2ee;
+  --desk: #f2efe9;
   --sans: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB",
           "Microsoft YaHei", "Noto Sans SC", sans-serif;
   --mono: ui-monospace, "Cascadia Mono", Consolas, "Courier New", monospace;
+  /* A4 297×210 减去 @page 的上下 12mm、左右 10mm */
+  --page-w: 190mm;
+  --page-h: 272mm;
 }
 
 * { box-sizing: border-box; }
-[hidden] { display: none !important; }   /* 工具栏里用它藏"空行"，别被 .toolbar-field 的 display 盖过去 */
+[hidden] { display: none !important; }
 
 html, body {
   margin: 0;
   padding: 0;
-  background: var(--bg);
+  background: var(--desk);
   color: var(--ink);
   font-family: var(--sans);
-  font-size: 14px;
-  line-height: 1.5;
+  font-size: 13px;
+  line-height: 1.45;
   -webkit-text-size-adjust: 100%;
 }
 
@@ -48,31 +51,33 @@ html, body {
 }
 .toolbar-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .toolbar-field { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
-.toolbar-field input {
-  width: 64px;
-  height: 32px;
+.toolbar-field input[type="number"] {
+  width: 62px;
+  height: 30px;
   padding: 0 8px;
   font: inherit;
   color: var(--ink);
   border: 1px solid var(--line);
-  border-radius: 7px;
+  border-radius: 6px;
   background: #fff;
 }
+.toolbar-check { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.toolbar-check input { width: 15px; height: 15px; }
 .hint { color: var(--muted); font-size: .82rem; }
 #backBtn { margin-left: auto; }
 
 .btn {
   appearance: none;
-  height: 32px;
+  height: 30px;
   padding: 0 14px;
   font: inherit;
   color: var(--ink);
   background: #fff;
   border: 1px solid var(--line);
-  border-radius: 7px;
+  border-radius: 6px;
   cursor: pointer;
 }
-.btn:hover { background: #f3efe9; }
+.btn:hover { background: #f1ede7; }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .btn.primary:hover { filter: brightness(1.06); }
 
@@ -81,119 +86,97 @@ html, body {
   padding: 2px;
   gap: 2px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 7px;
   background: #fff;
 }
 .seg-item {
   appearance: none;
-  height: 28px;
+  height: 26px;
   padding: 0 12px;
   font: inherit;
   color: var(--muted);
   background: transparent;
   border: 0;
-  border-radius: 6px;
+  border-radius: 5px;
   cursor: pointer;
 }
 .seg-item[aria-pressed="true"] { background: #17140f; color: #fff; }
 
 /* ---------- 纸 ---------- */
-.paper {
-  width: min(210mm, 100%);
-  margin: 16px auto 40px;
-  padding: 12mm 10mm;
+.paper { padding: 12px 0 40px; }
+
+.sheet-page {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: var(--page-w);
+  height: var(--page-h);
+  margin: 0 auto 12mm;
+  padding: 0;
   background: #fff;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, .12);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, .14);
+}
+.page-body { flex: 1 1 auto; min-height: 0; overflow: hidden; }
+.page-foot {
+  flex: none;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-start;
+  height: 5mm;
+  font-size: 9px;
+  color: var(--muted);
 }
 
-.sheet-head {
+/* 只有第一页、且开了选项时才有的小抬头 */
+.sheet-cap {
   display: flex;
   align-items: flex-start;
-  gap: 16px;
-  padding-bottom: 8px;
-  border-bottom: 2px solid var(--ink);
+  gap: 6mm;
+  padding: 0 0 3mm;
 }
-.sheet-title { flex: 1 1 auto; min-width: 0; }
-.sheet-title h1 {
-  margin: 0;
-  font-size: 22px;
+.sheet-cap .cap-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 15px;
   font-weight: 700;
-  letter-spacing: .01em;
 }
-.sheet-title .sheet-note {
-  margin: 6px 0 0;
-  color: var(--muted);
-  font-size: 12px;
-  white-space: pre-wrap;
-}
-.sheet-qr { flex: none; text-align: center; color: var(--muted); font-size: 10px; }
-.sheet-qr svg { display: block; width: 74px; height: 74px; }
-.sheet-qr .sheet-url {
-  display: block;
-  max-width: 160px;
-  margin-top: 2px;
-  font-family: var(--mono);
-  font-size: 8px;
-  word-break: break-all;
-}
-
-.sheet-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 22px;
-  margin: 8px 0 0;
-  font-size: 12px;
-}
-.sheet-meta div { display: flex; gap: 6px; }
-.sheet-meta dt { color: var(--muted); }
-.sheet-meta dd { margin: 0; }
+.sheet-cap .cap-qr { flex: none; text-align: right; }
+.sheet-cap .cap-qr svg { display: block; width: 18mm; height: 18mm; }
 
 .sheet-table {
   width: 100%;
-  margin-top: 10px;
   border-collapse: collapse;
   table-layout: fixed;
-  font-size: 12px;
+  font-size: 10.5px;
 }
 .sheet-table th,
 .sheet-table td {
   border: 1px solid var(--line);
-  padding: 5px 6px;
+  padding: 3px 5px;
   text-align: left;
   vertical-align: middle;
-  overflow: hidden;
   word-break: break-all;
 }
 .sheet-table th {
-  background: #f1ede7;
+  background: #efefef;
   font-weight: 600;
   white-space: nowrap;
 }
-.sheet-table tbody tr { break-inside: avoid; page-break-inside: avoid; }
-.sheet-table tbody tr:nth-child(even) { background: #fbf9f6; }
 .sheet-table td.no { text-align: center; color: var(--muted); }
 .sheet-table td.mono { font-family: var(--mono); }
-.sheet-table .w-no { width: 38px; }
-.sheet-table .w-sig { width: 84px; }
-.sheet-table .w-time { width: 108px; }
+.sheet-table .w-no { width: 24px; }
+.sheet-table .w-sid { width: 26mm; }
+.sheet-table .w-state { width: 16mm; }
 /* 空白表要写字：行高比数据行高一些 */
-.sheet-table.blank tbody td { height: 30px; }
+.sheet-table.blank td { height: 9mm; }
 
-.sheet-foot {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  margin-top: 8px;
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.sheet-empty {
-  margin: 18px 0 0;
-  padding: 14px;
-  border: 1px dashed var(--line);
+.sheet-note {
+  margin: 20mm auto 0;
+  max-width: 60mm;
+  padding: 10px;
   color: var(--muted);
   text-align: center;
+  border: 1px dashed var(--line);
 }
 
 /* ---------- 打印 ---------- */
@@ -205,18 +188,21 @@ html, body {
 @media print {
   html, body { background: #fff; }
   .toolbar { display: none !important; }
-  .paper {
-    width: auto;
+  .paper { padding: 0; }
+  .sheet-page {
     margin: 0;
-    padding: 0;
     box-shadow: none;
+    break-after: page;
+    page-break-after: always;
   }
-  .sheet-table th { background: #f1ede7 !important; -webkit-print-color-adjust: exact; }
+  .sheet-page:last-child { break-after: auto; page-break-after: auto; }
+  .sheet-table th { background: #efefef !important; -webkit-print-color-adjust: exact; }
 }
 
-/* 窄屏上先能看：表格横向滚，工具栏换行 */
-@media (max-width: 620px) {
-  .paper { margin: 8px 0 24px; padding: 14px 12px; box-shadow: none; }
-  .sheet-head { flex-wrap: wrap; }
-  .sheet-table { display: block; overflow-x: auto; }
+/* 窄屏：纸等比缩小，工具栏换行 */
+@media screen and (max-width: 780px) {
+  .paper { padding: 8px 8px 24px; }
+  .sheet-page { width: 100%; height: auto; min-height: 0; margin-bottom: 10px; }
+  .page-body { overflow-x: auto; }
+  .sheet-table { font-size: 11px; }
 }

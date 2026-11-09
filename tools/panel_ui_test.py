@@ -635,72 +635,84 @@ def signup_page(page, browser):
 
 
 def print_page(browser):
-    """打印报名表：空白表与已报名单，两样都要能上纸。"""
-    print("== 打印报名表 ==")
+    """打印：名单与报名单都只是一张表，页码在左下角；标题与二维码是选项。"""
+    print("== 打印 ==")
     owner = owner_opener()
+    rows = "\n".join("2025%04d,成员%03d" % (i, i) for i in range(1, 61))
     rid = call(owner, "/api/panel/roster/import", {
-        "name": "打印测试名单", "text": "学号,姓名\n20250031,甲一"})["id"]
+        "name": "打印测试名单", "text": "学号,姓名\n" + rows})["id"]
     sid = call(owner, "/api/panel/signup/create", {
         "title": "打印测试报名", "roster_id": rid})["id"]
     token = (call(owner, "/api/panel/signup?id=%d" % sid) or {}).get("signup", {}).get("token")
-    ctx, page = new_page(browser, 1100, 900)
+    ctx, page = new_page(browser, 900, 950)
     gate = None
     try:
         ui_login(page)
-        page.goto(BASE + "/panel#/signup/%d" % sid)
-        page.wait_for_timeout(800)
-        check("报名详情里有打印入口", page.locator("#signupPrintBtn").count() == 1)
 
-        page.goto(BASE + "/print?kind=signup&id=%d" % sid)
-        page.wait_for_selector(".sheet-table", timeout=15000)
-        page.wait_for_timeout(300)
-        blank = page.evaluate("""() => {
+        print("== 名单：一张简单的表 ==")
+        page.goto(BASE + "/panel#/roster/%d" % rid)
+        page.wait_for_timeout(800)
+        check("名单详情里有打印入口", page.locator("#rosterPrintBtn").count() == 1)
+        page.goto(BASE + "/print?kind=roster&id=%d" % rid)
+        page.wait_for_selector(".sheet-page", timeout=15000)
+        page.wait_for_timeout(400)
+        sheet = page.evaluate("""() => {
             const t = document.querySelector('.sheet-table');
             const cols = [...t.querySelectorAll('thead th')].map(x => x.textContent.trim());
-            return {title: document.querySelector('.sheet-title h1').textContent.trim(),
-                    rows: t.querySelectorAll('tbody tr').length,
-                    cols: cols, qr: !!document.querySelector('.sheet-qr svg'),
-                    blankCls: t.classList.contains('blank')};
+            return {pages: document.querySelectorAll('.sheet-page').length,
+                    nos: [...document.querySelectorAll('.page-no')]
+                          .map(x => x.textContent.trim()),
+                    cols: cols,
+                    rows: document.querySelectorAll('.sheet-table tbody tr').length,
+                    cap: !!document.querySelector('.sheet-cap'),
+                    body: document.getElementById('paper').innerText};
         }""")
-        check("纸上有报名名称", blank["title"] == "打印测试报名", blank["title"])
-        check("空白表默认 12 行", blank["rows"] == 12, blank["rows"])
-        check("列是学号、姓名、签名这些", "学号" in blank["cols"] and "姓名" in blank["cols"]
-              and "签名" in blank["cols"], blank["cols"])
-        check("带二维码，扫码就能在线报名", blank["qr"])
+        check("默认没有抬头（标题、二维码都不加）", not sheet["cap"])
+        check("也没有打印时间", "打印于" not in sheet["body"], sheet["body"][:80])
+        check("列是学号、姓名、院系、班级",
+              ["序号", "学号", "姓名", "院系", "班级"] == sheet["cols"], sheet["cols"])
+        check("60 人都在表里", sheet["rows"] == 60, sheet["rows"])
+        check("每页左下角标页码",
+              sheet["nos"] and all("第 " in n and "/" in n for n in sheet["nos"])
+              and sheet["nos"][0] == "第 1 / %d 页" % sheet["pages"], sheet["nos"])
+        check("页码数与页数一致", len(sheet["nos"]) == sheet["pages"], sheet)
 
-        page.fill("#blankRows", "20")
+        page.click("#optTitle")
         page.wait_for_timeout(350)
-        check("空行数能改，改完立刻重画",
-              page.evaluate("() => document.querySelectorAll('.sheet-table tbody tr').length")
-              == 20)
+        cap = page.evaluate("""() => {
+            const cap = document.querySelector('.sheet-cap');
+            return {there: !!cap, text: cap ? cap.innerText.trim() : ""};
+        }""")
+        check("勾上标题才出现抬头", cap["there"] and "打印测试名单" in cap["text"], cap)
+        page.click("#optTitle")
+        page.wait_for_timeout(250)
+        check("取消勾选又收回去",
+              not page.evaluate("() => !!document.querySelector('.sheet-cap')"))
 
         page.emulate_media(media="print")
         page.wait_for_timeout(250)
         check("打印时工具栏整块消失", page.locator("#toolbar").is_hidden())
-        check("也还是白底黑字",
+        check("纸永远是白底黑字",
               page.evaluate("() => getComputedStyle(document.body).backgroundColor")
               == "rgb(255, 255, 255)")
         page.emulate_media(media="screen")
 
-        page.click('[data-mode="list"]')
+        print("== 报名单 ==")
+        page.goto(BASE + "/panel#/signup/%d" % sid)
         page.wait_for_timeout(700)
-        listing = page.evaluate("""() => {
-            const t = document.querySelector('.sheet-table');
-            if (!t) return null;
-            const cols = [...t.querySelectorAll('thead th')].map(x => x.textContent.trim());
-            return {cols: cols, rows: t.querySelectorAll('tbody tr').length,
-                    foot: document.querySelector('.sheet-foot').textContent.trim(),
-                    rowsField: !document.getElementById('rowsField').hidden};
-        }""")
-        check("已报名单里有报名时间与签名列",
-              listing and "报名时间" in listing["cols"] and "签名" in listing["cols"],
-              listing["cols"] if listing else None)
-        check("名单模式下空行数不占地方", listing and not listing["rowsField"], listing)
-        check("没人报名时说清楚",
-              listing and listing["rows"] == 0
-              and "还没有人报名" in page.inner_text("#paper"), listing)
+        check("报名详情里有打印入口", page.locator("#signupPrintBtn").count() == 1)
+        page.goto(BASE + "/print?kind=signup&id=%d" % sid)
+        page.wait_for_selector(".sheet-page", timeout=15000)
+        page.wait_for_timeout(400)
+        check("默认打已报名单，抬头与二维码都不加", page.evaluate(
+            """() => !document.querySelector('.sheet-cap')
+                     && !document.getElementById('optTitle').checked
+                     && !document.getElementById('optQr').checked
+                     && !!document.querySelector('[data-mode=list][aria-pressed=true]')"""))
+        check("没人报名时说明白",
+              "还没有人报名" in page.inner_text("#paper"), page.inner_text("#paper")[:60])
 
-        # 真的有人报名之后，名单里应该有他
+        # 有人报名之后名单里就有他
         gate = browser.new_context(viewport={"width": 430, "height": 900}, locale="zh-CN")
         pub = gate.new_page()
         pub.goto(BASE + "/join/" + str(token), wait_until="networkidle")
@@ -709,18 +721,27 @@ def print_page(browser):
         pub.fill("#name", "甲一")
         pub.click("#go")
         pub.wait_for_timeout(1000)
-        page.click('[data-mode="blank"]')
-        page.wait_for_timeout(300)
-        page.click('[data-mode="list"]')
-        page.wait_for_timeout(800)
-        filled = page.evaluate("""() => {
-            const rows = [...document.querySelectorAll('.sheet-table tbody tr')];
-            return {rows: rows.length, first: rows[0] ? rows[0].textContent.trim() : "",
-                    foot: document.querySelector('.sheet-foot').textContent.trim()};
+        page.reload()
+        page.wait_for_selector(".sheet-table", timeout=15000)
+        page.wait_for_timeout(400)
+        listed = page.evaluate("""() => {
+            const tr = document.querySelector('.sheet-table tbody tr');
+            return {rows: document.querySelectorAll('.sheet-table tbody tr').length,
+                    text: tr ? tr.innerText.replace(/\s+/g, " ").trim() : "",
+                    pages: document.querySelectorAll('.sheet-page').length,
+                    no: document.querySelector('.page-no').textContent.trim()};
         }""")
-        check("报名的人出现在名单里", filled["rows"] == 1
-              and "20250031" in filled["first"], filled)
-        check("页脚给出总人数", "共 1 人" in filled["foot"], filled["foot"])
+        check("报名的人出现在表里", listed["rows"] == 1 and "20250031" in listed["text"],
+              listed)
+        check("一页就够时页码写 1 / 1", listed["no"] == "第 1 / 1 页", listed["no"])
+
+        # 空白表还留着，但要人自己去选
+        page.click('[data-mode="blank"]')
+        page.wait_for_timeout(400)
+        blank = page.evaluate("""() => ({
+            rows: document.querySelectorAll('.sheet-table tbody tr').length,
+            rowsField: !document.getElementById('rowsField').hidden})""")
+        check("选空白表才有空行与行数", blank["rowsField"] and blank["rows"] > 0, blank)
         check("这一段没有 javascript 错误", not page._errors,
               "; ".join(page._errors)[:200])
     finally:

@@ -5041,6 +5041,11 @@
     if (!S.roster) return;
     location.href = PX.PREFIX + "/api/panel/roster/export.csv?id=" + S.roster.id;
   });
+  // 打印名单：一张简单的表，另开一张纸
+  $("#rosterPrintBtn").addEventListener("click", function () {
+    if (!S.roster) return;
+    window.open(PX.PREFIX + "/print?kind=roster&id=" + S.roster.id, "_blank", "noopener");
+  });
   $("#rosterEditBtn").addEventListener("click", function () {
     if (S.roster) rosterDialog(S.roster);
   });

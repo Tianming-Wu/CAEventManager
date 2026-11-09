@@ -5279,6 +5279,229 @@
     img.src = "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(svgTag)));
   });
 
+  /* ---------------- 二维码的其它格式 ----------------
+     网页里那颗是 SVG（缩放随便），下载件另做：
+     - PNG 1:1：一格一像素、不留白边、只有黑白两色，图里一个杂色都没有
+     - PNG 打印：1024 见方、四周留四个模块的白边
+     - SVG：矢量，任何尺寸都清楚
+     都用二维码自己的矩阵画（isDark），不经过 SVG 再栅格化，所以才是"1:1"。 */
+  var qrMenuEl = null;
+
+  function closeQrMenu() {
+    if (!qrMenuEl) return;
+    qrMenuEl.remove();
+    qrMenuEl = null;
+    var more = $("#signupQrMore");
+    if (more) more.setAttribute("aria-expanded", "false");
+  }
+
+  function qrModel() {
+    var url = (S.signup && S.signup.url) || "";
+    if (!url) {
+      PX.toast("还没有可用的报名链接", true);
+      return null;
+    }
+    try {
+      var qr = qrcode(0, "M");
+      qr.addData(url);
+      qr.make();
+      return qr;
+    } catch (e) {
+      PX.toast("二维码生成失败", true);
+      return null;
+    }
+  }
+
+  // 一格一像素地画：cell 个像素表示一个模块，margin 是留白的模块数
+  function qrCanvas(qr, cell, margin) {
+    var count = qr.getModuleCount();
+    var side = (count + margin * 2) * cell;
+    var canvas = document.createElement("canvas");
+    canvas.width = side;
+    canvas.height = side;
+    var ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, side, side);
+    ctx.fillStyle = "#000000";
+    for (var row = 0; row < count; row++) {
+      for (var col = 0; col < count; col++) {
+        if (qr.isDark(row, col)) {
+          ctx.fillRect((col + margin) * cell, (row + margin) * cell, cell, cell);
+        }
+      }
+    }
+    return canvas;
+  }
+
+  /* 一格一像素的 1 位灰度 PNG：一个模块一个像素，没有留白，只有黑白两色。
+     canvas 只能给 8 位 RGBA，所以这一份自己拼：每行一个过滤字节 + 位图，
+     位图里 1 = 白、0 = 黑。压缩用 CompressionStream（deflate），外面套 PNG 要的
+     zlib 头与 adler32。这样出来的文件比 canvas 那份小一个数量级，也没有 alpha。 */
+  var _crcTable = null;
+
+  function crc32(bytes) {
+    if (!_crcTable) {
+      _crcTable = new Uint32Array(256);
+      for (var n = 0; n < 256; n++) {
+        var c = n;
+        for (var k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
+        _crcTable[n] = c >>> 0;
+      }
+    }
+    var crc = 0xFFFFFFFF;
+    for (var i = 0; i < bytes.length; i++) {
+      crc = _crcTable[(crc ^ bytes[i]) & 0xFF] ^ (crc >>> 8);
+    }
+    return (crc ^ 0xFFFFFFFF) >>> 0;
+  }
+
+  function adler32(bytes) {
+    var a = 1, b = 0;
+    for (var i = 0; i < bytes.length; i++) {
+      a = (a + bytes[i]) % 65521;
+      b = (b + a) % 65521;
+    }
+    return ((b << 16) | a) >>> 0;
+  }
+
+  function u32(value) {
+    return [(value >>> 24) & 255, (value >>> 16) & 255, (value >>> 8) & 255,
+            value & 255];
+  }
+
+  function pngChunk(type, data) {
+    var body = [];
+    for (var i = 0; i < type.length; i++) body.push(type.charCodeAt(i));
+    var payload = body.concat(data);
+    return u32(data.length).concat(payload, u32(crc32(payload)));
+  }
+
+  // "deflate" 在 Compression Streams 里给的就是 zlib（RFC1950），正是 PNG 要的
+  function deflateZlib(bytes) {
+    if (!window.CompressionStream) return Promise.reject(new Error("浏览器不支持压缩"));
+    var stream = new Blob([new Uint8Array(bytes)]).stream()
+      .pipeThrough(new CompressionStream("deflate"));
+    return new Response(stream).arrayBuffer().then(function (buf) {
+      return Array.prototype.slice.call(new Uint8Array(buf));
+    });
+  }
+
+  // 1 位灰度的 PNG 字节：side 见方，dark(row, col) 决定那一像素
+  function qrMonoPng(qr) {
+    var count = qr.getModuleCount();
+    var rowBytes = Math.ceil(count / 8);
+    var raw = [];
+    for (var row = 0; row < count; row++) {
+      raw.push(0);                              // 过滤类型：无
+      for (var b = 0; b < rowBytes; b++) {
+        var byte = 0;
+        for (var bit = 0; bit < 8; bit++) {
+          var col = b * 8 + bit;
+          var white = col >= count || !qr.isDark(row, col);
+          byte = (byte << 1) | (white ? 1 : 0);
+        }
+        raw.push(byte);
+      }
+    }
+    return deflateZlib(raw).then(function (idat) {
+      var ihdr = u32(count).concat(u32(count), [1, 0, 0, 0, 0]);   // 1 位、灰度
+      return [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]
+        .concat(pngChunk("IHDR", ihdr), pngChunk("IDAT", idat),
+                pngChunk("IEND", []));
+    });
+  }
+
+  function qrBaseName() {
+    var box = $("#signupName");
+    return ((box && box.value.trim()) || (S.signup && S.signup.title) || "signup");
+  }
+
+  function saveUrl(name, href) {
+    var link = document.createElement("a");
+    link.href = href;
+    link.download = name;
+    link.click();
+  }
+
+  function qrDownload(kind) {
+    var qr = qrModel();
+    if (!qr) return;
+    var base = qrBaseName();
+    if (kind === "png-1to1") {
+      var count = qr.getModuleCount();
+      qrMonoPng(qr).then(function (bytes) {
+        saveUrl(base + "-二维码-" + count + "px.png",
+                "data:image/png;base64," +
+                btoa(String.fromCharCode.apply(null, bytes)));
+        PX.toast("已下载 " + count + "×" + count + " 的 1:1 二维码");
+      }).catch(function () {
+        // 老浏览器没有 CompressionStream：退回 canvas（像素仍然是纯黑白）
+        saveUrl(base + "-二维码-" + count + "px.png",
+                qrCanvas(qr, 1, 0).toDataURL("image/png"));
+        PX.toast("已下载 " + count + "×" + count + " 的 1:1 二维码");
+      });
+      return;
+    }
+    if (kind === "png-print") {
+      var side = 1024;
+      var cell = Math.max(1, Math.floor(side / (qr.getModuleCount() + 8)));
+      saveUrl(base + "-二维码-打印.png",
+              qrCanvas(qr, cell, 4).toDataURL("image/png"));
+      PX.toast("已下载打印用的二维码");
+      return;
+    }
+    if (kind === "svg") {
+      var tag = qr.createSvgTag({ cellSize: 8, margin: 0, scalable: true });
+      // 库自带的白底 rect 在矢量件里多余：白底交给用它的人
+      tag = tag.replace(/<rect[^>]*fill="white"[^>]*\/>/i, "");
+      saveUrl(base + "-二维码.svg",
+              "data:image/svg+xml;charset=utf-8," + encodeURIComponent(tag));
+      PX.toast("已下载 SVG");
+    }
+  }
+
+  function openQrMenu(anchor) {
+    if (qrMenuEl) { closeQrMenu(); return; }
+    var menu = document.createElement("div");
+    menu.className = "card-menu";
+    menu.setAttribute("role", "menu");
+    menu.innerHTML =
+      '<button type="button" role="menuitem" data-qr="png-1to1">PNG · 1 格 1 像素，无留白</button>' +
+      '<button type="button" role="menuitem" data-qr="png-print">PNG · 1024，带留白</button>' +
+      '<button type="button" role="menuitem" data-qr="svg">SVG · 矢量</button>';
+    document.body.appendChild(menu);
+    var rect = anchor.getBoundingClientRect();
+    var left = Math.min(Math.max(8, rect.left),
+                        window.innerWidth - menu.offsetWidth - 8);
+    var top = rect.bottom + 6;
+    if (top + menu.offsetHeight > window.innerHeight - 8) {
+      top = Math.max(8, rect.top - menu.offsetHeight - 6);
+    }
+    menu.style.left = left + "px";
+    menu.style.top = top + "px";
+    qrMenuEl = menu;
+    anchor.setAttribute("aria-expanded", "true");
+    menu.addEventListener("click", function (e) {
+      var btn = e.target.closest("[data-qr]");
+      if (!btn) return;
+      closeQrMenu();
+      qrDownload(btn.getAttribute("data-qr"));
+    });
+    var first = menu.querySelector("button");
+    if (first) first.focus();
+  }
+
+  $("#signupQrMore").addEventListener("click", function (e) {
+    e.stopPropagation();
+    openQrMenu(this);
+  });
+  document.addEventListener("click", function (e) {
+    if (qrMenuEl && !qrMenuEl.contains(e.target) &&
+        e.target !== $("#signupQrMore") && !e.target.closest("#signupQrMore")) {
+      closeQrMenu();
+    }
+  });
+
   ["#signupTheme", "#signupAccent", "#signupName", "#signupNote",
    "#collectDept", "#collectGrp"].forEach(function (sel) {
     var el = $(sel);
@@ -5491,6 +5714,7 @@
       }
     }
     if (e.key === "Escape") {
+      if (qrMenuEl) return closeQrMenu();
       if (cardMenuEl) return closeCardMenu();
       if (!$("#overlay").hidden) return closeOverlay();
       if (assistantDrawerOpen()) return closeAssistantDrawer();

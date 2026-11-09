@@ -1757,6 +1757,33 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
 }
 #signupQr svg { width: 100%; height: 100%; display: block; }
 .qr-side { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+/* 二维码下面那一排：下载 + 「更多格式」拼成一颗按钮（同一个框），
+   两颗同高、同一中线，中间不空 */
+.qr-actions { display: flex; align-items: stretch; gap: 0; }
+.qr-actions #signupQrSave {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.qr-actions .qr-more {
+  width: 30px;
+  height: auto;
+  min-height: 28px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-left: 0;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--surface);
+  color: var(--muted);
+}
+.qr-actions .qr-more:hover { background: var(--surface-2); color: var(--text); }
+.qr-actions .qr-more svg { width: 16px; height: 16px; }
+.qr-actions .qr-more[aria-expanded="true"] {
+  background: var(--surface-2);
+  color: var(--text);
+}
+@media (pointer: coarse) {
+  .qr-actions .qr-more { min-height: 38px; }
+}
 
 /* ---------- the signup page preview ---------- */
 .preview-wrap {

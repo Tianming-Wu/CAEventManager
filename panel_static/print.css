@@ -17,9 +17,13 @@
   --sans: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB",
           "Microsoft YaHei", "Noto Sans SC", sans-serif;
   --mono: ui-monospace, "Cascadia Mono", Consolas, "Courier New", monospace;
-  /* A4 297×210 减去 @page 的上下 12mm、左右 10mm */
-  --page-w: 190mm;
-  --page-h: 272mm;
+  /* 一整张 A4。页边距画在纸块自己的 padding 里，而不是交给 @page——
+     打印对话框里选的边距、打印机吃不下的那几毫米，都不会再把它吃掉。
+     高度留 0.2mm 的余量：正好 297mm 时浏览器常常多吐一张空白纸。 */
+  --page-w: 210mm;
+  --page-h: 296.8mm;
+  --page-pad-y: 14mm;
+  --page-pad-x: 12mm;
 }
 
 * { box-sizing: border-box; }
@@ -112,7 +116,7 @@ html, body {
   width: var(--page-w);
   height: var(--page-h);
   margin: 0 auto 12mm;
-  padding: 0;
+  padding: var(--page-pad-y) var(--page-pad-x);
   background: #fff;
   box-shadow: 0 6px 24px rgba(0, 0, 0, .14);
 }
@@ -182,7 +186,7 @@ html, body {
 /* ---------- 打印 ---------- */
 @page {
   size: A4;
-  margin: 12mm 10mm;
+  margin: 0;          /* 边距在纸块的 padding 里，这里必须留 0 */
 }
 
 @media print {

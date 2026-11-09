@@ -32,6 +32,7 @@ import sys
 import threading
 import time
 import traceback
+import xlsx
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs, quote
 
@@ -56,9 +57,10 @@ TPL_DIR = os.path.join(BASE_DIR, "tpl")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.7.0.25"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.7.0.26"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
+XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
 
 # Served when a signed-in account opens a console it has no seat on.  A redirect
 # would loop: it can pass the login, and the console would just refuse again.
@@ -2704,6 +2706,49 @@ class Handler(BaseHTTPRequestHandler):
                 "text/csv; charset=utf-8",
                 headers=[_attachment_header(name + ".csv")])
 
+        if path == "/roster/export.xlsx" and method == "GET":
+            # 与 CSV 同一份行：表头 + 数据，不加任何说明行
+            rid = _int_arg(query, "id", 0, 0, 1000000)
+            row = open_roster(rid)
+            rows = lists.export_rows(lists.connect(), rid)
+            name = re.sub(r'[\\/:*?"<>|]+', "_", row["name"] or "roster")
+            return self._send(200, xlsx.build(rows, name[:28] or "名单"),
+                              xlsx.CONTENT_TYPE,
+                              headers=[_attachment_header(name + ".xlsx")])
+
+        if path == "/roster/import.xlsx" and method == "POST":
+            # 文件按原始字节收：xlsx 是 zip，不能当 JSON 解析
+            rid = _int_arg(query, "id", 0, 0, 1000000)
+            raw = getattr(self, "_raw_body", b"") or b""
+            if not raw:
+                raise model.ApiError("没有收到文件")
+            if len(raw) > XLSX_MAX:
+                raise model.ApiError("文件超过 %d MB，先拆小一点再导入"
+                                     % (XLSX_MAX // (1024 * 1024)))
+            try:
+                rows = xlsx.parse(raw)
+            except ValueError as exc:
+                raise model.ApiError(str(exc))
+            created_new = False
+            if rid:
+                open_roster(rid, write=True)
+            else:
+                # 没有 id 就是"用这份表格开一份新名单"，与 CSV 那条路一致
+                name = (query.get("name") or [""])[0].strip()
+                if not name:
+                    raise model.ApiError("请填写新名单的名称，或者先打开一份名单")
+                with lists.tx() as lx:
+                    rid = lists.create_roster(lx, acc["id"], name, "", "private")
+                created_new = True
+            with lists.tx() as lx:
+                res = lists.import_rows(lx, rid, rows)
+            with panel.tx() as tx:
+                panel.audit(tx, acc["username"], "roster_import", str(rid),
+                            "新增 %d 人，名单内已有 %d 人，新增人员记录 %d 条，无法读取 %d 行"
+                            % (res["added"], res["unchanged"], res["newPeople"],
+                               res["failed"]))
+            return self._json({"ok": True, "id": rid, "created": created_new, **res})
+
         if path == "/list_approvals" and method == "GET":
             # 写入申请的统一入口：普通账号也用得上，所以和超管的
             # 活跃审批分开两条路由，鉴权各管各的
@@ -2818,6 +2863,15 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(
                 200, "\ufeff" + buf.getvalue(), "text/csv; charset=utf-8",
                 headers=[_attachment_header(name + ".csv")])
+
+        if path == "/signup/export.xlsx" and method == "GET":
+            sid = _int_arg(query, "id", 0, 0, 1000000)
+            row = open_signup(sid)
+            rows = lists.signup_export_rows(lists.connect(), sid)
+            name = re.sub(r'[\\/:*?"<>|]+', "_", row["title"] or "signup")
+            return self._send(200, xlsx.build(rows, "报名"),
+                              xlsx.CONTENT_TYPE,
+                              headers=[_attachment_header(name + ".xlsx")])
 
         if path == "/people/search" and method == "GET":
             q = (query.get("q") or [""])[0].strip()

@@ -686,6 +686,12 @@ def import_text(conn, roster_id, text, source="import", tag=""):
     sample = text.splitlines()[0]
     delim = "\t" if sample.count("\t") > sample.count(",") else ","
     rows = list(csv.reader(io.StringIO(text), delimiter=delim))
+    return import_rows(conn, roster_id, rows, source=source, tag=tag)
+
+
+def import_rows(conn, roster_id, rows, source="import", tag=""):
+    """CSV 与 xlsx 走到同一个口：都是"一行一行地合并进名单"。"""
+    rows = [[("" if cell is None else str(cell)) for cell in row] for row in (rows or [])]
     rows = [r for r in rows if any((c or "").strip() for c in r)]
     if not rows:
         raise model.ApiError("没有解析到任何数据行")

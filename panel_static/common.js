@@ -60,6 +60,11 @@
       init.headers["Content-Type"] = "application/json";
       init.body = JSON.stringify(options.body);
     }
+    // 二进制上送（xlsx 导入）：原样把 Blob 当请求体，别经过 JSON
+    if (options.blob) {
+      init.headers["Content-Type"] = options.type || "application/octet-stream";
+      init.body = options.blob;
+    }
     // 长请求要能被"停止"打断：调用方传一个 AbortController 的 signal 就行
     if (options.signal) init.signal = options.signal;
     return fetch(PREFIX + "/api/panel" + path, init).then(function (res) {

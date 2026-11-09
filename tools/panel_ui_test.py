@@ -25,6 +25,9 @@ PASSWORD = sys.argv[2] if len(sys.argv) > 2 else ""
 LOGIN = sys.argv[3] if len(sys.argv) > 3 and not sys.argv[3].startswith("--") \
     else "owner"
 WITH_ACCOUNTS = "--accounts" in sys.argv
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT_DIR)
+import xlsx  # noqa: E402  xlsx 用例要用同一份实现写测试文件
 TAG = str(random.randint(1000, 9999))
 
 problems = []
@@ -753,6 +756,78 @@ def print_page(browser):
             try:
                 call(owner, path, body)
             except Exception:
+                pass
+
+
+def xlsx_page(browser):
+    """xlsx：名单与报名都能导出，名单能把 xlsx 导进来。"""
+    print("== xlsx 导入导出 ==")
+    owner = owner_opener()
+    rid = call(owner, "/api/panel/roster/import", {
+        "name": "表格测试名单", "text": "学号,姓名\n20250041,甲一"})["id"]
+    sid = call(owner, "/api/panel/signup/create", {
+        "title": "表格测试报名", "roster_id": rid})["id"]
+    blank = os.path.join(ROOT_DIR, "tmp", "ui")
+    os.makedirs(blank, exist_ok=True)
+    book = os.path.join(blank, "import-%d.xlsx" % rid)
+    with open(book, "wb") as fh:
+        fh.write(xlsx.build([["学号", "姓名", "院系", "班级"],
+                             ["0009001", "导入甲", "计算机学院", "计科 2501"],
+                             ["0009002", "导入乙", "", ""]], "名单"))
+    ctx, page = new_page(browser, 1280, 900)
+    try:
+        ui_login(page)
+        page.goto(BASE + "/panel#/roster/%d" % rid)
+        page.wait_for_timeout(800)
+        check("名单页有导出 CSV 与导出 Excel",
+              page.locator("#rosterExportBtn").count() == 1
+              and page.locator("#rosterXlsxBtn").count() == 1)
+
+        with page.expect_download(timeout=15000) as got:
+            page.click("#rosterXlsxBtn")
+        download = got.value
+        name = download.suggested_filename or ""
+        check("导出的文件名带 .xlsx", name.endswith(".xlsx"), name)
+        saved = os.path.join(blank, "down-%d.xlsx" % rid)
+        download.save_as(saved)
+        with open(saved, "rb") as fh:
+            rows = xlsx.parse(fh.read())
+        check("下载到的确实是 xlsx（能读回来）",
+              rows and rows[0][:2] == ["学号", "姓名"], rows[:1])
+        check("里面有人", any("20250041" in r for r in rows[1:]), rows[1:2])
+
+        print("== 把 xlsx 导进名单 ==")
+        page.set_input_files("#rosterMergeFile", book)
+        page.wait_for_timeout(1800)
+        names = page.evaluate("""() => [...document.querySelectorAll('#rosterEntryTable tbody td')]
+            .map(td => td.textContent.trim())""")
+        joined = " ".join(names)
+        check("导入的人出现在名单里", "导入甲" in joined and "导入乙" in joined,
+              (joined or page.inner_text("#rosterEntryTable"))[:160])
+        check("前导零的学号也在", names.count("0009001") == 1, names[:8])
+
+        page.goto(BASE + "/panel#/signup/%d" % sid)
+        page.wait_for_timeout(800)
+        check("报名页也有导出 Excel", page.locator("#signupXlsxBtn").count() == 1)
+        with page.expect_download(timeout=15000) as got2:
+            page.click("#signupXlsxBtn")
+        check("报名的 xlsx 也是 xlsx",
+              (got2.value.suggested_filename or "").endswith(".xlsx"),
+              got2.value.suggested_filename)
+        check("这一段没有 javascript 错误", not page._errors,
+              "; ".join(page._errors)[:200])
+    finally:
+        ctx.close()
+        for path, body in (("/api/panel/signup/delete", {"id": sid}),
+                           ("/api/panel/roster/delete", {"id": rid})):
+            try:
+                call(owner, path, body)
+            except Exception:
+                pass
+        for name in ("import-%d.xlsx" % rid, "down-%d.xlsx" % rid):
+            try:
+                os.remove(os.path.join(blank, name))
+            except OSError:
                 pass
 
 
@@ -2660,6 +2735,7 @@ def main():
                 roster_page(page)
                 signup_page(page, browser)
                 print_page(browser)
+                xlsx_page(browser)
                 notice_page(page)
                 card_page(page)
                 create_page(browser)

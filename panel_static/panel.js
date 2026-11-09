@@ -2249,6 +2249,32 @@
   }
 
   function importRoster(file, rosterId) {
+    // xlsx 按原始字节发过去（zip 不能当文本读），CSV / TSV 照旧当文本
+    var isXlsx = /\.xlsx$/i.test(file.name || "");
+    var done = function (d) {
+      PX.toast("导入完成：新增 " + d.added + " 人，名单内已有 " + d.unchanged +
+               " 人" + (d.failed ? "，无法读取 " + d.failed + " 行" : ""),
+               false, 6000, {
+                 icon: "open", title: "打开名单",
+                 run: function () { location.hash = "#/roster/" + d.id; }
+               });
+      if (rosterId) return loadRoster(rosterId).then(function () {
+        return loadEntries(false);
+      }).then(drawRoster);
+      location.hash = "#/roster/" + d.id;
+    };
+    var fail = function (e) { PX.toast(PX.esc(e.message), true); };
+
+    if (isXlsx) {
+      var url = "/roster/import.xlsx?id=" + (rosterId || 0);
+      if (!rosterId) {
+        url += "&name=" + encodeURIComponent(S.rosterImportName ||
+          (file.name || "").replace(/\.[^.]+$/, "") || "导入的名单");
+      }
+      PX.api(url, { method: "POST", blob: file }).then(done).catch(fail);
+      return;
+    }
+
     var reader = new FileReader();
     reader.onload = function () {
       var text = String(reader.result || "");
@@ -2260,20 +2286,7 @@
         body.name = S.rosterImportName ||
           (file.name || "").replace(/\.[^.]+$/, "") || "导入的名单";
       }
-      PX.api("/roster/import", { method: "POST", body: body })
-        .then(function (d) {
-          PX.toast("导入完成：新增 " + d.added + " 人，名单内已有 " + d.unchanged +
-                   " 人" + (d.failed ? "，无法读取 " + d.failed + " 行" : ""),
-                   false, 6000, {
-                     icon: "open", title: "打开名单",
-                     run: function () { location.hash = "#/roster/" + d.id; }
-                   });
-          if (rosterId) return loadRoster(rosterId).then(function () {
-            return loadEntries(false);
-          }).then(drawRoster);
-          location.hash = "#/roster/" + d.id;
-        })
-        .catch(function (e) { PX.toast(PX.esc(e.message), true); });
+      PX.api("/roster/import", { method: "POST", body: body }).then(done).catch(fail);
     };
     reader.onerror = function () { PX.toast("无法读取该文件", true); };
     reader.readAsText(file, "utf-8");
@@ -5041,6 +5054,10 @@
     if (!S.roster) return;
     location.href = PX.PREFIX + "/api/panel/roster/export.csv?id=" + S.roster.id;
   });
+  $("#rosterXlsxBtn").addEventListener("click", function () {
+    if (!S.roster) return;
+    location.href = PX.PREFIX + "/api/panel/roster/export.xlsx?id=" + S.roster.id;
+  });
   // 打印名单：一张简单的表，另开一张纸
   $("#rosterPrintBtn").addEventListener("click", function () {
     if (!S.roster) return;
@@ -5279,6 +5296,10 @@
   $("#signupExportBtn").addEventListener("click", function () {
     if (!S.signup) return;
     location.href = PX.PREFIX + "/api/panel/signup/export.csv?id=" + S.signup.id;
+  });
+  $("#signupXlsxBtn").addEventListener("click", function () {
+    if (!S.signup) return;
+    location.href = PX.PREFIX + "/api/panel/signup/export.xlsx?id=" + S.signup.id;
   });
   // 打印报名表：另开一张纸（空白表 / 已报名单），不挤在面板里
   $("#signupPrintBtn").addEventListener("click", function () {

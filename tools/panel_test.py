@@ -26,6 +26,9 @@ HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # 服务实例的数据目录：跑套件时会传进来，平台提示词就写在它下面
 DATA = os.environ.get("LOTTERY_DATA_DIR") or os.path.join(HERE, "data")
 
+sys.path.insert(0, HERE)
+import xlsx  # noqa: E402  读写自测要用同一份实现
+
 problems = []
 
 
@@ -70,6 +73,20 @@ def call(opener, path, body=None, expect=200, method=None,
 def post(opener, path, body=None, expect=200, marker="CAEventManager"):
     return call(opener, path, body if body is not None else {}, expect=expect,
                 method="POST", marker=marker)
+
+
+def post_bytes(opener, path, data, expect=200, ctype="application/octet-stream"):
+    """原样上送一段字节（xlsx 是 zip，不能当 JSON）。"""
+    req = urllib.request.Request(
+        BASE + path, data=data, method="POST",
+        headers={"Content-Type": ctype, "X-Requested-With": "CAEventManager"})
+    try:
+        with opener.open(req) as res:
+            return json.loads(res.read().decode("utf-8") or "{}")
+    except urllib.error.HTTPError as exc:
+        if exc.code == expect:
+            return json.loads(exc.read().decode("utf-8") or "{}")
+        raise
 
 
 def check(name, cond, detail=""):
@@ -742,6 +759,34 @@ def main():
           and "学号".encode() in sheet and "高勇".encode() in sheet,
           (sheet or b"")[:40])
 
+    print("== 名单：xlsx 导出与导入 ==")
+    book = call(owner, "/api/panel/roster/export.xlsx?id=%d" % roster_id)
+    check("导出 xlsx 是 zip（xlsx 的本质）",
+          isinstance(book, bytes) and book[:2] == b"PK", (book or b"")[:8])
+    rows = xlsx.parse(book)
+    check("读回来只有表头 + 数据行", rows and rows[0][:4] == ["学号", "姓名", "院系", "班级"],
+          rows[:2])
+    check("学号还是文本，前导零没丢",
+          any(r and r[0].startswith("2024") for r in rows[1:]), rows[1:3])
+
+    payload = xlsx.build([["学号", "姓名", "院系", "班级"],
+                          ["0001234", "戊五", "外国语学院", "英语 2501"],
+                          ["20240200", "己六", "", ""]])
+    merged = post_bytes(owner, "/api/panel/roster/import.xlsx?id=%d" % roster_id, payload)
+    check("xlsx 能导入进名单", merged and merged["added"] == 2, merged)
+    after = call(owner, "/api/panel/roster/entries?id=%d" % roster_id)
+    names = [e["name"] for e in after["entries"]]
+    check("导入的人在里面", "戊五" in names and "己六" in names, names)
+    check("前导零的学号原样存下",
+          any(e["sid"] == "0001234" for e in after["entries"]),
+          [e["sid"] for e in after["entries"]][:4])
+    again = post_bytes(owner, "/api/panel/roster/import.xlsx?id=%d" % roster_id, payload)
+    check("再导入同一份不会重复",
+          again and again["added"] == 0 and again["unchanged"] == 2, again)
+    post_bytes(owner, "/api/panel/roster/import.xlsx?id=%d" % roster_id,
+               b"not a zip", expect=400)
+    check("不是 xlsx 的文件会被拒", True)
+
     print("== 名单：什么都没改就不算保存 ==")
     same = post(owner, "/api/panel/roster/update",
                 {"id": roster_id, "name": "动漫社 2026 秋"})
@@ -1014,6 +1059,10 @@ def main():
     sheet = call(owner, "/api/panel/signup/export.csv?id=%d" % signup_id)
     check("报名 exports with its own columns",
           isinstance(sheet, bytes) and "是否住宿".encode() in sheet, (sheet or b"")[:40])
+    book = call(owner, "/api/panel/signup/export.xlsx?id=%d" % signup_id)
+    grid = xlsx.parse(book) if isinstance(book, bytes) and book[:2] == b"PK" else []
+    check("报名也能导出 xlsx",
+          grid and "是否住宿" in grid[0] and len(grid) >= 1, grid[:1])
 
     print("== 报名：限制会员 ==")
     post(owner, "/api/panel/signup/update",

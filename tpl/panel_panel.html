@@ -608,7 +608,7 @@
         </div>
       </div>
       <input type="file" id="rosterImportFile" hidden
-             accept=".csv,.tsv,.txt,text/csv,text/plain">
+             accept=".csv,.tsv,.txt,.xlsx,text/csv,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
     </section>
 
     <!-- ====================================================== 我的报名 -->
@@ -667,6 +667,7 @@
         <p class="page-sub" id="signupSub">—</p>
         <div class="page-actions">
           <button class="btn" id="signupExportBtn" type="button">导出报名表</button>
+          <button class="btn" id="signupXlsxBtn" type="button">导出 Excel</button>
           <button class="btn" id="signupPrintBtn" type="button">打印报名表</button>
           <button class="btn primary" id="signupSaveBtn" type="button">保存设置</button>
         </div>
@@ -958,7 +959,8 @@
         <p class="page-sub" id="rosterSub">—</p>
         <div class="page-actions">
           <button class="btn" id="rosterMergeBtn" type="button">导入成员</button>
-          <button class="btn" id="rosterExportBtn" type="button">导出</button>
+          <button class="btn" id="rosterExportBtn" type="button">导出 CSV</button>
+          <button class="btn" id="rosterXlsxBtn" type="button">导出 Excel</button>
           <button class="btn" id="rosterPrintBtn" type="button">打印名单</button>
           <button class="btn" id="rosterEditBtn" type="button">设置</button>
         </div>
@@ -1007,7 +1009,7 @@
         </div>
       </div>
       <input type="file" id="rosterMergeFile" hidden
-             accept=".csv,.tsv,.txt,text/csv,text/plain">
+             accept=".csv,.tsv,.txt,.xlsx,text/csv,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
     </section>
 
     <!-- ====================================================== 模块管理 -->

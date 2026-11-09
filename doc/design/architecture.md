@@ -14,6 +14,7 @@ panel.py          账号、会话、令牌、审计、助手存档、名单与�
 lists.py          名单与人员库（平台级的人）
 db.py             每场活动一个库；活动配置与状态
 model.py / expr.py / auth.py / checkin.py / exporter.py / packs.py / modules.py / presets.py / bus.py
+xlsx.py           表格读写（一个工作表、文本单元格）：名单与报名的导出导入都用它
 assistant.py      运维助手（模型调用、工具、提示词）
 policy.py         助手放行的唯一判定口
 ```

@@ -558,6 +558,30 @@ def main():
           app.policy.verdict({"role": "admin"}, "read_doc", {})[0]
           and app.policy.verdict({"role": "owner"}, "list_docs", {})[0])
 
+    print("== xlsx 读写 ==")
+    sheet = [["学号", "姓名", "院系", "班级"],
+             ["20250001", "甲一", "计算机学院", "计科 2401"],
+             ["0000012", "乙二", "含,逗号与\"引号\"", "换\n行"],
+             ["", "", "", ""],
+             ["20250013", "丙三", "很长" * 300, ""]]
+    book = app.xlsx.build(sheet, "名单")
+    check("写出来是 zip", book[:2] == b"PK", book[:8])
+    back = app.xlsx.parse(book)
+    check("表头一字不差", back[0] == sheet[0], back[0])
+    check("前导零没丢", back[2][0] == "0000012", back[2][:2])
+    check("逗号、引号、换行都还活着",
+          back[2][2] == "含,逗号与\"引号\"" and back[2][3] == "换\n行", back[2])
+    check("整行空白的丢掉", len(back) == 4, len(back))
+    check("长文本不截断", back[3][2] == "很长" * 300, len(back[3][2]))
+    check("空表也能写出来", app.xlsx.build([])[:2] == b"PK")
+    try:
+        app.xlsx.parse(b"definitely not a zip")
+        refused = False
+    except ValueError as exc:
+        refused = "xlsx" in str(exc)
+    check("不是 xlsx 就明说", refused)
+    check("列名换算到 AA 也对", app.xlsx._col_name(26) == "AA", app.xlsx._col_name(26))
+
     print("== the panel's own helpers ==")
     check("view() maps the role label",
           app.panel.ROLE_LABEL.get("owner") == "站长", app.panel.ROLE_LABEL)

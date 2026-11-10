@@ -58,7 +58,7 @@ TPL_DIR = os.path.join(BASE_DIR, "tpl")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.7.0.30"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.7.0.31"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -369,16 +369,13 @@ def student_public(conn, stu, cfg):
     return out
 
 
-def student_admin(stu):
-    return {
+def student_admin(stu, with_pinyin=True):
+    out = {
         "id": stu["id"],
         "sid": stu["sid"],
         "name": stu["name"],
         "py": stu.get("py"),
         "pyi": stu.get("pyi"),
-        # 逐字音节：控制台的混合搜索要按音节做前缀匹配（见 ROADMAP 三b），
-        # 前端没有汉字读音表，所以由服务端带下来
-        "pys": model.name_syllables(stu.get("name") or ""),
         "grp": stu.get("grp") or "",
         "note": stu.get("note") or "",
         "marks": {k: fmt_ts(v) for k, v in (stu.get("marks") or {}).items()},
@@ -389,6 +386,11 @@ def student_admin(stu):
         "tasks": stu.get("tasks", 0),
         "ticket_count": stu.get("ticket_count", 0),
     }
+    if with_pinyin:
+        # 逐字音节：混合搜索按音节做前缀匹配要用它（见 ROADMAP 三b）。
+        # 前端没有汉字读音表，所以由服务端算好带下来；没申请 search 的模块拿不到。
+        out["pys"] = model.name_syllables(stu.get("name") or "")
+    return out
 
 # --------------------------------------------------------------------------- #
 # handler
@@ -3321,6 +3323,10 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/admin/state" and method == "GET":
             cfg = db.all_config(conn)
+            kind_id = str(cfg.get("kind") or "")
+            # 拼音音节是搜索用的索引：模块申请了 search 才发，没申请就一个字节也不发
+            want_search = "search" in ((modules.get(kind_id, VERSION) or {})
+                                       .get("permissions") or {})
             students = model.snapshot(conn, cfg)
             roster_id = int(cfg.get("roster_id") or 0)
             roster_name = ""
@@ -3340,7 +3346,10 @@ class Handler(BaseHTTPRequestHandler):
                     "publicBaseUrl": public_base_url(conn),
                     "stats": model.stats(conn, cfg, students),
                     "prizes": model.prize_status(conn, cfg),
-                    "students": [student_admin(s) for s in students],
+                    "permissions": (modules.get(kind_id, VERSION) or {}).get(
+                        "permissions") or {},
+                    "students": [student_admin(s, with_pinyin=want_search)
+                                 for s in students],
                     "unlockUntil": me.unlock_until(),
                     "unlocked": me.unlocked(),
                     "audit": db.audit_tail(conn, 60),

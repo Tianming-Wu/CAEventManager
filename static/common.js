@@ -250,18 +250,19 @@
     return typeof t.length === "number" ? t.length : Object.keys(t).length;
   }
 
-  function findTag(word) {
+  function findTag(word, table) {
     var key = (word || "").toLowerCase();
-    for (var i = 0; i < TAGS.length; i++) {
-      if (TAGS[i].keys.indexOf(key) >= 0 || TAGS[i].keys.indexOf(word) >= 0) {
-        return TAGS[i];
+    var list = table || TAGS;
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].keys.indexOf(key) >= 0 || list[i].keys.indexOf(word) >= 0) {
+        return list[i];
       }
     }
     return null;
   }
 
   // {tags: [{tag, negate, raw}], terms: ["xyh", "#..."], hint: 未完成的标签词}
-  function parseQuery(text) {
+  function parseQuery(text, table) {
     var out = { tags: [], terms: [], unknown: [] };
     (text || "").trim().split(/\s+/).forEach(function (word) {
       if (!word) return;
@@ -273,7 +274,7 @@
       var negate = body.charAt(0) === "-";
       if (negate) body = body.slice(1);
       if (!body) return;                 // 只打了个 "#" 或 "#-"：还不算标签
-      var tag = findTag(body);
+      var tag = findTag(body, table);
       if (tag) out.tags.push({ tag: tag, negate: negate });
       else out.unknown.push(word);
     });
@@ -349,9 +350,54 @@
     return termScore(stu, term);
   }
 
+  /* 模块申请了 search 就按它声明的字段与词表来；没有就用内置的那张（抽奖模块的老样子） */
+  function tagsFromSpec(spec) {
+    if (!spec || !spec.tags || !spec.tags.length) return TAGS;
+    return spec.tags.map(function (tag) {
+      return {
+        keys: (tag.keys || []).map(function (k) { return String(k).toLowerCase(); }),
+        label: tag.label || ("#" + ((tag.keys || [])[0] || "")),
+        test: tagTest(tag)
+      };
+    });
+  }
+
+  function fieldOf(stu, path) {
+    var parts = String(path || "").split(".");
+    var value = stu;
+    for (var i = 0; i < parts.length && value !== undefined && value !== null; i++) {
+      value = value[parts[i]];
+    }
+    return value;
+  }
+
+  function tagTest(tag) {
+    if (tag.list) {
+      return function (stu) {
+        var items = fieldOf(stu, tag.list) || [];
+        var n = typeof items.length === "number" ? items.length : Object.keys(items).length;
+        return tag.filled === false ? n === 0 : n > 0;
+      };
+    }
+    if (typeof tag.atLeast === "number") {
+      return function (stu) { return (fieldOf(stu, tag.field) || 0) >= tag.atLeast; };
+    }
+    if (typeof tag.below === "number") {
+      return function (stu) { return (fieldOf(stu, tag.field) || 0) < tag.below; };
+    }
+    if (tag.filled === true) {
+      return function (stu) { return !!fieldOf(stu, tag.field); };
+    }
+    if (tag.filled === false) {
+      return function (stu) { return !fieldOf(stu, tag.field); };
+    }
+    return function (stu) { return String(fieldOf(stu, tag.field) || "") === String(tag.eq || ""); };
+  }
+
   /* 解析 + 求交：标签在本地过滤，词逐个匹配，取最弱的那一项当总分。 */
-  function queryStudents(list, text, limit) {
-    var parsed = parseQuery(text);
+  function queryStudents(list, text, limit, spec) {
+    var table = tagsFromSpec(spec);
+    var parsed = parseQuery(text, table);
     var out = [];
     for (var i = 0; i < list.length; i++) {
       var stu = list[i];
@@ -450,6 +496,7 @@
     score: score,
     parseQuery: parseQuery,
     queryStudents: queryStudents,
+    tagsFromSpec: tagsFromSpec,
     termScore: termScore,
     TAGS: TAGS,
     KIND_LABEL: KIND_LABEL

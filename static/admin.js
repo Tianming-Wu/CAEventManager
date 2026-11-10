@@ -160,7 +160,8 @@
 
   function filtered() {
     var q = S.q.trim();
-    var list = q ? LT.queryStudents(S.students, q) : S.students.slice();
+    var list = q ? LT.queryStudents(S.students, q, 999, searchSpec())
+                 : S.students.slice();
     return list.filter(function (s) {
       switch (S.filter) {
         case "in": return !!s.marks.checkin;
@@ -189,7 +190,7 @@
     }
     var parsed = LT.parseQuery(q);
     var known = parsed.unknown.length === 0;
-    var buttons = LT.TAGS.map(function (tag) {
+    var buttons = (LT.tagsFromSpec(searchSpec()) || LT.TAGS).map(function (tag) {
       return '<button type="button" data-tag="' + LT.esc(tag.label.split(" ")[0]) + '">' +
         LT.esc(tag.label) + "</button>";
     }).join("");
@@ -270,7 +271,8 @@
 
   function rosterRows() {
     var q = S.rosterQ.trim();
-    var list = q ? LT.queryStudents(S.students, q) : S.students.slice();
+    var list = q ? LT.queryStudents(S.students, q, 999, searchSpec())
+                 : S.students.slice();
     var key = S.sortKey;
     var dir = S.sortDir;
     var rank = { participant: 0, staff: 1, volunteer: 2 };
@@ -642,6 +644,7 @@
     S.byId = {};
     S.students.forEach(function (s) { S.byId[s.id] = s; });
     S.audit = d.audit || [];
+    S.permissions = d.permissions || {};
     S.draws = d.draws || [];
     S.unlocked = !!d.unlocked;
     S.unlockUntil = d.unlockUntil || 0;
@@ -663,10 +666,17 @@
     }).catch(bad);
   }
 
+  // 模块在 module.json 的 permissions.search 里说清楚"哪份清单、哪个字段是姓名"，
+  // 搜索的算法留在平台：这里只是把那份声明递给 LT
+  function searchSpec() {
+    var perms = S.permissions || {};
+    return perms.search || null;
+  }
+
   function refreshHits() {
     renderTagHint();
     if (!S.q.trim()) { S.hits = []; return; }
-    S.hits = LT.queryStudents(S.students, S.q, 8);
+    S.hits = LT.queryStudents(S.students, S.q, 8, searchSpec());
     if (S.sel >= S.hits.length) S.sel = Math.max(0, S.hits.length - 1);
   }
 

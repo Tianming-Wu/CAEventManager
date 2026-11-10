@@ -128,6 +128,82 @@ def normalize_external(raw):
     return out
 
 
+# --------------------------------------------------------------------------- #
+# 能力声明（module.json 的 permissions）
+# --------------------------------------------------------------------------- #
+# 站上有些能力不是白给的：模块要在 module.json 里申请，平台按声明给它配置，
+# 没申请的模块在接口里根本看不到那一段。写法学安卓的 manifest——名字 + 自己的定义：
+#
+#   "permissions": {
+#     "search": {"records": "students", "name": "name", "key": "sid",
+#                "fields": ["grp"], "tags": [{"keys": ["w"], "field": "role", "eq": "staff"}]}
+#   }
+#
+# 不需要申请的东西（版本号热更新、事件流、导出打包这类跟玩法无关的）平台一直给，
+# 也就不必写进来。名字不认识的申请一律丢掉，并按模块记一条原因——
+# 模块自己的错不该让整个活动起不来。
+CAPABILITIES = {
+    # 搜索：平台出算法（拼音音节、标签、求交），模块出"哪份清单、哪个字段是姓名"
+    "search": {
+        "records": str,        # state 里那份清单的键名
+        "name": str,           # 姓名字段（汉字那个）
+        "key": str,            # 学号/编号字段：片段匹配用
+        "fields": list,        # 其余字段：只做"直接包含"
+        "tags": list,          # 标签词 → 字段条件
+    },
+}
+
+DEFAULT_SEARCH = {
+    "records": "students",
+    "name": "name",
+    "key": "sid",
+    "fields": ["grp", "note"],
+    "tags": [],
+}
+
+
+def resolve_permissions(raw, errors=None):
+    """把模块申请的权限解析成"平台认的那几个"，不认识的丢掉并记下原因。"""
+    out = {}
+    if isinstance(raw, (list, tuple)):
+        raw = {str(name): {} for name in raw}
+    if not isinstance(raw, dict):
+        return out
+    for name in raw:
+        declared = raw[name]
+        spec = CAPABILITIES.get(name)
+        if spec is None:
+            _note(errors, "没有这个能力：%s" % name)
+            continue
+        if declared is True or declared is None:
+            declared = {}
+        if not isinstance(declared, dict):
+            _note(errors, "能力 %s 的声明应该是一个对象" % name)
+            continue
+        clean = {}
+        for field, kind in spec.items():
+            if field not in declared:
+                if name == "search" and field in DEFAULT_SEARCH:
+                    clean[field] = DEFAULT_SEARCH[field]
+                continue
+            value = declared[field]
+            if kind is list:
+                clean[field] = value if isinstance(value, list) else []
+            elif isinstance(value, kind):
+                clean[field] = value
+            else:
+                _note(errors, "能力 %s 的 %s 类型不对" % (name, field))
+        if name == "search":
+            clean = {k: clean.get(k, v) for k, v in DEFAULT_SEARCH.items()}
+        out[name] = clean
+    return out
+
+
+def _note(errors, text):
+    if errors is not None:
+        errors.append(text)
+
+
 def external_routes(module_id, version):
     """The set of public pages this activity's module is allowed to serve."""
     if not module_id:
@@ -204,6 +280,8 @@ def load_module(folder, version, builtin=False, enabled=True):
     if os.path.isdir(tpl_dir):
         templates = sorted(n[:-5] for n in os.listdir(tpl_dir) if n.endswith(".json"))
 
+    permissions = resolve_permissions(meta.get("permissions"))
+
     return {
         "id": kind_id,
         "name": str(meta.get("name")),
@@ -216,6 +294,7 @@ def load_module(folder, version, builtin=False, enabled=True):
         "requires": requires,
         "pages": normalize_pages(meta.get("pages")),
         "external": normalize_external(meta.get("external")),
+        "permissions": permissions,
         "fields": fields,
         "templates": templates,
         "path": folder,

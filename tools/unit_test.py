@@ -503,6 +503,35 @@ def main():
         check("最多留三份老的", not os.path.exists(path + ".4"))
         check("文件不在就当没这回事", app.rotate_file(os.path.join(box, "nope.log")) is False)
 
+    print("== 模块的能力声明（module.json 的 permissions）==")
+    errs = []
+    got = app.modules.resolve_permissions(
+        {"search": {"name": "xm", "records": "students", "key": "id"},
+         "nope": 1}, errs)
+    check("申请了的才给，没申请的丢掉",
+          list(got) == ["search"] and "没有这个能力：nope" in errs, (got, errs))
+    check("没写的字段用默认值",
+          got["search"]["fields"] == ["grp", "note"] and got["search"]["tags"] == [],
+          got["search"])
+    check("写了的字段照抄", got["search"]["name"] == "xm", got["search"]["name"])
+    check("列表写法的申请等价于空声明",
+          app.modules.resolve_permissions(["search"])["search"]["name"] == "name")
+    bad = []
+    check("声明写错就丢掉这个能力",
+          app.modules.resolve_permissions({"search": "x"}, bad) == {}
+          and bad and "应该是一个对象" in bad[-1], bad)
+    lottery = app.modules.get("nwuca.lottery", app.VERSION)
+    perms = (lottery or {}).get("permissions") or {}
+    check("抽奖模块声明了搜索", "search" in perms, list(perms))
+    check("它的词表里有工作人员与未签到",
+          any("w" in t["keys"] for t in perms["search"]["tags"])
+          and any("未签到" in t["keys"] for t in perms["search"]["tags"]),
+          [t.get("label") for t in perms["search"]["tags"]])
+    stu = {"id": 1, "sid": "2024001", "name": "高勇", "marks": {}, "tickets": []}
+    check("没申请搜索就不发拼音索引",
+          "pys" not in app.student_admin(stu, with_pinyin=False)
+          and "pys" in app.student_admin(stu))
+
     print("== 提示词里的变量 ==")
     acc = {"id": 7, "username": "laffey", "name": "吴天明", "role": "owner"}
     vals = app.assistant.prompt_values(acc, ["list_events", "host_stats"], "9.9.9.9")

@@ -8,12 +8,130 @@
   "builtin": true,
   "requires": ">=1.4",
   "description": "签到与任务发奖票，按票抽奖，另有一次到场均等抽特等奖",
-  "external": ["board", "screen", "checkin", "admin"],
+  "external": [
+    "board",
+    "screen",
+    "checkin",
+    "admin"
+  ],
   "pages": [
-    { "id": "ops", "title": "操作台" },
-    { "id": "roster", "title": "名单" },
-    { "id": "tickets", "title": "奖票" },
-    { "id": "draw", "title": "抽奖" },
-    { "id": "config", "title": "奖票设置" }
-  ]
+    {
+      "id": "ops",
+      "title": "操作台"
+    },
+    {
+      "id": "roster",
+      "title": "名单"
+    },
+    {
+      "id": "tickets",
+      "title": "奖票"
+    },
+    {
+      "id": "draw",
+      "title": "抽奖"
+    },
+    {
+      "id": "config",
+      "title": "奖票设置"
+    }
+  ],
+  "permissions": {
+    "search": {
+      "records": "students",
+      "name": "name",
+      "key": "sid",
+      "fields": [
+        "grp",
+        "note"
+      ],
+      "tags": [
+        {
+          "keys": [
+            "w",
+            "worker",
+            "staff",
+            "工作人员"
+          ],
+          "label": "#w 工作人员",
+          "field": "role",
+          "eq": "staff"
+        },
+        {
+          "keys": [
+            "v",
+            "volunteer",
+            "志愿者"
+          ],
+          "label": "#v 志愿者",
+          "field": "role",
+          "eq": "volunteer"
+        },
+        {
+          "keys": [
+            "p",
+            "participant",
+            "参加人员"
+          ],
+          "label": "#p 参加人员",
+          "field": "role",
+          "eq": "participant"
+        },
+        {
+          "keys": [
+            "已签到",
+            "in"
+          ],
+          "label": "#已签到",
+          "field": "marks.checkin",
+          "filled": true
+        },
+        {
+          "keys": [
+            "未签到",
+            "out"
+          ],
+          "label": "#未签到",
+          "field": "marks.checkin",
+          "filled": false
+        },
+        {
+          "keys": [
+            "已完成",
+            "done"
+          ],
+          "label": "#已完成",
+          "field": "tasks",
+          "atLeast": 2
+        },
+        {
+          "keys": [
+            "未完成",
+            "todo"
+          ],
+          "label": "#未完成",
+          "field": "tasks",
+          "below": 2
+        },
+        {
+          "keys": [
+            "有票",
+            "ticket"
+          ],
+          "label": "#有票",
+          "list": "tickets",
+          "filled": true
+        },
+        {
+          "keys": [
+            "无票",
+            "zeroticket"
+          ],
+          "label": "#无票",
+          "list": "tickets",
+          "filled": false
+        }
+      ]
+    }
+  }
 }

@@ -15,6 +15,7 @@ lists.py          名单与人员库（平台级的人）
 db.py             每场活动一个库；活动配置与状态
 model.py / expr.py / auth.py / checkin.py / exporter.py / packs.py / modules.py / presets.py / bus.py
 xlsx.py           表格读写（一个工作表、文本单元格）：名单与报名的导出导入都用它
+surnames.py       姓氏读音（曾 = zeng 这类），算拼音时先查它
 assistant.py      运维助手（模型调用、工具、提示词）
 policy.py         助手放行的唯一判定口
 ```
@@ -71,6 +72,35 @@ SQLite 开 WAL；写入统一走事务包装（`tx()`），一次写入成功之
 - **活动模块**：`modules/<id>/module.json` + `schema.json`；创建表单由 schema 生成，
   兼容约束按版本号判定
 - **预设**：`templates/*.json`，模块之上的一份配置快照
+
+## 模块能申请什么（权限声明）
+
+`module.json` 里有一段 `permissions`，写法照安卓的 manifest：**名字 + 自己的定义**。
+站上跟玩法无关的能力（版本号热更新、事件流、导出打包）平台一直给，不用申请；
+用得着的功能才要声明，没声明的模块在接口里根本看不到那一段。
+
+```json
+"permissions": {
+  "search": {
+    "records": "students",          // state 里那份清单的键名
+    "name": "name",                 // 姓名字段（汉字那个，平台据此建拼音索引）
+    "key": "sid",                   // 学号/编号：片段匹配用
+    "fields": ["grp", "note"],      // 其余字段：只做"直接包含"
+    "tags": [                       // 标签词 → 字段条件
+      {"keys": ["w", "worker", "工作人员"], "label": "#w 工作人员",
+       "field": "role", "eq": "staff"},
+      {"keys": ["未签到"], "label": "#未签到", "field": "marks.checkin", "filled": false}
+    ]
+  }
+}
+```
+
+- **平台出算法，模块出词表**：搜索的解析、拼音音节匹配、条件求交都在 `static/common.js`；
+  哪些字段、哪些标签、叫什么名字，是模块自己的事
+- **没申请就不发**：`/api/admin/state` 里没有 `permissions.search` 时，学生记录连 `pys`
+  （逐字音节）都不带——不给用不上的数据，也省得模块以为"这功能本来就有"
+- **写错只丢那一项**：认识不了的能力名或声明类型不对，解析时丢掉并记原因，不影响模块其余部分
+- 关键字：`records` / `name` / `key` / `fields` / `tags`（见 `modules.py` 的 `CAPABILITIES`）
 
 ## 明确不做的事
 

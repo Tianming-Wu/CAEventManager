@@ -53,6 +53,7 @@ import modules
 import pinyintable
 import policy
 import presets
+import shortlinks
 import localconfig
 import lists
 import model
@@ -64,7 +65,7 @@ TPL_DIR = os.path.join(BASE_DIR, "tpl")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.7.0.36"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.8.0.38"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -85,7 +86,6 @@ NOT_A_MEMBER_PAGE = """<!doctype html><meta charset="utf-8">
 </body>""".encode("utf-8")
 
 # Filled in by main() before the server starts listening.
-SECRET = ""
 LOCAL_CFG = {}
 
 _PANEL_FAILS = {}
@@ -106,10 +106,15 @@ def _note_register_hit(ip):
         _REGISTER_HITS[ip + ":n"] = 0
 
 # Very small guard against somebody hammering the short-code space.
-_SHORT_MISS = {"count": 0, "since": 0.0}
-SHORTLINK_TTL_MIN = 30
-SHORTLINK_MAX_MISS = 40        # wrong hits per window before cooling off
-SHORTLINK_WINDOW = 60.0
+SHORTLINK_MISS_PAGE = (
+    "<!doctype html><meta charset=utf-8><title>链接已失效</title>"
+    "<body style=\"font-family:system-ui;padding:3em;color:#888\">"
+    "这个短链已失效，请向发起人索取新链接。</body>").encode("utf-8")
+
+# 短链号只有 7 位，连着试错就直接拖慢响应
+SHORT_MISS = {"count": 0, "since": 0.0}
+SHORT_MAX_MISS = 40            # wrong hits per window before cooling off
+SHORT_WINDOW = 60.0
 
 
 # 服务日志：run.sh 用 `>>data/service.log` 起服务，所以轮转要在进程内做——
@@ -204,83 +209,10 @@ def sanitize_cookie_path(raw):
     return raw
 
 
-def shortlink_redirect(raw_path):
-    """Return a target path for /s/<code>, or None when it does not apply.
-
-    Deliberately lives *outside* the secret so a short code can be typed on a
-    machine that has no way to receive the long URL.  The code is 6 digits and
-    dies after SHORTLINK_TTL_MIN minutes.
-    """
-    marker = "/s/"
-    idx = raw_path.rfind(marker)
-    if idx < 0:
-        return None
-    code = raw_path[idx + len(marker):].strip("/")
-    if not code or "/" in code:
-        return None
-    now = time.time()
-    if now - _SHORT_MISS["since"] > SHORTLINK_WINDOW:
-        _SHORT_MISS["count"] = 0
-        _SHORT_MISS["since"] = now
-    conn = db.connect()
-    stored = str(db.get_config(conn, "shortlink_code", "") or "")
-    expires = float(db.get_config(conn, "shortlink_expires", 0) or 0)
-    target = str(db.get_config(conn, "shortlink_target", "screen") or "screen")
-    if target not in ("screen", "admin", "board"):
-        target = "screen"
-    if not stored or now > expires or code != stored:
-        _SHORT_MISS["count"] += 1
-        if _SHORT_MISS["count"] >= SHORTLINK_MAX_MISS:
-            time.sleep(0.5)          # cheap brake on brute force
-        return None
-    # The platform strips /u/<user>/<service> before forwarding, so the server
-    # cannot see the prefix the browser used.  Emit a root-relative path built
-    # from the configured public URL instead - that keeps the browser on the
-    # same origin, and this service accepts prefixed paths anyway.
-    public = public_base_url(conn)
-    prefix = urlparse(public).path.rstrip("/") if "://" in public else public.rstrip("/")
-    if not prefix:
-        prefix = "/" + SECRET
-    return prefix + "/" + ("" if target == "board" else target)
 
 
-def resolve_route(raw_path):
-    """Map an incoming path onto a route, demanding the secret segment.
-
-    Published URL:  https://example.org/<mount>/<secret>/admin
-    The platform strips ``/<mount>`` and forwards ``/<secret>/admin``,
-    but we also accept the untouched full path, so routing works either way.
-
-    Returns the route ("/admin") or None when the secret is missing - which is
-    what makes ordinary guessing of the URL useless.
-    """
-    if not raw_path.startswith("/"):
-        return None
-    parts = raw_path.split("/")
-    try:
-        idx = parts.index(SECRET)
-    except ValueError:
-        return None
-    rest = parts[idx + 1:]
-    route = "/" + "/".join(rest)
-    if route == "/" and raw_path.endswith("/"):
-        return "/"
-    return route.rstrip("/") or "/"
 
 
-def ensure_public_url(conn):
-    """Make sure the configured public URL carries the current secret id.
-
-    Covers two cases: a database seeded before the secret existed, and a manual
-    rotation.  A hand-edited URL that already contains the secret is kept.
-    """
-    stored = (db.get_config(conn, "public_base_url") or "").strip().rstrip("/")
-    default = localconfig.public_url(LOCAL_CFG)
-    if stored and ("/" + SECRET) in (stored + "/"):
-        return stored
-    with db.tx(conn):
-        db.set_config_raw(conn, "public_base_url", default)
-    return default
 
 
 PRESENCE_MAX_AGE = checkin.PRESENCE_TTL
@@ -295,21 +227,20 @@ def presence_cookie(value, cookie_path="/"):
     )
 
 
-def has_presence(headers):
+def has_presence(headers, secret):
     raw = headers.get("Cookie") or ""
     for part in raw.split(";"):
         part = part.strip()
         if part.startswith(checkin.COOKIE_NAME + "="):
-            return checkin.check_presence(SECRET, part.split("=", 1)[1])
+            return checkin.check_presence(secret, part.split("=", 1)[1])
     return False
 
 
-def public_base_url(conn):
-    """Configured public URL, falling back to the deployment default."""
-    url = (db.get_config(conn, "public_base_url") or "").strip()
-    if url:
-        return url.rstrip("/")
-    return localconfig.public_url(LOCAL_CFG)
+def public_base_url(seq=None):
+    """活动的对外地址：配置里的前缀 + 它自己的 token（token 变了地址就变）。"""
+    prefix = (LOCAL_CFG.get("public_base_prefix") or "").rstrip("/")
+    token = panel.event_token(db.event_id() if seq is None else seq)
+    return (prefix + "/" + token) if token else prefix
 
 
 MIME_OVERRIDES = {
@@ -936,7 +867,7 @@ class Handler(BaseHTTPRequestHandler):
         if found is None:
             return None
         acc, token, conn = found
-        seat = panel.member_of(conn, db.current_event(), acc["id"])
+        seat = panel.member_of(conn, db.event_id(), acc["id"])
         if seat is None or seat["state"] != "active":
             return None
         return ConsoleUser(acc, seat["role"], token, conn)
@@ -1024,17 +955,53 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         self._dispatch("POST")
 
+    def _shortlink(self, raw_path):
+        """`/s/<code>`：查表、记一次访问、跳到那个活动的目标页。
+
+        短链随时可能被删除、过期或用尽次数，所以每次都重新查，不缓存。
+        """
+        code = raw_path[len("/s/"):].strip("/")
+        now = time.time()
+        if now - SHORT_MISS["since"] > SHORT_WINDOW:
+            SHORT_MISS["count"] = 0
+            SHORT_MISS["since"] = now
+        conn = panel.connect()
+        link = shortlinks.resolve(conn, code, now) if code else None
+        if link is None:
+            SHORT_MISS["count"] += 1
+            if SHORT_MISS["count"] >= SHORT_MAX_MISS:
+                time.sleep(0.5)          # cheap brake on guessing
+            return self._send(404, SHORTLINK_MISS_PAGE, "text/html; charset=utf-8")
+        with panel.tx() as tx:
+            shortlinks.hit(tx, link["code"])
+        token = panel.event_token(link["eventSeq"])
+        archived = panel.connect().execute(
+            "SELECT archived_at FROM events WHERE seq=?", (link["eventSeq"],)).fetchone()
+        if not token or (archived and archived["archived_at"]):
+            return self._send(404, b"404", "text/plain; charset=utf-8")
+        prefix = (LOCAL_CFG.get("public_base_prefix") or "").rstrip("/")
+        location = "%s/%s/%s" % (prefix, token, link["target"])
+        log("shortlink %s -> %s" % (link["code"], location))
+        self.send_response(302)
+        self.send_header("Location", location)
+        self.send_header("Content-Length", "0")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+
     def _dispatch(self, method):
         """Three route families, in order: panel (root), short link, event (token)."""
         global EVENT_TOKENS
         parsed = urlparse(self.path)
         query = parse_qs(parsed.query)
-        EVENT_TOKENS = panel.event_tokens(extra=(SECRET,))
+        EVENT_TOKENS = panel.event_tokens()
         try:
             if parsed.path == "/favicon.ico":
                 return self._send(204, b"", "image/x-icon")
 
             self._drain_body()
+
+            if parsed.path.startswith("/s/"):
+                return self._shortlink(parsed.path)
 
             kind, route, token = panel.classify(parsed.path, EVENT_TOKENS)
             self._scope = "panel" if kind == "panel" else None
@@ -1044,29 +1011,22 @@ class Handler(BaseHTTPRequestHandler):
             if kind == "join":
                 return self._join(method, route, token)
 
-            redirect_to = shortlink_redirect(parsed.path)
-            if redirect_to is not None:
-                log("shortlink accepted -> %s" % redirect_to)
-                self.send_response(302)
-                self.send_header("Location", redirect_to)
-                self.send_header("Content-Length", "0")
-                self.send_header("Cache-Control", "no-store")
-                self.end_headers()
-                return
-
-            # every event request reads and writes that event's own database
-            db.set_current_event(panel.event_seq(token) or db.DEFAULT_SEQ)
+            # every event request reads and writes that event's own database;
+            # 活动号只在内部传递，对外一律用地址里的 token
+            seq = panel.event_seq(token) if token else None
             path = route
-            if path is None:
+            if seq is None or path is None:
                 # No panel route and no event token: nothing to serve.
-                self._send(
+                return self._send(
                     404,
                     b"<!doctype html><meta charset=utf-8><title>404</title>"
                     b"<body style=\"font-family:system-ui;padding:3em;color:#888\">404 Not Found</body>",
                     "text/html; charset=utf-8",
                 )
-            elif path.startswith("/api/"):
-                self._scope = "event:%s" % db.current_event()
+            db.set_event(seq)
+            self._token = token
+            if path.startswith("/api/"):
+                self._scope = "event:%s" % seq
                 self._api(method, path, query)
             else:
                 self._page(method, path)
@@ -1273,7 +1233,7 @@ class Handler(BaseHTTPRequestHandler):
                 # the row on the events table is often empty: the name lives
                 # in the event's own database, borrowed the way /events does it
                 if not r["title"]:
-                    db.set_current_event(r["seq"])
+                    db.set_event(r["seq"])
                     titles[r["seq"]] = (
                         db.all_config(db.connect()).get("title") or "")
             return self._json({"ok": True, "invites": [
@@ -1524,6 +1484,74 @@ class Handler(BaseHTTPRequestHandler):
                                "quotaMax": panel.CHAT_QUOTA_MAX,
                                "accounts": _accounts_with_usage(conn, rows)})
 
+        # ---- 短链：活动的平台资产；模块申请 features.shortlink 之后才能生成 ----
+        def event_seat(seq):
+            seat = panel.member_of(conn, seq, acc["id"])
+            if seat is None or seat["state"] != "active":
+                raise model.ApiError("只有这个活动的成员能管它的短链", 403)
+            return seat
+
+        def shortlink_slot(seq):
+            row = conn.execute("SELECT kind FROM events WHERE seq=?", (seq,)).fetchone()
+            mod = _modules_by_id(conn).get(row["kind"] if row else "") or {}
+            slot = (mod.get("features") or {}).get("shortlink")
+            if not slot:
+                raise model.ApiError("这个活动的模块没有申请短链能力", 403)
+            return slot
+
+        if path == "/shortlink" and method == "GET":
+            seq = int((query.get("seq") or ["0"])[0] or 0)
+            event_seat(seq)
+            slot = shortlink_slot(seq)
+            return self._json({
+                "ok": True,
+                "links": shortlinks.list_for(conn, seq),
+                "targets": slot.get("targets") or [],
+                "limit": localconfig.static_limit(LOCAL_CFG, "shortlink_per_event"),
+            })
+
+        if path == "/shortlink" and method == "POST":
+            data = body()
+            seq = int(data.get("seq") or 0)
+            event_seat(seq)
+            slot = shortlink_slot(seq)
+            target = str(data.get("target") or "").strip()
+            keys = [t.get("key") for t in (slot.get("targets") or []) if t.get("key")]
+            if keys and target not in keys:
+                raise model.ApiError("这个活动没有定义这个目标")
+            try:
+                with panel.tx() as tx:
+                    link = shortlinks.create(
+                        tx, seq, target, acc["username"],
+                        minutes=int(data.get("minutes") or 0),
+                        max_hits=int(data.get("max_hits") or 0),
+                        limit=localconfig.static_limit(LOCAL_CFG, "shortlink_per_event"))
+            except shortlinks.ShortlinkError as exc:
+                raise model.ApiError(str(exc))
+            prefix = (LOCAL_CFG.get("public_base_prefix") or "").rstrip("/")
+            return self._json({"ok": True, "link": link,
+                               "url": prefix + "/s/" + link["code"]})
+
+        if path == "/shortlink/delete" and method == "POST":
+            data = body()
+            code = str(data.get("code") or "").strip()
+            row = conn.execute("SELECT event_seq FROM shortlinks WHERE code=?",
+                               (code,)).fetchone()
+            if row is None:
+                raise model.ApiError("没有这条短链", 404)
+            seat = panel.member_of(conn, int(row["event_seq"]), acc["id"])
+            if seat is None or seat["state"] != "active":
+                # 删别人的短链是替人做破坏性改动：只有超管能做，而且要进 sudo
+                need("superadmin", "owner")
+                need_sudo()
+            with panel.tx() as tx:
+                shortlinks.revoke(tx, code)
+            return self._json({"ok": True, "code": code})
+
+        if path == "/shortlink/overview" and method == "GET":
+            need("superadmin", "owner")
+            return self._json({"ok": True, "rows": shortlinks.overview(conn)})
+
         if path == "/events" and method == "GET":
             archived = (query.get("archived") or ["0"])[0] in ("1", "true", "yes")
             if archived:
@@ -1561,19 +1589,16 @@ class Handler(BaseHTTPRequestHandler):
                 " LEFT JOIN accounts o ON o.id = e.owner_id"
                 " WHERE e.archived_at=0 AND m.seq IS NOT NULL"
                 " ORDER BY e.created_at", (acc["id"],)).fetchall()
-            # the public base lives in an event database, not the panel one;
-            # with a single event there is no ambiguity about which one
-            if len(rows) == 1:
-                db.set_current_event(rows[0]["seq"])
-            event_conn = db.connect()
             # links come from the configured prefix plus each row's own token -
             # reading a per-event URL would point every row at one activity
             base = (LOCAL_CFG.get("public_base_prefix") or "").rstrip("/")
             events = [panel.event_view(r, base, r["my_role"]) for r in rows]
-            # The adopted first event has no name of its own; borrow the live one
-            # while there is exactly one event, so the list is not a row of dashes.
-            if len(events) == 1 and not events[0]["title"]:
-                events[0]["title"] = db.all_config(event_conn).get("title") or ""
+            # 活动名在每个活动自己的库里：缺名字的按它自己的活动号去补
+            for row, view in zip(rows, events):
+                if view["title"]:
+                    continue
+                db.set_event(row["seq"])
+                view["title"] = db.all_config(db.connect()).get("title") or ""
             return self._json({"ok": True, "events": events})
 
         if path == "/account/decide" and method == "POST":
@@ -1743,7 +1768,7 @@ class Handler(BaseHTTPRequestHandler):
             kind = by_id.get(module_id)
             if kind is None:
                 raise model.ApiError("没有这个活动模块", 404)
-            db.set_current_event(seq)
+            db.set_event(seq)
             cfg = db.all_config(db.connect())
             keys = {f["key"] for f in kind["fields"]}
             params = {k: cfg[k] for k in keys if k in cfg and cfg[k] is not None}
@@ -1940,7 +1965,7 @@ class Handler(BaseHTTPRequestHandler):
                 panel.audit(tx, acc["username"], "event_create", str(seq), title)
 
             # the activity gets its own database, seeded from the kind's defaults
-            db.set_current_event(seq)
+            db.set_event(seq)
             db.init_db()
             event_conn = db.connect()
             prefix = (LOCAL_CFG.get("public_base_prefix") or "").rstrip("/")
@@ -1960,7 +1985,7 @@ class Handler(BaseHTTPRequestHandler):
             row = conn.execute(
                 "SELECT e.*, 'owner' AS my_role, ? AS owner_name FROM events e"
                 " WHERE e.seq=?", (acc["name"] or acc["username"], seq)).fetchone()
-            base = public_base_url(event_conn)
+            base = public_base_url(seq)
             return self._json({"ok": True, "event": panel.event_view(row, base, "owner"),
                                "invited": len(invited)})
 
@@ -1985,7 +2010,7 @@ class Handler(BaseHTTPRequestHandler):
             with panel.tx() as tx:
                 tx.execute("UPDATE events SET token=? WHERE seq=?", (token, seq))
                 panel.audit(tx, acc["username"], "event_rotate", str(seq), row["title"])
-            db.set_current_event(seq)
+            db.set_event(seq)
             prefix = (LOCAL_CFG.get("public_base_prefix") or "").rstrip("/")
             event_conn = db.connect()
             with db.tx(event_conn):
@@ -2020,9 +2045,11 @@ class Handler(BaseHTTPRequestHandler):
             with panel.tx() as tx:
                 tx.execute("UPDATE events SET archived_at=? WHERE seq=?",
                            (time.time(), seq))
+                # 短链是活动的平台资产：活动归档，它的短链由平台一并销毁
+                shortlinks.purge_event(tx, seq)
                 panel.audit(tx, acc["username"], "event_archive", str(seq),
                             row["title"])
-            db.set_current_event(seq)
+            db.set_event(seq)
             with db.tx(db.connect()):
                 db.audit(db.connect(), "event_archive", detail="archived")
             return self._json({"ok": True, "seq": seq, "archived": True,
@@ -2049,7 +2076,7 @@ class Handler(BaseHTTPRequestHandler):
                 tx.execute("UPDATE events SET title=? WHERE seq=?", (title, seq))
                 panel.audit(tx, acc["username"], "event_title", str(seq), title)
             # the event pages read their heading from the event database
-            db.set_current_event(seq)
+            db.set_event(seq)
             event_conn = db.connect()
             with db.tx(event_conn):
                 db.set_config_raw(event_conn, "title", title)
@@ -2981,11 +3008,13 @@ class Handler(BaseHTTPRequestHandler):
                     "checkin.html",
                     headers=[("Set-Cookie", "laffey_lot_presence=; Path=/; Max-Age=0")],
                 )
-            if token and checkin.verify(SECRET, token):
-                cookie_path = sanitize_cookie_path("/" + SECRET + "/")
+            secret = db.checkin_secret(conn)
+            if token and checkin.verify(secret, token):
+                # cookie 的路径按这个活动自己的 token 来：不同活动的签到互不影响
+                cookie_path = sanitize_cookie_path("/" + (self._token or "") + "/")
                 return self._page_html(
                     "checkin.html",
-                    headers=[("Set-Cookie", presence_cookie(checkin.issue_presence(SECRET), cookie_path))],
+                    headers=[("Set-Cookie", presence_cookie(checkin.issue_presence(secret), cookie_path))],
                 )
             return self._page_html("checkin.html")
         if path in routes:
@@ -3081,7 +3110,7 @@ class Handler(BaseHTTPRequestHandler):
 
     # ---------------- api ----------------
     def _api(self, method, path, query):
-        global SECRET, LOCAL_CFG
+        global LOCAL_CFG
         conn = db.connect()
 
         # ---- public ----
@@ -3110,13 +3139,13 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/stream" and method == "GET":
             # Public like the board: a projector and a phone showing the same
             # activity hear about changes instead of polling for them.
-            return self._stream(scope="event:%s" % db.current_event())
+            return self._stream(scope="event:%s" % db.event_id())
 
         if path == "/api/screen/token" and method == "GET":
             # Public on purpose: the projector machine should not need a login.
             # Rotation is a freshness gate (a screenshot or a forwarded link goes
             # stale in ~20s), not an access control - see checkin.py.
-            token, expires = checkin.current(SECRET)
+            token, expires = checkin.current(db.checkin_secret(conn))
             return self._json(
                 {
                     "ok": True,
@@ -3128,7 +3157,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/checkin/status" and method == "GET":
             cfg = db.all_config(conn)
-            verified = has_presence(self.headers)
+            verified = has_presence(self.headers, db.checkin_secret(conn))
             st = model.stats(conn, cfg)
             return self._json(
                 {
@@ -3151,7 +3180,7 @@ class Handler(BaseHTTPRequestHandler):
             cfg = db.all_config(conn)
             if not cfg.get("self_checkin", True):
                 return self._err("本活动未开启自助签到，请找工作人员", 403)
-            if not has_presence(self.headers):
+            if not has_presence(self.headers, db.checkin_secret(conn)):
                 return self._err("签到二维码已过期，请重新扫描现场大屏上的二维码", 403)
             data = self._body()
             try:
@@ -3205,7 +3234,7 @@ class Handler(BaseHTTPRequestHandler):
 
         # ---- everything below needs a seat on this activity ----
         me = self._require_console()
-        self._target = console_target(path, self._peek(), db.current_event()) \
+        self._target = console_target(path, self._peek(), db.event_id()) \
             if method == "POST" else None
         self._stale = False
         if self._target:
@@ -3233,7 +3262,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise model.ApiError("名称不能为空")
             if len(title) > 60:
                 raise model.ApiError("活动名称最长 60 个字")
-            seq = db.current_event()
+            seq = db.event_id()
             with panel.tx() as tx:
                 tx.execute("UPDATE events SET title=? WHERE seq=?", (title, seq))
                 panel.audit(tx, me.acc["username"], "event_title", str(seq), title)
@@ -3245,7 +3274,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/admin/members" and method == "GET":
             # the roster is the platform's page, and the owner's business
             need_owner()
-            seq = db.current_event()
+            seq = db.event_id()
             rows = panel.event_members(me.conn, seq)
             return self._json({
                 "ok": True,
@@ -3267,7 +3296,7 @@ class Handler(BaseHTTPRequestHandler):
                 "   AND id NOT IN (SELECT account_id FROM event_members WHERE seq=?)"
                 " ORDER BY CASE role WHEN 'owner' THEN 0 WHEN 'superadmin' THEN 1 ELSE 2 END,"
                 "          name, username LIMIT 8",
-                (like, like, db.current_event())).fetchall()
+                (like, like, db.event_id())).fetchall()
             return self._json({"ok": True, "accounts": [
                 {"id": r["id"], "username": r["username"], "name": r["name"],
                  "role": r["role"], "roleLabel": panel.ROLE_LABEL.get(r["role"], r["role"])}
@@ -3277,7 +3306,7 @@ class Handler(BaseHTTPRequestHandler):
             self._check_csrf()
             need_owner()
             data = self._body()
-            seq = db.current_event()
+            seq = db.event_id()
             account_id = int(data.get("accountId") or 0)
             action = (data.get("action") or "").strip()
             seat = me.conn.execute(
@@ -3369,7 +3398,10 @@ class Handler(BaseHTTPRequestHandler):
                     "roster": {"id": roster_id, "name": roster_name,
                                "syncedAt": cfg.get("roster_synced_at") or 0,
                                "detached": int(detached or 0)},
-                    "publicBaseUrl": public_base_url(conn),
+                    "publicBaseUrl": public_base_url(),
+                    "seq": db.event_id(),
+                    "shortlinkLimit": localconfig.static_limit(
+                        LOCAL_CFG, "shortlink_per_event"),
                     "stats": model.stats(conn, cfg, students),
                     "prizes": model.prize_status(conn, cfg),
                     "features": (modules.get(kind_id, VERSION) or {}).get(
@@ -3500,32 +3532,6 @@ class Handler(BaseHTTPRequestHandler):
                 me.touch_unlock()
             return self._json({"ok": True, "result": res})
 
-        if path == "/api/admin/shortlink" and method == "POST":
-            self._check_csrf()
-            data = self._body()
-            target = (data.get("target") or "screen").lower()
-            if target not in ("screen", "admin", "board"):
-                return self._err("target 只能是 screen / admin / board")
-            minutes = max(1, min(180, int(data.get("minutes") or SHORTLINK_TTL_MIN)))
-            code = "%06d" % secrets.randbelow(1000000)
-            expires = time.time() + minutes * 60
-            with db.tx(conn):
-                db.set_config_raw(conn, "shortlink_code", code)
-                db.set_config_raw(conn, "shortlink_target", target)
-                db.set_config_raw(conn, "shortlink_expires", expires)
-                db.audit(conn, "shortlink", detail="%s -> /%s (%d min)"
-                         % (code, target, minutes))
-            prefix = public_base_url(conn)
-            if SECRET in prefix:
-                prefix = prefix.split("/" + SECRET)[0]
-            return self._json({
-                "ok": True,
-                "code": code,
-                "url": prefix.rstrip("/") + "/s/" + code,
-                "target": target,
-                "expires": expires,
-                "minutes": minutes,
-            })
 
         if path == "/api/admin/phase" and method == "POST":
             self._check_csrf()
@@ -3821,12 +3827,6 @@ def bootstrap_secrets():
         with db.tx(conn):
             db.set_config_raw(conn, "public_base_url", localconfig.public_url(LOCAL_CFG))
         cfg = db.all_config(conn)
-    # This activity used to carry its own console password.  The console signs in
-    # through the panel now, so the hash is dropped instead of migrated: leaving
-    # it in place would leave a credential nothing checks and nobody rotates.
-    if cfg.get("admin_pass"):
-        with db.tx(conn):
-            db.set_config_raw(conn, "admin_pass", "")
     if not db.get_config(conn, "seeded"):
         with db.tx(conn):
             model.ensure_seed(conn)
@@ -3835,9 +3835,8 @@ def bootstrap_secrets():
 
 
 def main():
-    global SECRET, LOCAL_CFG
+    global LOCAL_CFG
     LOCAL_CFG = localconfig.load()
-    SECRET = LOCAL_CFG["path_secret"]
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default=os.environ.get("LOTTERY_HOST") or LOCAL_CFG.get("host") or "0.0.0.0")
@@ -3846,19 +3845,21 @@ def main():
     )
     args = parser.parse_args()
 
-    db.init_db()
-    bootstrap_secrets()
-    conn = db.connect()
-    ensure_public_url(conn)
     panel.init_db()
-    panel.bootstrap(LOCAL_CFG, event_token_hint=SECRET, log=log)
+    panel.bootstrap(LOCAL_CFG, log=log)
     lists.init_db()
+    # 每个活动有自己的库：启动时逐个建表、补默认配置、给公示页写好地址
+    for seq in panel.event_seqs():
+        db.set_event(seq)
+        db.init_db()
+        conn = db.connect()
+        bootstrap_secrets()
+        model.ensure_seed(conn)
     # the built-in presets live in templates/*.json; the table is what the app
     # reads, so they are copied in on every start
     with panel.tx() as tx:
         by_id = {m["id"]: m for m in modules.all_modules(VERSION)}
         presets.seed(tx, by_id)
-    model.ensure_seed(conn)
 
     pidfile = os.path.join(db.DATA_DIR, "service.pid")
     try:
@@ -3870,14 +3871,11 @@ def main():
 
     httpd = ThreadingHTTPServer((args.host, args.port), Handler)
     httpd.daemon_threads = True
-    cfg = db.all_config(conn)
-    log("lottery service v%s" % VERSION)
+    log("service v%s" % VERSION)
     log("listening on http://%s:%d" % (args.host, args.port))
-    log("secret path segment: %s" % SECRET)
-    log("public board  : %s/" % public_base_url(conn))
-    log("public screen : %s/screen" % public_base_url(conn))
-    log("admin console : %s/admin" % public_base_url(conn))
-    log("data dir: %s" % db.DATA_DIR)
+    log("public base : %s" % ((LOCAL_CFG.get("public_base_prefix") or "").rstrip("/") or "—"))
+    log("activities  : %s" % (", ".join(str(s) for s in panel.event_seqs()) or "还没有活动"))
+    log("data dir    : %s" % db.DATA_DIR)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

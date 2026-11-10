@@ -58,7 +58,25 @@ modules/<id>/                    实例自己装的模块（不进版本库）
   模块自己的事
 - **没申请就不发**：没声明 `search` 的模块，`/api/admin/state` 里的记录连 `pys`（逐字音节）都不带
 - **写错只丢那一项**：能力名认不出、声明类型不对，解析时丢掉并记原因，不影响模块其它部分
-- 目前可用的能力只有 `search`；要加新能力，在 `modules.py` 的 `CAPABILITIES` 里加一项
+- 另一个能力是 `shortlink`：模块声明它的页面允许被短链指向哪些目标，平台负责生成、跳转与回收
+
+```json
+"features": {
+  "shortlink": {
+    "targets": [
+      {"key": "screen", "label": "大屏"},
+      {"key": "checkin", "label": "签到页"},
+      {"key": "", "label": "公示页"}
+    ]
+  }
+}
+```
+
+`key` 是活动内的相对路径（空串表示公示页），`label` 是界面上显示的名字。没申请这个能力的模块，
+活动后台里没有短链入口，`/api/panel/shortlink` 也会拒绝。短链由平台保管、活动归档时销毁，
+模块不要自己存短链号。
+
+- 要加新能力，在 `modules.py` 的 `CAPABILITIES` 里加一项，再在 `FEATURE_DEFAULTS` 补默认值
 
 ## 模块之间的功能导出（计划中，尚未实现）
 
@@ -100,4 +118,5 @@ python tools/run_suites.py ui            # 起一个实例、灌演示数据、�
 ## 相关文档
 
 - [结构](architecture.md)
+- [短链接口](../reference/api-shortlink.md)
 - [奖票抽奖](../../builtin/modules/nwuca.lottery/doc.md)

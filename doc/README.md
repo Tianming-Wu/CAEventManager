@@ -29,6 +29,7 @@
 | [usage/presets.md](usage/presets.md) | 预设：存一份配置、三处陈列、与模块的关系 |
 | [usage/approval.md](usage/approval.md) | 审批：注册申请、写入审批、活动申请 |
 | [usage/server.md](usage/server.md) | 服务器与审计：机器占用、运维操作、审计日志 |
+| [usage/shortlinks.md](usage/shortlinks.md) | 短链：谁能生成、有效期与次数、删除、超管 |
 | [usage/platform-pages.md](usage/platform-pages.md) | 平台管理页：用户管理、模块管理、展示屏幕 |
 | [usage/notices.md](usage/notices.md) | 通知与服务提示：铃铛、紧急弹窗、降级提示、自己排一条 |
 | [usage/assistant.md](usage/assistant.md) | 运维助手：先配模型、怎么问、它能做什么、对话存档 |
@@ -44,6 +45,7 @@
 | [reference/api-tokens.md](reference/api-tokens.md) | API 令牌：怎么建、怎么用、三档范围、做不到什么、审计 |
 | [reference/api-tables.md](reference/api-tables.md) | 表格导入导出接口：导出与导入的地址与规矩 |
 | [reference/api-service.md](reference/api-service.md) | 服务有效性接口：只发警告、不发指令的那一族 |
+| [reference/api-shortlink.md](reference/api-shortlink.md) | 短链接口：生成、列出、删除，与拒绝的情况 |
 | [dev/ui-spec.md](dev/ui-spec.md) | 界面规范（开发指南）：标题与返回、卡片、表格、控件、反馈、措辞、抽屉、检查清单 |
 
 ## 运维

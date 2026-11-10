@@ -10,6 +10,7 @@ import socket
 import subprocess
 import sys
 import time
+import json
 import urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -47,7 +48,27 @@ def boot(tag):
     else:
         proc.terminate()
         raise SystemExit("server did not come up (%s)" % data)
+    # 新装的服务上没有任何活动。套件都需要一个，所以这里建一个再跑，
+    # 用的是内置预设（与真人点「创建活动」同一条接口）。
+    make_event(base, password(data))
     return proc, base, data
+
+
+def make_event(base, pw):
+    import http.cookiejar
+    jar = http.cookiejar.CookieJar()
+    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+    headers = {"X-Requested-With": "CAEventManager", "Content-Type": "application/json"}
+
+    def call(path, body=None):
+        data = json.dumps(body).encode() if body is not None else None
+        req = urllib.request.Request(base + path, data=data, headers=headers)
+        with opener.open(req, timeout=20) as res:
+            return json.loads(res.read().decode("utf-8"))
+
+    call("/api/panel/login", {"username": "owner", "password": pw})
+    call("/api/panel/events/create",
+         {"template": "nwuca.salon", "title": "测试活动", "params": {}})
 
 
 def password(data):

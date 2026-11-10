@@ -34,9 +34,12 @@ python3 app.py
 | --- | --- | --- |
 | `host` | `0.0.0.0` | 监听地址 |
 | `port` | `8931` | 监听端口 |
-| `path_secret` | 自动生成 | 首个活动的访问凭据，也就是地址里的那一段 |
 | `public_base_prefix` | `http://127.0.0.1:8931` | 拼绝对链接用，不参与路由判定 |
 | `owner_username` / `owner_name` | `owner` / `站长` | 站长的登录名与称呼 |
+
+活动的访问地址由「前缀 + 活动自己的 token」组成，token 存在 `panel.sqlite3` 里，不写进配置文件。
+
+静态设置写在同一个文件里，改完要重启服务：`shortlink_per_event`（一个活动最多同时持有多条短链，默认 5）。
 
 环境变量：`LOTTERY_DATA_DIR`、`LOTTERY_PACKS_DIR`、`LOTTERY_HOST`、`LOTTERY_PORT`、
 `LOTTERY_VERSION`、`LOTTERY_LOG_MAX`、`LOTTERY_ASSISTANT_PROMPT`。

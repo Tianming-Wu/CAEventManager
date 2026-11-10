@@ -29,7 +29,7 @@ if prefix and secret:
     print("admin=" + base + "/admin")
 
 try:
-    for line in open("data/admin_password.txt", encoding="utf-8"):
+    for line in open("data/owner_password.txt", encoding="utf-8"):
         if line.startswith("password:"):
             print("password=" + line.split(":", 1)[1].strip())
         elif line.startswith("username:"):

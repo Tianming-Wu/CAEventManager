@@ -201,20 +201,18 @@ def main():
     me = call(owner, "/api/panel/me")
     check("owner role reported", me and me["me"]["role"] == "owner", me)
     events = call(owner, "/api/panel/events")["events"]
-    check("the existing event is listed", len(events) == 1, events)
+    check("the activity the runner made is listed", len(events) == 1, events)
+    ev = events[0] if events else {}
     check("event links point at the token path",
-          events and "/" in events[0]["admin"] and events[0]["id"] in events[0]["url"], events)
-    ev = events[0]
+          bool(ev) and "/" in ev["admin"] and ev["token"] in ev["url"], ev)
     check("the event has a numeric id apart from its token",
           isinstance(ev.get("seq"), int) and ev["seq"] >= 1
-          and ev["seq"] != ev["token"], ev)
-    # the numeric id must never appear as a path segment ("127.0.0.1" contains
-    # digits, so a substring test would be wrong)
+          and ev.get("token") != str(ev.get("seq")), ev)
+    # 活动号不出现在地址里（"127.0.0.1" 里也有数字，所以不能只判断子串）
     check("the id is not part of the address",
-          ("/%d/" % ev["seq"]) not in ev["admin"], ev["admin"])
+          ("/%d/" % ev["seq"]) not in ev["admin"], ev.get("admin"))
     check("the event records its module", bool(ev.get("kind")), ev)
-    check("the owner is the owner",
-          ev.get("role") == "owner", ev.get("role"))
+    check("the owner is the owner", ev.get("role") == "owner", ev.get("role"))
 
     accs = call(owner, "/api/panel/accounts")
     pending = [a for a in accs["accounts"] if a["status"] == "pending"]

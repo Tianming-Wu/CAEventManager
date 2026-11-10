@@ -27,7 +27,8 @@ import model  # noqa: E402
 
 
 def build(args):
-    db.DB_PATH = os.path.join(TMP, "sim.sqlite3")
+    db.use_data_dir(TMP)
+    db.set_event(1)
     db.init_db()
     conn = db.connect()
     rng = random.Random(args.seed)

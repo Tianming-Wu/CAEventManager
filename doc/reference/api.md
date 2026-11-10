@@ -18,7 +18,7 @@
 /<token>/admin     活动后台（用面板账号登录）
 /<token>/login     跳面板登录，登录后回到该活动后台
 /<token>/api/*     活动接口
-/s/<code>          限时短码跳转
+/s/<code>          短链跳转（平台级的转发表，见 api-shortlink.md）
 ```
 
 路径里出现已知活动 token 时按活动处理，否则把剩余路径按面板路由匹配——所以本机直连、
@@ -58,6 +58,7 @@
 
 ## 相关文档
 
+- [短链接口](api-shortlink.md)
 - [API 令牌](api-tokens.md)
 - [表格导入导出接口](api-tables.md)
 - [服务有效性接口](api-service.md)

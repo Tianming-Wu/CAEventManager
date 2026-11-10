@@ -46,6 +46,36 @@
     return PANEL + "/login?s_return=" + encodeURIComponent(target);
   }
 
+
+  /* 面板族的调用：路径打在活动地址的上一级，请求标记换成面板那一套。
+     活动的控制台有时也要问面板（例如由平台管的短链），不能走 PREFIX。 */
+  function panelApi(path, options) {
+    options = options || {};
+    var headers = { "X-Requested-With": "CAEventManager" };
+    var init = {
+      method: options.method || "GET",
+      headers: headers,
+      credentials: "same-origin",
+      cache: "no-store"
+    };
+    if (options.body !== undefined) {
+      init.headers["Content-Type"] = "application/json";
+      init.body = JSON.stringify(options.body);
+    }
+    return fetch(PANEL + path, init).then(function (res) {
+      return res.json().catch(function () { return {}; }).then(function (data) {
+        if (!res.ok || data.ok === false) {
+          var err = new Error((data && data.error) || ("请求失败 " + res.status));
+          err.status = res.status;
+          err.data = data;
+          err.sudo = !!(data && data.sudoRequired);
+          throw err;
+        }
+        return data;
+      });
+    });
+  }
+
   function api(path, options) {
     options = options || {};
     var headers = { "X-Requested-With": "lottery" };
@@ -483,6 +513,7 @@
     PANEL: PANEL,
     panelLoginUrl: panelLoginUrl,
     api: api,
+    panelApi: panelApi,
     esc: esc,
     pad: pad,
     code: code,

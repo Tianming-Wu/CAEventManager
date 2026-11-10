@@ -79,8 +79,8 @@ python tools/bump_version.py --show
 还原：停服务 → 用备份覆盖 `data/` → `./bin/service.sh start`。注意 SQLite 的 `-wal` 与 `-shm`
 要和主库一起复制，或者在停服务之后复制（那时 WAL 已经落盘）。
 
-`./bin/service.sh reset` 会清空活动数据（只保留访问 id），重置前会要求输入 `yes`，并自动把旧库
-备份成 `data/backup-<时间>-*`。
+`./bin/service.sh reset` 会清空活动数据（活动与账号都重建），重置前会要求输入 `yes`，并自动把旧库
+备份成 `data/backup-<时间>-*`。新的站长密码重新写进 `data/owner_password.txt`。
 
 ## 自检
 
@@ -102,9 +102,9 @@ python tools/prod_check.py https://example.org/mount <活动 token>   # 线上�
 | --- | --- |
 | `port` | 监听端口 |
 | `host` | 监听地址 |
-| `path_secret` | 首个活动的访问 token（也就是访问凭据） |
 | `public_base_prefix` | 生成绝对链接用的前缀，不参与路由 |
 | `owner_username` / `owner_name` | 站长的登录名与称呼 |
+| `shortlink_per_event` | 静态设置：一个活动最多同时持有几条短链（默认 5），改完重启生效 |
 
 环境变量可以覆盖：`LOTTERY_DATA_DIR`、`LOTTERY_PACKS_DIR`、`LOTTERY_PORT`、
 `LOTTERY_VERSION`（测试用）、`LOTTERY_LOG_MAX`、`LOTTERY_ASSISTANT_PROMPT`。

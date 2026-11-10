@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
-"""Shared helper for the test/dev tools: build the secret URL prefix.
+"""测试与开发工具的共享件：把活动地址段拼出来。
 
-The service only answers under ``/<secret>/...`` where ``<secret>`` is the random
-32-character id in ``config.json``.  Tools therefore take a plain base URL and
-this helper appends the secret segment (unless it is already there).
+活动在地址里用 token，内部用活动号；两者都在 ``data/panel.sqlite3`` 的 events 表里。
+工具拿到一个裸地址，这里补上第一个活动的 token。
 """
 import json
 import os
+import sqlite3
 import urllib.parse
 
 APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -25,17 +25,33 @@ def load_local_config():
         return {}
 
 
-def secret():
-    return str(load_local_config().get("path_secret") or "")
+def data_dir():
+    return os.environ.get("LOTTERY_DATA_DIR") or os.path.join(APP_DIR, "data")
+
+
+def first_token():
+    """第一个活动的 token；库里没有活动时返回空串。"""
+    path = os.path.join(data_dir(), "panel.sqlite3")
+    try:
+        conn = sqlite3.connect(path, timeout=5.0)
+    except sqlite3.Error:
+        return ""
+    try:
+        row = conn.execute("SELECT token FROM events ORDER BY seq LIMIT 1").fetchone()
+    except sqlite3.Error:
+        return ""
+    finally:
+        conn.close()
+    return row[0] if row else ""
 
 
 def api_base(url):
-    """Return ``url`` with the secret segment appended when missing."""
+    """返回 ``url`` 补上活动 token 之后的地址（已经带了就不重复补）。"""
     url = (url or "").rstrip("/")
-    sec = secret()
-    if not sec:
+    token = first_token()
+    if not token:
         return url
     path = urllib.parse.urlparse(url).path
-    if ("/" + sec) in (path.rstrip("/") + "/"):
+    if ("/" + token) in (path.rstrip("/") + "/"):
         return url
-    return url + "/" + sec
+    return url + "/" + token

@@ -144,6 +144,10 @@ def normalize_external(raw):
 # 也就不必写进来。名字不认识的申请一律丢掉，并按模块记一条原因——
 # 模块自己的错不该让整个活动起不来。
 CAPABILITIES = {
+    # 短链：模块声明它允许生成哪些目标，平台负责跳转、归属与回收
+    "shortlink": {
+        "targets": list,       # [{"key": "screen", "label": "大屏"}]，key 是活动内路径
+    },
     # 搜索：平台出算法（拼音音节、标签、求交），模块出"哪份清单、哪个字段是姓名"
     "search": {
         "records": str,        # state 里那份清单的键名
@@ -152,6 +156,10 @@ CAPABILITIES = {
         "fields": list,        # 其余字段：只做"直接包含"
         "tags": list,          # 标签词 → 字段条件
     },
+}
+
+DEFAULT_SHORTLINK = {
+    "targets": [],
 }
 
 DEFAULT_SEARCH = {
@@ -181,11 +189,12 @@ def resolve_features(raw, errors=None):
         if not isinstance(declared, dict):
             _note(errors, "能力 %s 的声明应该是一个对象" % name)
             continue
+        defaults = FEATURE_DEFAULTS.get(name) or {}
         clean = {}
         for field, kind in spec.items():
             if field not in declared:
-                if name == "search" and field in DEFAULT_SEARCH:
-                    clean[field] = DEFAULT_SEARCH[field]
+                if field in defaults:
+                    clean[field] = defaults[field]
                 continue
             value = declared[field]
             if kind is list:
@@ -194,9 +203,31 @@ def resolve_features(raw, errors=None):
                 clean[field] = value
             else:
                 _note(errors, "能力 %s 的 %s 类型不对" % (name, field))
-        if name == "search":
-            clean = {k: clean.get(k, v) for k, v in DEFAULT_SEARCH.items()}
+        if defaults:
+            clean = {k: clean.get(k, v) for k, v in defaults.items()}
+        if name == "shortlink":
+            clean["targets"] = _shortlink_targets(clean.get("targets"))
         out[name] = clean
+    return out
+
+
+FEATURE_DEFAULTS = {
+    "search": DEFAULT_SEARCH,
+    "shortlink": DEFAULT_SHORTLINK,
+}
+
+
+def _shortlink_targets(raw):
+    """只留下形如 {"key", "label"} 的项；key 是活动内的相对路径，可为空（公示页）。"""
+    out = []
+    for item in raw or []:
+        if not isinstance(item, dict):
+            continue
+        key = str(item.get("key") or "").strip().lstrip("/")
+        label = str(item.get("label") or "").strip()
+        if not label or len(key) > 200:
+            continue
+        out.append({"key": key, "label": label})
     return out
 
 

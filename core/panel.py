@@ -16,6 +16,7 @@ Registration always creates admin + pending; only approval flips it to active.
 
 import json
 import os
+import paths
 import re
 import secrets
 import sqlite3
@@ -25,7 +26,7 @@ from urllib.parse import urlparse
 
 import localconfig
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = paths.APP_ROOT
 PANEL_TPL = os.path.join(BASE_DIR, "tpl")
 PANEL_STATIC = os.path.join(BASE_DIR, "panel_static")
 

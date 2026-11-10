@@ -24,9 +24,10 @@ check, and only for modules whose ``requires`` matches this build.
 """
 import json
 import os
+import paths
 import re
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = paths.APP_ROOT
 # shipped with the release, then whatever this instance installed itself
 BUILTIN_DIR = os.path.join(BASE_DIR, "builtin")
 BUILTIN_MODULES_DIR = os.path.join(BUILTIN_DIR, "modules")

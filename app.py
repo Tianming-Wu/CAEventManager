@@ -33,6 +33,10 @@ import sys
 import threading
 import time
 import traceback
+# 程序模块在 core/ 里，入口（本文件）留在仓库根目录；把 core 放进搜索路径，
+# 各模块之间与工具脚本里的导入写法都不用改。
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "core"))
+
 import xlsx
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs, quote
@@ -60,7 +64,7 @@ TPL_DIR = os.path.join(BASE_DIR, "tpl")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.7.0.35"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.7.0.36"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了

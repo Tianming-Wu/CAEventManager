@@ -16,6 +16,7 @@ import time
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(HERE, "core"))
 
 import app  # noqa: E402
 

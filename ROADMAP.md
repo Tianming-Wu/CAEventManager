@@ -536,6 +536,8 @@ colspan 单元格会把表头重新分配一遍，一有数据表头又跳回来
 
 - 「创建活动」与「新建活动」是同一个动作，分别出现在「我的活动」与「活动管理」两页，按钮文字不统一
 - 「删除屏幕」弹窗里的确认按钮叫「删除」，其余删除类动作叫法不一，需要统一一遍
+- 761～1100px 那一档不可用：侧栏只剩图标、没有文字，分组子项要点开才在一个没有动画的抽屉里出现。
+  这一档要重做（图标加悬停说明，或换成可收起的窄侧栏），不能当作可用布局
 - 手机端一批修正：侧栏分组收起时不再把子项画到下一项上、分隔线不再被 flex 压没；
   表格改成横向滚动、首列与操作列贴边（放得下就不滚）；报名的日期与时刻在手机上换成系统选择器
 - 服务器管理首页第四块由版本改为「用户（在线 / 注册）」，在线按最近五分钟有请求的会话统计
@@ -580,28 +582,49 @@ colspan 单元格会把表头重新分配一遍，一有数据表头又跳回来
 暴露的设计缺口：重复中奖（第 1 条）、任务链现场例外（第 2 条）、拼音姓氏（第 6 条）、
 名单页检索（已完成）。
 
-## 八、代码目录整理（计划）
+## 八、代码目录整理（**已完成**）
 
-仓库根目录现在有 27 个文件：入口、二十来个 Python 模块、两个 shell 脚本、部署脚本、文档与许可证。
-目标是根目录只留入口、服务管理与文档，其余落到子目录。
+根目录原来摊着 27 个文件：入口、二十来个 Python 模块、两个 shell 脚本、部署脚本、文档与许可证。
+现在根目录只剩入口、文档与许可证，其余按用途分目录。
 
-| 现在 | 之后 |
+| 位置 | 放什么 |
 | --- | --- |
-| `app.py` | 根目录：启动入口（HTTP 层与路由） |
-| `service.sh`、`run.sh` | `bin/`：服务管理 |
-| `deploy.ps1` | `bin/`：部署 |
-| `auth.py`、`bus.py`、`checkin.py`、`db.py`、`model.py`、`panel.py`、`lists.py`、`modules.py`、`presets.py`、`packs.py`、`exporter.py`、`expr.py`、`xlsx.py`、`health.py`、`policy.py`、`assistant.py`、`pinyin*.py`、`surnames.py`、`localconfig.py` | `core/`：程序模块 |
-| `builtin/`、`doc/`、`tools/`、`tpl/`、`static/`、`panel_static/` | 不变 |
-| `README.md`、`ROADMAP.md`、`LICENSE`、`.gitignore` | 根目录 |
+| 根目录 | `app.py`（入口与路由）、`README.md`、`ROADMAP.md`、`AGENTS.md`、`LICENSE`、`.gitignore` |
+| `core/` | 程序模块（账号、名单、活动、模块、预设、助手、xlsx、健康检查等 19 个），以及 `paths.py` |
+| `bin/` | `service.sh`、`run.sh`、`deploy.ps1` |
+| `tools/` | 测试与运维脚本 |
+| `tpl/`、`static/`、`panel_static/`、`builtin/`、`doc/` | 不变 |
 
-要一并改的地方：
+落地方式与注意事项：
 
-- 导入：现在是扁平导入（`import health`）。移进 `core/` 之后，改成包（`from core import health`）
-  或在入口处把 `core/` 加进 `sys.path`；前者干净，后者改动面小
-- `tools/` 下的测试与脚本按同样方式导入
-- `bin/service.sh` 与 `bin/run.sh` 的工作目录要回到上一级；`deploy.ps1` 的打包清单与远端保留清单
-  要跟着改（保留 `data/`、`config.json`、`screen_packs/`）
-- 文档里提到的路径（`app.py`、`tools/`、`doc/`）一起核对一遍
+- 模块之间仍是扁平导入。`app.py` 在导入前把 `core/` 放进 `sys.path`，`tools/` 下的脚本同样加一行，
+  所以除入口外没有一处 import 语句要改
+- 路径改由 `core/paths.py` 的 `APP_ROOT` 统一给出：配置、`data/`、`tpl/`、`builtin/`、`doc/`
+  都在根目录，不再各自用 `__file__` 推算
+- `bin/run.sh` 与 `bin/service.sh` 先回到上一级再工作；`bin/deploy.ps1` 的打包清单、远端 chmod
+  与重启命令都改到 `bin/` 下
+- 部署脚本的远端清理会把根目录下挪走的旧文件删掉，不需要手工登录清理
+## 九、去掉单活动时代的残留（计划）
 
-本机原地运行无需部署：仓库根目录执行 `python3 app.py` 即可。运行时生成的一切
-（`config.json`、`data/`、`screen_packs/`、`__pycache__/`、`tmp/`）都在 `.gitignore` 里。
+系统最早只有一个活动，它的访问 id 存在 `config.json` 的 `path_secret` 里。现在活动是一张表、
+一个活动一个库，为兼容早期部署留下的东西应当清掉：系统还没有真正上线，向下兼容的成本高于收益。
+
+| 位置 | 现状 | 之后 |
+| --- | --- | --- |
+| `db.migrate_legacy()` | 把 `data/lottery.sqlite3` 搬成 `data/events/1.sqlite3` | 删除 |
+| `db.DEFAULT_SEQ`、`db.DB_PATH` | 活动号的兜底值；`DB_PATH` 只给老脚本用 | 删除兜底，活动号必填 |
+| `db.current_event()` / `set_current_event()` | 线程局部的「当前活动」，请求路径上散着十几处赋值 | 由分发层把活动号显式传给下层 |
+| `panel.init` 的「首个活动（沿用原有访问 id）」 | 启动时按 `path_secret` 造一个活动行 | 删除；活动只由创建动作产生 |
+| `config.json` 的 `path_secret` | 名字与含义都是「首个活动的 token」，实际只用于签到二维码与 presence cookie 的签名 | 改名 `checkin_secret`，只管签名 |
+| `app.py` 启动时清理 `admin_pass` | 发现旧键就写空 | 删除 |
+| `service.sh reset` 里的 `data/admin_password.txt` | 删文件、打印「新的管理员密码」 | 删除这两处 |
+| 同上的清理 glob 里的 `data/lottery.sqlite3` | 备份与删除都包含单文件时代的老库 | 只留 `data/events/*` |
+| `tools/instance_info.py`、`tools/reorder_prizes.py` | 读 `data/admin_password.txt` | 改读 `data/owner_password.txt` |
+
+顺带两件：
+
+- `checkin` 的签名用全局 secret，所有活动的 presence cookie 同一把钥匙；改成按活动取密钥
+- 文档里 `path_secret` 的说法（`README.md`、`doc/ops/deploy.md`）与 `smoke_test` 对 `admin_pass` 的断言
+  一起改
+
+删除之后 `config.json` 的含义会变，已有部署需要手工补一次；目前只有一台开发实例，可以直接重建。

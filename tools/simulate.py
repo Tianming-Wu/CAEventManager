@@ -17,6 +17,7 @@ import time
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(HERE, "core"))
 
 TMP = tempfile.mkdtemp(prefix="lottery-sim-")
 os.environ["LOTTERY_DATA_DIR"] = TMP

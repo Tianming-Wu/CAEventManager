@@ -27,6 +27,7 @@ LOGIN = sys.argv[3] if len(sys.argv) > 3 and not sys.argv[3].startswith("--") \
 WITH_ACCOUNTS = "--accounts" in sys.argv
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT_DIR)
+sys.path.insert(0, os.path.join(ROOT_DIR, "core"))
 import xlsx  # noqa: E402  xlsx 用例要用同一份实现写测试文件
 TAG = str(random.randint(1000, 9999))
 

@@ -5,7 +5,7 @@
 # flock --no-fork guarantees exactly one instance and keeps the pid stable,
 # which is what service.sh relies on.
 set -eu
-cd "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+cd "$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 umask 077
 mkdir -p data
 # host/port come from config.json (LOTTERY_HOST / LOTTERY_PORT still win).

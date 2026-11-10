@@ -19,6 +19,7 @@ import csv
 import io
 import json
 import os
+import paths
 import secrets
 import sqlite3
 import threading
@@ -26,7 +27,7 @@ import time
 
 import model
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = paths.APP_ROOT
 
 VISIBILITY = ("private", "public", "org")
 VIS_LABEL = {"private": "私有", "public": "公开", "org": "组织公开"}

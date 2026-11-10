@@ -19,6 +19,7 @@
 
 import io
 import os
+import paths
 import re
 import shutil
 import stat as statmod
@@ -26,7 +27,7 @@ import tempfile
 import time
 import zipfile
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = paths.APP_ROOT
 # 导入的屏幕放在实例目录里（内置的只读，随发布走）。测试用 LOTTERY_PACKS_DIR 另开
 # 一处，免得跑一遍测试就往工作区里塞东西。
 INSTANCE = (os.environ.get("LOTTERY_PACKS_DIR")

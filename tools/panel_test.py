@@ -27,6 +27,7 @@ HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA = os.environ.get("LOTTERY_DATA_DIR") or os.path.join(HERE, "data")
 
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(HERE, "core"))
 import xlsx  # noqa: E402  读写自测要用同一份实现
 
 problems = []

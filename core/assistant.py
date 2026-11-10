@@ -14,6 +14,7 @@
 
 import json
 import os
+import paths
 import re
 import time
 import urllib.error
@@ -319,8 +320,8 @@ DOC_ROOTS = ("builtin/modules", "modules")
 
 
 def _docs_base():
-    """文档根：这个文件所在的目录（也就是应用根）。"""
-    return os.path.dirname(os.path.abspath(__file__))
+    """文档根：应用根目录（程序模块在 core/ 里，文档在根目录的 doc/ 下）。"""
+    return paths.APP_ROOT
 
 
 def _doc_title(path):

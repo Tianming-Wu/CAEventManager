@@ -1,7 +1,7 @@
 #!/bin/sh
 # Small service manager: start / stop / restart / status / log / check
 set -eu
-cd "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+cd "$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 PIDFILE="data/service.pid"
 LOG="data/service.log"
 PORT=$(python3 -c "import json;print(json.load(open('config.json')).get('port', 8931))" 2>/dev/null || echo 8931)
@@ -25,7 +25,7 @@ start)
         exit 0
     fi
     mkdir -p data
-    setsid nohup ./run.sh >/dev/null 2>&1 &
+    setsid nohup ./bin/run.sh >/dev/null 2>&1 &
     i=0
     while [ $i -lt 40 ]; do
         sleep 0.25

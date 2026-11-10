@@ -27,10 +27,11 @@ that already started from it are unaffected.
 """
 import json
 import os
+import paths
 import re
 import time
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = paths.APP_ROOT
 BUILTIN_TEMPLATES_DIR = os.path.join(BASE_DIR, "builtin", "templates")
 INSTANCE_TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
 ID_RE = re.compile(r"^[a-z0-9]+(\.[a-z0-9_-]+)+$")

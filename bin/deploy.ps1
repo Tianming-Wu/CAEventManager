@@ -26,7 +26,7 @@ $root = $PSScriptRoot
 $files = @(
     (Get-ChildItem -File -Filter *.py | Select-Object -ExpandProperty Name)
     (Get-ChildItem -File -Filter *.md | Select-Object -ExpandProperty Name)
-    "run.sh", "service.sh"
+    "bin/run.sh", "bin/service.sh"
 )
 # Collected too: tpl / static / panel_static / tools - a hand-written list here
 # silently skipped a new asset directory once already.
@@ -84,11 +84,11 @@ done < /tmp/lottery-stale.txt
 rm -f /tmp/lottery-incoming.txt /tmp/lottery-present.txt /tmp/lottery-stale.txt
 tar -xzf __TAR__ -C ~/__DEST__
 rm -f __TAR__
-sed -i 's/\r$//' run.sh service.sh 2>/dev/null || true
-chmod +x run.sh service.sh
+sed -i 's/\r$//' bin/run.sh bin/service.sh 2>/dev/null || true
+chmod +x bin/run.sh bin/service.sh
 find . -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/null || true
 __EXISTENCE__
-python3 -c "import app, db, model, auth, localconfig, checkin, exporter, panel, packs" || {
+python3 -c "import sys; sys.path.insert(0, 'core'); import app, db, model, auth, localconfig, checkin, exporter, panel, packs" || {
     echo "PREFLIGHT FAILED: deployed modules do not import" >&2
     exit 1
 }
@@ -111,7 +111,7 @@ echo "ok: all files present, imports clean"
 
     if (-not $NoRestart) {
         Write-Host "== restarting =="
-        $out = & ssh $Remote "cd ~/$Dest && ./service.sh restart && ./service.sh status" 2>&1
+        $out = & ssh $Remote "cd ~/$Dest && ./bin/service.sh restart && ./bin/service.sh status" 2>&1
         $out | ForEach-Object { Write-Host "   $_" }
         if ($LASTEXITCODE -ne 0) { throw "restart failed" }
     }

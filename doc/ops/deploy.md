@@ -5,9 +5,9 @@
 ## 部署
 
 ```powershell
-.\deploy.ps1 -Remote user@host                  # 上传并重启
-.\deploy.ps1 -Remote user@host -NoRestart       # 只同步
-.\deploy.ps1 -Remote user@host -Dest apps/lottery
+.\bin\deploy.ps1 -Remote user@host                  # 上传并重启
+.\bin\deploy.ps1 -Remote user@host -NoRestart       # 只同步
+.\bin\deploy.ps1 -Remote user@host -Dest apps/lottery
 ```
 
 脚本做的事：归一化行尾 → 打包源码 → 用 `cmd /c type` 把 tarball 经 ssh stdin 送出（目标机没有
@@ -20,12 +20,12 @@ sftp）→ 远端解包 → 逐个确认文件落地并试 import 主模块 → 
 
 ```sh
 cd ~/apps/lottery
-./service.sh status            # 打印公示 / 大屏 / 控制台三个地址，活动前先执行一次
-./service.sh start|stop|restart
-./service.sh log 50            # 另外还有 check / reset
+./bin/service.sh status            # 打印公示 / 大屏 / 控制台三个地址，活动前先执行一次
+./bin/service.sh start|stop|restart
+./bin/service.sh log 50            # 另外还有 check / reset
 ```
 
-`run.sh` 是前台运行器：用 `flock` 保证只有一个实例，`python3 -u app.py` 的输出追加到
+`bin/run.sh` 是前台运行器：用 `flock` 保证只有一个实例，`python3 -u app.py` 的输出追加到
 `data/service.log`。服务**不会自动拉起**，重启机器之后要手动 `start`（或交给 systemd 之类的守护）。
 
 ## 版本号
@@ -76,10 +76,10 @@ python tools/bump_version.py --show
 
 活动**没有删除操作**，只有存档：存档之后数据库文件不动，随时可以查。所以备份就是复制 `data/`。
 
-还原：停服务 → 用备份覆盖 `data/` → `./service.sh start`。注意 SQLite 的 `-wal` 与 `-shm`
+还原：停服务 → 用备份覆盖 `data/` → `./bin/service.sh start`。注意 SQLite 的 `-wal` 与 `-shm`
 要和主库一起复制，或者在停服务之后复制（那时 WAL 已经落盘）。
 
-`./service.sh reset` 会清空活动数据（只保留访问 id），重置前会要求输入 `yes`，并自动把旧库
+`./bin/service.sh reset` 会清空活动数据（只保留访问 id），重置前会要求输入 `yes`，并自动把旧库
 备份成 `data/backup-<时间>-*`。
 
 ## 自检

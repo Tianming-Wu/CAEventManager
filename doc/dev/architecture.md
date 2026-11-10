@@ -9,7 +9,10 @@
 与**每场活动的 token 段**（公示页、大屏、签到、活动后台）。新增活动不改变路径结构。
 
 ```
-app.py            路由与 HTTP 层；两族：(面板 /api/panel/*) 与 (活动 /<token>/*)
+app.py            入口与 HTTP 层；两族：(面板 /api/panel/*) 与 (活动 /<token>/*)
+core/             程序模块，导入时把 core/ 加进 sys.path
+core/paths.py     应用根目录；模块与资源的位置一律从这里算
+bin/              service.sh、run.sh（服务管理）、deploy.ps1（部署）
 panel.py          账号、会话、令牌、审计、助手存档、名单与报名的索引
 lists.py          名单与人员库（平台级的人）
 db.py             每场活动一个库；活动配置与状态

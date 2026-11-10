@@ -23,10 +23,11 @@ file is only for things that must be known before the database is opened.
 
 import json
 import os
+import paths
 import secrets
 import tempfile
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = paths.APP_ROOT
 CONFIG_PATH = os.environ.get("LOTTERY_CONFIG") or os.path.join(BASE_DIR, "config.json")
 
 DEFAULTS = {

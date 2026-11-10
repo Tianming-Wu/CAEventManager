@@ -14,11 +14,12 @@ Design notes
 """
 
 import os
+import paths
 import sqlite3
 import threading
 import time
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = paths.APP_ROOT
 DATA_DIR = os.environ.get("LOTTERY_DATA_DIR") or os.path.join(BASE_DIR, "data")
 
 # One file per event, named after its numeric id.  The id is a counter, so the

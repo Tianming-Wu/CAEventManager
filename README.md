@@ -23,7 +23,7 @@ python3 app.py
 ## 部署
 
 ```powershell
-.\deploy.ps1 -Remote user@host -Dest apps/lottery
+.\bin\deploy.ps1 -Remote user@host -Dest apps/lottery
 ```
 
 ## 配置

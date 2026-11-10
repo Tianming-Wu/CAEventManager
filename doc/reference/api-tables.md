@@ -1,4 +1,4 @@
-# 表格导入导出接口
+# 表格导入导出接口 - 名单与报名的 CSV 与 xlsx
 
 名单与报名的表格进出，走面板自己的接口（同一套权限与会话）。
 
@@ -15,4 +15,9 @@ POST /api/panel/roster/import.xlsx?name=<新名单>    （没有 id 就用这份
   公式、图表、多个工作表不处理（也不假装能处理）
 - 导入上限 4 MB；不是 xlsx 的文件会被拒并说明原因
 
-界面上的按钮怎么用见 [`../usage/output.md`](../usage/output.md)。
+界面上的按钮怎么用见 [../usage/output.md](../usage/output.md)。
+
+## 相关文档
+
+- [接口](api.md)
+- [导出与打印](../usage/output.md)

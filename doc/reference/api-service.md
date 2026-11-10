@@ -1,4 +1,4 @@
-# 服务有效性接口
+# 服务有效性接口 - 只发警告的那一族
 
 只发警告，不发指令：这一族接口读出来的都是"现在是什么样"，没有任何让它做什么的入口。
 
@@ -29,4 +29,9 @@ GET /<token>/api/service   活动侧（公开，与 /api/board 同一档）
 判定阈值在 `health.py` 开头（CPU 90%、内存 92%、磁盘剩余 12% 或 500 MB；几乎用尽按 3% 或 100 MB），
 那里是静态常量，改了重启生效。
 
-界面上的样子见 [`../usage/notices.md`](../usage/notices.md)。
+界面上的样子见 [../usage/notices.md](../usage/notices.md)。
+
+## 相关文档
+
+- [接口](api.md)
+- [通知与服务提示](../usage/notices.md)

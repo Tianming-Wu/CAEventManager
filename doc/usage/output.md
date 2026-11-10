@@ -1,4 +1,4 @@
-# 导出与打印
+# 导出与打印 - 表格与纸张
 
 两种拿出去的办法：导出成表格接着用，或者印成纸带到现场。
 
@@ -15,8 +15,8 @@
 - CSV 带 BOM，Excel 双击就能打开
 - xlsx 里全是文本单元格，学号不会变成数字、前导零不会掉
 - xlsx 的读写认得文本、数字与布尔值，空行跳过，合并单元格只取左上角；公式、图表、多个工作表不处理
-- 往名单里导入 xlsx 见 [`rosters.md`](rosters.md)，接口形式见
-  [`../reference/api-tables.md`](../reference/api-tables.md)
+- 往名单里导入 xlsx 见 [rosters.md](rosters.md)，接口形式见
+  [../reference/api-tables.md](../reference/api-tables.md)
 
 ## 打印名单
 
@@ -37,3 +37,9 @@
 - 打印时工具栏自动消失，纸永远是白底黑字，不受界面设置影响
 
 谁能看这份报名，谁才能打印它的报名表：打印页读的是面板自己的接口。
+
+## 相关文档
+
+- [名单](rosters.md)
+- [报名](signups.md)
+- [表格导入导出接口](../reference/api-tables.md)

@@ -1,4 +1,4 @@
-# 部署与运维
+# 部署与运维 - 上传、版本号、日志与备份
 
 目标是一台能 ssh 的 Linux 主机，只需要 `python3` 与 `tar`。没有数据库服务、没有 Node、没有构建步骤。
 
@@ -20,7 +20,7 @@ sftp）→ 远端解包 → 逐个确认文件落地并试 import 主模块 → 
 
 ```sh
 cd ~/apps/lottery
-./service.sh status            # 打印公示 / 大屏 / 控制台三个地址，活动前先跑一次
+./service.sh status            # 打印公示 / 大屏 / 控制台三个地址，活动前先执行一次
 ./service.sh start|stop|restart
 ./service.sh log 50            # 另外还有 check / reset
 ```
@@ -49,7 +49,7 @@ python tools/bump_version.py --show
 
 ## 重新部署之后
 
-服务重启不会把人踢下线，但已经开着的页面跑的还是旧脚本。所以每个回答都带着版本号：
+服务重启不会把人踢下线，但已经开着的页面仍在执行旧脚本。所以每个回答都带着版本号：
 
 - 面板：这一页没敲过字、没有开着的弹窗就直接刷新；否则在内容上方出一条「服务已更新到 vX」，
   点「刷新」再换。填了一半的表单不会被吞掉
@@ -92,7 +92,7 @@ python tools/prod_check.py https://example.org/mount <活动 token>   # 线上�
 
 `unit_test.py` 不需要服务；`panel_ui_test.py` 与 `ui_test.py` 用 Playwright 驱动真实页面，
 需要本机有 Edge。开发时用 `python tools/run_suites.py unit panel_test panel_ui_test smoke ui`
-一次跑完（自带空闲端口与临时数据目录）。
+一次执行完毕（自带空闲端口与临时数据目录）。
 
 ## 配置
 
@@ -105,7 +105,11 @@ python tools/prod_check.py https://example.org/mount <活动 token>   # 线上�
 | `path_secret` | 首个活动的访问 token（也就是访问凭据） |
 | `public_base_prefix` | 生成绝对链接用的前缀，不参与路由 |
 | `owner_username` / `owner_name` | 站长的登录名与称呼 |
-| `self_checkin` | 是否开放自助签到 |
 
 环境变量可以覆盖：`LOTTERY_DATA_DIR`、`LOTTERY_PACKS_DIR`、`LOTTERY_PORT`、
 `LOTTERY_VERSION`（测试用）、`LOTTERY_LOG_MAX`、`LOTTERY_ASSISTANT_PROMPT`。
+
+## 相关文档
+
+- [接口](../reference/api.md)
+- [结构](../dev/architecture.md)

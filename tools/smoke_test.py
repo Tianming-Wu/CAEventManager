@@ -448,6 +448,7 @@ def main():
     check("短链由平台生成", bool(made and made.get("ok")), made)
     code = ((made or {}).get("link") or {}).get("code") or ""
     check("短链号是 7 位", len(code) == 7, code)
+    check("短链号全大写", code == code.upper(), code)
     check("短链地址是 /s/<code>", ((made or {}).get("url") or "").endswith("/s/" + code),
           (made or {}).get("url"))
     check("短链地址里没有活动 token", TOKEN not in ((made or {}).get("url") or ""),
@@ -461,6 +462,29 @@ def main():
         loc = exc.headers.get("Location") or ""
         check("短链会跳转", exc.code == 302, exc.code)
         check("跳到该活动的目标页", loc.endswith("/screen") and TOKEN in loc, loc)
+
+    # 短链号不区分大小写：小写地址一样能跳
+    try:
+        no_redirect.open(BASE_ROOT + "/s/" + code.lower(), timeout=10)
+        check("小写也能跳", False, "no redirect")
+    except urllib.error.HTTPError as exc:
+        check("小写也能跳", exc.code == 302, exc.code)
+
+    # 模块可以指向活动范围内的任意路径
+    deep = panel_call("/api/panel/shortlink",
+                      {"seq": seq, "target": "admin#/ops", "minutes": 5, "max_hits": 1}) or {}
+    check("目标可以是任意相对路径", bool(deep.get("ok")), deep)
+    try:
+        no_redirect.open(BASE_ROOT + "/s/" + (deep.get("link") or {}).get("code", ""), timeout=10)
+        check("深层目标也能跳", False, "no redirect")
+    except urllib.error.HTTPError as exc:
+        check("深层目标也能跳", exc.code == 302
+              and (exc.headers.get("Location") or "").endswith("/admin#/ops"), exc.code)
+    # 400：面板接口拒绝，不带协议地址
+    bad = panel_call("/api/panel/shortlink",
+                     {"seq": seq, "target": "https://evil.example/x", "minutes": 5},
+                     expect=400) or {}
+    check("带协议的绝对地址被拒", bool(bad.get("error")), bad)
 
     listed = panel_call("/api/panel/shortlink?seq=%d" % seq) or {}
     check("列表里能看到它",

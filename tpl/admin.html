@@ -412,12 +412,14 @@
       </div>
       <p class="panel-hint">
         短链只作临时用途：平台不保证长期有效，随时可能被删除、过期或用尽次数。
-        需要长期可用的地方请直接用上面那个长链接。
+        需要长期可用的地方请直接用上面那个长链接。短链号不区分大小写。
       </p>
       <div class="row">
-        <div class="field" style="min-width:170px">
-          <label for="shortlinkTarget">指向</label>
-          <select id="shortlinkTarget"></select>
+        <div class="field" style="min-width:190px">
+          <label for="shortlinkTarget">指向（活动内的路径）</label>
+          <input id="shortlinkTarget" type="text" list="shortlinkSuggest" value="screen"
+                 placeholder="screen，留空是公示页" autocomplete="off" spellcheck="false">
+          <datalist id="shortlinkSuggest"></datalist>
         </div>
         <div class="field" style="min-width:130px">
           <label for="shortlinkMinutes">有效期（分钟）</label>

@@ -65,7 +65,7 @@ TPL_DIR = os.path.join(BASE_DIR, "tpl")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.8.0.38"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.8.1.39"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -106,6 +106,14 @@ def _note_register_hit(ip):
         _REGISTER_HITS[ip + ":n"] = 0
 
 # Very small guard against somebody hammering the short-code space.
+# 界面上给几个现成的目标候选；模块想指向别的路径也行
+SHORTLINK_SUGGEST = [
+    {"key": "", "label": "公示页"},
+    {"key": "screen", "label": "大屏"},
+    {"key": "checkin", "label": "签到页"},
+    {"key": "admin", "label": "活动后台"},
+]
+
 SHORTLINK_MISS_PAGE = (
     "<!doctype html><meta charset=utf-8><title>链接已失效</title>"
     "<body style=\"font-family:system-ui;padding:3em;color:#888\">"
@@ -1491,22 +1499,22 @@ class Handler(BaseHTTPRequestHandler):
                 raise model.ApiError("只有这个活动的成员能管它的短链", 403)
             return seat
 
-        def shortlink_slot(seq):
+        def shortlink_ok(seq):
+            """模块申请了 features.shortlink，这个活动才有短链能力。"""
             row = conn.execute("SELECT kind FROM events WHERE seq=?", (seq,)).fetchone()
             mod = _modules_by_id(conn).get(row["kind"] if row else "") or {}
-            slot = (mod.get("features") or {}).get("shortlink")
-            if not slot:
+            if "shortlink" not in (mod.get("features") or {}):
                 raise model.ApiError("这个活动的模块没有申请短链能力", 403)
-            return slot
 
         if path == "/shortlink" and method == "GET":
             seq = int((query.get("seq") or ["0"])[0] or 0)
             event_seat(seq)
-            slot = shortlink_slot(seq)
+            shortlink_ok(seq)
             return self._json({
                 "ok": True,
                 "links": shortlinks.list_for(conn, seq),
-                "targets": slot.get("targets") or [],
+                # 只是给界面几个现成的候选，模块可以指向别的路径
+                "suggest": SHORTLINK_SUGGEST,
                 "limit": localconfig.static_limit(LOCAL_CFG, "shortlink_per_event"),
             })
 
@@ -1514,15 +1522,11 @@ class Handler(BaseHTTPRequestHandler):
             data = body()
             seq = int(data.get("seq") or 0)
             event_seat(seq)
-            slot = shortlink_slot(seq)
-            target = str(data.get("target") or "").strip()
-            keys = [t.get("key") for t in (slot.get("targets") or []) if t.get("key")]
-            if keys and target not in keys:
-                raise model.ApiError("这个活动没有定义这个目标")
+            shortlink_ok(seq)
             try:
                 with panel.tx() as tx:
                     link = shortlinks.create(
-                        tx, seq, target, acc["username"],
+                        tx, seq, str(data.get("target") or ""), acc["username"],
                         minutes=int(data.get("minutes") or 0),
                         max_hits=int(data.get("max_hits") or 0),
                         limit=localconfig.static_limit(LOCAL_CFG, "shortlink_per_event"))

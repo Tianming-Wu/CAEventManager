@@ -12,7 +12,9 @@
 import secrets
 import time
 
-CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"   # 去掉 0 O 1 I 这类易混字符
+CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"   # 去掉 0 O 1 I 这类易混字符，全大写
+# 短链是给人手输的（投屏那台电脑、纸上抄来的），所以查找**不区分大小写**：
+# 存的时候一律大写，查之前先转大写。
 CODE_LEN = 7
 PER_EVENT_LIMIT = 5          # 单个活动同时持有的上限，见 localconfig.STATIC_DEFAULTS
 TTL_MAX_MIN = 60 * 24 * 30   # 有效期上限一个月；0 表示不设过期
@@ -49,13 +51,29 @@ def _view(row, now=None):
     }
 
 
-def create(conn, seq, target, created_by="", minutes=0, max_hits=0, limit=PER_EVENT_LIMIT):
-    """给一个活动生成一条短链。超出上限、目标不对都拒绝。"""
-    target = (target or "").strip().lstrip("/")
-    if not target or len(target) > TARGET_MAX:
-        raise ShortlinkError("目标地址不对")
-    if "/s/" in "/" + target:
+def clean_target(raw):
+    """目标是一个活动内的相对路径：模块想指哪儿就指哪儿，模块自己的 token 也可以跟在后面。
+
+    平台只拦三件事：带协议的绝对地址、跳出活动目录的 `..`、再套一层 `/s/`。
+    """
+    target = (raw or "").strip()
+    while target.startswith("/"):
+        target = target[1:]
+    if len(target) > TARGET_MAX:
+        raise ShortlinkError("目标地址太长")
+    low = target.lower()
+    if "://" in low or low.startswith("//"):
+        raise ShortlinkError("目标要写活动内的相对路径，不要带协议")
+    if ".." in target or "\\" in target:
+        raise ShortlinkError("目标里不能有 .. 或反斜杠")
+    if low == "s" or low.startswith("s/"):
         raise ShortlinkError("短链不能再指向短链")
+    return target
+
+
+def create(conn, seq, target, created_by="", minutes=0, max_hits=0, limit=PER_EVENT_LIMIT):
+    """给一个活动生成一条短链。超出上限、目标不合规都拒绝。"""
+    target = clean_target(target)
     minutes = int(minutes or 0)
     if minutes < 0 or minutes > TTL_MAX_MIN:
         raise ShortlinkError("有效期最多 30 天；不设过期请留空")
@@ -82,9 +100,14 @@ def create(conn, seq, target, created_by="", minutes=0, max_hits=0, limit=PER_EV
     raise ShortlinkError("短链号分配失败了，再试一次")
 
 
+def normalize_code(code):
+    """短链号不区分大小写：统一转大写，方便手输。"""
+    return (code or "").strip().upper()
+
+
 def resolve(conn, code, now=None):
     """按短链号找目标；无效（不存在 / 过期 / 用尽 / 已删）返回 None。"""
-    code = (code or "").strip()
+    code = normalize_code(code)
     if not code or len(code) != CODE_LEN:
         return None
     row = conn.execute("SELECT * FROM shortlinks WHERE code=?", (code,)).fetchone()
@@ -96,7 +119,7 @@ def resolve(conn, code, now=None):
 
 def hit(conn, code):
     """记一次访问。次数上限是硬限制，所以计数与判断在同一处加锁完成。"""
-    conn.execute("UPDATE shortlinks SET hits=hits+1 WHERE code=?", (code,))
+    conn.execute("UPDATE shortlinks SET hits=hits+1 WHERE code=?", (normalize_code(code),))
 
 
 def list_for(conn, seq, include_dead=True):
@@ -109,7 +132,7 @@ def list_for(conn, seq, include_dead=True):
 
 def revoke(conn, code):
     """删除即消失。返回是否真的删掉了一条。"""
-    cur = conn.execute("DELETE FROM shortlinks WHERE code=?", (code,))
+    cur = conn.execute("DELETE FROM shortlinks WHERE code=?", (normalize_code(code),))
     return cur.rowcount > 0
 
 

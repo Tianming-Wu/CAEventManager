@@ -133,21 +133,6 @@
         }
       ]
     },
-    "shortlink": {
-      "targets": [
-        {
-          "key": "screen",
-          "label": "大屏"
-        },
-        {
-          "key": "checkin",
-          "label": "签到页"
-        },
-        {
-          "key": "",
-          "label": "公示页"
-        }
-      ]
-    }
+    "shortlink": {}
   }
 }

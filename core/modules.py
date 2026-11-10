@@ -144,10 +144,10 @@ def normalize_external(raw):
 # 也就不必写进来。名字不认识的申请一律丢掉，并按模块记一条原因——
 # 模块自己的错不该让整个活动起不来。
 CAPABILITIES = {
-    # 短链：模块声明它允许生成哪些目标，平台负责跳转、归属与回收
-    "shortlink": {
-        "targets": list,       # [{"key": "screen", "label": "大屏"}]，key 是活动内路径
-    },
+    # 短链：申请之后，平台替这个模块负责的活动生成短链。指向哪里由模块自己决定
+    # （活动地址下任意路径，模块也可以把自己的一套 token 拼在后面），平台只管
+    # 跳转、归属、上限与回收。所以这里没有可声明的字段。
+    "shortlink": {},
     # 搜索：平台出算法（拼音音节、标签、求交），模块出"哪份清单、哪个字段是姓名"
     "search": {
         "records": str,        # state 里那份清单的键名
@@ -156,10 +156,6 @@ CAPABILITIES = {
         "fields": list,        # 其余字段：只做"直接包含"
         "tags": list,          # 标签词 → 字段条件
     },
-}
-
-DEFAULT_SHORTLINK = {
-    "targets": [],
 }
 
 DEFAULT_SEARCH = {
@@ -205,30 +201,15 @@ def resolve_features(raw, errors=None):
                 _note(errors, "能力 %s 的 %s 类型不对" % (name, field))
         if defaults:
             clean = {k: clean.get(k, v) for k, v in defaults.items()}
-        if name == "shortlink":
-            clean["targets"] = _shortlink_targets(clean.get("targets"))
         out[name] = clean
     return out
 
 
 FEATURE_DEFAULTS = {
     "search": DEFAULT_SEARCH,
-    "shortlink": DEFAULT_SHORTLINK,
 }
 
 
-def _shortlink_targets(raw):
-    """只留下形如 {"key", "label"} 的项；key 是活动内的相对路径，可为空（公示页）。"""
-    out = []
-    for item in raw or []:
-        if not isinstance(item, dict):
-            continue
-        key = str(item.get("key") or "").strip().lstrip("/")
-        label = str(item.get("label") or "").strip()
-        if not label or len(key) > 200:
-            continue
-        out.append({"key": key, "label": label})
-    return out
 
 
 def _note(errors, text):

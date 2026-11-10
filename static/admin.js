@@ -502,7 +502,7 @@
   }
 
   /* ---- 短链：活动的平台资产，模块申请 features.shortlink 之后才有入口 ---- */
-  var SHORT = { links: [], targets: [], limit: 0, timer: null };
+  var SHORT = { links: [], suggest: [], limit: 0, timer: null };
 
   function shortlinkSlot() {
     return (S.features && S.features.shortlink) || null;
@@ -529,7 +529,7 @@
         : l.revoked ? "已删除" : l.expired ? "已过期" : "次数用尽";
       return "<tr>" +
         '<td><span class="mono">/s/' + LT.esc(l.code) + "</span></td>" +
-        "<td>" + LT.esc(l.target || "公示页") + "</td>" +
+        "<td>" + LT.esc(l.target || "/（公示页）") + "</td>" +
         "<td>" + LT.esc(fmtLeft(l)) + "</td>" +
         "<td>" + LT.esc(state) + "</td>" +
         '<td class="actions"><button class="btn sm ghost" data-shortline-del="' +
@@ -547,11 +547,11 @@
     return LT.panelApi("/api/panel/shortlink?seq=" + S.seq)
       .then(function (d) {
         SHORT.links = d.links || [];
-        SHORT.targets = d.targets || [];
         SHORT.limit = d.limit || 0;
-        var pick = $("#shortlinkTarget");
-        if (pick && !pick.options.length) {
-          pick.innerHTML = SHORT.targets.map(function (t) {
+        var hints = $("#shortlinkSuggest");
+        if (hints && !hints.children.length) {
+          SHORT.suggest = d.suggest || [];
+          hints.innerHTML = SHORT.suggest.map(function (t) {
             return '<option value="' + LT.esc(t.key) + '">' + LT.esc(t.label) + "</option>";
           }).join("");
         }
@@ -561,12 +561,12 @@
   }
 
   function mintShortlink() {
-    var pick = $("#shortlinkTarget");
+    var target = ($("#shortlinkTarget").value || "").trim();
     var minutes = Number($("#shortlinkMinutes").value || 0);
     var hits = Number($("#shortlinkHits").value || 0);
     LT.panelApi("/api/panel/shortlink", {
       method: "POST",
-      body: { seq: S.seq, target: pick ? pick.value : "", minutes: minutes, max_hits: hits },
+      body: { seq: S.seq, target: target, minutes: minutes, max_hits: hits },
     })
       .then(function (d) {
         ok("已生成短链 " + (d.link && d.link.code ? "/s/" + d.link.code : ""));

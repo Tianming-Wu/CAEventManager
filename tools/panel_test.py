@@ -338,6 +338,20 @@ def main():
     check("a second account signing in raises the online count",
           again.get("online", 0) >= 2, again)
 
+    print("== 服务有效性提示 ==")
+    svc = call(owner, "/api/panel/service") or {}
+    check("接口回一份清单", isinstance(svc.get("items"), list), svc)
+    check("带版本号与时间", bool(svc.get("version")) and bool(svc.get("at")), sorted(svc))
+    keys = {"id", "kind", "level", "title", "body", "sticky"}
+    check("每条只有这几个键，没有夹带动作",
+          all(set(i) == keys for i in svc.get("items") or []), svc.get("items"))
+    check("级别用通知那三档",
+          all(i["level"] in ("info", "important", "critical")
+              for i in svc.get("items") or []), svc.get("items"))
+    check("普通管理员看到的是同一份",
+          (call(plain, "/api/panel/service") or {}).get("items") == svc.get("items"),
+          (call(plain, "/api/panel/service") or {}).get("items"))
+
     print("== presets and modules ==")
     tpls = call(owner, "/api/panel/templates")["presets"]
     ids = [t["id"] for t in tpls]
@@ -1373,7 +1387,7 @@ def main():
                                    "tool_calls": [{"id": "call_doc", "type": "function",
                                                    "function": {"name": "read_doc",
                                                                 "arguments":
-                                                                    '{"path": "doc/usage/panel.md"}'}}]}
+                                                                    '{"path": "doc/usage/start.md"}'}}]}
                     elif tool_msgs:
                         titles = re.findall(r'"title": "([^"]+)"',
                                             tool_msgs[-1].get("content") or "")
@@ -1488,7 +1502,7 @@ def main():
         tool_msgs = [m for m in (stub.requests[before + 1]["body"].get("messages") or [])
                      if m.get("role") == "tool"]
         check("读回来的正文进了上下文",
-              tool_msgs and "管理面板使用说明" in (tool_msgs[-1].get("content") or ""),
+              tool_msgs and "开始用" in (tool_msgs[-1].get("content") or ""),
               (tool_msgs[-1].get("content") or "")[:80] if tool_msgs else first[:1])
 
         print("== 平台自己的提示词：数据目录里放一份 markdown ==")

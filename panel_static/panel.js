@@ -101,6 +101,8 @@
     typed: false,          // 这一页里敲过字：别在人家填表的时候刷新页面
     notices: [],
     noticeUnread: 0,
+    service: [],           // 服务有效性提示：服务端推出来的，不进库
+    svcMuted: {},          // 手动关掉的常驻提示，记在这台设备上
     alertOpen: false,
     approvals: [],
     myAsks: [],
@@ -931,6 +933,55 @@
   /* ------------------------------------------------------------------ 通知 --- */
   /* 右上角一个铃铛：有未读就亮红点，点开是列表。紧急级未读一上线就全屏弹出，
    * 只能点"已读 / 关闭"结束——点周围不消失。 */
+  /* 服务有效性：服务端按一次读数推出来的提示（占用偏高、盘快写不进去了）。
+     只读、不进库、不发指令；条件消失，提示跟着消失。 */
+  var SVC_MUTE_KEY = "xl.svc.muted";
+
+  function loadSvcMuted() {
+    try {
+      (localStorage.getItem(SVC_MUTE_KEY) || "").split(",").forEach(function (id) {
+        if (id) S.svcMuted[id] = true;
+      });
+    } catch (e) { /* 隐私模式：只在这一次里记住 */ }
+  }
+
+  function servicesShown() {
+    return (S.service || []).filter(function (it) { return !S.svcMuted[it.id]; });
+  }
+
+  /* 常驻的那几条可以单独关掉；紧急级不给关——写不进去这件事不该被静音 */
+  function muteService(id) {
+    S.svcMuted[id] = true;
+    try {
+      localStorage.setItem(SVC_MUTE_KEY, Object.keys(S.svcMuted).join(","));
+    } catch (e) { /* 同上 */ }
+    drawBell();
+    drawNoticeList();
+  }
+
+  function loadService() {
+    return PX.api("/service")
+      .then(function (d) {
+        S.service = (d && d.items) || [];
+        drawBell();
+        drawNoticeList();
+      })
+      .catch(function () { /* 读不到就不提示，不自己造一条 */ });
+  }
+
+  function drawServiceRow(it) {
+    var mute = it.sticky && it.level !== "critical"
+      ? '<button class="notice-mute" type="button" data-svc-mute="' + PX.esc(it.id) +
+        '">不再提示</button>'
+      : "";
+    return '<div class="notice-item svc ' + PX.esc(it.level || "info") + '">' +
+      '<span class="notice-meta"><span class="notice-level">服务</span>' +
+      mute + "</span>" +
+      '<span class="notice-title">' + PX.esc(it.title) + "</span>" +
+      (it.body ? '<span class="notice-body">' + PX.esc(it.body) + "</span>" : "") +
+      "</div>";
+  }
+
   function loadNotices() {
     return PX.api("/notices")
       .then(function (d) {
@@ -945,11 +996,18 @@
 
   function drawBell() {
     var dot = $("#bellDot");
+    var svc = servicesShown().length;
+    /* 红点只表示"有未读通知"：服务提示是当下的状态，读完通知也还在，
+       拿它挡着红点会让人以为没读完。它换成铃铛本身着色。 */
     if (dot) dot.hidden = !S.noticeUnread;
     var btn = $("#bellBtn");
     if (btn) {
+      btn.classList.toggle("has-svc", svc > 0);
+      var bits = [];
+      if (S.noticeUnread) bits.push(S.noticeUnread + " 条未读");
+      if (svc) bits.push(svc + " 条服务提示");
       btn.setAttribute("aria-label",
-        S.noticeUnread ? "通知（" + S.noticeUnread + " 条未读）" : "通知");
+        bits.length ? "通知（" + bits.join("，") + "）" : "通知");
     }
   }
 
@@ -958,11 +1016,13 @@
     if (!box) return;
     var foot = $("#noticeFoot");
     if (foot) foot.hidden = !S.notices.some(function (n) { return n.unread; });
-    if (!S.notices.length) {
+    var svc = servicesShown();
+    if (!S.notices.length && !svc.length) {
       box.innerHTML = '<p class="notice-empty">还没有通知</p>';
       return;
     }
-    box.innerHTML = S.notices.map(function (n) {
+    box.innerHTML = svc.map(drawServiceRow).join("") +
+      S.notices.map(function (n) {
       return '<button class="notice-item ' + PX.esc(n.level) +
         (n.unread ? " unread" : "") + '" type="button" data-notice="' + n.id +
         '" data-object="' + PX.esc(n.object || "") + '">' +
@@ -1027,7 +1087,7 @@
     panel.classList.toggle("open", show);
     panel.setAttribute("aria-hidden", show ? "false" : "true");
     if (btn) btn.setAttribute("aria-expanded", show ? "true" : "false");
-    if (show) loadNotices();
+    if (show) { loadNotices(); loadService(); }
   }
 
   /* --------------------------------------------------------------- 名单 --- */
@@ -2496,6 +2556,7 @@
     animateCrumb(wanted, prevHadBack);
     scheduleFitTables();
     loadNotices();
+    loadService();
     syncSudo();
     if (wanted === "server" || wanted === "overview") refreshHost();
     if (wanted === "audit" && canAudit() && !S.audit.length) loadAudit().then(draw);
@@ -5570,6 +5631,9 @@
   $("#bellBtn").addEventListener("click", function () {
     openNoticePanel();
   });
+  loadSvcMuted();
+  loadService();
+  setInterval(loadService, 30000);
   document.addEventListener("keydown", function (e) {
     // 紧急弹窗可以用 ESC 收起，等同于点"关闭"（不标已读）
     if (e.key === "Escape" && $("#alertBack") && !$("#alertBack").hidden) {
@@ -5580,6 +5644,11 @@
   }, true);
   $("#noticeReadAll").addEventListener("click", function () { markNotices([]); });
   $("#noticeList").addEventListener("click", function (e) {
+    var muteBtn = e.target.closest ? e.target.closest("[data-svc-mute]") : null;
+    if (muteBtn) {
+      muteService(muteBtn.getAttribute("data-svc-mute"));
+      return;
+    }
     var item = e.target.closest ? e.target.closest("[data-notice]") : null;
     if (!item) return;
     var id = Number(item.getAttribute("data-notice"));

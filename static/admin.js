@@ -1539,6 +1539,23 @@
   }
 
   // ------------------------------------------------------------------ boot
+  /* 服务有效性：服务端按一次读数推出来的提示（占用偏高、盘快写不进去了）。
+     只读、不进库；条件消失，提示跟着消失。 */
+  function drawService(items) {
+    var box = $("#svcChips");
+    if (!box) return;
+    box.innerHTML = (items || []).map(function (it) {
+      return '<span class="chip svc ' + LT.esc(it.level || "info") + '" title="' +
+        LT.esc(it.body || "") + '">' + LT.esc(it.title) + "</span>";
+    }).join("");
+  }
+
+  function loadService() {
+    return LT.api("/api/service")
+      .then(function (d) { drawService(d && d.items); })
+      .catch(function () { /* 读不到就不提示，不自己造一条 */ });
+  }
+
   function boot() {
     bindSearch();
     bindGlobal();
@@ -1607,6 +1624,10 @@
       clearTimeout(S.remoteTimer);
       S.remoteTimer = setTimeout(function () { load().catch(function () {}); }, 300);
     });
+
+    // 服务降级提示：进来先读一次，之后半分钟对一次
+    loadService();
+    setInterval(loadService, 30000);
 
     // keep the unlock countdown honest, and quietly resync every 15s
     setInterval(renderUnlock, 1000);

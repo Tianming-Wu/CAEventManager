@@ -68,7 +68,7 @@ def verdict(account, action, params):
 
 平台提示词里可以写变量（`${user.role}`、`${time.date}`、`${tools}` 等），发出去之前按这次对话的
 人替换；没定义的占位符原样留着，好让写错的地方露出来。变量清单见
-[`../usage/assistant.md`](../usage/assistant.md#可以写的变量)。
+[`../usage/assistant-prompt.md`](../usage/assistant-prompt.md#可以写的变量)。
 
 ## 对话存档
 

@@ -150,6 +150,12 @@ def main():
             check("event route needs the token (%s)" % probe, exc.code == 404, exc.code)
 
     print("== public endpoints ==")
+    svc = call("/api/service")
+    check("service now has a public read",
+          isinstance(svc.get("items"), list) and bool(svc.get("version")), svc)
+    check("it carries no instructions, only readings",
+          all(set(i) == {"id", "kind", "level", "title", "body", "sticky"}
+              for i in svc.get("items") or []), svc.get("items"))
     board = call("/api/board")
     check("board reaches server", board is not None and board.get("ok"))
     check("board has no secrets", board is None or "admin_pass" not in json.dumps(board))

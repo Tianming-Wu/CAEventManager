@@ -143,6 +143,16 @@ code, .mono { font-family: var(--mono); }
   white-space: nowrap;
 }
 .chip b { color: var(--text); font-variant-numeric: tabular-nums; font-size: .9rem; }
+.chip.svc.important {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+.chip.svc.critical {
+  border-color: var(--danger-line);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
 .chip.gold, .chip.green, .chip.blue {
   border-color: var(--accent-line);
   background: var(--accent-soft);

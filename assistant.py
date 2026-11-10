@@ -369,7 +369,17 @@ def doc_entries():
             full = os.path.join(parent, module, "doc.md")
             if os.path.isfile(full):
                 add(full, "%s/%s/doc.md" % (kind, module))
+    # 按 DOC_ALLOWED 的次序排：先操作指南，再参考，模块说明最后。
+    # 清单是给模型看的，最常读的排前面。
+    out.sort(key=lambda item: (_doc_rank(item["path"]), item["path"]))
     return out
+
+
+def _doc_rank(rel):
+    for i, prefix in enumerate(DOC_ALLOWED):
+        if rel.startswith(prefix):
+            return i
+    return len(DOC_ALLOWED)
 
 
 def read_doc(rel):
@@ -453,7 +463,7 @@ TOOLS = [
      "description": "服务器状态与在线人数（仅站长）",
      "parameters": {"type": "object", "properties": {}}},
     {"name": "list_docs", "run": _tool_list_docs,
-     "description": "列出随应用装好的说明文档（平台用法、界面规范、部署运维）与各模块的现场说明",
+     "description": "列出随应用装好的说明文档（平台用法、接口参考）与各模块的现场说明",
      "parameters": {"type": "object",
                     "properties": {"q": {"type": "string",
                                          "description": "只看路径或标题里含这个词的"}}}},
@@ -461,7 +471,7 @@ TOOLS = [
      "description": "读一份说明文档的正文；路径来自 list_docs",
      "parameters": {"type": "object",
                     "properties": {"path": {"type": "string",
-                                            "description": "例如 doc/usage/panel.md"}},
+                                            "description": "例如 doc/usage/rosters.md"}},
                     "required": ["path"]}},
 ]
 

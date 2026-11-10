@@ -559,7 +559,7 @@ def main():
     rows = app.assistant.doc_entries()
     paths = [r["path"] for r in rows]
     check("操作指南都在清单里",
-          "doc/usage/panel.md" in paths and "doc/reference/api.md" in paths, paths[:5])
+          "doc/usage/start.md" in paths and "doc/reference/api.md" in paths, paths[:5])
     check("开发指南不在清单里（助手读不到）",
           not [x for x in paths if x.startswith("doc/dev/") or x.startswith("doc/ops/")]
           and "doc/README.md" not in paths, paths)
@@ -567,7 +567,7 @@ def main():
           "builtin/modules/nwuca.lottery/doc.md" in paths, paths[-3:])
     check("每份都有标题、有大小",
           all(r["title"] and r["size"] > 0 for r in rows))
-    text, err = app.assistant.read_doc("doc/usage/panel.md")
+    text, err = app.assistant.read_doc("doc/usage/start.md")
     check("正文读得出来", not err and text.startswith("#"), (text or "")[:20])
     check("跳出目录的路径一律拒", bool(app.assistant.read_doc("../app.py")[1])
           and bool(app.assistant.read_doc("doc/../../app.py")[1]))
@@ -589,6 +589,39 @@ def main():
     check("读文档对所有角色开放",
           app.policy.verdict({"role": "admin"}, "read_doc", {})[0]
           and app.policy.verdict({"role": "owner"}, "list_docs", {})[0])
+
+    print("== 服务有效性提示 ==")
+
+    class Disk(object):
+        def __init__(self, total, used, free):
+            self.total, self.used, self.free = total, used, free
+
+    GB = 1073741824
+    check("一切正常就不吵人",
+          app.health.signals({"cpu": 12.0, "mem": 40.0, "memTotalMB": 32768.0},
+                             Disk(100 * GB, 40 * GB, 60 * GB)) == [])
+    check("读不到就不说，不自己造一条",
+          app.health.signals(None, None) == [])
+    busy = app.health.signals({"cpu": 95.0}, None)
+    check("CPU 偏高提示一条", [i["id"] for i in busy] == ["svc:cpu"], busy)
+    check("读数写进正文，能自己复核", "95%" in busy[0]["body"], busy[0])
+    check("占用类的降下来就没了（不必处理）", busy[0]["sticky"] is False, busy[0])
+    check("条目只有这几个键，没有夹带动作",
+          set(busy[0]) == {"id", "kind", "level", "title", "body", "sticky"}
+          and busy[0]["kind"] == "service", sorted(busy[0]))
+    mem = app.health.signals({"mem": 95.0, "memTotalMB": 32768.0}, None)
+    check("内存偏高带上总量", mem and "GB" in mem[0]["body"], mem)
+    tight = app.health.signals(None, Disk(100 * GB, 92 * GB, 8 * GB))
+    check("盘快满了要留到条件消失",
+          [i["id"] for i in tight] == ["svc:disk"] and tight[0]["sticky"] is True
+          and tight[0]["level"] == "important", tight)
+    check("几乎写不进去是紧急",
+          app.health.signals(None, Disk(100 * GB, 99 * GB, 1 * GB))[0]["level"]
+          == "critical")
+    check("大盘也不例外（按剩余字节兜底）",
+          [i["level"] for i in app.health.signals(None, Disk(3 * GB, 2.6 * GB,
+                                                            400 * 1048576))]
+          == ["important"])
 
     print("== xlsx 读写 ==")
     sheet = [["学号", "姓名", "院系", "班级"],

@@ -27,6 +27,7 @@ import os
 import platform
 import re
 import secrets
+import shutil
 import socket
 import sys
 import threading
@@ -43,6 +44,7 @@ import checkin
 import db
 import expr
 import exporter
+import health
 import modules
 import pinyintable
 import policy
@@ -58,7 +60,7 @@ TPL_DIR = os.path.join(BASE_DIR, "tpl")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.7.0.32"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.7.0.33"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -471,6 +473,15 @@ def _modules_by_id(conn):
 
 def presets_ok_slug(slug):
     return bool(slug) and bool(presets.ID_RE.match(slug))
+
+
+def service_items():
+    """服务有效性提示：这台机器现在的状态，只读推导，随时可再取一次。"""
+    try:
+        disk = shutil.disk_usage(db.DATA_DIR)
+    except OSError:
+        disk = None
+    return health.signals(host_stats_cached(), disk)
 
 
 class Conflict(model.ApiError):
@@ -2199,6 +2210,11 @@ class Handler(BaseHTTPRequestHandler):
                                "unread": int(panel.unread_count(conn, acc) or 0),
                                "revs": bus.snapshot()})
 
+        if path == "/service" and method == "GET":
+            # 服务有效性：只发警告、不发指令，任何登录账号看到的都一样
+            return self._json({"ok": True, "version": VERSION,
+                               "at": time.time(), "items": service_items()})
+
         if path == "/notices/read" and method == "POST":
             data = body()
             ids = data.get("ids") or []
@@ -3080,6 +3096,12 @@ class Handler(BaseHTTPRequestHandler):
                 "serverTime": time.time(),
             }
             return self._json_cached(payload)
+
+        if path == "/api/service" and method == "GET":
+            # 与面板那份同一口数据：活动后台右上角也提示服务降级。
+            # 公开，和 /api/board 一样——里面只有占用与剩余空间，没有别人的东西。
+            return self._json({"ok": True, "version": VERSION,
+                               "at": time.time(), "items": service_items()})
 
         if path == "/api/stream" and method == "GET":
             # Public like the board: a projector and a phone showing the same

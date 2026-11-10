@@ -2555,6 +2555,7 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   flex: none;
 }
 .bell:hover { background: var(--surface-2); color: var(--text); }
+.bell.has-svc { color: var(--accent-strong); }
 .bell svg { width: 19px; height: 19px; fill: none; stroke: currentColor;
             stroke-width: 1.6; stroke-linecap: round; }
 .bell-dot {
@@ -2648,6 +2649,20 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
 .notice-body { display: block; font-size: .8rem; color: var(--muted);
                margin-top: 3px; white-space: normal; }
 .notice-empty { padding: 18px 12px; color: var(--dim); font-size: .84rem; text-align: center; }
+/* 服务有效性提示：排在真实通知前面，不可以点开，常驻的那几条能单独关掉 */
+.notice-item.svc { cursor: default; }
+.notice-item.svc:hover { background: transparent; }
+.notice-item.svc .notice-meta { justify-content: space-between; }
+.notice-mute {
+  border: 0;
+  background: transparent;
+  color: var(--dim);
+  font: inherit;
+  font-size: .74rem;
+  cursor: pointer;
+  padding: 0 2px;
+}
+.notice-mute:hover { color: var(--text); }
 
 /* 公开报名页：被时间或名额拦下时，原因要看得清 */
 .blocked {

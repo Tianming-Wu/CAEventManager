@@ -999,7 +999,7 @@ def notice_page(page):
     page.click("#bellBtn")
     page.wait_for_timeout(600)
     check("the panel lists the notices",
-          page.locator(".notice-item").count() == 2,
+          page.locator(".notice-item:not(.svc)").count() == 2,
           page.locator(".notice-item").count())
     check("levels are marked", "重要" in page.inner_text("#noticeList") and
           "紧急" in page.inner_text("#noticeList"), page.inner_text("#noticeList")[:80])

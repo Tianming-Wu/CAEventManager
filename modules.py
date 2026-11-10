@@ -129,12 +129,12 @@ def normalize_external(raw):
 
 
 # --------------------------------------------------------------------------- #
-# 能力声明（module.json 的 permissions）
+# 能力声明（module.json 的 features）
 # --------------------------------------------------------------------------- #
-# 站上有些能力不是白给的：模块要在 module.json 里申请，平台按声明给它配置，
+# 站上有些能力不是白给的：模块要在 module.json 的 features 里申请，平台按声明给它配置，
 # 没申请的模块在接口里根本看不到那一段。写法学安卓的 manifest——名字 + 自己的定义：
 #
-#   "permissions": {
+#   "features": {
 #     "search": {"records": "students", "name": "name", "key": "sid",
 #                "fields": ["grp"], "tags": [{"keys": ["w"], "field": "role", "eq": "staff"}]}
 #   }
@@ -162,7 +162,7 @@ DEFAULT_SEARCH = {
 }
 
 
-def resolve_permissions(raw, errors=None):
+def resolve_features(raw, errors=None):
     """把模块申请的权限解析成"平台认的那几个"，不认识的丢掉并记下原因。"""
     out = {}
     if isinstance(raw, (list, tuple)):
@@ -280,7 +280,7 @@ def load_module(folder, version, builtin=False, enabled=True):
     if os.path.isdir(tpl_dir):
         templates = sorted(n[:-5] for n in os.listdir(tpl_dir) if n.endswith(".json"))
 
-    permissions = resolve_permissions(meta.get("permissions"))
+    features = resolve_features(meta.get("features"))
 
     return {
         "id": kind_id,
@@ -294,7 +294,7 @@ def load_module(folder, version, builtin=False, enabled=True):
         "requires": requires,
         "pages": normalize_pages(meta.get("pages")),
         "external": normalize_external(meta.get("external")),
-        "permissions": permissions,
+        "features": features,
         "fields": fields,
         "templates": templates,
         "path": folder,

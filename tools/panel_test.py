@@ -1373,7 +1373,7 @@ def main():
                                    "tool_calls": [{"id": "call_doc", "type": "function",
                                                    "function": {"name": "read_doc",
                                                                 "arguments":
-                                                                    '{"path": "doc/README.md"}'}}]}
+                                                                    '{"path": "doc/usage/panel.md"}'}}]}
                     elif tool_msgs:
                         titles = re.findall(r'"title": "([^"]+)"',
                                             tool_msgs[-1].get("content") or "")
@@ -1488,7 +1488,7 @@ def main():
         tool_msgs = [m for m in (stub.requests[before + 1]["body"].get("messages") or [])
                      if m.get("role") == "tool"]
         check("读回来的正文进了上下文",
-              tool_msgs and "文档目录" in (tool_msgs[-1].get("content") or ""),
+              tool_msgs and "管理面板使用说明" in (tool_msgs[-1].get("content") or ""),
               (tool_msgs[-1].get("content") or "")[:80] if tool_msgs else first[:1])
 
         print("== 平台自己的提示词：数据目录里放一份 markdown ==")

@@ -3,15 +3,18 @@
 CAEventManager 的文档按**读者**分成四类。要改的地方先在这里找文件，别在根目录 `README.md` 里
 越写越长——那里只留一张一页纸的概览。
 
-文档是**随应用一起装到机器上**的（部署时整个 `doc/` 会跟着过去），所以运维助手也能读它们：
-`list_docs` 列出清单，`read_doc` 读一份正文。模块自己的说明也在这个清单里。
+文档分成**操作指南**与**开发指南**两类，随应用一起装到机器上（部署时整个 `doc/` 都会过去）。
+
+**运维助手只读操作指南**：`doc/usage/`、`doc/reference/`、以及模块自己的 `doc.md`。
+开发指南（`doc/dev/`）与运维手册（`doc/ops/`）不在它的清单里——让 web agent 具备开发与写入能力是
+另一回事，二次开发由开发者在自己的环境里做，他本来就能读仓库。少给一份就少烧一份 token。
 
 | 目录 | 给谁看 | 写什么 |
 | --- | --- | --- |
 | [`usage/`](usage/) | 用这套系统的人 | 怎么用：面板、活动现场、运维助手 |
 | [`reference/`](reference/) | 使用者与开发者 | 查得到的东西：界面规范、术语、接口 |
 | [`ops/`](ops/) | 维护这台机器的人 | 部署、版本、日志、备份 |
-| [`design/`](design/) | 改这套代码的人 | 结构、权限模型、边界与取舍 |
+| [`dev/`](dev/) | 改这套代码的人（**助手读不到**） | 结构、模块开发、界面规范 |
 | `builtin/modules/<id>/doc.md` | 用某个模块的人 | 这个模块的页面与现场操作（不走这里，跟着模块走） |
 
 ## 使用
@@ -26,7 +29,7 @@ CAEventManager 的文档按**读者**分成四类。要改的地方先在这里�
 
 | 文件 | 一句话 |
 | --- | --- |
-| [`reference/ui-spec.md`](reference/ui-spec.md) | 界面规范：标题与返回、卡片、表格、控件、反馈、措辞、抽屉、检查清单 |
+| [`dev/ui-spec.md`](dev/ui-spec.md) | 界面规范（开发指南）：标题与返回、卡片、表格、控件、反馈、措辞、抽屉、检查清单 |
 | [`reference/glossary.md`](reference/glossary.md) | 术语表：名单 / 报名 / 预设 / 状态词 / 角色 |
 | [`reference/api.md`](reference/api.md) | 接口与 API 令牌：路由家族、鉴权、范围、审计 |
 
@@ -40,8 +43,9 @@ CAEventManager 的文档按**读者**分成四类。要改的地方先在这里�
 
 | 文件 | 一句话 |
 | --- | --- |
-| [`design/architecture.md`](design/architecture.md) | 结构：三个数据库、路由家族、实时同步、权限层次 |
-| [`design/assistant.md`](design/assistant.md) | 运维助手的设计：为什么沿用账号权限、工具面、策略层 |
+| [`dev/architecture.md`](dev/architecture.md) | 结构：三个数据库、路由家族、实时同步、权限层次、模块能力声明 |
+| [`dev/assistant.md`](dev/assistant.md) | 运维助手的设计：为什么沿用账号权限、工具面、策略层 |
+| [`dev/modules.md`](dev/modules.md) | 模块开发指南：module.json、能力声明（features）、页面与屏幕 |
 
 ## 写文档的约定
 

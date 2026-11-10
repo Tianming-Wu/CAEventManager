@@ -503,9 +503,9 @@ def main():
         check("最多留三份老的", not os.path.exists(path + ".4"))
         check("文件不在就当没这回事", app.rotate_file(os.path.join(box, "nope.log")) is False)
 
-    print("== 模块的能力声明（module.json 的 permissions）==")
+    print("== 模块的能力声明（module.json 的 features）==")
     errs = []
-    got = app.modules.resolve_permissions(
+    got = app.modules.resolve_features(
         {"search": {"name": "xm", "records": "students", "key": "id"},
          "nope": 1}, errs)
     check("申请了的才给，没申请的丢掉",
@@ -515,13 +515,13 @@ def main():
           got["search"])
     check("写了的字段照抄", got["search"]["name"] == "xm", got["search"]["name"])
     check("列表写法的申请等价于空声明",
-          app.modules.resolve_permissions(["search"])["search"]["name"] == "name")
+          app.modules.resolve_features(["search"])["search"]["name"] == "name")
     bad = []
     check("声明写错就丢掉这个能力",
-          app.modules.resolve_permissions({"search": "x"}, bad) == {}
+          app.modules.resolve_features({"search": "x"}, bad) == {}
           and bad and "应该是一个对象" in bad[-1], bad)
     lottery = app.modules.get("nwuca.lottery", app.VERSION)
-    perms = (lottery or {}).get("permissions") or {}
+    perms = (lottery or {}).get("features") or {}
     check("抽奖模块声明了搜索", "search" in perms, list(perms))
     check("它的词表里有工作人员与未签到",
           any("w" in t["keys"] for t in perms["search"]["tags"])
@@ -558,8 +558,11 @@ def main():
     print("== 助手能读的文档 ==")
     rows = app.assistant.doc_entries()
     paths = [r["path"] for r in rows]
-    check("doc/ 整棵树都在清单里",
-          "doc/README.md" in paths and "doc/usage/panel.md" in paths, paths[:5])
+    check("操作指南都在清单里",
+          "doc/usage/panel.md" in paths and "doc/reference/api.md" in paths, paths[:5])
+    check("开发指南不在清单里（助手读不到）",
+          not [x for x in paths if x.startswith("doc/dev/") or x.startswith("doc/ops/")]
+          and "doc/README.md" not in paths, paths)
     check("模块自己的说明也在清单里",
           "builtin/modules/nwuca.lottery/doc.md" in paths, paths[-3:])
     check("每份都有标题、有大小",
@@ -570,11 +573,11 @@ def main():
           and bool(app.assistant.read_doc("doc/../../app.py")[1]))
     check("不在清单里的路径也拒", bool(app.assistant.read_doc("doc/nope.md")[1]))
     probe = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                         "doc", "_probe-long.md")
+                         "doc", "usage", "_probe-long.md")
     try:
         with open(probe, "w", encoding="utf-8") as fh:
             fh.write("# 长文\n" + "字" * (app.assistant.DOC_MAX_CHARS + 500))
-        long_text, long_err = app.assistant.read_doc("doc/_probe-long.md")
+        long_text, long_err = app.assistant.read_doc("doc/usage/_probe-long.md")
         check("太长就截断并说明",
               not long_err and len(long_text) <= app.assistant.DOC_MAX_CHARS + 120
               and "后面还有" in long_text, len(long_text or ""))
@@ -582,7 +585,7 @@ def main():
         if os.path.exists(probe):
             os.remove(probe)
     check("删掉之后就查不到了",
-          bool(app.assistant.read_doc("doc/_probe-long.md")[1]))
+          bool(app.assistant.read_doc("doc/usage/_probe-long.md")[1]))
     check("读文档对所有角色开放",
           app.policy.verdict({"role": "admin"}, "read_doc", {})[0]
           and app.policy.verdict({"role": "owner"}, "list_docs", {})[0])

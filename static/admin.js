@@ -644,7 +644,7 @@
     S.byId = {};
     S.students.forEach(function (s) { S.byId[s.id] = s; });
     S.audit = d.audit || [];
-    S.permissions = d.permissions || {};
+    S.features = d.features || {};
     S.draws = d.draws || [];
     S.unlocked = !!d.unlocked;
     S.unlockUntil = d.unlockUntil || 0;
@@ -666,10 +666,10 @@
     }).catch(bad);
   }
 
-  // 模块在 module.json 的 permissions.search 里说清楚"哪份清单、哪个字段是姓名"，
+  // 模块在 module.json 的 features.search 里说清楚"哪份清单、哪个字段是姓名"，
   // 搜索的算法留在平台：这里只是把那份声明递给 LT
   function searchSpec() {
-    var perms = S.permissions || {};
+    var perms = S.features || {};
     return perms.search || null;
   }
 

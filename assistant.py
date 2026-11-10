@@ -309,7 +309,10 @@ def _tool_host_stats(client, args):
 # "这个平台怎么用"就会瞎猜。文档是纯文本、随部署一起过去，读一份只在用到时花一次。
 DOC_DIR = "doc"
 DOC_EXTS = (".md",)
-DOC_MAX_KINDS = ("doc", "module")
+# 助手只读**操作指南**：给运维做事要用的那部分（怎么用、接口、术语、模块自己的现场说明）。
+# 开发指南（doc/dev、doc/ops）不给：让 web agent 具备开发/写入能力是另一回事，
+# 二开是开发者自己在他的环境里做，他本来就能读仓库。少给一份就少烧一份 token。
+DOC_ALLOWED = ("doc/usage/", "doc/reference/")
 DOC_LIST_MAX = 60
 DOC_MAX_CHARS = 12000          # 一份文档一次最多回这么多字，太长就截断并说明
 DOC_ROOTS = ("builtin/modules", "modules")
@@ -354,7 +357,10 @@ def doc_entries():
             if not name.lower().endswith(DOC_EXTS):
                 continue
             full = os.path.join(here, name)
-            add(full, os.path.relpath(full, base).replace(os.sep, "/"))
+            rel = os.path.relpath(full, base).replace(os.sep, "/")
+            if not rel.startswith(DOC_ALLOWED):
+                continue
+            add(full, rel)
     for kind in DOC_ROOTS:
         parent = os.path.join(base, kind)
         if not os.path.isdir(parent):
@@ -524,10 +530,19 @@ def _who(values):
     return name + ("（%s）" % "；".join(rest) if rest else "")
 
 
+def doc_catalog():
+    """能读的文档清单（路径 + 标题），写进系统提示：不塞正文，只告诉它有哪些。"""
+    return ["%s（%s）" % (item["path"], item["title"]) for item in doc_entries()]
+
+
 def system_prompt(account=None, tools=None, version=""):
-    """发给模型的那段系统提示：固定规则 + 当前是谁 + 平台自己写的那份（如果有）。"""
+    """发给模型的那段系统提示：固定规则 + 当前是谁 + 可读文档清单 + 平台提示词。"""
     values = prompt_values(account, tools, version)
     parts = [SYSTEM_PROMPT]
+    catalog = doc_catalog()
+    if catalog:
+        parts.append("可读的说明文档（用 read_doc 读其中一份）：\n"
+                     + "\n".join("- " + line for line in catalog))
     if values.get("user.username"):
         # 助手光靠工具清单看不出自己在跟谁说话：把人和身份说清楚，语气与能做的事才对得上
         parts.append("当前使用者：%s。" % _who(values))

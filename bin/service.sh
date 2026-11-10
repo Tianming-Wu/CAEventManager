@@ -67,17 +67,28 @@ status)
     if running; then
         echo "running, pid $(pid)"
         python3 - <<'PY'
-import json, os
+import json, os, sqlite3
 try:
-    cfg = json.load(open(os.path.join("config.json"), encoding="utf-8"))
+    cfg = json.load(open("config.json", encoding="utf-8"))
 except Exception:
     cfg = {}
-secret = cfg.get("path_secret") or ""
 prefix = (cfg.get("public_base_prefix") or "").rstrip("/")
-base = (prefix + "/" + secret) if secret else "(no secret in config.json)"
-print("  board : " + base + "/")
-print("  screen: " + base + "/screen")
-print("  admin : " + base + "/admin")
+db_path = os.path.join(os.environ.get("LOTTERY_DATA_DIR") or "data", "panel.sqlite3")
+try:
+    conn = sqlite3.connect(db_path, timeout=5.0)
+    rows = conn.execute("SELECT seq, token, title, archived_at FROM events ORDER BY seq").fetchall()
+except Exception as exc:
+    print("  (读不到 %s：%s)" % (db_path, exc))
+    rows = []
+live = [r for r in rows if not r[3]]
+if not live:
+    print("  activities: (还没有活动，去面板里创建)")
+for seq, token, title, _archived in live:
+    base = prefix + "/" + token
+    print("  [%d] %s" % (seq, title or "未命名"))
+    print("      board : " + base + "/")
+    print("      screen: " + base + "/screen")
+    print("      admin : " + base + "/admin")
 PY
     else
         echo "not running"

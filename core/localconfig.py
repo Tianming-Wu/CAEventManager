@@ -6,10 +6,8 @@ One process serves two things:
     /                       master panel (login, accounts, event list)
     /<event-token>/...      one event (board, screen, admin, checkin)
 
-``path_secret`` is that event token: a random 32-character base64url id generated
-once on first run and kept stable in ``config.json``.  It is the only guard on
-the event pages, so it must not be guessable, and it must be passed to players
-as part of the URL.
+每个活动自己的 token 存在 ``data/panel.sqlite3`` 的 events 表里，不在这个文件里：
+这里只放服务层配置（监听地址、对外前缀、站长身份）与必须重启才生效的静态设置。
 
 Routing never looks at ``public_base_prefix``: the server answers on whatever
 path the request arrives by, so local access, the current
@@ -31,7 +29,6 @@ BASE_DIR = paths.APP_ROOT
 CONFIG_PATH = os.environ.get("LOTTERY_CONFIG") or os.path.join(BASE_DIR, "config.json")
 
 DEFAULTS = {
-    "path_secret": "",
     "host": "0.0.0.0",
     "port": 8931,
     # Who the owner signs in as, and what the console calls them.  The two are
@@ -44,6 +41,12 @@ DEFAULTS = {
     # whatever path the request arrives by, so local access always works and a
     # future subdomain is a config change, not a code change.
     "public_base_prefix": "http://127.0.0.1:8931",
+}
+
+# 静态设置：改配置文件后重启生效，界面上没有入口。
+# 单个活动同时能持有多条短链，超出就拒绝生成。
+STATIC_DEFAULTS = {
+    "shortlink_per_event": 5,
 }
 
 SECRET_LEN = 32
@@ -80,12 +83,10 @@ def load():
     # which of these the operator actually wrote down, as opposed to defaults
     cfg["_explicit"] = set(c for c in raw() if c in DEFAULTS)
 
-    secret = str(cfg.get("path_secret") or "").strip()
-    if not secret or not all(c.isalnum() or c in "-_" for c in secret):
-        cfg["path_secret"] = new_secret()
-        changed = True
-    else:
-        cfg["path_secret"] = secret
+    # 静态设置只有写在文件里才生效：缺的补默认值，但不回写，
+    # 这样文件里始终只留运维真正决定过的项
+    for key, value in STATIC_DEFAULTS.items():
+        cfg.setdefault(key, value)
     if changed:
         save(cfg)
     return cfg
@@ -93,7 +94,6 @@ def load():
 
 def save(cfg):
     payload = {
-        "path_secret": cfg.get("path_secret") or "",
         "host": cfg.get("host") or DEFAULTS["host"],
         "port": int(cfg.get("port") or DEFAULTS["port"]),
         "public_base_prefix": (cfg.get("public_base_prefix") or DEFAULTS["public_base_prefix"]).rstrip("/"),
@@ -119,6 +119,13 @@ def save(cfg):
 
 
 def public_url(cfg):
-    """Full public base URL including the secret segment (no trailing slash)."""
-    prefix = (cfg.get("public_base_prefix") or DEFAULTS["public_base_prefix"]).rstrip("/")
-    return prefix + "/" + cfg["path_secret"]
+    """配置里的对外前缀（不含活动 token，那一节由活动自己带）。"""
+    return (cfg.get("public_base_prefix") or DEFAULTS["public_base_prefix"]).rstrip("/")
+
+
+def static_limit(cfg, key):
+    """静态设置取整；写错了回落到默认值。"""
+    try:
+        return int(cfg.get(key, STATIC_DEFAULTS.get(key, 0)))
+    except (TypeError, ValueError):
+        return int(STATIC_DEFAULTS.get(key, 0))

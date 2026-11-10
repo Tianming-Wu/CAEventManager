@@ -101,11 +101,8 @@ DEFAULT_CONFIG = {
     "person_draw_no_repeat": True,  # older key, read when the new one is absent
     "screen_phase": "signin",       # signin | draw - drives what the big screen shows
     "screen_show_wall": False,      # the per-person name grid; off by default
-    # short-lived /s/<code> alias, for machines where nobody can paste the
+    # 签到二维码与 presence cookie 的签名密钥：第一次用到时按活动生成，见 checkin_secret()
     # 32-character access id (the projector laptop, typically)
-    "shortlink_code": "",
-    "shortlink_target": "screen",
-    "shortlink_expires": 0,
     "self_checkin": True,           # allow scanning the on-screen QR to check in
     "event_timezone_offset": 8,  # only used for CSV export / server-side text
 }
@@ -229,6 +226,18 @@ def connect():
     _local.conn = conn
     _local.path = path
     return conn
+
+
+def checkin_secret(conn):
+    """这个活动的签到签名密钥；第一次用到时生成并写进它自己的库。"""
+    secret = get_config(conn, "checkin_secret")
+    if secret:
+        return secret
+    import secrets as _secrets
+    secret = _secrets.token_urlsafe(24)[:32]
+    with tx(conn):
+        set_config_raw(conn, "checkin_secret", secret)
+    return secret
 
 
 def init_db():

@@ -163,6 +163,20 @@ CREATE TABLE IF NOT EXISTS settings (
     updated_by TEXT NOT NULL DEFAULT ''
 );
 
+-- 短链：一张自动转发的路由表，按活动记（见 shortlinks.py）
+CREATE TABLE IF NOT EXISTS shortlinks (
+    code        TEXT    PRIMARY KEY,
+    event_seq   INTEGER NOT NULL,
+    target      TEXT    NOT NULL,
+    created_by  TEXT    NOT NULL DEFAULT '',
+    created_at  REAL    NOT NULL,
+    expires_at  REAL    NOT NULL DEFAULT 0,     -- 0 = 不设过期
+    max_hits    INTEGER NOT NULL DEFAULT 0,     -- 0 = 不限次数
+    hits        INTEGER NOT NULL DEFAULT 0,
+    revoked_at  REAL    NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS shortlinks_event ON shortlinks(event_seq);
+
 CREATE TABLE IF NOT EXISTS notices (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     ts           REAL    NOT NULL,
@@ -1092,6 +1106,12 @@ def event_tokens(extra=()):
     except Exception:
         pass
     return tokens
+
+
+def event_token(seq):
+    """活动号对应的 token：对外地址只认 token，内部只传活动号。"""
+    row = connect().execute("SELECT token FROM events WHERE seq=?", (seq,)).fetchone()
+    return row["token"] if row else ""
 
 
 def event_seq(token):

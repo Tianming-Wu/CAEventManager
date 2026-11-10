@@ -207,13 +207,6 @@
         <button class="btn" id="phaseDrawBtn">切到抽奖阶段</button>
         <span class="chip" id="phaseNow">当前：—</span>
       </div>
-      <hr style="border:none;border-top:1px solid var(--line);margin:14px 0 10px">
-      <p class="panel-hint">投屏那台电脑敲不进长网址时，生成一个短链接给它。</p>
-      <div class="row">
-        <button class="btn" id="shortlinkBtn">生成大屏短链接</button>
-        <span class="note" id="shortlinkNote"></span>
-      </div>
-      <div id="shortlinkBox" style="margin-top:10px"></div>
     </div>
 
     <div class="panel">
@@ -409,6 +402,41 @@
         <span class="note" id="rosterNote"></span>
       </div>
       <dl class="kv" id="rosterInfo" style="margin-top:14px"></dl>
+    </div>
+
+    <div class="panel">
+      <div class="row" style="margin-bottom:8px">
+        <h2 style="margin:0">短链</h2>
+        <div class="spacer"></div>
+        <span class="note" id="shortlinkLimit"></span>
+      </div>
+      <p class="panel-hint">
+        短链只作临时用途：平台不保证长期有效，随时可能被删除、过期或用尽次数。
+        需要长期可用的地方请直接用上面那个长链接。
+      </p>
+      <div class="row">
+        <div class="field" style="min-width:170px">
+          <label for="shortlinkTarget">指向</label>
+          <select id="shortlinkTarget"></select>
+        </div>
+        <div class="field" style="min-width:130px">
+          <label for="shortlinkMinutes">有效期（分钟）</label>
+          <input id="shortlinkMinutes" type="number" min="0" max="43200" step="1" placeholder="不限">
+        </div>
+        <div class="field" style="min-width:130px">
+          <label for="shortlinkHits">最多访问次数</label>
+          <input id="shortlinkHits" type="number" min="0" step="1" placeholder="不限">
+        </div>
+        <button class="btn primary" id="shortlinkBtn" type="button">生成短链</button>
+      </div>
+      <div class="tblwrap" style="margin-top:12px">
+        <table class="tbl" id="shortlinkTable">
+          <thead><tr>
+            <th>短链</th><th>指向</th><th>有效期</th><th>次数</th><th class="actions">操作</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
     </div>
 
     <div class="panel">

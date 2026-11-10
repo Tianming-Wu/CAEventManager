@@ -101,7 +101,8 @@ def check(name, cond, detail=""):
         failures.append(name)
 
 
-SECRET_FRAG = BASE.rsplit("/", 1)[-1]
+TOKEN = BASE.rsplit("/", 1)[-1]
+BASE_ROOT = BASE.rsplit("/", 1)[0]
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -438,36 +439,57 @@ def main():
     before = call("/api/admin/plan")["summary"]["present"]
     check("bonus ranking ignores staff", before == st["checkin"], (before, st["checkin"]))
 
-    print("== short link for the projector ==")
-    res = post("/api/admin/shortlink", {"target": "screen", "minutes": 30})
-    check("short link minted", res and res["ok"] and len(res["code"]) == 6, res)
-    short_url = res["url"]
-    check("short url sits outside the secret", SECRET_FRAG not in short_url, short_url)
-    check("short url ends with /s/<code>", short_url.endswith("/s/" + res["code"]), short_url)
+    print("== 短链：平台级的转发表，按活动记 ==")
+    # 短链在面板族：活动成员生成、列自己的、删自己的
+    events = panel_call("/api/panel/events") or {}
+    seq = (events.get("events") or [{}])[0].get("seq") or 0
+    made = panel_call("/api/panel/shortlink",
+                      {"seq": seq, "target": "screen", "minutes": 30, "max_hits": 2})
+    check("短链由平台生成", bool(made and made.get("ok")), made)
+    code = ((made or {}).get("link") or {}).get("code") or ""
+    check("短链号是 7 位", len(code) == 7, code)
+    check("短链地址是 /s/<code>", ((made or {}).get("url") or "").endswith("/s/" + code),
+          (made or {}).get("url"))
+    check("短链地址里没有活动 token", TOKEN not in ((made or {}).get("url") or ""),
+          (made or {}).get("url"))
 
-    # follow the redirect the way a browser would, against the test server
-    base_root = BASE.rsplit("/", 1)[0]
-    local_short = base_root + "/s/" + res["code"]
     no_redirect = urllib.request.build_opener(_NoRedirect)
     try:
-        no_redirect.open(local_short, timeout=10)
-        check("short link redirects", False, "no redirect")
+        no_redirect.open(BASE_ROOT + "/s/" + code, timeout=10)
+        check("短链会跳转", False, "no redirect")
     except urllib.error.HTTPError as exc:
         loc = exc.headers.get("Location") or ""
-        check("short link redirects", exc.code == 302, exc.code)
-        check("redirect points at the secret screen url",
-              loc.endswith("/screen") and SECRET_FRAG in loc, loc)
-        # the same Location must also resolve against the test server
-        followed = urllib.request.urlopen(base_root + loc, timeout=10)
-        check("the redirect target works", followed.status == 200, followed.status)
+        check("短链会跳转", exc.code == 302, exc.code)
+        check("跳到该活动的目标页", loc.endswith("/screen") and TOKEN in loc, loc)
 
-    # an expired / wrong code must not work
-    post("/api/admin/shortlink", {"target": "screen", "minutes": 1})
+    listed = panel_call("/api/panel/shortlink?seq=%d" % seq) or {}
+    check("列表里能看到它",
+          any(l["code"] == code for l in listed.get("links") or []), listed)
+
+    for _ in range(2):
+        try:
+            no_redirect.open(BASE_ROOT + "/s/" + code, timeout=10)
+        except urllib.error.HTTPError:
+            pass
     try:
-        no_redirect.open(base_root + "/s/000000", timeout=10)
-        check("wrong short code rejected", False, "accepted")
+        no_redirect.open(BASE_ROOT + "/s/" + code, timeout=10)
+        check("次数用尽后不再跳转", False, "still redirecting")
     except urllib.error.HTTPError as exc:
-        check("wrong short code rejected", exc.code == 404, exc.code)
+        check("次数用尽后不再跳转", exc.code == 404, exc.code)
+
+    deleted = panel_call("/api/panel/shortlink/delete", {"code": code}) or {}
+    check("活动能删自己的短链", deleted.get("code") == code, deleted)
+    try:
+        no_redirect.open(BASE_ROOT + "/s/" + code, timeout=10)
+        check("删除即失效", False, "still works")
+    except urllib.error.HTTPError as exc:
+        check("删除即失效", exc.code == 404, exc.code)
+
+    try:
+        no_redirect.open(BASE_ROOT + "/s/ZZZZZZZ", timeout=10)
+        check("不存在的短链是 404", False, "accepted")
+    except urllib.error.HTTPError as exc:
+        check("不存在的短链是 404", exc.code == 404, exc.code)
 
     print("== accounting invariants ==")
     # turning a ticket holder into staff must take the ticket back

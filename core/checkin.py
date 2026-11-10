@@ -26,9 +26,9 @@ PRESENCE_TTL = 15 * 60  # how long a verified phone may take to fill the form
 COOKIE_NAME = "laffey_lot_presence"
 
 
-def _secret(path_secret):
+def _secret(secret):
     return hmac.new(
-        str(path_secret).encode("utf-8"), b"checkin-presence-v1", hashlib.sha256
+        str(secret).encode("utf-8"), b"checkin-presence-v1", hashlib.sha256
     ).digest()
 
 
@@ -36,18 +36,18 @@ def _token(secret, window):
     return hmac.new(secret, str(window).encode("ascii"), hashlib.sha256).hexdigest()[:16]
 
 
-def current(path_secret, now=None):
+def current(secret, now=None):
     """(token, epoch_seconds_when_it_expires) for the window covering *now*."""
-    secret = _secret(path_secret)
+    secret = _secret(secret)
     now = time.time() if now is None else now
     window = int(now // WINDOW)
     return _token(secret, window), (window + 1) * WINDOW
 
 
-def verify(path_secret, token, now=None):
+def verify(secret, token, now=None):
     if not token or not isinstance(token, str):
         return False
-    secret = _secret(path_secret)
+    secret = _secret(secret)
     now = time.time() if now is None else now
     window = int(now // WINDOW)
     supplied = token.strip()
@@ -60,18 +60,18 @@ def verify(path_secret, token, now=None):
 # --------------------------------------------------------------------------- #
 # presence cookie: "<issued_at>.<signature>"
 # --------------------------------------------------------------------------- #
-def _sign(path_secret, issued):
+def _sign(secret, issued):
     return hmac.new(
-        _secret(path_secret), ("presence|%d" % int(issued)).encode("ascii"), hashlib.sha256
+        _secret(secret), ("presence|%d" % int(issued)).encode("ascii"), hashlib.sha256
     ).hexdigest()[:32]
 
 
-def issue_presence(path_secret, now=None):
+def issue_presence(secret, now=None):
     issued = int(time.time() if now is None else now)
-    return "%d.%s" % (issued, _sign(path_secret, issued))
+    return "%d.%s" % (issued, _sign(secret, issued))
 
 
-def check_presence(path_secret, value, now=None):
+def check_presence(secret, value, now=None):
     if not value or "." not in value:
         return False
     issued_raw, _, sig = value.partition(".")
@@ -82,4 +82,4 @@ def check_presence(path_secret, value, now=None):
     now = time.time() if now is None else now
     if issued > now + 60 or now - issued > PRESENCE_TTL:
         return False
-    return hmac.compare_digest(_sign(path_secret, issued), sig)
+    return hmac.compare_digest(_sign(secret, issued), sig)

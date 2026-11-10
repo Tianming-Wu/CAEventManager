@@ -501,38 +501,83 @@
       .catch(bad);
   }
 
-  function mintShortlink() {
-    LT.api("/api/admin/shortlink", { method: "POST", body: { target: "screen", minutes: 60 } })
+  /* ---- 短链：活动的平台资产，模块申请 features.shortlink 之后才有入口 ---- */
+  var SHORT = { links: [], targets: [], limit: 0, timer: null };
+
+  function shortlinkSlot() {
+    return (S.features && S.features.shortlink) || null;
+  }
+
+  function fmtLeft(link) {
+    if (!link.expiresAt) return "不限";
+    var left = Math.max(0, link.expiresAt - Date.now() / 1000);
+    if (left <= 0) return "已过期";
+    return Math.floor(left / 60) + " 分钟";
+  }
+
+  function drawShortlinks() {
+    var body = $("#shortlinkTable tbody");
+    if (!body) return;
+    $("#shortlinkLimit").textContent =
+      SHORT.limit ? "本活动最多 " + SHORT.limit + " 条" : "";
+    if (!SHORT.links.length) {
+      body.innerHTML = '<tr><td colspan="5" style="color:var(--muted)">还没有短链</td></tr>';
+      return;
+    }
+    body.innerHTML = SHORT.links.map(function (l) {
+      var state = l.valid ? (l.maxHits ? l.hits + " / " + l.maxHits : l.hits + " 次")
+        : l.revoked ? "已删除" : l.expired ? "已过期" : "次数用尽";
+      return "<tr>" +
+        '<td><span class="mono">/s/' + LT.esc(l.code) + "</span></td>" +
+        "<td>" + LT.esc(l.target || "公示页") + "</td>" +
+        "<td>" + LT.esc(fmtLeft(l)) + "</td>" +
+        "<td>" + LT.esc(state) + "</td>" +
+        '<td class="actions"><button class="btn sm ghost" data-shortline-del="' +
+        LT.esc(l.code) + '">删除</button></td>' +
+        "</tr>";
+    }).join("");
+  }
+
+  function loadShortlinks() {
+    if (!shortlinkSlot()) {
+      var panel = $("#shortlinkTable") && $("#shortlinkTable").closest(".panel");
+      if (panel) panel.classList.add("hidden");
+      return Promise.resolve();
+    }
+    return LT.panelApi("/api/panel/shortlink?seq=" + S.seq)
       .then(function (d) {
-        $("#shortlinkBox").innerHTML =
-          '<div class="winner" style="flex-direction:column;align-items:flex-start;gap:6px">' +
-          '<div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap">' +
-          '<span class="prize">短链接</span>' +
-          '<span class="mono" style="font-size:1.15rem;font-weight:700">' + LT.esc(d.url) + "</span>" +
-          "</div>" +
-          '<div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap">' +
-          '<span class="prize">只输数字</span>' +
-          '<span class="mono" style="font-size:1.5rem;font-weight:700;letter-spacing:.15em">' +
-          LT.esc(d.code) + "</span>" +
-          '<span class="note">在投屏电脑打开上面的网址，或直接打开任意页面后把地址换成 /s/' +
-          LT.esc(d.code) + "</span>" +
-          "</div>" +
-          '<span class="note" id="shortlinkLeft">有效期 ' + d.minutes + " 分钟</span>" +
-          "</div>";
-        $("#shortlinkNote").textContent = "已生成，指向大屏页";
-        var left = d.minutes * 60;
-        clearInterval(mintShortlink.timer);
-        mintShortlink.timer = setInterval(function () {
-          left -= 1;
-          var el = $("#shortlinkLeft");
-          if (left <= 0) {
-            clearInterval(mintShortlink.timer);
-            if (el) el.textContent = "已过期";
-            return;
-          }
-          if (el) el.textContent = "还剩 " + Math.floor(left / 60) + ":" + LT.pad(left % 60);
-        }, 1000);
+        SHORT.links = d.links || [];
+        SHORT.targets = d.targets || [];
+        SHORT.limit = d.limit || 0;
+        var pick = $("#shortlinkTarget");
+        if (pick && !pick.options.length) {
+          pick.innerHTML = SHORT.targets.map(function (t) {
+            return '<option value="' + LT.esc(t.key) + '">' + LT.esc(t.label) + "</option>";
+          }).join("");
+        }
+        drawShortlinks();
       })
+      .catch(function () { /* 没权限或模块没申请：入口本来就不该出现 */ });
+  }
+
+  function mintShortlink() {
+    var pick = $("#shortlinkTarget");
+    var minutes = Number($("#shortlinkMinutes").value || 0);
+    var hits = Number($("#shortlinkHits").value || 0);
+    LT.panelApi("/api/panel/shortlink", {
+      method: "POST",
+      body: { seq: S.seq, target: pick ? pick.value : "", minutes: minutes, max_hits: hits },
+    })
+      .then(function (d) {
+        ok("已生成短链 " + (d.link && d.link.code ? "/s/" + d.link.code : ""));
+        return loadShortlinks();
+      })
+      .catch(bad);
+  }
+
+  function revokeShortlink(code) {
+    LT.panelApi("/api/panel/shortlink/delete", { method: "POST", body: { code: code } })
+      .then(function () { ok("短链已删除"); return loadShortlinks(); })
       .catch(bad);
   }
 
@@ -542,6 +587,7 @@
   var formTouched = false;
 
   function renderSettings() {
+    loadShortlinks();
     var c = S.config;
     if (!formTouched) {
       $("#setTitle").value = c.title || "";
@@ -635,6 +681,8 @@
 
   // ------------------------------------------------------------------ data
   function applyState(d) {
+    S.features = d.features || {};
+    S.seq = d.seq || 0;
     S.config = d.config || {};
     S.prizes = d.prizes || [];
     S.screenPacks = d.screenPacks || [];
@@ -983,7 +1031,13 @@
       }).catch(bad);
     });
 
-    $("#refreshBtn").addEventListener("click", function () { load().then(function () { ok("已刷新"); }); });
+    $("#shortlinkBtn").addEventListener("click", mintShortlink);
+  $("#shortlinkTable").addEventListener("click", function (e) {
+    var btn = e.target.closest ? e.target.closest("[data-shortline-del]") : null;
+    if (btn) revokeShortlink(btn.getAttribute("data-shortline-del"));
+  });
+
+  $("#refreshBtn").addEventListener("click", function () { load().then(function () { ok("已刷新"); }); });
 
     $("#rosterFilter").addEventListener("input", function (e) {
       S.rosterQ = e.target.value;

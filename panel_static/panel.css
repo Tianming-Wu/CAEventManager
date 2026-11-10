@@ -2578,18 +2578,23 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  box-shadow: 0 18px 40px rgba(40, 28, 12, .22);
-  /* 与顶栏同层但要**在它下面**（顶栏 40）：收起时整块挪到顶栏上方
-     （-100% 自己高度再减掉那 10px 间距），所以看到的是"从顶栏底下滑出来" */
+  /* 与顶栏同层但要**在它下面**（顶栏 40）：收起时整块挪到顶栏上方，
+     所以看到的是"从顶栏底下滑出来" */
   z-index: 30;
   overflow: hidden;
-  transform: translateY(calc(-100% - 10px));
+  /* 多滑一截（-64px）：只挪到"自己刚好藏进顶栏"是不够的——阴影比盒子大，
+     那圈 18px 偏移 + 40px 模糊还会从顶栏下沿露出来。所以让它多走一个阴影的距离，
+     阴影也跟着一起钻进去；同时收起的阴影本身淡到透明，收尾时不会留一条灰影 */
+  transform: translateY(calc(-100% - 74px));
+  box-shadow: 0 18px 40px rgba(40, 28, 12, 0);
   visibility: hidden;
   pointer-events: none;
-  transition: transform .24s cubic-bezier(.2, .7, .3, 1), visibility .24s;
+  transition: transform .28s cubic-bezier(.2, .7, .3, 1),
+              box-shadow .28s ease, visibility .28s;
 }
 .notice-panel.open {
   transform: none;
+  box-shadow: 0 18px 40px rgba(40, 28, 12, .22);
   visibility: visible;
   pointer-events: auto;
 }

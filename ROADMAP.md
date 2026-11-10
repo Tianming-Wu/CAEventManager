@@ -633,3 +633,31 @@ colspan 单元格会把表头重新分配一遍，一有数据表头又跳回来
   一起改
 
 删除之后 `config.json` 的含义会变，已有部署需要手工补一次；目前只有一台开发实例，可以直接重建。
+
+## 十、短链改成平台能力（计划）
+
+现状：短链不是模块文件里的代码，但整条链路都长在模块上——
+
+- 存储用**活动库**的三个配置键：`shortlink_code` / `shortlink_target` / `shortlink_expires`，
+  默认值还写在 `core/db.py` 的 `DEFAULT_CONFIG` 里（那是奖票活动的数据模型）
+- 目标是 `screen` / `admin` / `board` 三个模块概念
+- 接口挂在模块的命名空间下：`POST /api/admin/shortlink`
+- 界面在模块的控制台 `static/admin.js` 里；一个活动同时只有一条短链，最长 180 分钟
+
+做法：删掉这一套，在平台重做一个更通用的版本，并作为模块可申请的 `features` 能力。
+
+- **表**：放 `panel.sqlite3` 的 `shortlinks`——`code`（7 位 base32，去掉 0/O/1/I 这类易混字符）、
+  `event_seq`、`target_path`（活动内的相对路径，例如 `screen`、`admin#/roster`）、
+  `created_by`、`created_at`、`expires_at`、`hits`
+- **路由**：`/s/<code>` 属于面板族，与活动无关。命中后 302 到 `/<活动 token>/<target_path>`——
+  对外只用 token，活动号只在库里
+- **接口**：`POST /api/panel/shortlink`（要活动成员身份）返回 `code` / `url` / `expires`；
+  `GET` 列出这场活动还有效的短链；`DELETE` 立即失效
+- **能力声明**：`module.json` 的 `features.shortlink` 里写这个模块允许指向哪些目标
+  （`targets: [{"key": "screen", "label": "大屏"}]`）。没申请就没有接口、也没有按钮
+- **界面**：短链面板从 `static/admin.js` 移到平台侧（活动后台顶栏一个入口），
+  目标下拉由模块声明的列表生成
+- **顺手删掉**：`DEFAULT_CONFIG` 里的三个 `shortlink_*` 键、`/api/admin/shortlink`、
+  `shortlink_redirect()` 的旧实现；限速逻辑（同来源连错 N 次后延迟）保留到新实现里
+
+与「九」一起做：两件事都动请求分发与活动上下文，分开做要改两遍。

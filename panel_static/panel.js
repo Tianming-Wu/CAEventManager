@@ -4137,7 +4137,7 @@
     if (!sub) return;
     var cfg = S.assistantCfg || {};
     if (!cfg.ready) {
-      sub.textContent = "还没有密钥：点右上角的设置图标填一把，地址与模型有默认值";
+      sub.textContent = "还没有密钥：点页面右上角的模型设置按钮填写，地址与模型有默认值";
       return;
     }
     var bits = ["当前模型：" + (cfg.model || "—")];
@@ -4342,7 +4342,7 @@
     drawAssistantQuota();
     var sub = $("#assistantSub");
     if (sub && !S.assistantQuota && !cfg.ready) {
-      sub.textContent = "还没有密钥：点右上角的设置图标填一把，地址与模型有默认值";
+      sub.textContent = "还没有密钥：点页面右上角的模型设置按钮填写，地址与模型有默认值";
     }
     var asks = $("#assistantAsks");
     if (asks && !asks.children.length) {

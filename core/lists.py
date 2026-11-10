@@ -16,16 +16,17 @@
 """
 
 import csv
+import errors
 import io
 import json
 import os
 import paths
+import pinyin
 import secrets
 import sqlite3
 import threading
 import time
 
-import model
 
 BASE_DIR = paths.APP_ROOT
 
@@ -230,7 +231,7 @@ def init_db():
 # people
 # --------------------------------------------------------------------------- #
 def _pinyin(name, py=None, pyi=None):
-    return model.normalize_pinyin({"name": name, "py": py, "pyi": pyi})
+    return pinyin.pi({"name": name, "py": py, "pyi": pyi})
 
 
 def upsert_person(conn, sid, name, grp="", note="", py=None, pyi=None, dept=""):
@@ -244,7 +245,7 @@ def upsert_person(conn, sid, name, grp="", note="", py=None, pyi=None, dept=""):
     sid = (sid or "").strip()
     name = (name or "").strip()
     if not sid or not name:
-        raise model.ApiError("学号和姓名都不能为空")
+        raise errors.ApiError("学号和姓名都不能为空")
     now = time.time()
     py, pyi = _pinyin(name, py, pyi)
     dept = (dept or "").strip()
@@ -275,9 +276,9 @@ def create_roster(conn, owner_id, name, note="", visibility="private",
                   grant_mode="auto", approve_mode="owner"):
     name = (name or "").strip()
     if not name:
-        raise model.ApiError("请填写名单名称")
+        raise errors.ApiError("请填写名单名称")
     if len(name) > 60:
-        raise model.ApiError("名单名称最长 60 个字")
+        raise errors.ApiError("名单名称最长 60 个字")
     if visibility not in VISIBILITY:
         visibility = "private"
     if grant_mode not in GRANT_MODES:
@@ -304,18 +305,18 @@ def update_roster(conn, roster_id, **fields):
         if key == "name":
             value = str(value).strip()
             if not value:
-                raise model.ApiError("请填写名单名称")
+                raise errors.ApiError("请填写名单名称")
             if len(value) > 60:
-                raise model.ApiError("名单名称最长 60 个字")
+                raise errors.ApiError("名单名称最长 60 个字")
         elif key == "visibility":
             if value not in VISIBILITY:
-                raise model.ApiError("可见性只能是私有 / 公开 / 组织公开")
+                raise errors.ApiError("可见性只能是私有 / 公开 / 组织公开")
         elif key == "grant_mode":
             if value not in GRANT_MODES:
-                raise model.ApiError("写入权限只能是申请即生效或需要确认")
+                raise errors.ApiError("写入权限只能是申请即生效或需要确认")
         elif key == "approve_mode":
             if value not in APPROVE_MODES:
-                raise model.ApiError("审批人只能是拥有者或可写的人")
+                raise errors.ApiError("审批人只能是拥有者或可写的人")
         else:
             value = str(value)[:200]
         if current is not None and key in current.keys() and current[key] == value:
@@ -660,7 +661,16 @@ def entry_view(row):
 # import / export
 # --------------------------------------------------------------------------- #
 # 名单比活动名单多一列院系，其余表头词沿用活动那份
-ALIASES = dict(model.HEADER_ALIASES)
+# 名单导入认哪些表头：这是平台的事，与玩法无关
+HEADER_ALIASES = {
+    "sid": ("学号", "sid", "id", "号码", "studentid", "student_id", "工号", "准考证号"),
+    "name": ("姓名", "name", "名字", "学生姓名"),
+    "py": ("拼音", "py", "pinyin", "全拼"),
+    "pyi": ("首字母", "pyi", "initials", "简拼"),
+    "grp": ("班级", "分组", "grp", "group", "小组", "专业"),
+    "note": ("备注", "note", "说明"),
+}
+ALIASES = dict(HEADER_ALIASES)
 ALIASES["dept"] = ("院系", "学院", "系别", "系", "dept", "department", "faculty")
 
 
@@ -683,7 +693,7 @@ def import_text(conn, roster_id, text, source="import", tag=""):
     """
     text = (text or "").strip("\ufeff").strip()
     if not text:
-        raise model.ApiError("导入内容为空")
+        raise errors.ApiError("导入内容为空")
     sample = text.splitlines()[0]
     delim = "\t" if sample.count("\t") > sample.count(",") else ","
     rows = list(csv.reader(io.StringIO(text), delimiter=delim))
@@ -695,7 +705,7 @@ def import_rows(conn, roster_id, rows, source="import", tag=""):
     rows = [[("" if cell is None else str(cell)) for cell in row] for row in (rows or [])]
     rows = [r for r in rows if any((c or "").strip() for c in r)]
     if not rows:
-        raise model.ApiError("没有解析到任何数据行")
+        raise errors.ApiError("没有解析到任何数据行")
 
     header = _detect_header(rows[0])
     start = 1
@@ -858,18 +868,18 @@ def _theme_of(row):
 
 def check_window(opens_at, closes_at):
     if opens_at and closes_at and opens_at >= closes_at:
-        raise model.ApiError("开始时间必须早于结束时间")
+        raise errors.ApiError("开始时间必须早于结束时间")
 
 
 def create_signup(conn, owner_id, data):
     title = (data.get("title") or "").strip()
     if not title:
-        raise model.ApiError("请填写报名名称")
+        raise errors.ApiError("请填写报名名称")
     if len(title) > 60:
-        raise model.ApiError("报名名称最长 60 个字")
+        raise errors.ApiError("报名名称最长 60 个字")
     roster_id = int(data.get("roster_id") or 0)
     if not roster_id or roster(conn, roster_id) is None:
-        raise model.ApiError("请选择报名写入的名单")
+        raise errors.ApiError("请选择报名写入的名单")
     opens_at = float(data.get("opens_at") or 0)
     closes_at = float(data.get("closes_at") or 0)
     check_window(opens_at, closes_at)
@@ -895,7 +905,7 @@ def create_signup(conn, owner_id, data):
 def update_signup(conn, signup_id, data):
     row = signup(conn, signup_id)
     if row is None:
-        raise model.ApiError("报名不存在", 404)
+        raise errors.ApiError("报名不存在", 404)
     sets, vals = [], []
 
     def put(key, value):
@@ -907,9 +917,9 @@ def update_signup(conn, signup_id, data):
     if "title" in data:
         title = (data.get("title") or "").strip()
         if not title:
-            raise model.ApiError("请填写报名名称")
+            raise errors.ApiError("请填写报名名称")
         if len(title) > 60:
-            raise model.ApiError("报名名称最长 60 个字")
+            raise errors.ApiError("报名名称最长 60 个字")
         put("title", title)
     if "note" in data:
         put("note", (data.get("note") or "").strip()[:300])
@@ -1098,13 +1108,13 @@ def _coerce_field(field, raw):
         try:
             return str(float(value))
         except (TypeError, ValueError):
-            raise model.ApiError("「%s」需要填数字" % field["label"])
+            raise errors.ApiError("「%s」需要填数字" % field["label"])
     if field["type"] == "select":
         if value in (None, ""):
             return ""
         value = str(value).strip()
         if value not in field["options"]:
-            raise model.ApiError("「%s」的选项不在可选范围内" % field["label"])
+            raise errors.ApiError("「%s」的选项不在可选范围内" % field["label"])
         return value
     return str(value or "").strip()[:500]
 
@@ -1118,19 +1128,19 @@ def submit_signup(conn, row, form, ip=""):
     sid = (form.get("sid") or "").strip()
     name = (form.get("name") or "").strip()
     if not sid or not name:
-        raise model.ApiError("学号和姓名均为必填")
+        raise errors.ApiError("学号和姓名均为必填")
     if len(sid) > 32 or len(name) > 32:
-        raise model.ApiError("学号或姓名过长")
+        raise errors.ApiError("学号或姓名过长")
     count = signup_counts(conn, [row["id"]]).get(row["id"], 0)
     status = signup_status(row, count, now)
     if status == "disabled":
-        raise model.ApiError("本次报名已关闭", 409)
+        raise errors.ApiError("本次报名已关闭", 409)
     if status == "upcoming":
-        raise model.ApiError("本次报名尚未开始", 409)
+        raise errors.ApiError("本次报名尚未开始", 409)
     if status == "ended":
-        raise model.ApiError("本次报名已结束", 409)
+        raise errors.ApiError("本次报名已结束", 409)
     if status == "full":
-        raise model.ApiError("名额已满", 409)
+        raise errors.ApiError("名额已满", 409)
 
     member = None
     if row["filter_roster_id"]:
@@ -1139,16 +1149,16 @@ def submit_signup(conn, row, form, ip=""):
             " WHERE e.roster_id=? AND e.state='active' AND p.sid=?",
             (row["filter_roster_id"], sid)).fetchone()
         if member is None:
-            raise model.ApiError("你不在本次报名的范围名单内", 403)
+            raise errors.ApiError("你不在本次报名的范围名单内", 403)
         if _norm(member["name"]) != _norm(name):
-            raise model.ApiError("姓名与名单中的记录不一致", 403)
+            raise errors.ApiError("姓名与名单中的记录不一致", 403)
 
     fields = _fields_of(row)
     answers = {}
     for field in fields:
         value = _coerce_field(field, (form.get("answers") or {}).get(field["key"]))
         if field["required"] and not value:
-            raise model.ApiError("「%s」为必填项" % field["label"])
+            raise errors.ApiError("「%s」为必填项" % field["label"])
         answers[field["key"]] = value
 
     def into(target):
@@ -1184,7 +1194,7 @@ def submit_signup(conn, row, form, ip=""):
                     "name": existing["name"], "count": count}
         # 信息不一致：能不能自己改，由这条报名自己的设置说了算
         if row["self_edit"] != "on":
-            raise model.ApiError(
+            raise errors.ApiError(
                 "您已经报过名，但信息不一致。如果之前的信息有误，请联系负责人", 409)
         if not form.get("update"):
             return {"ok": True, "state": "differs", "ts": existing["ts"],

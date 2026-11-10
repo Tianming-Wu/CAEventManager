@@ -14,6 +14,7 @@ Design notes
 """
 
 import os
+import modules
 import paths
 import sqlite3
 import threading
@@ -66,84 +67,17 @@ def event_id():
 KINDS = ("checkin", "task1", "task2")
 KIND_LABEL = {"checkin": "签到", "task1": "任务一", "task2": "任务二", "bonus": "速度奖励"}
 
+# 平台自己的默认配置；玩法相关的默认值在模块的 defaults.json 里，建活动时一并写入
 DEFAULT_CONFIG = {
-    "kind": "nwuca.lottery",     # which activity kind draws this activity
-    "title": "抽奖活动",
+    "kind": "nwuca.lottery",      # 这个活动用的是哪个模块
+    "title": "",
     "subtitle": "",
-    # pool: "auto" => present * 3 + bonus_constant (recomputed live, follows the
-    # real attendance and can never starve the guaranteed tickets)
-    #       "fixed" => exactly pool_size
-    "pool_mode": "auto",
-    "pool_size": 200,           # used when pool_mode == "fixed"
-    "bonus_constant": 20,       # extra speed-reward tickets in auto mode
-    "nominal_guaranteed": 180,  # informational only
-    "beta": 1.0,
-    "public_base_url": "",
-    "show_times": True,
-    "show_sid": False,
-    "tie_seed": 0,              # 0 => generated lazily; breaks remainder ties
-    "finalized": False,
-    "finalized_at": 0,
-    # name + how many units + how they are drawn ("ticket" = by ticket,
-    # "person" = equal chance among the people in the room)
-    # order here is the draw order shown to the operator: smallest prize first
-    "prizes": [
-        {"name": "三等奖", "count": 10, "mode": "ticket"},
-        {"name": "二等奖", "count": 5, "mode": "ticket"},
-        {"name": "一等奖", "count": 2, "mode": "ticket"},
-        {"name": "特等奖", "count": 1, "mode": "person"},
-    ],
-    "allow_bonus": True,
-    # de-duplication, two independent axes: inside one prize, and across prizes.
-    # by-person prizes only follow the first (see model.draw_rules)
-    "draw_unique_inside": True,
-    "draw_unique_across": False,
-    "person_draw_no_repeat": True,  # older key, read when the new one is absent
-    "screen_phase": "signin",       # signin | draw - drives what the big screen shows
-    "screen_show_wall": False,      # the per-person name grid; off by default
-    # 签到二维码与 presence cookie 的签名密钥：第一次用到时按活动生成，见 checkin_secret()
-    # 32-character access id (the projector laptop, typically)
-    "self_checkin": True,           # allow scanning the on-screen QR to check in
-    "event_timezone_offset": 8,  # only used for CSV export / server-side text
+    "public_base_url": "",        # 对外地址由前缀 + token 算出来，这里只留旧值备用
+    "self_checkin": True,         # 允许扫大屏二维码自助签到
+    "event_timezone_offset": 8,   # 导出与文案里的时区
 }
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS students (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    sid         TEXT    NOT NULL UNIQUE,
-    name        TEXT    NOT NULL,
-    py          TEXT,
-    pyi         TEXT,
-    grp         TEXT,
-    note        TEXT,
-    role        TEXT    NOT NULL DEFAULT 'participant',  -- participant | staff | volunteer
-    origin      TEXT    NOT NULL DEFAULT 'manual',       -- manual | import | roster | signup
-    detached_at REAL    NOT NULL DEFAULT 0,              -- 绑定的名单里已经没有这个人
-    created_at  REAL    NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS marks (
-    student_id  INTEGER NOT NULL,
-    kind        TEXT    NOT NULL,
-    done_at     REAL    NOT NULL,
-    source      TEXT,
-    actor       TEXT,
-    PRIMARY KEY (student_id, kind)
-);
-
-CREATE TABLE IF NOT EXISTS tickets (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    student_id  INTEGER NOT NULL,
-    kind        TEXT    NOT NULL,
-    code        INTEGER NOT NULL,
-    assigned_at REAL    NOT NULL,
-    released_at REAL
-);
-CREATE UNIQUE INDEX IF NOT EXISTS tickets_live_code
-    ON tickets(code) WHERE released_at IS NULL;
-CREATE INDEX IF NOT EXISTS tickets_live_student
-    ON tickets(student_id) WHERE released_at IS NULL;
-
+PLATFORM_SCHEMA = """
 CREATE TABLE IF NOT EXISTS audit (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     ts          REAL    NOT NULL,
@@ -155,22 +89,10 @@ CREATE TABLE IF NOT EXISTS audit (
 );
 CREATE INDEX IF NOT EXISTS audit_ts ON audit(ts);
 
-CREATE TABLE IF NOT EXISTS draws (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    seq         INTEGER NOT NULL,
-    prize       TEXT,
-    mode        TEXT    NOT NULL DEFAULT 'ticket',  -- 'ticket' | 'person'
-    code        INTEGER,
-    student_id  INTEGER,
-    ts          REAL    NOT NULL,
-    voided_at   REAL,
-    batch       TEXT                                -- draws made by one click share it
-);
-
 CREATE TABLE IF NOT EXISTS config (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
-);
+);;
 """
 
 _local = threading.local()
@@ -240,33 +162,24 @@ def checkin_secret(conn):
     return secret
 
 
-def init_db():
-    """Create schema and seed missing config keys.  Safe to call repeatedly."""
+def init_db(kind=None):
+    """建表并补默认配置：平台自己的表加这个活动的模块声明的表。可重复调用。"""
     global _initialized
     with _init_lock:
         conn = connect()
-        conn.executescript(SCHEMA)
-        # migrations for databases created by an older build
-        cols = {row["name"] for row in conn.execute("PRAGMA table_info(draws)")}
-        if "mode" not in cols:
-            conn.execute("ALTER TABLE draws ADD COLUMN mode TEXT NOT NULL DEFAULT 'ticket'")
-        if "batch" not in cols:
-            conn.execute("ALTER TABLE draws ADD COLUMN batch TEXT")
-        scols = {row["name"] for row in conn.execute("PRAGMA table_info(students)")}
-        if "origin" not in scols:
-            conn.execute(
-                "ALTER TABLE students ADD COLUMN origin TEXT NOT NULL DEFAULT 'manual'"
-            )
-        if "detached_at" not in scols:
-            conn.execute(
-                "ALTER TABLE students ADD COLUMN detached_at REAL NOT NULL DEFAULT 0"
-            )
-        if "role" not in scols:
-            conn.execute(
-                "ALTER TABLE students ADD COLUMN role TEXT NOT NULL DEFAULT 'participant'"
-            )
+        conn.executescript(PLATFORM_SCHEMA)
+        # 干什么用的模块决定了它自己那几张表；没写 kind 就看库里的配置
+        cfg_kind = kind or get_config(conn, "kind") or DEFAULT_CONFIG["kind"]
+        module_schema = modules.kind_schema(cfg_kind)
+        if module_schema:
+            conn.executescript(module_schema)
         now = time.time()
-        for key, val in DEFAULT_CONFIG.items():
+        defaults = dict(DEFAULT_CONFIG)
+        defaults.setdefault("kind", cfg_kind)
+        # 模块的默认配置只在它自己的键缺的时候才写，平台的键以平台为准
+        for key, val in modules.kind_defaults(cfg_kind).items():
+            defaults.setdefault(key, val)
+        for key, val in defaults.items():
             cur = conn.execute("SELECT 1 FROM config WHERE key=?", (key,))
             if cur.fetchone() is None:
                 set_config_raw(conn, key, val)

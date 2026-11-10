@@ -22,9 +22,11 @@ inside the module, so the next event does not start from an empty form.
 Only the metadata is read here.  ``module.py`` is loaded later, after a syntax
 check, and only for modules whose ``requires`` matches this build.
 """
+import importlib.util
 import json
 import os
 import paths
+import sys
 import re
 
 BASE_DIR = paths.APP_ROOT
@@ -254,6 +256,69 @@ def console_pages(module_id, version, disabled=()):
     for page_id, title in PLATFORM_PAGES:
         pages.append({"id": page_id, "title": title, "platform": True})
     return pages
+
+
+def kind_dir(kind_id):
+    """模块目录：实例自己装的优先，其次内置。"""
+    kind_id = str(kind_id or "").strip()
+    if not kind_id or "/" in kind_id or "\\" in kind_id or ".." in kind_id:
+        return None
+    for root in ("modules", "builtin/modules"):
+        folder = os.path.join(paths.APP_ROOT, root, kind_id)
+        if os.path.isdir(folder):
+            return folder
+    return None
+
+
+def kind_schema(kind_id):
+    """模块在自己那一份 schema.sql 里声明的表；没有就返回空串。"""
+    folder = kind_dir(kind_id)
+    if folder is None:
+        return ""
+    path = os.path.join(folder, "schema.sql")
+    if not os.path.isfile(path):
+        return ""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return fh.read()
+    except OSError:
+        return ""
+
+
+def kind_defaults(kind_id):
+    """模块的默认配置（活动库里的 config 键）。"""
+    folder = kind_dir(kind_id)
+    if folder is None:
+        return {}
+    path = os.path.join(folder, "defaults.json")
+    if not os.path.isfile(path):
+        return {}
+    try:
+        data = _read_json(path)
+    except ValueError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def load_kind_model(kind_id):
+    """按活动所用的模块把它的 model.py 载进来；同一个模块只载一次。"""
+    kind_id = str(kind_id or "").strip()
+    if kind_id in _MODELS:
+        return _MODELS[kind_id]
+    folder = kind_dir(kind_id)
+    path = os.path.join(folder, "model.py") if folder else ""
+    if not path or not os.path.isfile(path):
+        raise KindError("模块 %s 没有提供 model.py" % kind_id)
+    name = "kindmodel_" + kind_id.replace(".", "_").replace("-", "_")
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    _MODELS[kind_id] = module
+    return module
+
+
+_MODELS = {}
 
 
 def load_module(folder, version, builtin=False, enabled=True):

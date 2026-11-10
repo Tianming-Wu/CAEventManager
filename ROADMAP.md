@@ -685,7 +685,7 @@ colspan 单元格会把表头重新分配一遍，一有数据表头又跳回来
 
 ---
 
-## 十一、把模块的业务模型搬出核心（计划）
+## 十一、把模块的业务模型搬出核心（**第一步已完成**）
 
 现状：核心能不带模块启动（把 `builtin/modules/nwuca.lottery` 挪走，`/login` 与面板照常工作，
 已实测），但**玩法的数据模型还在核心**：
@@ -711,7 +711,16 @@ colspan 单元格会把表头重新分配一遍，一有数据表头又跳回来
   `schema.sql`），用 `importlib` 按 `kind` 加载；旧部署的活动库不迁移——系统还没上线，
   直接重建
 
-顺序：先把 `model.py` 与奖票的表搬进模块并跑通现有测试，再抽接口；一次到位风险太大。
+**第一步已落地**：`core/model.py` 搬进 `builtin/modules/nwuca.lottery/model.py`，平台的
+`core/model.py` 只剩一个按 `kind` 载入的分发器（模块级 `__getattr__`，调用写法不变）；
+奖票的四张表移进模块的 `schema.sql`，默认配置移进 `defaults.json`；核心只留 `config` / `audit`。
+顺手把两件反向依赖摆正：`ApiError` 到 `core/errors.py`，姓名音节到 `core/pinyin.py`，
+表头别名回到 `core/lists.py`。实测把整个模块目录移走，平台照常启动（面板、名单、报名、审批、
+短链都在），只有用到这个玩法的接口才会报错。
+
+下一步（还没做）：把 `app.py` 里那些直接调 `model.mark` / `model.draw` 的活动接口收进模块，
+平台只保留声明式接口（`snapshot` / `stats` / `self_checkin` / 动作调用），这样装两个玩法完全
+不同的模块，平台代码不需要认识其中任何一个。
 
 ## 十二、高危功能（`super.` 前缀）（计划）
 

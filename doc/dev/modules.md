@@ -10,6 +10,9 @@ builtin/modules/<id>/            随版本发布的模块
 modules/<id>/                    实例自己装的模块（不进版本库）
   module.json                    标识、名称、版本、页面、能力声明
   schema.json                    创建活动时要填的参数（平台据此画表单）
+  model.py                       这个玩法的业务逻辑（平台按 kind 载入）
+  schema.sql                     这个模块在活动库里的表
+  defaults.json                  这个模块的默认配置键
   templates/*.json               随模块发布的预设
   doc.md                         这个模块的现场说明（运维助手也读这份）
 ```

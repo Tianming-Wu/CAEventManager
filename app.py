@@ -65,7 +65,7 @@ TPL_DIR = os.path.join(BASE_DIR, "tpl")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.8.2.40"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.9.0.41"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -1968,9 +1968,9 @@ class Handler(BaseHTTPRequestHandler):
                         (seq, who, "member", "pending", now))
                 panel.audit(tx, acc["username"], "event_create", str(seq), title)
 
-            # the activity gets its own database, seeded from the kind's defaults
+            # the activity gets its own database: 平台表 + 这个模块声明的表
             db.set_event(seq)
-            db.init_db()
+            db.init_db(kind["id"])
             event_conn = db.connect()
             prefix = (LOCAL_CFG.get("public_base_prefix") or "").rstrip("/")
             with db.tx(event_conn):
@@ -3858,7 +3858,7 @@ def main():
         db.init_db()
         conn = db.connect()
         bootstrap_secrets()
-        model.ensure_seed(conn)
+        model.ensure_event(conn)
     # the built-in presets live in templates/*.json; the table is what the app
     # reads, so they are copied in on every start
     with panel.tx() as tx:

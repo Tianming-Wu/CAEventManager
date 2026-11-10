@@ -1,0 +1,40 @@
+{
+  "pool_mode": "auto",
+  "pool_size": 200,
+  "bonus_constant": 20,
+  "nominal_guaranteed": 180,
+  "beta": 1.0,
+  "show_times": true,
+  "show_sid": false,
+  "tie_seed": 0,
+  "finalized": false,
+  "finalized_at": 0,
+  "prizes": [
+    {
+      "name": "三等奖",
+      "count": 10,
+      "mode": "ticket"
+    },
+    {
+      "name": "二等奖",
+      "count": 5,
+      "mode": "ticket"
+    },
+    {
+      "name": "一等奖",
+      "count": 2,
+      "mode": "ticket"
+    },
+    {
+      "name": "特等奖",
+      "count": 1,
+      "mode": "person"
+    }
+  ],
+  "allow_bonus": true,
+  "draw_unique_inside": true,
+  "draw_unique_across": false,
+  "person_draw_no_repeat": true,
+  "screen_phase": "signin",
+  "screen_show_wall": false
+}

@@ -18,6 +18,9 @@ lists.py          名单与人员库（平台级的人）
 db.py             每场活动一个库；活动配置与状态
 model.py / expr.py / auth.py / checkin.py / exporter.py / packs.py / modules.py / presets.py / bus.py
 xlsx.py           表格读写（一个工作表、文本单元格）：名单与报名的导出导入都用它
+errors.py         ApiError：平台与模块共用的错误类型
+pinyin.py         姓名 → 逐字音节与首字母（姓用姓氏读音）
+model.py          **加载器**：按活动所用的模块，把它的 model.py 载进来
 surnames.py       姓氏读音（曾 = zeng 这类），算拼音时先查它
 assistant.py      运维助手（模型调用、工具、提示词）
 policy.py         助手放行的唯一判定口
@@ -27,6 +30,24 @@ shortlinks.py     短链：平台级的转发表，按活动记（core/shortlink
 
 路由判定不依赖外部前缀：路径里出现已知活动 token 就按活动处理，否则把剩余路径按面板路由匹配。
 所以本机直连、反向代理前缀、将来的子域名都不用改代码；`public_base_prefix` 只用于生成绝对链接。
+
+## 模块提供什么
+
+平台不认识任何玩法：奖票、任务链、抽奖这些词只出现在模块里。
+
+| 模块目录里 | 平台拿它做什么 |
+| --- | --- |
+| `module.json` | 标识、版本约束、申请的能力（`features`） |
+| `schema.json` | 建活动时画的表单 |
+| `model.py` | 这个玩法的业务逻辑。平台通过 `core/model.py` 按 `kind` 载入，`model.xxx(...)` 直接落到它上面 |
+| `schema.sql` | 这个模块在活动库里的表。平台建完自己的表（`config` / `audit`）再执行这一份 |
+| `defaults.json` | 这个模块的默认配置键，建活动时写进活动库 |
+| `templates/*.json` | 随模块发布的预设 |
+| `doc.md` | 现场说明，运维助手也读 |
+
+把 `builtin/modules/nwuca.lottery` 整个移走，平台照常启动：面板、名单、报名、审批、短链都在，
+用到这个玩法的接口才会报错（因为模块不在）。模块自己的初始化钩子是 `ensure_seed(conn)`，
+没有就跳过。
 
 ## 数据
 

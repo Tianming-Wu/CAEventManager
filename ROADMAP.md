@@ -615,11 +615,16 @@ colspan 单元格会把表头重新分配一遍，一有数据表头又跳回来
 | `db.DEFAULT_SEQ`、`db.DB_PATH` | 活动号的兜底值；`DB_PATH` 只给老脚本用 | 删除兜底，活动号必填 |
 | `db.current_event()` / `set_current_event()` | 线程局部的「当前活动」，请求路径上散着十几处赋值 | 由分发层把活动号显式传给下层 |
 | `panel.init` 的「首个活动（沿用原有访问 id）」 | 启动时按 `path_secret` 造一个活动行 | 删除；活动只由创建动作产生 |
-| `config.json` 的 `path_secret` | 名字与含义都是「首个活动的 token」，实际只用于签到二维码与 presence cookie 的签名 | 改名 `checkin_secret`，只管签名 |
+| `config.json` 的 `path_secret` | 名字与含义都是「首个活动的 token」，实际只用于签到二维码与 presence cookie 的签名 | 从 `config.json` 删除；签到签名密钥改成每个活动各一把，存在活动自己的库里 |
 | `app.py` 启动时清理 `admin_pass` | 发现旧键就写空 | 删除 |
 | `service.sh reset` 里的 `data/admin_password.txt` | 删文件、打印「新的管理员密码」 | 删除这两处 |
 | 同上的清理 glob 里的 `data/lottery.sqlite3` | 备份与删除都包含单文件时代的老库 | 只留 `data/events/*` |
 | `tools/instance_info.py`、`tools/reorder_prizes.py` | 读 `data/admin_password.txt` | 改读 `data/owner_password.txt` |
+
+清理之后 `config.json` 只留服务顶层配置：`host`、`port`、`public_base_prefix`、
+`owner_username`、`owner_name`。活动、名单、账号相关的一切都在数据库里。
+
+删键之前先确认没有别处读它：目前只有 `app.py` 取它算 `SECRET`、`localconfig.py` 生成与校验它。
 
 顺带两件：
 

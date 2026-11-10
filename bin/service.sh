@@ -1,7 +1,10 @@
 #!/bin/sh
 # Small service manager: start / stop / restart / status / log / check
 set -eu
-cd "$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+# 工作目录一律取**脚本所在目录的上一级**，与调用时所在的目录无关：
+# 相对路径先解析成绝对路径，再往上一级，从哪个目录调用都不会跑偏。
+HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+cd "$HERE/.."
 PIDFILE="data/service.pid"
 LOG="data/service.log"
 PORT=$(python3 -c "import json;print(json.load(open('config.json')).get('port', 8931))" 2>/dev/null || echo 8931)

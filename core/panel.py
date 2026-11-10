@@ -1017,7 +1017,7 @@ def _sync_owner_identity(conn, owner, cfg, log=print, explicit=None):
     log("  name    : %r -> %r" % (owner["name"], new_name))
 
 
-def bootstrap(cfg, event_token_hint=None, log=print):
+def bootstrap(cfg, log=print):
     """Create the owner account on first run; record the pre-existing event.
 
     ``config.json`` owns the owner's login name and display name, so an existing
@@ -1055,26 +1055,6 @@ def bootstrap(cfg, event_token_hint=None, log=print):
     else:
         _sync_owner_identity(conn, owner, cfg, log, cfg.get("_explicit") or set())
 
-    # the first event already exists as the service's original access id
-    if event_token_hint:
-        row = conn.execute("SELECT 1 FROM events WHERE token=?",
-                           (event_token_hint,)).fetchone()
-        if row is None:
-            owner_row = conn.execute("SELECT id FROM accounts WHERE role='owner'").fetchone()
-            with tx() as t:
-                cur = t.execute(
-                    "INSERT INTO events (token, title, note, kind, params, owner_id,"
-                    " created_at) VALUES (?,?,?,?,?,?,?)",
-                    (event_token_hint, "", "首个活动（沿用原有访问 id）",
-                     DEFAULT_KIND, "{}", owner_row["id"] if owner_row else None,
-                     time.time()),
-                )
-                if owner_row is not None:
-                    t.execute(
-                        "INSERT OR IGNORE INTO event_members"
-                        " (seq, account_id, role, state, added_at) VALUES (?,?,?,?,?)",
-                        (cur.lastrowid, owner_row["id"], "owner", "active", time.time()))
-                audit(t, "system", "event_adopt", event_token_hint, None)
 
 
 # --------------------------------------------------------------------------- #
@@ -1090,6 +1070,11 @@ def _is_panel_route(path):
     return (path in PANEL_PAGES
             or path.startswith("/api/panel/")
             or path.startswith("/panel_static/"))
+
+
+def event_seqs():
+    """活动号列表：启动时按它逐个初始化各自的库。"""
+    return [row["seq"] for row in connect().execute("SELECT seq FROM events ORDER BY seq")]
 
 
 def event_tokens(extra=()):

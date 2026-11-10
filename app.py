@@ -936,7 +936,7 @@ class Handler(BaseHTTPRequestHandler):
         if found is None:
             return None
         acc, token, conn = found
-        seat = panel.member_of(conn, db.current_event(), acc["id"])
+        seat = panel.member_of(conn, db.event_id(), acc["id"])
         if seat is None or seat["state"] != "active":
             return None
         return ConsoleUser(acc, seat["role"], token, conn)
@@ -1054,19 +1054,21 @@ class Handler(BaseHTTPRequestHandler):
                 self.end_headers()
                 return
 
-            # every event request reads and writes that event's own database
-            db.set_current_event(panel.event_seq(token) or db.DEFAULT_SEQ)
+            # every event request reads and writes that event's own database;
+            # 活动号只在内部传递，对外一律用地址里的 token
+            seq = panel.event_seq(token) if token else None
             path = route
-            if path is None:
+            if seq is None or path is None:
                 # No panel route and no event token: nothing to serve.
-                self._send(
+                return self._send(
                     404,
                     b"<!doctype html><meta charset=utf-8><title>404</title>"
                     b"<body style=\"font-family:system-ui;padding:3em;color:#888\">404 Not Found</body>",
                     "text/html; charset=utf-8",
                 )
-            elif path.startswith("/api/"):
-                self._scope = "event:%s" % db.current_event()
+            db.set_event(seq)
+            if path.startswith("/api/"):
+                self._scope = "event:%s" % seq
                 self._api(method, path, query)
             else:
                 self._page(method, path)
@@ -1273,7 +1275,7 @@ class Handler(BaseHTTPRequestHandler):
                 # the row on the events table is often empty: the name lives
                 # in the event's own database, borrowed the way /events does it
                 if not r["title"]:
-                    db.set_current_event(r["seq"])
+                    db.set_event(r["seq"])
                     titles[r["seq"]] = (
                         db.all_config(db.connect()).get("title") or "")
             return self._json({"ok": True, "invites": [
@@ -1561,19 +1563,16 @@ class Handler(BaseHTTPRequestHandler):
                 " LEFT JOIN accounts o ON o.id = e.owner_id"
                 " WHERE e.archived_at=0 AND m.seq IS NOT NULL"
                 " ORDER BY e.created_at", (acc["id"],)).fetchall()
-            # the public base lives in an event database, not the panel one;
-            # with a single event there is no ambiguity about which one
-            if len(rows) == 1:
-                db.set_current_event(rows[0]["seq"])
-            event_conn = db.connect()
             # links come from the configured prefix plus each row's own token -
             # reading a per-event URL would point every row at one activity
             base = (LOCAL_CFG.get("public_base_prefix") or "").rstrip("/")
             events = [panel.event_view(r, base, r["my_role"]) for r in rows]
-            # The adopted first event has no name of its own; borrow the live one
-            # while there is exactly one event, so the list is not a row of dashes.
-            if len(events) == 1 and not events[0]["title"]:
-                events[0]["title"] = db.all_config(event_conn).get("title") or ""
+            # 活动名在每个活动自己的库里：缺名字的按它自己的活动号去补
+            for row, view in zip(rows, events):
+                if view["title"]:
+                    continue
+                db.set_event(row["seq"])
+                view["title"] = db.all_config(db.connect()).get("title") or ""
             return self._json({"ok": True, "events": events})
 
         if path == "/account/decide" and method == "POST":
@@ -1743,7 +1742,7 @@ class Handler(BaseHTTPRequestHandler):
             kind = by_id.get(module_id)
             if kind is None:
                 raise model.ApiError("没有这个活动模块", 404)
-            db.set_current_event(seq)
+            db.set_event(seq)
             cfg = db.all_config(db.connect())
             keys = {f["key"] for f in kind["fields"]}
             params = {k: cfg[k] for k in keys if k in cfg and cfg[k] is not None}
@@ -1940,7 +1939,7 @@ class Handler(BaseHTTPRequestHandler):
                 panel.audit(tx, acc["username"], "event_create", str(seq), title)
 
             # the activity gets its own database, seeded from the kind's defaults
-            db.set_current_event(seq)
+            db.set_event(seq)
             db.init_db()
             event_conn = db.connect()
             prefix = (LOCAL_CFG.get("public_base_prefix") or "").rstrip("/")
@@ -1985,7 +1984,7 @@ class Handler(BaseHTTPRequestHandler):
             with panel.tx() as tx:
                 tx.execute("UPDATE events SET token=? WHERE seq=?", (token, seq))
                 panel.audit(tx, acc["username"], "event_rotate", str(seq), row["title"])
-            db.set_current_event(seq)
+            db.set_event(seq)
             prefix = (LOCAL_CFG.get("public_base_prefix") or "").rstrip("/")
             event_conn = db.connect()
             with db.tx(event_conn):
@@ -2022,7 +2021,7 @@ class Handler(BaseHTTPRequestHandler):
                            (time.time(), seq))
                 panel.audit(tx, acc["username"], "event_archive", str(seq),
                             row["title"])
-            db.set_current_event(seq)
+            db.set_event(seq)
             with db.tx(db.connect()):
                 db.audit(db.connect(), "event_archive", detail="archived")
             return self._json({"ok": True, "seq": seq, "archived": True,
@@ -2049,7 +2048,7 @@ class Handler(BaseHTTPRequestHandler):
                 tx.execute("UPDATE events SET title=? WHERE seq=?", (title, seq))
                 panel.audit(tx, acc["username"], "event_title", str(seq), title)
             # the event pages read their heading from the event database
-            db.set_current_event(seq)
+            db.set_event(seq)
             event_conn = db.connect()
             with db.tx(event_conn):
                 db.set_config_raw(event_conn, "title", title)
@@ -3110,7 +3109,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/stream" and method == "GET":
             # Public like the board: a projector and a phone showing the same
             # activity hear about changes instead of polling for them.
-            return self._stream(scope="event:%s" % db.current_event())
+            return self._stream(scope="event:%s" % db.event_id())
 
         if path == "/api/screen/token" and method == "GET":
             # Public on purpose: the projector machine should not need a login.
@@ -3205,7 +3204,7 @@ class Handler(BaseHTTPRequestHandler):
 
         # ---- everything below needs a seat on this activity ----
         me = self._require_console()
-        self._target = console_target(path, self._peek(), db.current_event()) \
+        self._target = console_target(path, self._peek(), db.event_id()) \
             if method == "POST" else None
         self._stale = False
         if self._target:
@@ -3233,7 +3232,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise model.ApiError("名称不能为空")
             if len(title) > 60:
                 raise model.ApiError("活动名称最长 60 个字")
-            seq = db.current_event()
+            seq = db.event_id()
             with panel.tx() as tx:
                 tx.execute("UPDATE events SET title=? WHERE seq=?", (title, seq))
                 panel.audit(tx, me.acc["username"], "event_title", str(seq), title)
@@ -3245,7 +3244,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/admin/members" and method == "GET":
             # the roster is the platform's page, and the owner's business
             need_owner()
-            seq = db.current_event()
+            seq = db.event_id()
             rows = panel.event_members(me.conn, seq)
             return self._json({
                 "ok": True,
@@ -3267,7 +3266,7 @@ class Handler(BaseHTTPRequestHandler):
                 "   AND id NOT IN (SELECT account_id FROM event_members WHERE seq=?)"
                 " ORDER BY CASE role WHEN 'owner' THEN 0 WHEN 'superadmin' THEN 1 ELSE 2 END,"
                 "          name, username LIMIT 8",
-                (like, like, db.current_event())).fetchall()
+                (like, like, db.event_id())).fetchall()
             return self._json({"ok": True, "accounts": [
                 {"id": r["id"], "username": r["username"], "name": r["name"],
                  "role": r["role"], "roleLabel": panel.ROLE_LABEL.get(r["role"], r["role"])}
@@ -3277,7 +3276,7 @@ class Handler(BaseHTTPRequestHandler):
             self._check_csrf()
             need_owner()
             data = self._body()
-            seq = db.current_event()
+            seq = db.event_id()
             account_id = int(data.get("accountId") or 0)
             action = (data.get("action") or "").strip()
             seat = me.conn.execute(
@@ -3821,12 +3820,6 @@ def bootstrap_secrets():
         with db.tx(conn):
             db.set_config_raw(conn, "public_base_url", localconfig.public_url(LOCAL_CFG))
         cfg = db.all_config(conn)
-    # This activity used to carry its own console password.  The console signs in
-    # through the panel now, so the hash is dropped instead of migrated: leaving
-    # it in place would leave a credential nothing checks and nobody rotates.
-    if cfg.get("admin_pass"):
-        with db.tx(conn):
-            db.set_config_raw(conn, "admin_pass", "")
     if not db.get_config(conn, "seeded"):
         with db.tx(conn):
             model.ensure_seed(conn)
@@ -3846,19 +3839,22 @@ def main():
     )
     args = parser.parse_args()
 
-    db.init_db()
-    bootstrap_secrets()
-    conn = db.connect()
-    ensure_public_url(conn)
     panel.init_db()
-    panel.bootstrap(LOCAL_CFG, event_token_hint=SECRET, log=log)
+    panel.bootstrap(LOCAL_CFG, log=log)
     lists.init_db()
+    # 每个活动有自己的库：启动时逐个建表、补默认配置、给公示页写好地址
+    for seq in panel.event_seqs():
+        db.set_event(seq)
+        db.init_db()
+        conn = db.connect()
+        bootstrap_secrets()
+        ensure_public_url(conn)
+        model.ensure_seed(conn)
     # the built-in presets live in templates/*.json; the table is what the app
     # reads, so they are copied in on every start
     with panel.tx() as tx:
         by_id = {m["id"]: m for m in modules.all_modules(VERSION)}
         presets.seed(tx, by_id)
-    model.ensure_seed(conn)
 
     pidfile = os.path.join(db.DATA_DIR, "service.pid")
     try:
@@ -3870,14 +3866,11 @@ def main():
 
     httpd = ThreadingHTTPServer((args.host, args.port), Handler)
     httpd.daemon_threads = True
-    cfg = db.all_config(conn)
-    log("lottery service v%s" % VERSION)
+    log("service v%s" % VERSION)
     log("listening on http://%s:%d" % (args.host, args.port))
-    log("secret path segment: %s" % SECRET)
-    log("public board  : %s/" % public_base_url(conn))
-    log("public screen : %s/screen" % public_base_url(conn))
-    log("admin console : %s/admin" % public_base_url(conn))
-    log("data dir: %s" % db.DATA_DIR)
+    log("public base : %s" % ((LOCAL_CFG.get("public_base_prefix") or "").rstrip("/") or "—"))
+    log("activities  : %s" % (", ".join(str(s) for s in panel.event_seqs()) or "还没有活动"))
+    log("data dir    : %s" % db.DATA_DIR)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

@@ -25,8 +25,6 @@ DATA_DIR = os.environ.get("LOTTERY_DATA_DIR") or os.path.join(BASE_DIR, "data")
 # One file per event, named after its numeric id.  The id is a counter, so the
 # name cannot collide, and the file is the unit of backup, export and deletion.
 EVENTS_DIR = os.path.join(DATA_DIR, "events")
-LEGACY_DB = os.path.join(DATA_DIR, "lottery.sqlite3")
-DEFAULT_SEQ = 1
 
 
 def use_data_dir(path):
@@ -35,50 +33,35 @@ def use_data_dir(path):
     The paths are derived once at import, which is fine for the service but not
     for tests or tools that build a throwaway installation.
     """
-    global DATA_DIR, EVENTS_DIR, LEGACY_DB, DB_PATH
+    global DATA_DIR, EVENTS_DIR
     DATA_DIR = os.path.abspath(path)
     EVENTS_DIR = os.path.join(DATA_DIR, "events")
-    LEGACY_DB = os.path.join(DATA_DIR, "lottery.sqlite3")
-    DB_PATH = event_path(DEFAULT_SEQ)
     _local.conn = None
     _local.path = None
+    _local.seq = None
 
 
 def event_path(seq):
     return os.path.join(EVENTS_DIR, "%s.sqlite3" % int(seq))
 
 
-# kept for the tools that used to poke at DB_PATH
-DB_PATH = event_path(DEFAULT_SEQ)
 
 
-def migrate_legacy():
-    """Move the single-file database into the per-event layout.
 
-    Runs once: the old name disappears the moment the move succeeds.
-    """
-    if not os.path.exists(LEGACY_DB) or os.path.exists(event_path(1)):
-        return False
-    os.makedirs(EVENTS_DIR, exist_ok=True)
-    os.replace(LEGACY_DB, event_path(1))
-    for suffix in ("-wal", "-shm"):
-        old = LEGACY_DB + suffix
-        if os.path.exists(old):
-            os.replace(old, event_path(1) + suffix)
-    return True
+def set_event(seq):
+    """Point this thread's connection at one event's database (its numeric id)."""
+    _local.seq = int(seq)
+    if getattr(_local, "path", None) != event_path(seq):
+        _local.conn = None
+        _local.path = None
 
 
-def set_current_event(seq):
-    """Point this thread's connection at one event's database."""
+def event_id():
+    """The event this thread is serving.  The dispatcher sets it per request."""
+    seq = getattr(_local, "seq", None)
     if seq is None:
-        return
-    if getattr(_local, "seq", None) != int(seq):
-        _local.seq = int(seq)
-
-
-def current_event():
-    """Which event this thread is serving; the dispatcher sets it per request."""
-    return getattr(_local, "seq", DEFAULT_SEQ)
+        raise RuntimeError("还没有选活动：先调用 db.set_event(seq)")
+    return seq
 
 KINDS = ("checkin", "task1", "task2")
 KIND_LABEL = {"checkin": "签到", "task1": "任务一", "task2": "任务二", "bonus": "速度奖励"}
@@ -233,7 +216,7 @@ class tx:
 def connect():
     """Thread-local connection (http.server serves each request in its own thread)."""
     conn = getattr(_local, "conn", None)
-    path = event_path(getattr(_local, "seq", None) or DEFAULT_SEQ)
+    path = event_path(event_id())
     if conn is not None and getattr(_local, "path", None) == path:
         return conn
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -251,7 +234,6 @@ def connect():
 def init_db():
     """Create schema and seed missing config keys.  Safe to call repeatedly."""
     global _initialized
-    migrate_legacy()
     with _init_lock:
         conn = connect()
         conn.executescript(SCHEMA)

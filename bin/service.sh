@@ -99,19 +99,15 @@ reset)
     fi
     "$0" stop >/dev/null 2>&1 || true
     stamp=$(date +%Y%m%d-%H%M%S)
-    for f in data/events/*.sqlite3 data/events/*.sqlite3-wal data/events/*.sqlite3-shm \
-         data/lottery.sqlite3 data/lottery.sqlite3-wal data/lottery.sqlite3-shm; do
+    for f in data/events/*.sqlite3 data/events/*.sqlite3-wal data/events/*.sqlite3-shm; do
         if [ -f "$f" ]; then
             cp "$f" "data/backup-$stamp-$(basename "$f")" 2>/dev/null || true
             rm -f "$f"
         fi
     done
-    rm -f data/admin_password.txt data/service.pid
+    rm -f data/service.pid
     echo "已清空（备份在 data/backup-$stamp-*）"
     "$0" start
-    echo
-    echo "新的管理员密码:"
-    cat data/admin_password.txt 2>/dev/null || echo "  (未生成，检查日志)"
     ;;
 log)
     tail -n "${2:-40}" "$LOG"

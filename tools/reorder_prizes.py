@@ -22,7 +22,7 @@ cfg = json.load(open("config.json", encoding="utf-8"))
 secret = cfg["path_secret"]
 base = "http://127.0.0.1:%d/%s" % (int(cfg.get("port") or 8931), secret)
 password = ""
-for line in open("data/admin_password.txt", encoding="utf-8"):
+for line in open("data/owner_password.txt", encoding="utf-8"):
     if line.startswith("password:"):
         password = line.split(":", 1)[1].strip()
 

@@ -170,7 +170,7 @@ def expressions():
     os.environ["LOTTERY_DATA_DIR"] = root
     db.use_data_dir(root)
     try:
-        db.set_current_event(1)
+        db.set_event(1)
         db.init_db()
         conn = db.connect()
         with db.tx(conn):
@@ -205,7 +205,7 @@ def _seed_batch(students, prizes, pool=40, inside=True):
     root = tempfile.mkdtemp(prefix="batch-")
     os.environ["LOTTERY_DATA_DIR"] = root
     db.use_data_dir(root)
-    db.set_current_event(1)
+    db.set_event(1)
     db.init_db()
     conn = db.connect()
     with db.tx(conn):

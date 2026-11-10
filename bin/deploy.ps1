@@ -1,7 +1,7 @@
 # Deploy the service to a host over ssh.
 #
-#   .\deploy.ps1 -Remote user@host
-#   .\deploy.ps1 -Remote user@host -NoRestart   # sync only
+#   .\bin\deploy.ps1 -Remote user@host
+#   .\bin\deploy.ps1 -Remote user@host -NoRestart   # sync only
 #
 # Only source files are copied; the remote data/ and config.json (which holds the
 # secret URL id) are never touched.  The remote step verifies that every file
@@ -19,7 +19,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$root = $PSScriptRoot
+# 脚本在 bin/ 下，仓库根目录是它的上一级：打包、清理与行尾归一化都在根目录做
+$root = Split-Path -Parent $PSScriptRoot
 
 # Collected, not hand-maintained: a forgotten module used to reach the server
 # and only the import preflight caught it.

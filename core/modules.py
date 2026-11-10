@@ -34,6 +34,22 @@ BUILTIN_MODULES_DIR = os.path.join(BUILTIN_DIR, "modules")
 INSTANCE_MODULES_DIR = os.path.join(BASE_DIR, "modules")
 
 ID_RE = re.compile(r"^[a-z0-9]+(\.[a-z0-9_-]+)+$")
+# `super.` 是平台保留给高危功能的命名空间（见 RESERVED_PREFIX），模块 id 与功能名都不能用
+RESERVED_PREFIX = "super."
+SUPER_FEATURES = {
+    "super.anyshortlink": "不限目标的短链接跳转：可以指向活动地址之外的地方",
+}
+
+
+def is_super_feature(name):
+    return str(name or "").startswith(RESERVED_PREFIX)
+
+
+def super_features(raw):
+    """声明里出现的 super.* 能力，导入模块时要一条条列给人看。"""
+    names = list(raw) if isinstance(raw, (list, tuple)) else list(raw or {})
+    return [{"name": n, "note": SUPER_FEATURES.get(n, "平台保留的高危能力")}
+            for n in names if is_super_feature(n)]
 REQ_RE = re.compile(r"^\s*(>=|<=|>|<|==)\s*([0-9]+(?:\.[0-9]+)*)\s*$")
 
 
@@ -178,7 +194,10 @@ def resolve_features(raw, errors=None):
         declared = raw[name]
         spec = CAPABILITIES.get(name)
         if spec is None:
-            _note(errors, "没有这个能力：%s" % name)
+            if is_super_feature(name):
+                _note(errors, "高危能力 %s 还没有启用，需要平台单独授权" % name)
+            else:
+                _note(errors, "没有这个能力：%s" % name)
             continue
         if declared is True or declared is None:
             declared = {}
@@ -250,6 +269,8 @@ def load_module(folder, version, builtin=False, enabled=True):
     kind_id = str(meta.get("id") or "").strip()
     if not ID_RE.match(kind_id):
         raise KindError("id 需要形如 nwuca.lottery")
+    if is_super_feature(kind_id):
+        raise KindError("%s 是平台保留的命名空间，模块 id 不能用" % RESERVED_PREFIX)
     if not str(meta.get("name") or "").strip():
         raise KindError("缺少 name")
     requires = str(meta.get("requires") or "").strip()

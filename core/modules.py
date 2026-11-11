@@ -396,6 +396,31 @@ def kind_defaults(kind_id):
     return data if isinstance(data, dict) else {}
 
 
+def page_fragments(kind_id, pages=None):
+    """模块自己那几张页签的 HTML（`pages/<id>.html`），按 pages 的顺序拼起来。
+
+    平台只提供外壳与页签条，页签里画什么由模块给；脚本仍由平台按 id 绑，
+    所以这里只搬标记，不搬逻辑。
+    """
+    folder = kind_dir(kind_id)
+    if folder is None:
+        return []
+    out = []
+    for page in pages or []:
+        page_id = str(page.get("id") or "").strip()
+        if not page_id or "/" in page_id or ".." in page_id:
+            continue
+        path = os.path.join(folder, "pages", "%s.html" % page_id)
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, encoding="utf-8") as fh:
+                out.append(fh.read())
+        except OSError:
+            continue
+    return out
+
+
 def load_kind_model(kind_id):
     """按活动所用的模块把它的 model.py 载进来；同一个模块只载一次。"""
     kind_id = str(kind_id or "").strip()

@@ -1,0 +1,119 @@
+<!-- 模块自己的页签：平台按 pages 声明注入到活动后台 -->
+  <section id="tab-config" class="hidden">
+    <div class="grid-2">
+      <div class="panel">
+        <h2>基本</h2>
+        <div class="field"><label>活动标题</label><input id="setTitle" type="text" readonly><p class="hint">在活动设置的「活动」一栏里改</p></div>
+        <div class="field"><label>副标题 / 说明</label><input id="setSubtitle" type="text"></div>
+        <div class="field">
+          <label>公示页地址(用于二维码)</label>
+          <input id="setBaseUrl" type="text" placeholder="https://<host>/mount/lottery">
+          <p class="note">二维码由此地址生成。</p>
+        </div>
+        <div class="row">
+          <label class="switch" style="cursor:pointer">
+            <input type="checkbox" id="setShowTimes"><span class="track"></span>公示页显示完成时间
+          </label>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <label class="switch" style="cursor:pointer">
+            <input type="checkbox" id="setShowSid"><span class="track"></span>公示页显示学号
+          </label>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <label class="switch" style="cursor:pointer">
+            <input type="checkbox" id="setScreenWall"><span class="track"></span>大屏显示名字墙
+          </label>
+        </div>
+        <div class="field" style="margin-top:14px">
+          <label for="setScreenPack">展示屏幕</label>
+          <select id="setScreenPack"><option value="">活动自带</option></select>
+          <p class="hint">「外部资源 › 展示屏幕」里导入的几份可以在这里给这场活动挑一份；
+            不选就用活动自带的展示页</p>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>奖票与算法</h2>
+        <div class="field">
+          <label>奖票池模式</label>
+          <select id="setPoolMode">
+            <option value="auto">自动（到场 × 3 + 额外票）</option>
+            <option value="fixed">固定张数</option>
+            <option value="expr">表达式</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>额外奖票常数（自动模式）</label>
+          <input id="setBonusConstant" type="number" min="0" max="1000">
+<p class="note">约等于最快的前 C 人各多一张。建议不超过到场人数的一半。</p>
+        </div>
+        <div class="field">
+          <label>固定奖票池总数（仅固定模式）</label>
+          <input id="setPool" type="number" min="1" max="5000">
+          <p class="note">已发出的奖票不受影响，只要不低于已发张数。</p>
+        </div>
+        <div class="field" id="poolExprField" hidden>
+          <label>池子表达式（仅表达式模式）</label>
+          <input id="setPoolExpr" type="text" spellcheck="false"
+                 placeholder="signed_in * 3 + 20">
+          <p class="note">
+            可用：signed_in（已签到参加人员）、present（含工作人员）、
+            participants、staff_present、tasks_done、guaranteed。
+            支持 + - * / // % **、括号、min/max/round/abs/int。
+            每次状态变化都会重算。
+          </p>
+        </div>
+        <p class="note" id="poolPreview"></p>
+        <div class="field">
+          <label>速度权重 β</label>
+          <input id="setBeta" type="number" step="0.1" min="0" max="5">
+<p class="note">0 不看速度，1 首尾 2 倍，2 为 3 倍。</p>
+        </div>
+        <div class="row">
+          <label class="switch" style="cursor:pointer">
+            <input type="checkbox" id="setAllowBonus"><span class="track"></span>启用速度奖励分配
+          </label>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <label class="switch" style="cursor:pointer">
+            <input type="checkbox" id="setUniqueInside"><span class="track"></span>同一个奖不重复同一个人
+          </label>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <label class="switch" style="cursor:pointer">
+            <input type="checkbox" id="setUniqueAcross"><span class="track"></span>一个人不能同时拿两个奖
+          </label>
+        </div>
+        <p class="note">按人抽取的奖（如特等奖）只受前一条约束。</p>
+        <div class="row" style="margin-top:12px">
+          <button class="btn primary" id="saveSettingsBtn">保存设置</button>
+          <span class="note" id="settingsNote"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="panel">
+        <h2>奖品</h2>
+        <p class="panel-hint">数量即抽取次数。</p>
+        <div id="prizeEditor"></div>
+        <div class="row" style="margin-top:8px">
+          <button class="btn sm" id="prizeAddBtn">添加一行</button>
+          <button class="btn primary" id="savePrizesBtn">保存</button>
+          <span class="note" id="prizeNote"></span>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>公示页二维码与访问地址</h2>
+  
+        <div id="qrHolder" class="row" style="align-items:flex-start;gap:14px;margin-bottom:10px"></div>
+        <p class="note" style="word-break:break-all" id="secretUrl"></p>
+        <p class="note">地址失效请到总管理面板的活动卡片菜单里重置</p>
+      </div>
+    </div>
+
+  </section>
+
+  <!-- =================== 活动设置（平台绘制） =================== -->

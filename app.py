@@ -68,7 +68,7 @@ TPL_DIR = os.path.join(BASE_DIR, "tpl")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.10.10.55"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.10.11.56"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -116,6 +116,23 @@ SHORTLINK_SUGGEST = [
     {"key": "checkin", "label": "签到页"},
     {"key": "admin", "label": "活动后台"},
 ]
+
+def module_pages_html(cfg):
+    """模块自己那几张页签的标记，平台把它们拼进外壳的 {{MODULE_PAGES}}。"""
+    kind = cfg.get("kind") or db.DEFAULT_CONFIG["kind"]
+    mod = _modules_by_id(panel.connect()).get(kind) or {}
+    return "\n".join(modules.page_fragments(kind, mod.get("pages") or []))
+
+
+def substitute_page(body, cfg):
+    """页面里的占位符：标题、版本、图标、以及模块的页签片段。"""
+    body = body.replace(b"{{TITLE}}", str(cfg.get("title") or "抽奖").encode("utf-8"))
+    body = body.replace(b"{{VERSION}}", VERSION.encode("utf-8"))
+    body = body.replace(b"{{FAVICON}}", favicon_markup().encode("utf-8"))
+    if b"{{MODULE_PAGES}}" in body:
+        body = body.replace(b"{{MODULE_PAGES}}", module_pages_html(cfg).encode("utf-8"))
+    return body
+
 
 def not_found_page():
     """404 的页面：tpl/404.html 在就用它，没有就用一句白话。状态码始终是 404。"""
@@ -3247,8 +3264,7 @@ class Handler(BaseHTTPRequestHandler):
             body = fh.read()
         conn = db.connect()
         cfg = db.all_config(conn)
-        body = body.replace(b"{{TITLE}}", str(cfg.get("title") or "抽奖").encode("utf-8"))
-        body = body.replace(b"{{FAVICON}}", favicon_markup().encode("utf-8"))
+        body = substitute_page(body, cfg)
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
@@ -3273,10 +3289,7 @@ class Handler(BaseHTTPRequestHandler):
                 ctype += "; charset=utf-8"
         if ctype.startswith("text/html"):
             conn = db.connect()
-            cfg = db.all_config(conn)
-            body = body.replace(b"{{TITLE}}", str(cfg.get("title") or "抽奖").encode("utf-8"))
-            body = body.replace(b"{{VERSION}}", VERSION.encode("utf-8"))
-            body = body.replace(b"{{FAVICON}}", favicon_markup().encode("utf-8"))
+            body = substitute_page(body, db.all_config(conn))
         self.send_response(200)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))

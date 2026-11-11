@@ -725,7 +725,9 @@ colspan 单元格会把表头重新分配一遍，一有数据表头又跳回来
 
 1. **（下一步）** 动作声明：`module.json` 的 `actions` + 平台统一的 `/api/do/<name>` 调度，
    把 `app.py` 里那 20 多个 `/api/admin/*` 收成调度 + 少数平台动作
-2. 页面资源：平台按 `pages/*.html|js` 注入，`tpl/admin.html` 里与奖票相关的段落搬进模块
+2. 页面资源：**标记已搬完**——`tpl/admin.html` 里与奖票相关的那五段（操作台、名单、奖票、
+   抽奖、奖票设置）移进 `builtin/modules/nwuca.lottery/pages/*.html`，平台按 `pages` 的顺序
+   拼进外壳的 `{{MODULE_PAGES}}`；外壳从 451 行减到 179 行。脚本仍在平台侧，等接口稳定再搬
 3. 展示数据：公示页/大屏改吃 `present()`，平台只画壳
 4. 验收：两个玩法完全不同的模块同时跑，平台代码里 grep 不到玩法名词
 

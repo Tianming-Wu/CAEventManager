@@ -1,0 +1,42 @@
+<!-- 模块自己的页签：平台按 pages 声明注入到活动后台 -->
+  <section id="tab-draw" class="hidden">
+    <div class="panel">
+      <h2>大屏阶段</h2>
+      <p class="panel-hint">
+        签到阶段显示时效签到二维码；抽奖阶段显示公示二维码与中奖名单。
+      </p>
+      <div class="row">
+        <button class="btn" id="phaseSigninBtn">切到签到阶段</button>
+        <button class="btn" id="phaseDrawBtn">切到抽奖阶段</button>
+        <span class="chip" id="phaseNow">当前：—</span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>抽奖</h2>
+      <p class="panel-hint">按票抽：票越多机会越大。均等：只在到场者中抽取，不占用奖票。逐个：每次点击抽出一人；一次抽完：一次抽出该奖品的剩余名额。</p>
+      <table class="prize-table" id="prizeTable">
+        <thead><tr>
+          <th>奖品</th><th>方式</th><th>节奏</th><th class="right">已抽</th>
+          <th class="right">剩余</th><th class="right">操作</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+      <div id="drawResult" style="margin-top:12px"></div>
+    </div>
+
+    <div class="panel">
+      <h2>抽奖记录</h2>
+      <div class="tblwrap" style="max-height:50vh">
+        <table class="tbl" id="drawTable">
+          <thead><tr>
+            <th class="right">#</th><th>奖品</th><th>方式</th><th>奖票号</th><th>得主</th><th>时间</th>
+            <th class="right">操作</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- =================== 奖票设置（活动模块） =================== -->

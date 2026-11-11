@@ -162,9 +162,13 @@ def checkin(ctx, payload):
 
 ```
 pages/ops.html          这个页签的内容（一段 HTML，不含 <html> 外壳）
-pages/ops.js            这个页签的脚本，平台在页面切换时载入一次
+pages/ops.js            这个页签的脚本（还没做：现在脚本仍在平台的控制台里按 id 绑定）
 pages/ops.css           可选
 ```
+
+**现状**：HTML 已经归模块——平台读 `pages/<页签>.html`，按 `pages` 的顺序拼进后台外壳的
+`{{MODULE_PAGES}}`；脚本暂时还在平台那边（`static/admin.js`），因为它按元素 id 绑定，
+等接口稳定后再搬。
 
 平台注入时提供两样东西：
 

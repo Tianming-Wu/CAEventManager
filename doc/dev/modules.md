@@ -14,6 +14,7 @@ modules/<id>/                    实例自己装的模块（不进版本库）
   module.json                    标识、名称、版本、页面、能力声明
   schema.json                    创建活动时要填的参数（平台据此画表单）
   model.py                       这个玩法的业务逻辑（平台按 kind 载入）
+  pages/<页签>.html              这个页签的标记，平台拼进活动后台的外壳
   schema.sql                     这个模块在活动库里的表
   defaults.json                  这个模块的默认配置键
   templates/*.json               随模块发布的预设

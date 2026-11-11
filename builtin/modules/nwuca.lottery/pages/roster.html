@@ -1,0 +1,58 @@
+<!-- 模块自己的页签：平台按 pages 声明注入到活动后台 -->
+  <section id="tab-roster" class="hidden">
+    <div class="grid-2">
+      <div class="panel">
+        <h2>导入名单</h2>
+        <p class="panel-hint">
+          支持 CSV / TSV，也支持直接从 Excel 复制粘贴(制表符分隔)。<br>
+          表头可用：<code>学号,姓名,班级,拼音,首字母</code>；无表头时按「学号,姓名」解析。<br>
+          按学号增量更新，不会删除已有记录。
+        </p>
+        <textarea id="importText" placeholder="2024001,张三,计科2401&#10;2024002,李四,计科2401"></textarea>
+        <div class="row" style="margin-top:8px">
+          <input type="file" id="importFile" accept=".csv,.txt,text/csv,text/plain" style="display:none">
+          <button class="btn" id="pickFileBtn">选择文件…</button>
+          <button class="btn primary" id="importBtn">导入</button>
+          <span class="note" id="importNote"></span>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>新增单个学生</h2>
+        
+        <div class="row">
+          <div class="field" style="flex:1;min-width:110px"><label>学号</label><input id="addSid" type="text"></div>
+          <div class="field" style="flex:1;min-width:110px"><label>姓名</label><input id="addName" type="text"></div>
+        </div>
+        <div class="field"><label>班级(可选)</label><input id="addGrp" type="text"></div>
+        <button class="btn primary" id="addBtn">添加</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="row" style="margin-bottom:10px">
+        <h2 style="margin:0">全部名单</h2><span class="chip" id="rosterCount"></span>
+        <input id="rosterFilter" type="search" placeholder="姓名 / 拼音 / 学号" autocomplete="off"
+               style="width:min(260px,42vw);padding:5px 9px;font-size:.85rem">
+        <div class="spacer"></div>
+      </div>
+      <div class="tblwrap" style="max-height:60vh">
+        <table class="tbl" id="fullTable">
+          <thead><tr>
+            <th class="sortable" data-sort="sid">学号</th>
+            <th class="sortable" data-sort="name">姓名</th>
+            <th class="sortable" data-sort="grp">班级</th>
+            <th class="sortable" data-sort="role">身份</th>
+            <th class="sortable" data-sort="checkin">签到</th>
+            <th class="sortable" data-sort="task1">任务一</th>
+            <th class="sortable" data-sort="task2">任务二</th>
+            <th class="sortable right" data-sort="tickets">奖票</th>
+            <th class="right">操作</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= 奖票 ======================= -->

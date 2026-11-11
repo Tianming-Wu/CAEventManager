@@ -1,0 +1,36 @@
+<!-- 模块自己的页签：平台按 pages 声明注入到活动后台 -->
+  <section id="tab-tickets" class="hidden">
+    <div class="panel">
+      <h2>奖票结算</h2>
+      <p class="panel-hint">
+        保底奖票 = 签到 1 张 + 任务一 1 张 + 任务二 1 张。
+        剩下的票按两个任务的完成速度加权分配：权重 <code>1 + β·(名次) </code>，
+        β 越大越快的人拿得越多。下面是按当前数据算出来的结果(未点结算前只是预览)。
+      </p>
+      <div class="plan-summary" id="planSummary"></div>
+      <div class="row">
+        <button class="btn gold" id="finalizeBtn">结算并发放剩余奖票</button>
+        <button class="btn danger" id="unfinalizeBtn">取消结算</button>
+        <button class="btn danger" id="resetTicketsBtn">重置全部奖票</button>
+        <div class="spacer"></div>
+        <span class="note" id="planNote"></span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>速度排名与奖励预览</h2>
+      <div class="tblwrap" style="max-height:56vh">
+        <table class="tbl" id="planTable">
+          <thead><tr>
+            <th class="right">名次</th><th>姓名</th><th class="right">完成任务</th>
+            <th class="right">平均名次分</th><th class="right">权重</th>
+            <th class="right">期望额外票</th><th class="right">实得额外票</th>
+            <th class="right">当前奖票数</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= 抽奖 ======================= -->

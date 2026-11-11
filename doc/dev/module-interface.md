@@ -68,7 +68,7 @@
 | `requires` | 平台 | 需要的平台版本 |
 | `pages` | 平台 | 申请哪些页签；`id` 任意小写串 |
 | `scripts` | 平台 | 页签脚本之前先载入的共用脚本，写文件名去掉 `.js`（如 `common`） |
-| `external` | 平台 | 要哪些公开页面：`board` / `screen` / `checkin` / `admin` |
+| `external` | 平台 | 要哪些公开页面：`board` / `screen` / `checkin` / `admin`；声明了就自带那一页 |
 | `features` | 平台 | 能力声明（`search` / `shortlink` / 将来的 `super.*`） |
 | `actions` | 平台 | 写操作声明，平台据此生成接口、鉴权、审计与版本号 |
 | `board` | 平台 | 公示页/大屏要哪些块，见「展示数据」 |
@@ -203,6 +203,23 @@ window.MODULE.pages.tickets = {
 **已经搬完的**：五个页签的标记、脚本与动作全在模块里（`ops` / `roster` / `tickets` /
 `draw` / `config` 五份脚本加一份共用件）。平台侧只剩页签调度与主站功能：活动设置（成员、
 名单来源、短链、数据、危险区域）、日志、解锁开关。
+
+### 公开页（`external`）
+
+公示页、签到页这些不用登录的页面也归模块：在 `external/` 里放整页 HTML，脚本与样式放同一层。
+
+```
+external/board.html      公示页（整页，含 <html> 外壳；{{TITLE}} / {{FAVICON}} 由平台替换）
+external/board.js        这一页的脚本
+external/checkin.html    签到页
+external/checkin.js
+```
+
+- 页面在 `/<token>/` 下（公示页就是 `/<token>/`，签到页是 `/<token>/checkin`），
+  所以页面里写 `static/app.css`、`external/board.js` 都是相对地址
+- `module.json` 的 `external` 声明了哪几页，平台就把哪几页指向模块；没带文件就是 404
+- 大屏走的还是「外部资源 › 展示屏幕」那套：`screen_packs/<标识>/`，活动设置里挑一份
+- 平台在这些页面上仍是那几件共用件：`static/common.js` 给的 `LT`、平台的那张样式表
 
 ## 数据
 

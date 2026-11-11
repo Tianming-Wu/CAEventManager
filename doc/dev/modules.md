@@ -122,6 +122,7 @@ modules/<id>/                    实例自己装的模块（不进版本库）
 ## 页面与屏幕
 
 - 控制台页面由模块给：`pages/<页签>.html` 是内容，`pages/<页签>.js` 是脚本，外壳与调度在平台
+- 公开页（公示页、签到页）由模块给：`external/<页>.html` + 同名脚本，声明在 `module.json` 的 `external` 里
 - 公示页与大屏要什么数据由模块的 `present()` 说了算，平台只转发、不认识里面的字段
 - 展示屏幕是可替换的插接件：`screen_packs/<标识>/screen.html`，活动配置里写 `screen_pack` 就切换
 - 预设是模块之上的一份配置快照，只能设置模块 `schema.json` 声明过的参数

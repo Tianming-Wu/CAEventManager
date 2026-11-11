@@ -161,6 +161,15 @@ def main():
     check("board reaches server", board is not None and board.get("ok"))
     check("board has no secrets", board is None or "admin_pass" not in json.dumps(board))
 
+    # 公开页是模块自带的：平台按 external 声明把它们发出去，脚本也在模块目录里
+    with _ur.urlopen(BASE + "/", timeout=5) as res:
+        page = res.read().decode("utf-8", "replace")
+    check("公示页由模块的 external 提供", "external/board.js" in page, page[:80])
+    with _ur.urlopen(BASE + "/external/board.js", timeout=5) as res:
+        script = res.read()
+    check("模块的公开脚本发得出来",
+          res.status == 200 and b"api/board" in script, res.status)
+
     print("== auth ==")
     # The console has no password of its own any more: the panel account is the
     # only identity, and a seat on the activity is what opens the console.

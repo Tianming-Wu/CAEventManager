@@ -272,6 +272,24 @@ def external_routes(module_id, version):
     return set(kind.get("external") or [])
 
 
+def external_dir(kind_id):
+    """模块自带的公开页目录（公示页、签到页这些），没有就是空串。"""
+    folder = kind_dir(kind_id)
+    if not folder:
+        return ""
+    return os.path.join(folder, "external")
+
+
+def external_file(kind_id, name):
+    """模块自带的某一份公开资源；没带就返回空串。"""
+    name = str(name or "").strip()
+    if not name or "/" in name or "\\" in name or name.startswith("."):
+        return ""
+    folder = external_dir(kind_id)
+    full = os.path.join(folder, name) if folder else ""
+    return full if full and os.path.isfile(full) else ""
+
+
 def console_pages(module_id, version, disabled=()):
     """Every page the console should show, in order: the module's, then the platform's."""
     kind = get(module_id, version, disabled=disabled) if module_id else None

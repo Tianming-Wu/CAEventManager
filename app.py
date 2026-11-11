@@ -68,7 +68,7 @@ TPL_DIR = os.path.join(BASE_DIR, "tpl")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.11.1.63"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.11.1.64"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -3194,8 +3194,18 @@ class Handler(BaseHTTPRequestHandler):
                 )
             return self._page_html("checkin.html")
         if path in routes:
-            _page_id, name, ctype = routes[path]
-            return self._serve_file(os.path.join(TPL_DIR, name), ctype, cache=False)
+            _page_id, name, _ctype = routes[path]
+            return self._page_html(name)
+        if path.startswith("/external/"):
+            # 模块自带的公开资源：页面自己的 js / css，路径里不许有花活
+            rel = path[len("/external/"):]
+            if not rel or "/" in rel or ".." in rel or rel.startswith("."):
+                return self._err("not found", 404)
+            kind = db.get_config(db.connect(), "kind") or db.DEFAULT_CONFIG["kind"]
+            full = modules.external_file(kind, rel)
+            if not full:
+                return self._err("not found", 404)
+            return self._serve_file(full, None, cache=True)
         if path.startswith("/module/") and path.endswith(".js"):
             # 模块页面脚本：只认 pages/<页签>.js，路径里不许有花活
             name = path[len("/module/"):-len(".js")]
@@ -3253,9 +3263,23 @@ class Handler(BaseHTTPRequestHandler):
         body = body.replace(b"{{VERSION}}", VERSION.encode("utf-8"))
         return self._send(200, body, "text/html; charset=utf-8")
 
+    def _page_body(self, name):
+        """公开页的正文：模块自带这一页就用模块的，没有才回落到平台模板。"""
+        kind = db.get_config(db.connect(), "kind") or db.DEFAULT_CONFIG["kind"]
+        full = modules.external_file(kind, name)
+        if full:
+            with open(full, "rb") as fh:
+                return fh.read()
+        platform = os.path.join(TPL_DIR, name)
+        if os.path.isfile(platform):
+            with open(platform, "rb") as fh:
+                return fh.read()
+        return None
+
     def _page_html(self, name, headers=None):
-        with open(os.path.join(TPL_DIR, name), "rb") as fh:
-            body = fh.read()
+        body = self._page_body(name)
+        if body is None:
+            return self._err("not found", 404)
         conn = db.connect()
         cfg = db.all_config(conn)
         body = substitute_page(body, cfg)

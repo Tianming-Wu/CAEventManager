@@ -149,12 +149,11 @@ def checkin(ctx, payload):
 | `title` | 动作名 | 审计里怎么写 |
 | `args` | `{}` | 参数表：`type`（int / str / bool / float / json）、`required`、`max` |
 | `seat` | `member` | 要什么席位：`member` 或 `owner` |
-| `unlock` | `false` | 要不要先打开「解锁修改」开关（现场高危动作） |
-| `sudo` | `false` | 要不要活动级提权：30 秒、只对「这个会话 × 这个活动」，与主站 sudo 互不代替 |
+| `unlock` | `false` | 要不要先打开「解锁修改」开关（现场高危动作一律走这个，现场没时间输密码） |
 | `finalized` | `block` | 活动已结算时是否还允许：`block` / `allow` |
 | `target` | `event` | 版本号对象模板，`{arg}` 会替换成参数；并发冲突与实时同步都按它算 |
 
-平台在调用前后做的固定几件事：解析账号与席位 → 校验 `sudo` / `unlock` / `finalized` / 参数 →
+平台在调用前后做的固定几件事：解析账号与席位 → 校验 `unlock` / `finalized` / 参数 →
 开事务 → 调 `action()` → 冲突检查 → 记审计（`title` + 模块返回的 `audit`）→ 推版本号。
 
 ## 页面与资源

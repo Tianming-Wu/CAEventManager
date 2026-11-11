@@ -68,7 +68,7 @@ TPL_DIR = os.path.join(BASE_DIR, "tpl")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.10.8.53"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.10.9.54"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -1423,6 +1423,23 @@ class Handler(BaseHTTPRequestHandler):
                 raise model.ApiError("当前账号无权执行该操作", 403)
             return acc
 
+        def need_sudo_once(data=None):
+            """一次性提权：不设有效期，验证这一次请求带的密码。
+
+            活动设置里的「归档」这类是主站操作的快捷入口——现场不想等十分钟的提权窗口，
+            但也不能不做确认，所以一次一验。
+            """
+            if getattr(self, "_via_token", None) is not None:
+                raise model.ApiError("这个操作需要重新输入密码，令牌做不到", 403)
+            if panel.session_sudo(conn, sess) > time.time():
+                return True
+            password = str((data or {}).get("password") or "")
+            if password and panel.verify_password(password, acc["pass"]):
+                with panel.tx() as tx:
+                    panel.audit(tx, acc["username"], "sudo_once", None, "一次性确认")
+                return True
+            raise SudoRequired()
+
         def need_sudo():
             """Elevation is per session, so this is the only place it is checked."""
             if getattr(self, "_via_token", None) is not None:
@@ -2085,7 +2102,8 @@ class Handler(BaseHTTPRequestHandler):
             return size
 
         if path == "/event/archive" and method == "POST":
-            # 归档是负责人对自己活动的软删除：服务端把文件夹打包，外面只留元数据
+            # 归档是负责人对自己活动的软删除：服务端把文件夹打包，外面只留元数据。
+            # 它本质是主站动作，活动设置里只是快捷入口，所以允许当次带密码做一次性确认
             data = body()
             seq = int(data.get("seq") or 0)
             seat = seat_of(seq)
@@ -2095,7 +2113,7 @@ class Handler(BaseHTTPRequestHandler):
             if row["archived_at"]:
                 return self._json({"ok": True, "seq": seq, "archived": True,
                                    "already": True})
-            need_sudo()
+            need_sudo_once(data)
             refuse_stale()
             size = do_archive(seq, row["title"])
             return self._json({"ok": True, "seq": seq, "archived": True,
@@ -3297,10 +3315,6 @@ class Handler(BaseHTTPRequestHandler):
             raise model.ApiError("这个活动没有这个动作：%s" % name, 404)
         if decl["seat"] == "owner" and me.role != "owner":
             raise model.ApiError("只有该活动的负责人能做这个操作", 403)
-        if decl["sudo"]:
-            token = self._panel_token()
-            if panel.event_sudo(panel.connect(), token, db.event_id()) <= time.time():
-                raise SudoRequired()
         if decl["unlock"] and not me.unlocked():
             raise model.ApiError("这个操作需要先打开「解锁修改」开关", 403)
         if decl["finalized"] == "block" and (cfg.get("finalized") or False):
@@ -3463,45 +3477,6 @@ class Handler(BaseHTTPRequestHandler):
 
         # ---- everything below needs a seat on this activity ----
         me = self._require_console()
-
-        if path == "/api/sudo" and method == "POST":
-            # 活动级提权：只对「这个会话 × 这个活动」生效，30 秒
-            data = self._body()
-            if not panel.verify_password(data.get("password") or "", me.acc["pass"]):
-                raise model.ApiError("密码错误", 403)
-            token = self._panel_token()
-            seq = db.event_id()
-            with panel.tx() as tx:
-                until = panel.set_event_sudo(tx, token, seq, panel.EVENT_SUDO_TTL)
-                panel.audit(tx, me.acc["username"], "event_sudo_on", str(seq),
-                            "本活动提权 %d 秒" % panel.EVENT_SUDO_TTL)
-            return self._json({"ok": True, "sudoUntil": until,
-                               "sudoTtl": panel.EVENT_SUDO_TTL, "now": time.time()})
-
-        if path == "/api/sudo/exit" and method == "POST":
-            token = self._panel_token()
-            seq = db.event_id()
-            with panel.tx() as tx:
-                panel.set_event_sudo(tx, token, seq, 0)
-                panel.audit(tx, me.acc["username"], "event_sudo_off", str(seq))
-            return self._json({"ok": True, "sudoUntil": 0})
-
-        def need_event_sudo():
-            """活动内的高危动作：要在这个活动上单独提一次权。"""
-            token = self._panel_token()
-            if panel.event_sudo(panel.connect(), token, db.event_id()) <= time.time():
-                raise SudoRequired()
-        self._target = console_target(path, self._peek(), db.event_id()) \
-            if method == "POST" else None
-        self._stale = False
-        if self._target:
-            base = self._base_rev(self._target)
-            if base is not None and base < bus.revision(self._target):
-                self._stale = True
-                # marking is append-only: someone else's other fact about the
-                # same person is not a disagreement, so those merge
-                if path not in ("/api/admin/mark", "/api/admin/undo"):
-                    raise Conflict("另一位工作人员刚刚改过这一项，本次更改没有生效")
 
         def need_owner():
             if me.role != "owner":

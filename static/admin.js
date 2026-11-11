@@ -146,6 +146,7 @@
   }
 
   function renderUnlock() {
+    S.unlocked = $("#unlockToggle").checked;
     var on = S.unlocked && S.unlockUntil * 1000 > Date.now();
     $("#unlockToggle").checked = on;
     $("#unlockWrap").classList.toggle("on", on);
@@ -588,6 +589,10 @@
 
   function archiveEvent() {
     if (!S.seq) return;
+    if (!S.unlocked) {
+      ok("归档前请先在右上角打开「解锁修改」");
+      return;
+    }
     LT.confirm("归档活动",
       "归档后这场活动不再出现在列表里，链接与短链同时失效；数据会被打包，只留元数据。"
       + "归档之后活动不再保证能打开。",
@@ -600,7 +605,16 @@
         })
         .catch(function (e) {
           if (e && e.sudo) {
-            askPanelPassword().then(function () { archiveEvent(); }).catch(function () {});
+            // 一次性确认：这一次请求带上密码，不打开任何提权窗口
+            askOncePassword("归档活动").then(function (password) {
+              LT.panelApi("/api/panel/event/archive",
+                { method: "POST", body: { seq: S.seq, password: password } })
+                .then(function () {
+                  ok("已归档，正在回到总览");
+                  setTimeout(function () { location.href = LT.panelLoginUrl(); }, 1200);
+                })
+                .catch(bad);
+            }).catch(function () {});
             return;
           }
           bad(e);
@@ -608,38 +622,26 @@
     });
   }
 
-  /* 活动级提权：接口回 403 + sudoRequired 时弹一次密码，提完把同一个请求重发一遍。
-     它只对「这个浏览器会话 × 这个活动」生效，30 秒后就没了 */
-  function apiEventSudo(path, options, what) {
-    return LT.api(path, options).catch(function (e) {
-      if (!e.sudo) throw e;
-      return askEventPassword(what).then(function () {
-        return LT.api(path, options);
-      });
-    });
-  }
-
-  function askEventPassword(what) {
+  /* 一次性确认：只验这一次请求的密码，不开提权窗口 */
+  function askOncePassword(what) {
     return new Promise(function (resolve, reject) {
-      var action = what ? "「" + LT.esc(what) + "」" : "";
       var back = LT.modal("<h2>需要确认</h2>"
-        + '<p class="page-sub">' + action + "需要重新输入一次密码"
-        + "（30 秒内本活动内有效）。</p>"
-        + '<div class="field"><label for="eventPw">登录密码</label>'
-        + '<input id="eventPw" type="password" autocomplete="current-password"></div>'
+        + '<p class="page-sub">' + LT.esc(what) + '：请输入登录密码。</p>'
+        + '<div class="field"><label for="oncePw">登录密码</label>'
+        + '<input id="oncePw" type="password" autocomplete="current-password"></div>'
         + '<div class="row" style="margin-top:16px;justify-content:flex-end">'
-        + '<button class="btn" id="eventPwCancel" type="button">取消</button>'
-        + '<button class="btn primary" id="eventPwGo" type="button">确认</button></div>');
-      var box = $("#eventPw");
+        + '<button class="btn" id="onceCancel" type="button">取消</button>'
+        + '<button class="btn primary" id="onceGo" type="button">确认</button></div>');
+      var box = $("#oncePw");
       if (box) box.focus();
-      $("#eventPwCancel").addEventListener("click", function () {
+      $("#onceCancel").addEventListener("click", function () {
         back.close();
         reject(new Error("cancelled"));
       });
-      $("#eventPwGo").addEventListener("click", function () {
-        LT.api("/api/sudo", { method: "POST", body: { password: $("#eventPw").value || "" } })
-          .then(function () { back.close(); resolve(true); })
-          .catch(function (e) { bad(e); });
+      $("#onceGo").addEventListener("click", function () {
+        var pw = ($("#oncePw").value || "");
+        back.close();
+        resolve(pw);
       });
     });
   }

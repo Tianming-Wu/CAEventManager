@@ -263,8 +263,7 @@
       },
       "seat": "member",
       "unlock": true,
-      "target": "student:{id}",
-      "sudo": true
+      "target": "student:{id}"
     },
     "finalize": {
       "title": "结算奖票",
@@ -285,8 +284,7 @@
       "args": {},
       "seat": "owner",
       "unlock": true,
-      "target": "draw",
-      "sudo": true
+      "target": "draw"
     }
   }
 }

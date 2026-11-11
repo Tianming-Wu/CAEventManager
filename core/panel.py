@@ -42,7 +42,6 @@ SESSION_TTL = 7 * 24 * 3600
 # session row, not on the account: another device signing in as the same person
 # starts from zero, and signing out drops it with the session.
 SUDO_TTL = 600
-EVENT_SUDO_TTL = 30        # 活动内的一次提权：只够做完这一件事
 # The console's own "解锁修改": 30 seconds of quiet put the dangerous buttons
 # back to sleep.  It is ergonomics for a live event, not a permission - the
 # account is checked separately and does not change while the clock runs.
@@ -118,13 +117,6 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 
 -- 活动级提权：绑定在「这个会话 × 这个活动」上，30 秒就好
-CREATE TABLE IF NOT EXISTS event_sudo (
-    token      TEXT    NOT NULL,
-    seq        INTEGER NOT NULL,
-    until      REAL    NOT NULL DEFAULT 0,
-    PRIMARY KEY (token, seq)
-);
-
 CREATE TABLE IF NOT EXISTS presets (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     slug       TEXT    NOT NULL UNIQUE,       -- what a URL carries
@@ -511,23 +503,6 @@ def destroy_session(conn, token):
     conn.execute("DELETE FROM sessions WHERE token=?", (token,))
 
 
-def event_sudo(conn, token, seq):
-    """这个会话在这场活动上的提权到什么时候为止；0 表示没提过。"""
-    if not token or not seq:
-        return 0.0
-    row = conn.execute(
-        "SELECT until FROM event_sudo WHERE token=? AND seq=?",
-        (token, int(seq))).fetchone()
-    return float(row["until"]) if row else 0.0
-
-
-def set_event_sudo(conn, token, seq, seconds):
-    until = time.time() + seconds if seconds else 0
-    conn.execute(
-        "INSERT INTO event_sudo (token, seq, until) VALUES (?,?,?)"
-        " ON CONFLICT(token, seq) DO UPDATE SET until=excluded.until",
-        (token, int(seq), until))
-    return until
 
 
 def session_sudo(conn, token):

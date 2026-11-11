@@ -568,25 +568,17 @@ def main():
           first.startswith("data: ") and "revs" in first, first)
     stream.close()
 
-    print("== 活动级 sudo：30 秒、只对本活动 ==")
-    post("/api/sudo/exit", {})
-    # delete_student 在模块里声明了 sudo：没提权时应被拦下
-    victim = post("/api/do/add_student", {"sid": "2026SUDO1", "name": "提权测试"})
+    print("== 现场高危动作靠「解锁修改」开关 ==")
+    victim = post("/api/do/add_student", {"sid": "2026UNLOCK1", "name": "解锁测试"})
     vid = ((victim or {}).get("student") or {}).get("id")
     if vid:
-        post("/api/admin/unlock", {"on": True})
-        blocked = post("/api/do/delete_student", {"id": vid}, expect=403)
-        check("要提权的动作先被拦下",
-              bool(blocked and blocked.get("sudoRequired")), blocked)
-        wrong = post("/api/sudo", {"password": "nope"}, expect=403)
-        check("密码不对不给提权", wrong is None or wrong.get("ok") is not True, wrong)
-        done = post("/api/sudo", {"password": owner_credentials()[1]})
-        check("密码对了就能提权 30 秒",
-              bool(done and done.get("sudoTtl") == 30), done)
-        gone = post("/api/do/delete_student", {"id": vid})
-        check("提权之后同一个请求就过了", bool(gone and gone.get("ok")), gone)
         post("/api/admin/unlock", {"on": False})
-        post("/api/sudo/exit", {})
+        blocked = post("/api/do/delete_student", {"id": vid}, expect=403)
+        check("没解锁时删不掉", bool(blocked and blocked.get("error")), blocked)
+        post("/api/admin/unlock", {"on": True})
+        gone = post("/api/do/delete_student", {"id": vid})
+        check("打开解锁就能删", bool(gone and gone.get("ok")), gone)
+        post("/api/admin/unlock", {"on": False})
 
     print("== 模块动作：/<token>/api/do/<name> ==")
     # 放在最后：这里会加一个人再删掉，不碰前面那些断言的口径
@@ -603,12 +595,9 @@ def main():
         refused = post("/api/do/delete_student", {"id": listed[0]["id"]}, expect=403)
         check("要解锁的动作没解锁时被拒", bool(refused and refused.get("error")), refused)
         post("/api/admin/unlock", {"on": True})
-        # delete_student 在模块里声明了 sudo：解锁之外还要活动级提权
-        post("/api/sudo", {"password": owner_credentials()[1]})
         gone = post("/api/do/delete_student", {"id": listed[0]["id"]})
-        check("解锁 + 提权之后删得掉", bool(gone and gone.get("ok")), gone)
+        check("解锁之后删得掉", bool(gone and gone.get("ok")), gone)
         post("/api/admin/unlock", {"on": False})
-        post("/api/sudo/exit", {})
     miss = post("/api/do/nope", {}, expect=404)
     check("没声明的动作是 404", bool(miss and miss.get("error")), miss)
     bad = post("/api/do/mark", {"kind": "checkin"}, expect=400)

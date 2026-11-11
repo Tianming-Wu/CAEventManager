@@ -38,7 +38,7 @@
 ## 活动数据的归档与下载
 
 ```
-POST /api/panel/event/archive        负责人归档自己的活动（要 sudo）
+POST /api/panel/event/archive        负责人归档自己的活动（要提权；请求里带 password 可做一次性确认）
 POST /api/panel/event/force_archive  超管强制归档别人的活动（要 sudo）
 POST /api/panel/event/unarchive      超管取消归档（要 sudo）
 GET  /api/panel/event/download?seq=  下载：开启时负责人与参与者；已归档时超管 + sudo（含归档包）
@@ -47,18 +47,6 @@ POST /api/panel/event/delete         超管彻底删除已归档的活动（要 
 
 归档会把 `data/events/<活动号>/` 打包成 `archive.tar.gz`，删掉业务库与审计库，只留元数据；
 取消归档把包解开。下载给的是 zip，文件名里带活动号。
-
-## 活动级提权
-
-活动内的高危动作（模块在 `actions` 里写 `"sudo": true`）要单独提一次权，和主站 sudo 互不代替：
-
-```
-POST /<token>/api/sudo        {password}   提权 30 秒，只对「这个会话 × 这个活动」
-POST /<token>/api/sudo/exit                立即退出
-```
-
-没提权时接口回 `403` + `sudoRequired`，客户端应当弹一次密码框、提权之后重发**同一个**请求。
-换活动、换设备都要重新输；30 秒一过就失效。
 
 ## 事件流
 

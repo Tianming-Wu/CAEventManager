@@ -118,6 +118,10 @@
   var ICON_PENCIL = '<svg viewBox="0 0 20 20" aria-hidden="true">' +
     '<path d="M4.2 15.8h3.1l7.5-7.5a1.6 1.6 0 0 0-2.3-2.3l-7.5 7.5v2.3Z"/>' +
     '<path d="M11.5 7l2.3 2.3"/></svg>';
+  var ICON_GEAR = '<svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="10" r="2.4"/><path d="M10 3.2v1.6M10 15.2v1.6M3.2 10h1.6M15.2 10h1.6M5.2 5.2l1.1 1.1M13.7 13.7l1.1 1.1M14.8 5.2l-1.1 1.1M6.3 13.7l-1.1 1.1"/></svg>';
+  var ICON_REFRESH = '<svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M16.2 10a6.2 6.2 0 1 1-1.9-4.4"/><path d="M16.4 3.6v3.2h-3.2"/></svg>';
+  var ICON_LINK = '<svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8.4 11.6a3.4 3.4 0 0 0 4.8 0l2.1-2.1a3.4 3.4 0 0 0-4.8-4.8l-1 1"/><path d="M11.6 8.4a3.4 3.4 0 0 0-4.8 0l-2.1 2.1a3.4 3.4 0 0 0 4.8 4.8l1-1"/></svg>';
+  var ICON_RECLAIM = '<svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4.2 10a5.8 5.8 0 0 1 10-4"/><path d="M14.2 3.6v2.8h-2.8"/><path d="M15.8 10a5.8 5.8 0 0 1-10 4"/><path d="M5.8 16.4v-2.8h2.8"/></svg>';
   var ICON_ARCHIVE = '<svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3.4 6.4h13.2v9a1.6 1.6 0 0 1-1.6 1.6H5a1.6 1.6 0 0 1-1.6-1.6v-9Z"/><path d="M2.6 3.4h14.8v3H2.6zM8 10h4"/></svg>';
   var ICON_TRASH = '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 5.6h12M8 3.4h4M6.2 5.6l.7 9.4a1.6 1.6 0 0 0 1.6 1.5h3a1.6 1.6 0 0 0 1.6-1.5l.7-9.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
@@ -578,21 +582,26 @@
     menu.innerHTML =
       (e.role === "owner"
         ? '<button type="button" role="menuitem" data-rename="' + e.seq + '">' +
-          "重命名活动</button>"
+          ICON_PENCIL + "重命名活动</button>"
         : "") +
       '<button type="button" role="menuitem" data-copy="' + PX.esc(e.url) + '">' +
-      "复制访问链接</button>" +
+      ICON_COPY + "复制访问链接</button>" +
       '<button type="button" role="menuitem" data-save-preset="' + e.seq + '">' +
-      "保存为预设</button>" +
+      ICON_STAR + "保存为预设</button>" +
       '<div class="menu-sep"></div>' +
       '<a role="menuitem" class="menu-link" href="' + PX.esc(e.admin) +
-      '" target="_blank" rel="noopener">活动设置 ↗</a>' +
+      '" target="_blank" rel="noopener">' + ICON_GEAR + "活动设置 ↗</a>" +
       (e.role === "owner"
         ? '<div class="menu-sep"></div>' +
           '<button type="button" role="menuitem" data-rotate="' + e.seq + '">' +
-          "重置访问地址</button>" +
+          ICON_REFRESH + "重置访问地址</button>" +
           '<button type="button" role="menuitem" class="danger" ' +
-          'data-archive="' + e.seq + '">' + ICON_ARCHIVE + '归档</button>'
+          'data-archive="' + e.seq + '">' + ICON_ARCHIVE + "归档</button>"
+        : "") +
+      (isSuper()
+        ? '<div class="menu-sep"></div>' +
+          '<button type="button" role="menuitem" data-reclaim="' + e.seq + '">' +
+          ICON_RECLAIM + "回收站内资源</button>"
         : "");
     document.body.appendChild(menu);
 
@@ -685,6 +694,62 @@
       closeOverlay();
       run();
     });
+  }
+
+  /* 站内资源回收：把这场活动占着的东西（目前是短链）由超管显式收回来 */
+  function reclaimEvent(seq) {
+    var e = S.events.filter(function (x) { return String(x.seq) === String(seq); })[0];
+    closeCardMenu();
+    confirmHighRisk("回收站内资源",
+      "会销毁这场活动的全部短链，已经发出去的短链地址立即失效。"
+      + (e ? "<br>活动：" + PX.esc(eventTitle(e)) : ""),
+      "回收", true,
+      function () {
+        apiSudo("/event/reclaim", { method: "POST", body: { seq: Number(seq) } },
+          "回收站内资源")
+          .then(function (d) {
+            PX.toast("已回收 " + ((d && d.shortlinks) || 0) + " 条短链");
+            return reloadAll();
+          })
+          .catch(fail);
+      });
+  }
+
+  /* 已归档活动的三个提权动作：下载完整数据、取消归档、彻底删除 */
+  function archivedDownload(seq) {
+    var w = window.open((PX.panelRoot || "") + "/api/panel/event/download?seq=" + seq,
+      "_blank");
+    if (w) PX.toast("正在准备下载");
+  }
+
+  function archivedRestore(seq) {
+    confirmHighRisk("取消归档",
+      "会把归档包解开，活动恢复成可打开的状态，负责人就能下载数据。"
+      + "已经销毁的短链不会回来。",
+      "取消归档", false, function () {
+        apiSudo("/event/unarchive", { method: "POST", body: { seq: Number(seq) } },
+          "取消归档")
+          .then(function () {
+            PX.toast("已取消归档");
+            return reloadAll();
+          })
+          .catch(fail);
+      });
+  }
+
+  function archivedDelete(seq) {
+    confirmHighRisk("彻底删除归档的活动",
+      "会删掉服务器上这场活动的全部内容，不可逆。要留数据请先点「下载」。",
+      "彻底删除", true,
+      function () {
+        apiSudo("/event/delete", { method: "POST", body: { seq: Number(seq) } },
+          "彻底删除归档的活动")
+          .then(function () {
+            PX.toast("已删除");
+            return reloadAll();
+          })
+          .catch(fail);
+      });
   }
 
   function rotateEvent(seq) {
@@ -3523,12 +3588,18 @@
     var body = $("#archivedTable tbody");
     if (!body) return;
     body.innerHTML = S.archived.length ? S.archived.map(function (e) {
+      // 已归档的活动已经归平台管：下载、取消归档、彻底删除都在这一行的操作列里
       return "<tr>" +
         "<td><b>" + PX.esc(eventTitle(e)) + "</b></td>" +
         "<td>" + PX.esc(e.ownerName || "—") + "</td>" +
         '<td class="mono">' + PX.whenExact(e.archivedAt) + "</td>" +
-        '<td class="mono">' + PX.esc(shortToken(e.id)) + "</td></tr>";
-    }).join("") : emptyRow(4, S.archivedTotal === 0
+        '<td class="mono">' + PX.esc(shortToken(e.id)) + "</td>" +
+        '<td class="actions">' +
+        '<button class="btn sm" type="button" data-arch-download="' + e.seq + '">下载</button>' +
+        '<button class="btn sm" type="button" data-arch-restore="' + e.seq + '">取消归档</button>' +
+        '<button class="btn sm danger" type="button" data-arch-delete="' + e.seq +
+        '">彻底删除</button></td></tr>' ;
+    }).join("") : emptyRow(5, S.archivedTotal === 0
       ? "还没有归档的活动"
       : "正在读取…");
     var more = $("#archivedMore");
@@ -4807,6 +4878,14 @@
 
     var archiveBtn = t.closest("[data-archive]");
     if (archiveBtn) return archiveEvent(archiveBtn.getAttribute("data-archive"));
+    var reclaimBtn = t.closest("[data-reclaim]");
+    if (reclaimBtn) return reclaimEvent(reclaimBtn.getAttribute("data-reclaim"));
+    var dlBtn = t.closest("[data-arch-download]");
+    if (dlBtn) return archivedDownload(dlBtn.getAttribute("data-arch-download"));
+    var restoreBtn = t.closest("[data-arch-restore]");
+    if (restoreBtn) return archivedRestore(restoreBtn.getAttribute("data-arch-restore"));
+    var delBtn = t.closest("[data-arch-delete]");
+    if (delBtn) return archivedDelete(delBtn.getAttribute("data-arch-delete"));
 
     var requestBtn = t.closest("[data-request]");
     if (requestBtn) {

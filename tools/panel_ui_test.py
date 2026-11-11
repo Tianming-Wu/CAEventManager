@@ -2008,6 +2008,23 @@ def users_table(page):
     page.wait_for_timeout(300)
 
 
+def close_overlays(page, times=4):
+    """弹窗是叠放的：一层层关掉，别把下面那层留在屏幕上挡点击。"""
+    for _ in range(times):
+        if page.evaluate("() => document.getElementById('overlay').hidden"):
+            return
+        close = page.locator("#overlayClose")
+        if close.count():
+            try:
+                close.click(timeout=2000)
+            except Exception:
+                page.keyboard.press("Escape")
+        else:
+            page.keyboard.press("Escape")
+        page.wait_for_timeout(150)
+    page.evaluate("() => { document.getElementById('overlay').hidden = true; }")
+
+
 def events_table(page):
     print("== 活动管理：首列点开详情 ==")
     page.goto(BASE + "/panel#/all-events")
@@ -2031,8 +2048,7 @@ def events_table(page):
         .map(b => b.textContent.trim())""")
     check("详情里列出高权限动作", len(acts) >= 4, acts)
     check("详情里有转移负责人", any("转移负责人" in a for a in acts), acts)
-    page.click("#overlayClose")
-    page.wait_for_timeout(150)
+    close_overlays(page)
 
 
 def create_page(browser):

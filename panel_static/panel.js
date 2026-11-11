@@ -251,6 +251,8 @@
   var OVERLAY_STACK = [];
 
   function openOverlay(kind, title, html, after, stack) {
+    // 只有明确要叠（stack=true）的弹窗才压住下面那层：sudo 提示、以及从详情里点开的确认框。
+    // 其它的照旧替换，免得一层层弹窗堆着关不掉
     if (stack && !$("#overlay").hidden && overlayKind) {
       OVERLAY_STACK.push({ kind: overlayKind, title: $("#overlayTitle").textContent,
                            html: $("#overlayBody").innerHTML,
@@ -277,6 +279,11 @@
     var close = $("#overlayClose");
     if (close && kind !== "sudo") close.focus();
     if (typeof after === "function") after(body);
+  }
+
+  function closeAllOverlays() {
+    OVERLAY_STACK.length = 0;
+    closeOverlay();
   }
 
   function closeOverlay() {
@@ -698,16 +705,20 @@
   // While not elevated the password prompt is that confirmation, so this is
   // skipped - typing it is already deliberate, and cancelling it leaves no
   // trace because nothing ever reached the server.
-  function confirmHighRisk(title, note, label, danger, run) {
+  function confirmHighRisk(title, note, label, danger, run, opts) {
     if (!sudoActive()) return run();
     openOverlay("confirm", title,
       '<p class="page-sub">' + note + "</p>"
       + '<div class="row" style="margin-top:18px;justify-content:flex-end">'
       + '<button class="btn" type="button" data-close-overlay="1">取消</button>'
       + '<button class="btn ' + (danger ? "danger" : "primary") + '" type="button" '
-      + 'id="confirmGo">' + label + "</button></div>");
+      + 'id="confirmGo">' + label + "</button></div>", null,
+      !!(opts && opts.keepUnder));
     $("#confirmGo").addEventListener("click", function () {
-      closeOverlay();
+      // 从详情弹窗点开的动作要把详情留着（取消 sudo 之后还得回到那儿）；
+      // 其它的确认框收掉整摞，回到页面
+      if (opts && opts.keepUnder) closeOverlay();
+      else closeAllOverlays();
       run();
     });
   }
@@ -747,7 +758,7 @@
     ];
     var acts = [];
     if (!archived) {
-      acts.push({ text: "打开活动设置 ↗", kind: "ghost",
+      acts.push({ text: "打开活动设置 ↗", kind: "ghost", primary: true,
                   run: function () { window.open(e.admin, "_blank"); } });
     }
     if (archived) {
@@ -762,13 +773,21 @@
       acts.push({ text: "回收站内资源", kind: "", run: function () { reclaimEvent(seq); } });
       acts.push({ text: "强制归档", kind: "danger", run: function () { forceArchive(seq); } });
     }
+    // 「打开活动设置」是无框的链接式按钮，和别的按钮挤在一行会把它们推歪：单独一行
+    var head = acts.filter(function (a) { return a.primary; });
+    var rest = acts.filter(function (a) { return !a.primary; });
+    function buttons(list, offset) {
+      return list.map(function (a, i) {
+        return '<button class="btn ' + a.kind + '" type="button" data-detail-act="' +
+          (i + offset) + '">' + PX.esc(a.text) + "</button>";
+      }).join("");
+    }
     var html = '<dl class="kv">' + rows.map(function (r) {
       return "<dt>" + PX.esc(r[0]) + "</dt><dd>" + PX.esc(r[1]) + "</dd>";
     }).join("") + "</dl>" +
-      '<div class="detail-actions">' + acts.map(function (a, i) {
-        return '<button class="btn ' + a.kind + '" type="button" data-detail-act="' + i +
-          '">' + PX.esc(a.text) + "</button>";
-      }).join("") + "</div>";
+      (head.length ? '<div class="detail-actions detail-actions-top">' +
+        buttons(head, 0) + "</div>" : "") +
+      '<div class="detail-actions">' + buttons(rest, head.length) + "</div>";
     openOverlay("event-detail", eventTitle(e), html, function (card) {
       card.querySelectorAll("[data-detail-act]").forEach(function (btn) {
         btn.addEventListener("click", function () {
@@ -776,8 +795,10 @@
           if (!act) return;
           // 取消归档、彻底删除会让这场活动整个变样：那两步离开详情。
           // 下载、转移、回收、强制归档留在详情里，取消也不至于把页面跳走
-          if (act.leaves) closeOverlay();
-          act.run();
+          var out = act.run();
+          if (act.leaves && out && out.then) {
+            out.then(function () { closeAllOverlays(); }, function () {});
+          }
         });
       });
     });
@@ -829,19 +850,23 @@
   }
 
   function archivedRestore(seq) {
-    confirmHighRisk("取消归档", "确认取消归档？",
-      "取消归档", false, function () {
-        apiSudo("/event/unarchive", { method: "POST", body: { seq: Number(seq) } },
-          "取消归档")
-          .then(function () {
-            PX.toast("已取消归档");
-            return reloadAll();
-          })
-          .catch(fail);
-      });
+    return new Promise(function (resolve) {
+      confirmHighRisk("取消归档", "确认取消归档？",
+        "取消归档", false, function () {
+          apiSudo("/event/unarchive", { method: "POST", body: { seq: Number(seq) } },
+            "取消归档")
+            .then(function () {
+              PX.toast("已取消归档");
+              resolve(true);
+              return reloadAll();
+            })
+            .catch(function (e) { resolve(false); fail(e); });
+        }, { keepUnder: true });
+    });
   }
 
   function archivedDelete(seq) {
+    return new Promise(function (resolve) {
     confirmHighRisk("彻底删除归档的活动",
       "删除后不可恢复。确认继续？",
       "彻底删除", true,
@@ -850,6 +875,7 @@
           "彻底删除归档的活动")
           .then(function () {
             PX.toast("已删除");
+            resolve(true);
             return loadArchived(true);
           })
           .catch(function (e) {
@@ -857,11 +883,14 @@
               // 别处已经删掉了：刷新一遍列表，别让人对着一条已经不存在的记录再点
               PX.toast("这场活动已经不在了", true);
               loadArchived(true);
+              resolve(true);
               return;
             }
+            resolve(false);
             fail(e);
           });
-      });
+      }, { keepUnder: true });
+    });
   }
 
   function rotateEvent(seq) {

@@ -35,6 +35,19 @@
 
 平台之外的程序用 API 令牌，见 [api-tokens.md](api-tokens.md)。
 
+## 活动数据的归档与下载
+
+```
+POST /api/panel/event/archive        负责人归档自己的活动（要 sudo）
+POST /api/panel/event/force_archive  超管强制归档别人的活动（要 sudo）
+POST /api/panel/event/unarchive      超管取消归档（要 sudo）
+GET  /api/panel/event/download?seq=  下载：开启时负责人与参与者；已归档时超管 + sudo（含归档包）
+POST /api/panel/event/delete         超管彻底删除已归档的活动（要 sudo）
+```
+
+归档会把 `data/events/<活动号>/` 打包成 `archive.tar.gz`，删掉业务库与审计库，只留元数据；
+取消归档把包解开。下载给的是 zip，文件名里带活动号。
+
 ## 事件流
 
 - 面板：`GET /api/panel/stream`（需要登录）

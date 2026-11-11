@@ -258,6 +258,42 @@ class tx:
         return False
 
 
+# 每个线程一个连接，全都登记在这里：归档要删文件时得把相关连接都收掉
+_CONNS = []
+
+
+def close_connection():
+    """关掉本线程的连接。"""
+    conn = getattr(_local, "conn", None)
+    if conn is not None:
+        try:
+            conn.close()
+        except sqlite3.Error:
+            pass
+    seq = getattr(_local, "seq", None)
+    _CONNS[:] = [(s, c) for (s, c) in _CONNS if c is not conn]
+    _local.conn = None
+    _local.path = None
+
+
+def close_event_connections(seq):
+    """关掉某个活动的所有连接（可能分布在别的线程上）。归档删文件之前调用。"""
+    seq = int(seq)
+    keep = []
+    for item_seq, conn in _CONNS:
+        if item_seq != seq:
+            keep.append((item_seq, conn))
+            continue
+        try:
+            conn.close()
+        except sqlite3.Error:
+            pass
+    _CONNS[:] = keep
+    if getattr(_local, "seq", None) == seq:
+        _local.conn = None
+        _local.path = None
+
+
 def connect():
     """Thread-local connection (http.server serves each request in its own thread)."""
     conn = getattr(_local, "conn", None)
@@ -265,7 +301,9 @@ def connect():
     if conn is not None and getattr(_local, "path", None) == path:
         return conn
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    conn = sqlite3.connect(path, timeout=15.0, isolation_level=None)
+    # check_same_thread=False：每个线程仍各用各的连接，但归档时平台要能统一收掉
+    conn = sqlite3.connect(path, timeout=15.0, isolation_level=None,
+                           check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=FULL")
@@ -273,6 +311,7 @@ def connect():
     conn.execute("PRAGMA foreign_keys=ON")
     _local.conn = conn
     _local.path = path
+    _CONNS.append((event_id(), conn))
     return conn
 
 

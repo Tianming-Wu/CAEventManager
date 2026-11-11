@@ -46,6 +46,7 @@ import assistant
 import bus
 import checkin
 import db
+import eventfs
 import expr
 import exporter
 import health
@@ -67,7 +68,7 @@ TPL_DIR = os.path.join(BASE_DIR, "tpl")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.10.0.45"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.10.1.46"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -2044,38 +2045,127 @@ class Handler(BaseHTTPRequestHandler):
                                "admin": (prefix + "/" + token + "/admin") if prefix
                                         else "/" + token + "/admin"})
 
-        if path == "/event/archive" and method == "POST":
-            # Archiving is the owner's own delete.  The row and the database file
-            # stay: an activity that happened is part of the record, and the
-            # audit log has to keep pointing at something.
-            data = body()
-            seq = int(data.get("seq") or 0)
-            mine = conn.execute(
-                "SELECT role FROM event_members WHERE seq=? AND account_id=?",
-                (seq, acc["id"])).fetchone()
-            if mine is None or mine["role"] != "owner":
-                raise model.ApiError("\u53ea\u6709\u8be5\u6d3b\u52a8\u7684\u8d1f\u8d23\u4eba\u80fd\u5b58\u6863", 403)
-            need_sudo()
-            row = conn.execute("SELECT title, archived_at FROM events WHERE seq=?",
-                               (seq,)).fetchone()
+        def event_row(seq):
+            row = conn.execute("SELECT * FROM events WHERE seq=?", (seq,)).fetchone()
             if row is None:
-                raise model.ApiError("\u6d3b\u52a8\u4e0d\u5b58\u5728", 404)
-            if row["archived_at"]:
-                return self._json({"ok": True, "seq": seq, "archived": True,
-                                   "already": True})
-            refuse_stale()
+                raise model.ApiError("活动不存在", 404)
+            return row
+
+        def seat_of(seq, account_id=None):
+            return conn.execute(
+                "SELECT role, state FROM event_members WHERE seq=? AND account_id=?",
+                (seq, account_id or acc["id"])).fetchone()
+
+        def do_archive(seq, title, forced_by=""):
+            """打包、留元数据、销短链、写审计。归档之后活动不再保证能打开。"""
+            try:
+                size = eventfs.archive(seq)
+            except eventfs.EventFsError as exc:
+                raise model.ApiError(str(exc))
             with panel.tx() as tx:
                 tx.execute("UPDATE events SET archived_at=? WHERE seq=?",
                            (time.time(), seq))
-                # 短链是活动的平台资产：活动归档，它的短链由平台一并销毁
                 shortlinks.purge_event(tx, seq)
-                panel.audit(tx, acc["username"], "event_archive", str(seq),
-                            row["title"])
-            db.set_event(seq)
-            with db.tx(db.connect()):
-                db.audit(db.connect(), "event_archive", detail="archived")
+                panel.audit(tx, acc["username"],
+                            "event_force_archive" if forced_by else "event_archive",
+                            str(seq), title)
+            return size
+
+        if path == "/event/archive" and method == "POST":
+            # 归档是负责人对自己活动的软删除：服务端把文件夹打包，外面只留元数据
+            data = body()
+            seq = int(data.get("seq") or 0)
+            seat = seat_of(seq)
+            if seat is None or seat["role"] != "owner":
+                raise model.ApiError("只有该活动的负责人能归档", 403)
+            row = event_row(seq)
+            if row["archived_at"]:
+                return self._json({"ok": True, "seq": seq, "archived": True,
+                                   "already": True})
+            need_sudo()
+            refuse_stale()
+            size = do_archive(seq, row["title"])
             return self._json({"ok": True, "seq": seq, "archived": True,
-                               "title": row["title"]})
+                               "title": row["title"], "bytes": size})
+
+        if path == "/event/force_archive" and method == "POST":
+            # 强制归档别人的活动：超管提权操作
+            data = body()
+            seq = int(data.get("seq") or 0)
+            need("superadmin", "owner")
+            row = event_row(seq)
+            if row["archived_at"]:
+                return self._json({"ok": True, "seq": seq, "archived": True,
+                                   "already": True})
+            need_sudo()
+            size = do_archive(seq, row["title"], forced_by=acc["username"])
+            return self._json({"ok": True, "seq": seq, "archived": True,
+                               "title": row["title"], "bytes": size})
+
+        if path == "/event/unarchive" and method == "POST":
+            # 取消归档：超管提权，把归档包解开，负责人就能下载后再归一次
+            data = body()
+            seq = int(data.get("seq") or 0)
+            need("superadmin", "owner")
+            need_sudo()
+            row = event_row(seq)
+            try:
+                restored = eventfs.restore(seq)
+            except eventfs.EventFsError as exc:
+                raise model.ApiError(str(exc))
+            with panel.tx() as tx:
+                tx.execute("UPDATE events SET archived_at=0 WHERE seq=?", (seq,))
+                panel.audit(tx, acc["username"], "event_unarchive", str(seq),
+                            row["title"])
+            if restored:
+                db.set_event(seq)
+                db.init_db()
+            return self._json({"ok": True, "seq": seq, "archived": False,
+                               "restored": restored})
+
+        if path == "/event/delete" and method == "POST":
+            # 彻底删除已归档的活动：不可逆，只有超管能做
+            data = body()
+            seq = int(data.get("seq") or 0)
+            need("superadmin", "owner")
+            row = event_row(seq)
+            if not row["archived_at"]:
+                raise model.ApiError("只能删除已归档的活动；正在用的先归档", 409)
+            need_sudo()
+            removed = eventfs.delete(seq)
+            with panel.tx() as tx:
+                tx.execute("DELETE FROM event_members WHERE seq=?", (seq,))
+                tx.execute("DELETE FROM events WHERE seq=?", (seq,))
+                panel.audit(tx, acc["username"], "event_delete", str(seq),
+                            row["title"])
+            return self._json({"ok": True, "seq": seq, "removed": removed})
+
+        if path == "/event/download" and method == "GET":
+            # 活动正常开启时负责人与参与者都能下载；归档之后只有超管提权能拿
+            seq = int((query.get("seq") or ["0"])[0] or 0)
+            row = event_row(seq)
+            seat = seat_of(seq)
+            mine = seat is not None and seat["state"] == "active"
+            if row["archived_at"]:
+                need("superadmin", "owner")
+                need_sudo()
+                blob = eventfs.package(seq, full=True)
+            else:
+                if not mine:
+                    need("superadmin", "owner")
+                blob = eventfs.package(seq)
+            title = db.read_meta(seq).get("title") or row["title"] or ""
+            ascii_name = "".join(ch for ch in title if ch.isascii() and
+                                 (ch.isalnum() or ch in "-_"))
+            name = "event-%d-%s.zip" % (seq, ascii_name or "activity")
+            # HTTP 头只认 latin-1：ASCII 名给老客户端，UTF-8 名按 RFC 5987 附在后面
+            utf8_name = quote("活动%d-%s.zip" % (seq, title or "数据"))
+            disposition = "attachment; filename=\"%s\"; filename*=UTF-8''%s" % (
+                name, utf8_name)
+            with panel.tx() as tx:
+                panel.audit(tx, acc["username"], "event_download", str(seq), name)
+            return self._send(200, blob, "application/zip",
+                              headers=[("Content-Disposition", disposition)])
 
         if path == "/event/title" and method == "POST":
             # The name belongs to the event's top-level data, so only that

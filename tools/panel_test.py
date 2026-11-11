@@ -604,6 +604,39 @@ def main():
     again = post(owner, "/api/panel/event/archive", {"seq": ev2["seq"]})
     check("archiving twice is harmless", again and again["ok"], again)
 
+    print("== 活动归档：打包、下载、还原、删除 ==")
+    spare = post(owner, "/api/panel/events/create",
+                 {"template": "nwuca.salon", "title": "归档用例"})
+    aseq = spare["event"]["seq"] if spare and spare.get("event") else 0
+    check("建出一场用来归档的活动", bool(aseq), spare)
+    if aseq:
+        # 活动正常开启时：负责人能下载
+        blob = call(owner, "/api/panel/event/download?seq=%d" % aseq)
+        check("开启时负责人能下载数据", blob is not None and len(blob) > 200, blob if blob is None else len(blob))
+        # 归档要 sudo：前面的用例可能已经进过，先退出来
+        post(owner, "/api/panel/sudo/exit", {})
+        post(owner, "/api/panel/event/archive", {"seq": aseq}, expect=403)
+        check("归档要进 sudo", True)
+        post(owner, "/api/panel/sudo", {"password": owner_password()})
+        res = post(owner, "/api/panel/event/archive", {"seq": aseq})
+        check("负责人能归档自己的活动", res and res.get("archived"), res)
+        listed = [e for e in call(owner, "/api/panel/events?archived=1")["events"]
+                  if e["seq"] == aseq]
+        check("归档后退到已归档列表", len(listed) == 1, listed)
+        # 归档之后数据由管理员保管
+        post(owner, "/api/panel/event/unarchive", {"seq": aseq})
+        restored = call(owner, "/api/panel/events")["events"]
+        check("取消归档之后回到正常列表",
+              any(e["seq"] == aseq for e in restored), [e["seq"] for e in restored])
+        again = call(owner, "/api/panel/event/download?seq=%d" % aseq)
+        check("还原之后又能下载", again is not None and len(again) > 200,
+              again if again is None else len(again))
+        post(owner, "/api/panel/event/archive", {"seq": aseq})
+        post(owner, "/api/panel/event/delete", {"seq": aseq})
+        gone = [e for e in call(owner, "/api/panel/events")["events"]
+                if e["seq"] == aseq]
+        check("已归档的活动能彻底删除", gone == [], gone)
+
     print("== renaming an activity ==")
     ev = call(owner, "/api/panel/events")["events"][0]
     got = post(owner, "/api/panel/event/title",

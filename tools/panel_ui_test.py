@@ -2146,12 +2146,16 @@ def server_page(page):
     page.wait_for_timeout(700)
     body = page.inner_text('[data-page="server"]')
     check("运维操作那张占位卡没有了", "还没有接入" not in body, body[:120])
-    check("换成了安全模式卡", page.locator("#safeModeBtn").count() == 1)
-    check("按钮写的是进入安全模式",
-          page.inner_text("#safeModeBtn").strip() == "进入安全模式",
-          page.inner_text("#safeModeBtn"))
-    check("服务信息里有一行安全模式", "安全模式" in page.inner_text("#srvInfo"),
-          page.inner_text("#srvInfo"))
+    check("服务卡片上有重启与安全模式两个按钮",
+          page.locator("#serviceRestartBtn").count() == 1
+          and page.locator("#safeModeBtn").count() == 1)
+    check("按钮写的是重启服务与进入安全模式",
+          page.inner_text("#serviceRestartBtn").strip() == "重启服务"
+          and page.inner_text("#safeModeBtn").strip() == "进入安全模式",
+          (page.inner_text("#serviceRestartBtn"), page.inner_text("#safeModeBtn")))
+    check("卡片上没有多余的角标", page.locator("#safeModeChip").count() == 0)
+    check("服务信息里没有单独的安全模式一行",
+          "安全模式" not in page.inner_text("#srvInfo"), page.inner_text("#srvInfo"))
 
 
 def sudo_page(page):

@@ -168,12 +168,18 @@ def main():
         code, refused = post("/api/panel/service/safe_mode", {"on": False})
         check("退出安全模式要先进 sudo",
               code == 403 and refused.get("sudoRequired"), (code, refused))
+        code, refused_restart = post("/api/panel/service/restart", {})
+        check("重启服务同样要 sudo",
+              code == 403 and refused_restart.get("sudoRequired"), (code, refused_restart))
         post("/api/panel/sudo", {"password": pw})
         code, off = post("/api/panel/service/safe_mode", {"on": False})
         check("进了 sudo 就能改开关", code == 200 and off.get("safeMode") is False,
               (code, off))
         check("不是看护进程起的服务：只改配置，不自己重启",
               off.get("restarting") is False, off)
+        code, restarted = post("/api/panel/service/restart", {})
+        check("进了 sudo 就能重启，没人看着时只回一句说明",
+              code == 200 and restarted.get("restarting") is False, (code, restarted))
         raw_cfg = json.load(open(os.path.join(DATA, "config.json"), encoding="utf-8"))
         check("开关写进了 config.json", raw_cfg.get("safe_mode") is False, raw_cfg)
         code, again = post("/api/panel/service/safe_mode", {"on": False})

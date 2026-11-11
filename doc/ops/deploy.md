@@ -75,7 +75,8 @@ python tools/bump_version.py --show
 服务会自己重启一次。
 
 改开关的接口是 `POST /api/panel/service/safe_mode`（`{"on": true|false}`），站长加 sudo 才动得了，
-进出都记审计。写的是 `config.json` 里的 `safe_mode`，别的键原样保留。
+进出都记审计。写的是 `config.json` 里的 `safe_mode`，别的键原样保留。重启服务的接口是
+`POST /api/panel/service/restart`，同样站长加 sudo，也记审计。
 
 ## 日志
 

@@ -3814,13 +3814,10 @@
   }
 
   function drawSafeMode() {
-    var chip = $("#safeModeChip");
     var btn = $("#safeModeBtn");
     var note = $("#safeModeNote");
-    if (!chip || !btn) return;
+    if (!btn) return;
     var on = safeModeOn();
-    chip.textContent = on ? "安全模式中" : "正常";
-    chip.className = "chip" + (on ? " gold live" : "");
     btn.textContent = on ? "退出安全模式" : "进入安全模式";
     btn.className = "btn " + (on ? "" : "danger");
     if (note) {
@@ -3838,7 +3835,7 @@
         S.users = (d && d.users) || null;
         S.hostMeta = { safeMode: !!(d && d.safeMode), supervised: d && d.supervised };
         applyHost(d && d.host ? d.host : null);
-        if (S.hostMeta.safeMode === want) {
+        if (want === null || S.hostMeta.safeMode === want) {
           location.reload();
           return;
         }
@@ -3853,6 +3850,23 @@
       });
     };
     setTimeout(probe, 500);
+  }
+
+  function restartService() {
+    confirmHighRisk("重启服务？",
+      "正在进行的操作会短暂断开，几秒后恢复。",
+      "重启", false, function () {
+        apiSudo("/service/restart", { method: "POST" }, "重启")
+          .then(function (d) {
+            if (d.restarting) {
+              PX.toast("服务重启中…");
+              waitForRestart(null);
+            } else {
+              PX.toast("服务管理未运行，请到服务器上重启");
+            }
+          })
+          .catch(fail);
+      });
   }
 
   function toggleSafeMode() {
@@ -3890,7 +3904,7 @@
     var rows = [];
     if (h) {
       rows.push(["主机", h.host || "—"]);
-      rows.push(["版本", h.version || "—"]);
+      rows.push(["版本", (h.version || "—") + (safeModeOn() ? "（安全模式）" : "")]);
       rows.push(["内存", (h.mem !== null && h.mem !== undefined)
         ? Math.round(h.mem) + "%" +
           (h.memTotalMB ? "（共 " + Math.round(h.memTotalMB) + " MB）" : "")
@@ -3901,9 +3915,9 @@
       rows.push(["活动数", String(S.events.length)]);
       rows.push(["账号数", String(S.accounts.length)]);
     } else {
-      rows.push(["状态", "这台机器读不到设备占用（非 Linux 或 /proc 不可用）"]);
+      rows.push(["状态", "这台机器读不到设备占用（非 Linux 或 /proc 不可用）"
+                         + (safeModeOn() ? "（安全模式）" : "")]);
     }
-    rows.push(["安全模式", safeModeOn() ? "是" : "否"]);
     $("#srvInfo").innerHTML = rows.map(function (r) {
       return "<dt>" + PX.esc(r[0]) + "</dt><dd>" + PX.esc(r[1]) + "</dd>";
     }).join("");
@@ -5291,6 +5305,7 @@
   });
 
   $("#safeModeBtn").addEventListener("click", toggleSafeMode);
+  $("#serviceRestartBtn").addEventListener("click", restartService);
 
   $("#pwBtn").addEventListener("click", function () {
     var err = $("#pwErr");

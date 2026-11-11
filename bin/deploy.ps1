@@ -85,8 +85,8 @@ done < /tmp/lottery-stale.txt
 rm -f /tmp/lottery-incoming.txt /tmp/lottery-present.txt /tmp/lottery-stale.txt
 tar -xzf __TAR__ -C ~/__DEST__
 rm -f __TAR__
-sed -i 's/\r$//' bin/run.sh bin/service.sh 2>/dev/null || true
-chmod +x bin/run.sh bin/service.sh
+sed -i 's/\r$//' bin/*.sh 2>/dev/null || true
+chmod +x bin/*.sh
 find . -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/null || true
 __EXISTENCE__
 python3 -c "import sys; sys.path.insert(0, 'core'); import app, db, model, auth, localconfig, checkin, exporter, panel, packs" || {

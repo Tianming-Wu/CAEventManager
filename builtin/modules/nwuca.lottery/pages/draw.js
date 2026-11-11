@@ -11,18 +11,6 @@ window.MODULE = window.MODULE || { pages: {} };
   function ok(html) { LT.toast(html, false); }
   function fail(e) { LT.toast(LT.esc((e && e.message) || "出错了"), true); }
 
-  function normalizePrizes(list) {
-    return (list || []).map(function (p) {
-      if (typeof p === "string") return { name: p, count: 1, mode: "ticket", batch: false };
-      return {
-        name: (p && p.name) || "",
-        count: Number(p && p.count) || 0,
-        mode: p && p.mode === "person" ? "person" : "ticket",
-        batch: !!(p && p.batch)
-      };
-    }).filter(function (p) { return p.name; });
-  }
-
   function paceSwitch(index, oneShot) {
     return '<div class="seg" role="group">' +
       '<button type="button" class="seg-btn' + (oneShot ? "" : " on") +
@@ -73,23 +61,6 @@ window.MODULE = window.MODULE || { pages: {} };
       .catch(fail);
   }
 
-  function renderPrizeEditor() {
-    var box = $("#prizeEditor");
-    if (!box) return;
-    var prizes = normalizePrizes(S.config.prizes);
-    box.innerHTML = prizes.map(function (p, i) {
-      return '<div class="prize-row" data-i="' + i + '" data-batch="' + (p.batch ? "1" : "0") + '">' +
-        '<input class="p-name" type="text" value="' + LT.esc(p.name) + '" placeholder="奖品名称">' +
-        '<input class="p-count" type="number" min="0" max="999" value="' + p.count + '">' +
-        '<select class="p-mode">' +
-        '<option value="ticket"' + (p.mode === "ticket" ? " selected" : "") + ">按票</option>" +
-        '<option value="person"' + (p.mode === "person" ? " selected" : "") + ">均等</option>" +
-        "</select>" +
-        '<button class="btn sm danger" data-prize-del="' + i + '">删除</button>' +
-        "</div>";
-    }).join("") || '<p class="note">还没有配置奖品</p>';
-  }
-
   function renderDraws() {
     $("#drawTable tbody").innerHTML = S.draws.map(function (d) {
       var voided = !!d.voided_at;
@@ -117,7 +88,6 @@ window.MODULE = window.MODULE || { pages: {} };
       S = state || S;
       if (ctx && tab) ctx.tab = tab;
       renderPrizeList();
-      renderPrizeEditor();
       renderDraws();
     },
     // 平台点「逐个 / 一次抽完」这两颗按钮时调过来
@@ -127,7 +97,6 @@ window.MODULE = window.MODULE || { pages: {} };
     show: function (tab) {
       if (ctx && tab) ctx.tab = tab;
       renderPrizeList();
-      renderPrizeEditor();
       renderDraws();
     },
   };

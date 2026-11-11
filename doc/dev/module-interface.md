@@ -180,6 +180,7 @@ window.MODULE.pages.tickets = {
   mount(ctx) {},              // 启动时一次；ctx = {LT, state, tab, page, reload, showTab}
   refresh(state, tab) {},     // 平台每次拉到新状态
   show(tab) {},               // 切到这个页签（返回值是 Promise 也行）
+  count(state) {},            // 可选：页签上的数字，没有就不画角标
 };
 ```
 
@@ -190,13 +191,14 @@ window.MODULE.pages.tickets = {
 - `ctx.showTab(id)` 切到另一个页签：模块自己的几页之间跳转用，例如名单页把一个人交给操作台
 - 同一模块的页面之间可以直接调对方的入口（`window.MODULE.pages.ops.select(name)`），
   几页共用的画法放 `MODULE.lib`，由共用脚本定义
+- 顶栏那条状态由模块填：共用脚本里定义 `window.MODULE.head = { render(state) → HTML }`，
+  平台只提供那块地方，不认识上面写的是什么
 - 页签里的按钮由模块自己在 `mount` 里接；平台只认平台外壳上那几个 `data-*`
-- 平台不直接调模块的函数，只走 `button → pageShow/pageRefresh`；模块要通知平台也用事件，
-  例如算完计划后 `document.dispatchEvent(new Event("module-plan"))`
-- 平台自己的按钮状态（结算、重置）由平台维护，模块不要碰
+- 平台不直接调模块的函数，只走 `button → pageShow/pageRefresh`
 
-**已经搬完的**：五个页签的标记全在模块里；脚本已搬「奖票」「抽奖」「操作台」「名单」四页，
-平台侧只剩调度与主站功能（活动设置、日志、短链、成员）。剩下的「奖票设置」按同一份契约搬。
+**已经搬完的**：五个页签的标记与脚本全在模块里（`ops` / `roster` / `tickets` / `draw` /
+`config` 五份脚本加一份共用件）。平台侧只剩页签调度与主站功能：活动设置（成员、名单来源、
+短链、数据、危险区域）、日志、解锁开关。
 
 ## 数据
 

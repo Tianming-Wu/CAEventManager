@@ -218,5 +218,7 @@ window.MODULE = window.MODULE || { pages: {} };
       ensureState();
       renderFullTable();
     },
+    /* 页签上的角标：这份名单里有多少人 */
+    count: function (state) { return ((state || S).students || []).length; },
   };
 })();

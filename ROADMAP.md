@@ -731,8 +731,9 @@ colspan 单元格会把表头重新分配一遍，一有数据表头又跳回来
 3b. **脚本接口已定**：模块放 `pages/<页签>.js`，平台载入后按 `mount / refresh / show` 调用；
    几页共用的画法放 `pages/common.js`（在 `module.json` 的 `scripts` 里声明，先于页签脚本载入），
    由 `MODULE.lib` 共享；页面之间可以互相调用入口，跨页切页签用 `ctx.showTab()`。
-   「奖票」→`tickets.js`、「抽奖」→`draw.js`、「操作台」→`ops.js`、「名单」→`roster.js`，
-   平台侧只剩调度与主站功能。剩下「奖票设置」一页按同一份契约搬
+   「奖票」→`tickets.js`、「抽奖」→`draw.js`、「操作台」→`ops.js`、「名单」→`roster.js`、
+   「奖票设置」→`config.js`；顶栏状态条与页签角标也由模块给（`MODULE.head`、`count()`），
+   平台侧只剩页签调度与主站功能
 3. 展示数据：公示页/大屏改吃 `present()`，平台只画壳
 4. 验收：两个玩法完全不同的模块同时跑，平台代码里 grep 不到玩法名词
 

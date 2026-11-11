@@ -138,6 +138,65 @@ window.MODULE.lib = (function () {
     return perms.search || null;
   }
 
+  /* 自动模式下奖票池跟着到场人数走 */
+  function poolSize(state, st) {
+    if ((state.config.pool_mode || "auto") === "fixed") return Number(state.config.pool_size) || 0;
+    return st.checkin * 3 + (Number(state.config.bonus_constant) || 0);
+  }
+
+  function stats(state) {
+    state = state || S;
+    var st = {
+      total: state.students.length, participants: 0, staff: 0, staff_present: 0,
+      checkin: 0, task1: 0, task2: 0,
+      live_tickets: 0, max_code: 0, finalized: !!state.config.finalized
+    };
+    state.students.forEach(function (s) {
+      if (isParticipant(s)) {
+        st.participants++;
+        KINDS.forEach(function (k) { if (s.marks[k]) st[k]++; });
+      } else {
+        st.staff++;
+        if (s.marks.checkin) st.staff_present++;
+      }
+      (s.tickets || []).forEach(function (t) {
+        st.live_tickets++;
+        if (t.code > st.max_code) st.max_code = t.code;
+      });
+    });
+    st.guaranteed = st.checkin + st.task1 + st.task2;
+    st.pool_mode = state.config.pool_mode || "auto";
+    st.bonus_constant = Number(state.config.bonus_constant) || 0;
+    st.pool_size = poolSize(state, st);
+    st.bonus_pool = Math.max(0, st.pool_size - st.guaranteed);
+    st.remaining = st.pool_size - st.live_tickets;
+    return st;
+  }
+
+  /* 顶栏的状态条由模块填：平台只管那块地方，不认识上面写的是什么 */
+  function headHtml(state) {
+    state = state || S;
+    var st = stats(state);
+    var html = [
+      '<span class="chip green"><b>' + st.checkin + "</b>/" + st.participants + " 已签到</span>",
+      '<span class="chip blue"><b>' + st.task1 + "</b> 任务一</span>",
+      '<span class="chip blue"><b>' + st.task2 + "</b> 任务二</span>",
+      '<span class="chip gold"><b>' + st.live_tickets + "</b>/" + st.pool_size + " 奖票已发</span>"
+    ];
+    if (st.staff) {
+      html.push('<span class="chip">工作人员 <b>' + st.staff_present + "</b>/" + st.staff + "</span>");
+    }
+    if (st.finalized) html.push('<span class="chip gold live">已结算</span>');
+    if (state.unlocked) {
+      html.push('<span class="chip" style="border-color:#6b2020;color:#ffb4b4">修改已解锁</span>');
+    }
+    return html.join("");
+  }
+
+  window.MODULE.head = {
+    render: function (state) { return headHtml(state); }
+  };
+
   return {
     bind: bind, state: state, reloadState: reloadState,
     $: $, $$: $$, ok: ok, fail: fail, bad: bad,
@@ -145,6 +204,6 @@ window.MODULE.lib = (function () {
     kindLabel: kindLabel, isParticipant: isParticipant, roleLabel: roleLabel,
     canMark: canMark, ticketChips: ticketChips, roleTag: roleTag, timeCell: timeCell,
     stepBadges: stepBadges, nextLabel: nextLabel, actionButtons: actionButtons,
-    searchSpec: searchSpec
+    searchSpec: searchSpec, stats: stats, poolSize: poolSize
   };
 })();

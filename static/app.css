@@ -188,6 +188,13 @@ code, .mono { font-family: var(--mono); }
 }
 .btn.danger { background: var(--danger-soft); border-color: var(--danger-line); color: var(--danger); }
 .btn.danger:hover { border-color: var(--danger); }
+/* 危险区域：没权限的人看到的是减淡的红，点不动 */
+.btn.danger.dim, .btn.danger:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+.danger-zone { border-color: var(--danger-line); }
+.danger-zone h2 { color: var(--danger); }
 .btn.ghost { background: transparent; border-color: transparent; color: var(--muted); }
 .btn.ghost:hover { background: var(--surface-2); }
 .btn.sm { padding: 3px 8px; font-size: .78rem; }

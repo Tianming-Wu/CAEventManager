@@ -586,8 +586,66 @@
   // typed: the fields are only re-read from the server once they save.
   var formTouched = false;
 
+  function archiveEvent() {
+    if (!S.seq) return;
+    LT.confirm("归档活动",
+      "归档后这场活动不再出现在列表里，链接与短链同时失效；数据会被打包，只留元数据。"
+      + "归档之后活动不再保证能打开。",
+      { danger: true, label: "归档" }).then(function (yes) {
+      if (!yes) return;
+      LT.panelApi("/api/panel/event/archive", { method: "POST", body: { seq: S.seq } })
+        .then(function () {
+          ok("已归档，正在回到总览");
+          setTimeout(function () { location.href = LT.panelLoginUrl(); }, 1200);
+        })
+        .catch(function (e) {
+          if (e && e.sudo) {
+            askPanelPassword().then(function () { archiveEvent(); }).catch(function () {});
+            return;
+          }
+          bad(e);
+        });
+    });
+  }
+
+  /* 提权：活动级的动作要回面板去输一次密码；面板的 sudo 是会话级的，这里借用同一次登录 */
+  function askPanelPassword() {
+    return new Promise(function (resolve, reject) {
+      LT.modal("<h2>需要确认</h2><p class=\"page-sub\">这个操作要重新输入一次密码。</p>"
+        + '<div class="field"><label for="sudoPw">登录密码</label>'
+        + '<input id="sudoPw" type="password" autocomplete="off"></div>'
+        + '<div class="row" style="margin-top:16px;justify-content:flex-end">'
+        + '<button class="btn" data-close="1">取消</button>'
+        + '<button class="btn primary" id="sudoGo">确认</button></div>');
+      $("#sudoGo").addEventListener("click", function () {
+        LT.panelApi("/api/panel/sudo", {
+          method: "POST", body: { password: $("#sudoPw").value || "" } })
+          .then(function () { LT.closeModal(); resolve(true); })
+          .catch(function (e) { PX_ERROR(e); reject(e); });
+      });
+    });
+  }
+
+  function PX_ERROR(e) {
+    LT.toast(LT.esc((e && e.message) || "密码不对"), true);
+  }
+
+  /* 危险区域：负责人能点，其他成员看到的是减淡的红色、点不动 */
+  function renderDangerZone() {
+    var btn = $("#archiveEventBtn");
+    if (!btn) return;
+    var seat = (S.seat && S.seat.role) || "";
+    var owner = seat === "owner";
+    btn.disabled = !owner;
+    btn.classList.toggle("danger", true);
+    btn.classList.toggle("dim", !owner);
+    var note = $("#archiveEventNote");
+    if (note) note.textContent = owner ? "" : "只有该活动的负责人能归档";
+  }
+
   function renderSettings() {
     loadShortlinks();
+    renderDangerZone();
     var c = S.config;
     if (!formTouched) {
       $("#setTitle").value = c.title || "";
@@ -608,7 +666,6 @@
       renderPrizeEditor();
     }
     $("#exportLink").href = LT.PREFIX + "/api/admin/export.csv";
-    $("#exportZipLink").href = LT.PREFIX + "/api/admin/export.zip";
     $("#secretUrl").textContent = S.publicBaseUrl + "/";
     updatePoolPreview();
     renderQR();
@@ -1031,10 +1088,16 @@
       }).catch(bad);
     });
 
+    $("#archiveEventBtn").addEventListener("click", archiveEvent);
     $("#shortlinkBtn").addEventListener("click", mintShortlink);
   $("#shortlinkTable").addEventListener("click", function (e) {
     var btn = e.target.closest ? e.target.closest("[data-shortline-del]") : null;
     if (btn) revokeShortlink(btn.getAttribute("data-shortline-del"));
+  });
+
+  $("#downloadDataBtn").addEventListener("click", function () {
+    if (!S.seq) return;
+    window.open((LT.panelRoot || "") + "/api/panel/event/download?seq=" + S.seq, "_blank");
   });
 
   $("#refreshBtn").addEventListener("click", function () { load().then(function () { ok("已刷新"); }); });
@@ -1417,6 +1480,7 @@
     LT.api("/api/admin/members").then(function (d) {
       S.members = d.members || [];
       S.seat = d.me || {};
+      renderDangerZone();
       renderMembers();
       renderEventInfo();
       loadRosterSource();

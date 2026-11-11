@@ -512,6 +512,7 @@
     conflictMsg: conflictMsg,
     PANEL: PANEL,
     panelLoginUrl: panelLoginUrl,
+    panelRoot: PANEL,
     api: api,
     panelApi: panelApi,
     esc: esc,

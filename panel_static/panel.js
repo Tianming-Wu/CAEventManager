@@ -118,6 +118,7 @@
   var ICON_PENCIL = '<svg viewBox="0 0 20 20" aria-hidden="true">' +
     '<path d="M4.2 15.8h3.1l7.5-7.5a1.6 1.6 0 0 0-2.3-2.3l-7.5 7.5v2.3Z"/>' +
     '<path d="M11.5 7l2.3 2.3"/></svg>';
+  var ICON_ARCHIVE = '<svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3.4 6.4h13.2v9a1.6 1.6 0 0 1-1.6 1.6H5a1.6 1.6 0 0 1-1.6-1.6v-9Z"/><path d="M2.6 3.4h14.8v3H2.6zM8 10h4"/></svg>';
   var ICON_TRASH = '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 5.6h12M8 3.4h4M6.2 5.6l.7 9.4a1.6 1.6 0 0 0 1.6 1.5h3a1.6 1.6 0 0 0 1.6-1.5l.7-9.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
   /* ---------------------------------------------------------------- helpers */
@@ -591,7 +592,7 @@
           '<button type="button" role="menuitem" data-rotate="' + e.seq + '">' +
           "重置访问地址</button>" +
           '<button type="button" role="menuitem" class="danger" ' +
-          'data-archive="' + e.seq + '">存档活动</button>'
+          'data-archive="' + e.seq + '">' + ICON_ARCHIVE + '归档</button>'
         : "");
     document.body.appendChild(menu);
 
@@ -706,14 +707,15 @@
   function archiveEvent(seq) {
     var e = S.events.filter(function (x) { return String(x.seq) === String(seq); })[0];
     closeCardMenu();
-    confirmHighRisk("存档活动",
-      "存档后这个活动不再出现在列表里，它的链接也会失效。数据保留，不会被删除。"
+    confirmHighRisk("归档活动",
+      "归档后这个活动不再出现在列表里，链接与短链都会失效；服务端会把它的数据打包，"
+      + "只留元数据，活动不再保证能打开。要留数据请在归档前下载。"
       + (e ? "<br>存档：" + PX.esc(eventTitle(e)) : ""),
-      "存档", true,
+      "归档", true,
       function () {
-        apiSudo("/event/archive", { method: "POST", body: { seq: Number(seq) } }, "存档活动")
+        apiSudo("/event/archive", { method: "POST", body: { seq: Number(seq) } }, "归档活动")
           .then(function () {
-            PX.toast("已存档");
+            PX.toast("已归档");
             return reloadAll();
           })
           .catch(fail);

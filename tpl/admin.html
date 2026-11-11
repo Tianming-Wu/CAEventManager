@@ -352,17 +352,6 @@
       </div>
     </div>
 
-    <div class="panel">
-      <h2>数据</h2>
-      <p class="panel-hint">
-        活动结束后下载归档。打包内容：汇总、名单、奖票明细、抽奖记录、中奖汇总、操作日志。
-      </p>
-      <div class="row">
-        <a class="btn danger" id="exportZipLink" href="#" target="_blank" rel="noopener"
-           style="padding:10px 22px;font-size:.95rem">下载数据</a>
-        <a class="btn ghost sm" id="exportLink" href="#" target="_blank" rel="noopener">仅名单 CSV</a>
-      </div>
-    </div>
   </section>
 
   <!-- =================== 活动设置（平台绘制） =================== -->
@@ -438,6 +427,31 @@
           </tr></thead>
           <tbody></tbody>
         </table>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>数据</h2>
+      <p class="panel-hint">
+        活动正常开启时，负责人与参与者都能下载这场活动的数据：业务库、审计日志与元数据。
+        归档之后数据由管理员保管。
+      </p>
+      <div class="row">
+        <button class="btn" id="downloadDataBtn" type="button">下载数据</button>
+        <a class="btn ghost sm" id="exportLink" href="#" target="_blank" rel="noopener">仅名单 CSV</a>
+      </div>
+    </div>
+
+    <div class="panel danger-zone">
+      <h2>危险区域</h2>
+      <p class="panel-hint">
+        归档是活动负责人对自己活动的软删除：服务端会把数据打包、只留元数据，
+        活动从列表退到「已归档」，链接与短链同时失效。归档之后活动不再保证能打开，
+        要留数据请先在上面下载。
+      </p>
+      <div class="row">
+        <button class="btn danger" id="archiveEventBtn" type="button">归档活动</button>
+        <span class="note" id="archiveEventNote"></span>
       </div>
     </div>
 

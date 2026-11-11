@@ -2087,7 +2087,7 @@ def create_page(browser):
         if newest:
             page.click('[data-menu="' + newest + '"]')
             page.wait_for_timeout(300)
-            check("the menu offers 存档活动", page.locator("[data-archive]").count() == 1)
+            check("the menu offers 归档", page.locator("[data-archive]").count() == 1)
             page.click("[data-archive]")
             page.wait_for_timeout(600)
             # nothing is elevated, so the password prompt is the confirmation:
@@ -2095,7 +2095,7 @@ def create_page(browser):
             check("archiving asks for the password straight away",
                   page.locator("#sudoPass").count() == 1)
             entered = page.inner_text("#overlayBody")
-            check("and names the action", "存档活动" in entered, entered[:60])
+            check("and names the action", "归档" in entered, entered[:60])
             check("the prompt has no header bar",
                   page.evaluate("() => getComputedStyle("
                                 "document.querySelector('.overlay-card .overlay-head'))"

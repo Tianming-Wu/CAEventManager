@@ -139,6 +139,26 @@ def normalize_pages(raw):
     return out
 
 
+SCRIPT_RE = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
+
+
+def normalize_scripts(raw):
+    """模块自己那几份共用脚本，按声明顺序载入，先于页签脚本。
+
+    页签脚本只画自己那一页，几页都要用的东西（共用的画法与请求）放这里。
+    名字认不出来就丢掉：少一份脚本顶多某段画不出来，不该让整个活动起不来。
+    """
+    out = []
+    for item in raw or []:
+        name = str(item or "").strip()
+        if name.endswith(".js"):
+            name = name[:-3]
+        if not SCRIPT_RE.match(name) or name in out:
+            continue
+        out.append(name)
+    return out
+
+
 def normalize_external(raw):
     """The public page ids a module declares; unknown ids are dropped."""
     if raw is None:
@@ -260,6 +280,12 @@ def console_pages(module_id, version, disabled=()):
     for page_id, title in PLATFORM_PAGES:
         pages.append({"id": page_id, "title": title, "platform": True})
     return pages
+
+
+def console_scripts(module_id, version, disabled=()):
+    """The module's shared console scripts, to be loaded before its page scripts."""
+    kind = get(module_id, version, disabled=disabled) if module_id else None
+    return list(kind["scripts"]) if kind else []
 
 
 ACTION_TYPES = {
@@ -523,6 +549,7 @@ def load_module(folder, version, builtin=False, enabled=True):
         "description": str(meta.get("description") or ""),
         "requires": requires,
         "pages": normalize_pages(meta.get("pages")),
+        "scripts": normalize_scripts(meta.get("scripts")),
         "external": normalize_external(meta.get("external")),
         "features": features,
         "api": api,

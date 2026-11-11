@@ -17,13 +17,6 @@
     members: [],
     seat: {},
     unlockUntil: 0,
-    q: "",
-    hits: [],
-    sel: 0,
-    rosterQ: "",
-    sortKey: "sid",
-    sortDir: 1,
-    filter: "all",
     plan: null,
     tab: "ops"
   };
@@ -43,40 +36,39 @@
 
   function pageShow(id) {
     var page = modulePage(id);
-    if (page && page.show) return page.show();
+    if (page && page.show) return page.show(S.tab);
     return undefined;
   }
 
-  function loadModuleScripts(pages) {
+  /* 一个文件一个 <script>：先载模块的共用件，再载各页自己的 */
+  function loadScripts(names) {
     var base = (window.LT && LT.PREFIX) || "";
-    var list = (pages || []).filter(function (p) { return p && p.id; });
-    return Promise.all(list.map(function (p) {
+    return Promise.all((names || []).map(function (name) {
       return new Promise(function (resolve) {
         var el = document.createElement("script");
-        el.src = base + "/module/" + encodeURIComponent(p.id) + ".js";
+        el.src = base + "/module/" + encodeURIComponent(name) + ".js";
         el.onload = function () { resolve(true); };
         el.onerror = function () { resolve(false); };   // 没有脚本的页签是正常的
         document.head.appendChild(el);
       });
-    })).then(function () {
+    }));
+  }
+
+  function loadModuleScripts(scripts, pages) {
+    var list = (pages || []).filter(function (p) { return p && p.id; });
+    return loadScripts(scripts).then(function () {
+      return loadScripts(list.map(function (p) { return p.id; }));
+    }).then(function () {
       list.forEach(function (p) {
         var page = modulePage(p.id);
         if (page && page.mount) {
-          page.mount({ LT: LT, state: S, tab: S.tab, page: p, reload: load });
+          page.mount({ LT: LT, state: S, tab: S.tab, page: p,
+                       reload: load, showTab: showTab });
         }
       });
       // 脚本是异步来的：载入的时候可能已经切到某个页签了，补画一次
       if (S.tab) pageShow(S.tab);
     });
-  }
-
-  function kindLabel(k) { return LT.KIND_LABEL[k] || k; }
-
-  function canMark(stu, kind) {
-    if (stu.marks[kind]) return false;
-    if (S.config.finalized) return false;
-    var need = PREV[kind];
-    return !need || !!stu.marks[need];
   }
 
   // Mirrors model.effective_pool(): in auto mode the pool follows the room.
@@ -113,44 +105,6 @@
     st.bonus_pool = Math.max(0, st.pool_size - st.guaranteed);
     st.remaining = st.pool_size - st.live_tickets;
     return st;
-  }
-
-  function ticketChips(stu) {
-    var list = (stu.tickets || []).slice().sort(function (a, b) { return a.code - b.code; });
-    return list.map(function (t) {
-      return '<span class="tkt' + (t.kind === "bonus" ? " bonus" : "") + '" title="' +
-        (LT.KIND_LABEL[t.kind] || t.kind) + '">' + LT.code(t.code) + "</span>";
-    }).join(" ");
-  }
-
-  var ROLE_TAG = { staff: "工作人员", volunteer: "志愿者" };
-
-  function roleTag(stu) {
-    var label = ROLE_TAG[stu.role];
-    return label ? ' <span class="role-tag">' + label + "</span>" : "";
-  }
-
-  function stepBadges(stu) {
-    if (!isParticipant(stu)) {
-      return stu.marks.checkin
-        ? '<span class="step done">到场 ✓</span>'
-        : '<span class="step next">到场</span>';
-    }
-    return KINDS.map(function (k) {
-      if (stu.marks[k]) {
-        return '<span class="step done">' + kindLabel(k) + " ✓</span>";
-      }
-      if (stu.next === k && !S.config.finalized) {
-        return '<span class="step next">' + kindLabel(k) + "</span>";
-      }
-      return '<span class="step">' + kindLabel(k) + "</span>";
-    }).join("");
-  }
-
-  function nextLabel(stu) {
-    if (S.config.finalized) return '<span class="next none">已结算</span>';
-    if (!stu.next) return '<span class="next none">已完成</span>';
-    return '<span class="next">下一步 ' + kindLabel(stu.next) + "</span>";
   }
 
   // ------------------------------------------------------------------ toasts
@@ -211,175 +165,6 @@
     }
   }
 
-  function filtered() {
-    var q = S.q.trim();
-    var list = q ? LT.queryStudents(S.students, q, 999, searchSpec())
-                 : S.students.slice();
-    return list.filter(function (s) {
-      switch (S.filter) {
-        case "in": return !!s.marks.checkin;
-        case "out": return !s.marks.checkin;
-        case "todo": return s.marks.checkin && (s.tasks < 2);
-        case "done": return s.tasks === 2;
-        case "zero": return Object.keys(s.tickets || {}).length === 0;
-        default: return true;
-      }
-    });
-  }
-
-  /* 正在打 `#` 词的时候，把手上的标签列出来（点一下就能补全），
-     不要求谁记住语法 */
-  function renderTagHint() {
-    var box = $("#tagHint");
-    if (!box) return;
-    var q = S.q.trim();
-    var words = q.split(/\s+/);
-    var last = words[words.length - 1] || "";
-    var typing = last.charAt(0) === "#";
-    if (!typing) {
-      box.hidden = true;
-      box.innerHTML = "";
-      return;
-    }
-    var parsed = LT.parseQuery(q);
-    var known = parsed.unknown.length === 0;
-    var buttons = (LT.tagsFromSpec(searchSpec()) || LT.TAGS).map(function (tag) {
-      return '<button type="button" data-tag="' + LT.esc(tag.label.split(" ")[0]) + '">' +
-        LT.esc(tag.label) + "</button>";
-    }).join("");
-    box.innerHTML = (known ? "按身份、状态筛：" : "没有这个标签。可用的有：") + buttons;
-    box.hidden = false;
-  }
-
-  function renderHits() {
-    var box = $("#hits");
-    if (!S.q.trim()) {
-      box.innerHTML = S.students.length
-        ? '<div class="empty">输入姓名、拼音或学号</div>'
-        : '<div class="empty">名单还是空的 —— 去「名单」页导入。</div>';
-      return;
-    }
-    if (!S.hits.length) {
-      box.innerHTML = '<div class="empty">没有匹配的学生</div>';
-      return;
-    }
-    box.innerHTML = S.hits.map(function (s, i) {
-      return '<div class="hit' + (i === S.sel ? " sel" : "") + '" data-id="' + s.id + '" data-i="' + i + '">' +
-        '<div class="who"><span class="nm">' + LT.esc(s.name) + "</span>" + roleTag(s) +
-        '<span class="sid">' + LT.esc(s.sid) + "</span>" +
-        '<div class="steps">' + stepBadges(s) + "</div></div>" +
-        '<div class="side">' + ticketChips(s) + nextLabel(s) + "</div></div>";
-    }).join("");
-  }
-
-  function actionButtons(stu, compact) {
-    if (!isParticipant(stu)) {
-      var shown = !!stu.marks.checkin;
-      var html = '<button class="btn sm ' + (shown ? "" : "primary") + '" data-mark="checkin" data-id="' +
-        stu.id + '"' + (shown ? " disabled" : "") + ">" + (shown ? "到场 ✓" : "到场") + "</button>";
-      if (shown) {
-        html += ' <button class="btn sm danger" data-undo="checkin" data-id="' + stu.id + '"' +
-          (S.unlocked ? "" : " disabled") + ">撤销</button>";
-      }
-      return html;
-    }
-    var btns = [];
-    KINDS.forEach(function (k, idx) {
-      var can = canMark(stu, k);
-      if (stu.marks[k]) {
-        btns.push('<button class="btn sm danger" data-undo="' + k + '" data-id="' + stu.id + '"' +
-          (S.unlocked ? "" : " disabled title=\"先打开解锁修改\"") + ">撤 " + kindLabel(k) + "…</button>");
-      } else {
-        btns.push('<button class="btn sm ' + (stu.next === k ? "green" : "") + '" data-mark="' + k +
-          '" data-id="' + stu.id + '"' + (can ? "" : " disabled") + ">" +
-          (compact ? (idx + 1) : "") + kindLabel(k) + "</button>");
-      }
-    });
-    return btns.join(" ");
-  }
-
-  function timeCell(ts, kind) {
-    if (!ts) return '<td class="num" style="color:var(--dim)">—</td>';
-    return '<td class="num" title="' + LT.fmtDateTime(ts) + '">' + LT.fmtTime(ts) + "</td>";
-  }
-
-  function renderTable() {
-    var rows = filtered();
-    var tbody = $("#rosterTable tbody");
-    if (!rows.length) {
-      tbody.innerHTML = '<tr><td colspan="8" class="empty">没有符合条件的学生</td></tr>';
-    } else {
-      tbody.innerHTML = rows.map(function (s) {
-        return '<tr class="' + (s.tasks === 2 ? "done" : "") + '">' +
-          '<td><b>' + LT.esc(s.name) + "</b>" + roleTag(s) + "</td>" +
-          '<td class="num">' + LT.esc(s.sid) + "</td>" +
-          '<td style="color:var(--muted)">' + LT.esc(s.grp || "") + "</td>" +
-          timeCell(s.marks.checkin) + timeCell(s.marks.task1) + timeCell(s.marks.task2) +
-          "<td>" + (ticketChips(s) || '<span style="color:var(--dim)">—</span>') + "</td>" +
-          '<td class="right">' + actionButtons(s, false) + "</td></tr>";
-      }).join("");
-    }
-    $("#rosterNote").textContent = "显示 " + rows.length + " / " + S.students.length + " 人";
-  }
-
-  function rosterRows() {
-    var q = S.rosterQ.trim();
-    var list = q ? LT.queryStudents(S.students, q, 999, searchSpec())
-                 : S.students.slice();
-    var key = S.sortKey;
-    var dir = S.sortDir;
-    var rank = { participant: 0, staff: 1, volunteer: 2 };
-    list.sort(function (a, b) {
-      var av, bv;
-      if (key === "checkin" || key === "task1" || key === "task2") {
-        av = a.marks[key] || 0;
-        bv = b.marks[key] || 0;
-      } else if (key === "tickets") {
-        av = (a.tickets || []).length;
-        bv = (b.tickets || []).length;
-      } else if (key === "name") {
-        av = a.py || a.name;
-        bv = b.py || b.name;
-      } else if (key === "role") {
-        av = rank[a.role || "participant"] || 0;
-        bv = rank[b.role || "participant"] || 0;
-      } else {
-        av = a[key] || "";
-        bv = b[key] || "";
-      }
-      if (av < bv) return -dir;
-      if (av > bv) return dir;
-      return (a.sid || "").localeCompare(b.sid || "");
-    });
-    return list;
-  }
-
-  function renderFullTable() {
-    var tbody = $("#fullTable tbody");
-    var rows = rosterRows();
-    $$("#fullTable th[data-sort]").forEach(function (th) {
-      th.classList.toggle("sorted", th.getAttribute("data-sort") === S.sortKey);
-      th.setAttribute("data-dir", th.getAttribute("data-sort") === S.sortKey
-        ? (S.sortDir > 0 ? "asc" : "desc") : "");
-    });
-    tbody.innerHTML = rows.map(function (s) {
-      return "<tr>" +
-        '<td class="num">' + LT.esc(s.sid) + "</td>" +
-        '<td><b>' + LT.esc(s.name) + "</b></td>" +
-        '<td style="color:var(--muted)">' + LT.esc(s.grp || "") + "</td>" +
-        '<td style="color:var(--muted)">' + (ROLE_TAG[s.role] || "参加人员") + "</td>" +
-        timeCell(s.marks.checkin) + timeCell(s.marks.task1) + timeCell(s.marks.task2) +
-        "<td>" + (ticketChips(s) || "—") + "</td>" +
-        '<td class="right">' +
-        '<button class="btn sm" data-edit="' + s.id + '">编辑</button> ' +
-        '<button class="btn sm ' + (s.next ? "green" : "") + '" data-row="' + s.id + '">选中</button>' +
-        "</td></tr>";
-    }).join("") || '<tr><td colspan="9" class="empty">没有匹配的学生</td></tr>';
-    $("#rosterCount").textContent = rows.length === S.students.length
-      ? S.students.length + " 人"
-      : rows.length + " / " + S.students.length + " 人";
-  }
-
   function renderLog() {
     $("#logTable tbody").innerHTML = S.audit.map(function (a) {
       return "<tr><td class='num'>" + LT.fmtDateTime(a.ts) + "</td>" +
@@ -387,17 +172,6 @@
         "<td style='white-space:normal'>" + LT.esc(a.detail || "") + "</td></tr>";
     }).join("");
   }
-
-  // Mirrors model.normalize_prizes(): a stored prize may still be a bare name.
-
-  // 「逐个」 draws one winner per click; 「一次抽完」 draws the whole remaining
-  // quota of that prize in one go. Stored with the prize, so it survives a
-  // reload and both operators see the same choice.
-
-
-
-
-
 
   function renderPhase() {
     var p = S.config.screen_phase || "signin";
@@ -647,9 +421,8 @@
     renderPhase();
     pageRefresh("draw");
     renderUnlock();
-    renderHits();
-    renderTable();
-    renderFullTable();
+    pageRefresh("ops");
+    pageRefresh("roster");
     pageShow("draw");
     renderLog();
     if (S.tab === "config") renderSettings();
@@ -673,7 +446,6 @@
     S.draws = d.draws || [];
     S.unlocked = !!d.unlocked;
     S.unlockUntil = d.unlockUntil || 0;
-    refreshHits();
     renderAll();
   }
 
@@ -685,252 +457,10 @@
   }
 
 
-  // 模块在 module.json 的 features.search 里说清楚"哪份清单、哪个字段是姓名"，
-  // 搜索的算法留在平台：这里只是把那份声明递给 LT
-  function searchSpec() {
-    var perms = S.features || {};
-    return perms.search || null;
-  }
-
-  function refreshHits() {
-    renderTagHint();
-    if (!S.q.trim()) { S.hits = []; return; }
-    S.hits = LT.queryStudents(S.students, S.q, 8, searchSpec());
-    if (S.sel >= S.hits.length) S.sel = Math.max(0, S.hits.length - 1);
-  }
-
-  function patchStudent(stu) {
-    if (!stu) return;
-    var i = S.students.findIndex(function (s) { return s.id === stu.id; });
-    if (i >= 0) S.students[i] = stu; else S.students.push(stu);
-    S.byId[stu.id] = stu;
-    // the hit list holds its own references; without this the search result row
-    // would keep showing the pre-action state until the next poll.
-    for (var j = 0; j < S.hits.length; j++) {
-      if (S.hits[j].id === stu.id) S.hits[j] = stu;
-    }
-  }
-
-  // ------------------------------------------------------------------ actions
-  function mark(studentId, kind) {
-    var stu = S.byId[studentId];
-    if (!stu) return;
-    if (stu.marks[kind]) { ok("<b>" + LT.esc(stu.name) + "</b> 的" + kindLabel(kind) + "早就完成了"); return; }
-    if (S.config.finalized) { bad("已结算奖票，如需继续操作请先取消结算（需解锁）"); return; }
-    var need = PREV[kind];
-    if (need && !stu.marks[need]) { bad("需要先完成「" + kindLabel(need) + "」"); return; }
-
-    LT.api("/api/admin/mark", { method: "POST", body: { student_id: studentId, kind: kind } })
-      .then(function (d) {
-        patchStudent(d.student);
-        renderAll();
-        var code = d.result && d.result.code;
-        var suffix = d.result && d.result.already
-          ? "（之前已完成）"
-          : ' · 奖票 <b>#' + LT.code(code) + "</b>";
-        ok("<b>" + LT.esc(stu.name) + "</b> " + kindLabel(kind) + " 完成" + suffix);
-      })
-      .catch(function (e) {
-        bad(e);
-        if (e.status === 409) load();
-      });
-  }
-
-  function undo(studentId, kind) {
-    var stu = S.byId[studentId];
-    if (!stu) return;
-    if (!S.unlocked) { bad("撤销需要先打开右上角的「解锁修改」开关"); return; }
-    var deps = kind === "checkin"
-      ? ["task1", "task2"].filter(function (k) { return stu.marks[k]; })
-      : (kind === "task1" && stu.marks.task2 ? ["task2"] : []);
-
-    var run = function (cascade) {
-      LT.api("/api/admin/undo", {
-        method: "POST",
-        body: { student_id: studentId, kind: kind, cascade: cascade }
-      })
-        .then(function (d) {
-          S.unlockUntil = d.unlockUntil || S.unlockUntil;
-          patchStudent(d.student);
-          renderAll();
-          ok("<b>" + LT.esc(stu.name) + "</b> 已撤销 " +
-            (d.result.released || []).map(kindLabel).join("、"));
-        })
-        .catch(function (e) { bad(e); if (e.status === 403) { S.unlocked = false; renderUnlock(); } });
-    };
-
-    if (deps.length) {
-      LT.confirm({
-        title: "级联撤销",
-        danger: true,
-        okText: "一起撤销",
-        html: "撤销 <b>" + kindLabel(kind) + "</b> 会同时撤销后续已完成的 <b>" +
-          deps.map(kindLabel).join("、") + "</b>，并收回对应奖票。<br>确认要撤销 <b>" + LT.esc(stu.name) + "</b> 的这些记录吗？"
-      }).then(function (yes) { if (yes) run(true); });
-    } else {
-      run(false);
-    }
-  }
-
-  function resetInput() {
-    $("#q").value = "";
-    S.q = "";
-    S.hits = [];
-    S.sel = 0;
-    renderHits();
-    renderTable();
-  }
-
-  function selectedHit() {
-    return S.hits[S.sel] || null;
-  }
-
-  // Keep the keyboard fast-path usable after a mouse click: on the ops tab the
-  // search box should hold focus unless the operator is typing somewhere else.
-  function refocus() {
-    if (S.tab !== "ops") return;
-    var el = document.activeElement;
-    if (el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) && el.id !== "q") return;
-    if (document.querySelector(".modal-back")) return;
-    $("#q").focus();
-  }
-
   // ------------------------------------------------------------------ events
-  // Browsers happily treat a lone search box as a login field and autofill the
-  // saved account name into it.  Anything that appears without a keystroke is
-  // not the operator's input, so drop it before it confuses the roster filter.
-  function guardAutofill(input, onClear) {
-    var touched = false;
-    var scrub = function () {
-      if (touched || !input.value) return;
-      input.value = "";
-      if (onClear) onClear();
-    };
-    input.addEventListener("keydown", function () { touched = true; });
-    input.addEventListener("focus", scrub);
-    input.addEventListener("mousedown", function () { setTimeout(scrub, 0); });
-    input.addEventListener("input", function (e) {
-      if (e.isTrusted) touched = true;
-    });
-    [300, 1200, 2600].forEach(function (ms) { setTimeout(scrub, ms); });
-    window.addEventListener("load", scrub);
-    return scrub;
-  }
-
-  function bindSearch() {
-    var q = $("#q");
-    q.addEventListener("input", function () {
-      S.q = q.value;
-      S.sel = 0;
-      refreshHits();
-      renderHits();
-      renderTable();
-    });
-    // 点提示里的标签＝把它补进查询（省得记写法）
-    var hintBox = $("#tagHint");
-    if (hintBox) {
-      hintBox.addEventListener("click", function (e) {
-        var btn = e.target.closest("[data-tag]");
-        if (!btn) return;
-        var words = S.q.trim().split(/\s+/).filter(Boolean);
-        if (words.length && words[words.length - 1].charAt(0) === "#") words.pop();
-        words.push(btn.getAttribute("data-tag"));
-        S.q = words.join(" ") + " ";
-        q.value = S.q;
-        S.sel = 0;
-        refreshHits();
-        renderHits();
-        renderTable();
-        q.focus();
-      });
-    }
-    q.addEventListener("keydown", function (e) {
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        if (S.hits.length) { S.sel = (S.sel + 1) % S.hits.length; renderHits(); }
-        return;
-      }
-      if (e.key === "ArrowUp") {
-        e.preventDefault();
-        if (S.hits.length) { S.sel = (S.sel - 1 + S.hits.length) % S.hits.length; renderHits(); }
-        return;
-      }
-      if (e.key === "Escape") {
-        if (q.value) { e.preventDefault(); resetInput(); }
-        return;
-      }
-      // Undo: Ctrl+Shift+Z.  Nothing here uses Alt - Alt+Z opens the NVIDIA
-      // overlay on machines with the NVIDIA app, and other vendor tools grab
-      // Alt+digits too, so those combos are off limits.
-      if (e.ctrlKey && e.shiftKey && e.code === "KeyZ") {
-        e.preventDefault();
-        var s = selectedHit();
-        if (!s) return;
-        var done = KINDS.filter(function (k) { return s.marks[k]; });
-        if (!done.length) { ok("没有可撤销的步骤"); return; }
-        undo(s.id, done[done.length - 1]);
-        return;
-      }
-      // Step override: Shift+1/2/3 (e.code so keyboard layout and shift
-      // symbols cannot break it).
-      var digit = { Digit1: 0, Digit2: 1, Digit3: 2 }[e.code];
-      if (e.shiftKey && !e.ctrlKey && !e.altKey && digit !== undefined) {
-        e.preventDefault();
-        var stu = selectedHit();
-        if (!stu) return;
-        mark(stu.id, KINDS[digit]);
-        return;
-      }
-      if (e.key === "Enter") {
-        e.preventDefault();
-        var target = selectedHit();
-        if (!target) {
-          var cands = filtered();
-          if (cands.length === 1) { target = cands[0]; }
-        }
-        if (!target) { bad("没有选中学生"); return; }
-        if (!target.next) { ok("<b>" + LT.esc(target.name) + "</b> 已经全部完成了"); return; }
-        mark(target.id, target.next);
-      }
-    });
-
-    // right-click clears the box: faster than selecting the text with the mouse
-    q.addEventListener("contextmenu", function (e) {
-      if (!q.value) return;
-      e.preventDefault();
-      S.q = "";
-      S.hits = [];
-      S.sel = 0;
-      q.value = "";
-      renderHits();
-      renderTable();
-    });
-
-    guardAutofill(q, function () {
-      S.q = "";
-      S.hits = [];
-      S.sel = 0;
-      renderHits();
-      renderTable();
-    });
-
-    $("#hits").addEventListener("click", function (e) {
-      var hit = e.target.closest(".hit");
-      if (!hit) return;
-      S.sel = Number(hit.getAttribute("data-i"));
-      renderHits();
-      var stu = S.byId[Number(hit.getAttribute("data-id"))];
-      if (stu && stu.next) mark(stu.id, stu.next);
-    });
-  }
-
   function bindGlobal() {
     document.addEventListener("click", function (e) {
       var t = e.target;
-      var mk = t.getAttribute && t.getAttribute("data-mark");
-      if (mk) { mark(Number(t.getAttribute("data-id")), mk); refocus(); return; }
-      var un = t.getAttribute && t.getAttribute("data-undo");
-      if (un) { undo(Number(t.getAttribute("data-id")), un); refocus(); return; }
       var dp = t.getAttribute && t.getAttribute("data-draw");
       if (dp) { drawPrize(Number(dp)); return; }
       var pc = t.getAttribute && t.getAttribute("data-pace");
@@ -949,21 +479,6 @@
       }
       var vd = t.getAttribute && t.getAttribute("data-void");
       if (vd) { voidDraw(Number(vd)); return; }
-      var ed = t.getAttribute && t.getAttribute("data-edit");
-      if (ed) { editStudent(Number(ed)); return; }
-      var row = t.getAttribute && t.getAttribute("data-row");
-      if (row) {
-        var s = S.byId[Number(row)];
-        showTab("ops");
-        $("#q").value = s.name;
-        S.q = s.name;
-        S.sel = 0;
-        refreshHits();
-        renderHits();
-        renderTable();
-        $("#q").focus();
-        return;
-      }
     });
 
     $("#tabs").addEventListener("click", function (e) {
@@ -972,14 +487,6 @@
     });
 
     renderTabs();
-
-    $("#filters").addEventListener("click", function (e) {
-      var btn = e.target.closest("button[data-filter]");
-      if (!btn) return;
-      S.filter = btn.getAttribute("data-filter");
-      $$("#filters button").forEach(function (b) { b.classList.toggle("primary", b === btn); });
-      renderTable();
-    });
 
     $("#unlockToggle").addEventListener("change", function (e) {
       var on = e.target.checked;
@@ -1018,29 +525,8 @@
     window.open((LT.panelRoot || "") + "/api/panel/event/download?seq=" + S.seq, "_blank");
   });
 
-  $("#refreshBtn").addEventListener("click", function () { load().then(function () { ok("已刷新"); }); });
-
-    $("#rosterFilter").addEventListener("input", function (e) {
-      S.rosterQ = e.target.value;
-      renderFullTable();
-    });
-    $("#fullTable").addEventListener("click", function (e) {
-      var th = e.target.closest("th[data-sort]");
-      if (!th) return;
-      var key = th.getAttribute("data-sort");
-      if (S.sortKey === key) S.sortDir = -S.sortDir;
-      else { S.sortKey = key; S.sortDir = 1; }
-      renderFullTable();
-    });
     $("#logRefreshBtn").addEventListener("click", function () { load().then(function () { ok("已刷新"); }); });
 
-    document.addEventListener("keydown", function (e) {
-      if (e.key === "/" && document.activeElement !== $("#q") && !document.querySelector(".modal-back")) {
-        e.preventDefault();
-        showTab("ops");
-        $("#q").focus();
-      }
-    });
   }
 
   function setUnlock(on) {
@@ -1048,7 +534,7 @@
       S.unlocked = d.unlocked;
       S.unlockUntil = d.unlockUntil;
       renderUnlock();
-      renderTable();
+      pageRefresh("ops");
       pageRefresh("tickets");
       pageRefresh("draw");
       ok(on ? "已解锁" : "已上锁");
@@ -1062,7 +548,7 @@
     LT.api("/api/admin/console").then(function (d) {
       S.pages = d.pages || [];
       // 模块页面的脚本：载入之后调 mount，平台这边只留页签条与调度
-      loadModuleScripts(S.pages);
+      loadModuleScripts(d.scripts, S.pages);
       nav.innerHTML = S.pages.map(function (page) {
         var extra = page.id === "roster"
           ? '<span class="badge-n" id="nRoster">0</span>' : "";
@@ -1087,88 +573,12 @@
     S.tab = name;
     $$("#tabs button").forEach(function (b) { b.classList.toggle("active", b.getAttribute("data-tab") === name); });
     $$("main > section").forEach(function (s) { s.classList.toggle("hidden", s.id !== "tab-" + name); });
-    if (name === "ops") { $("#q").focus(); }
-    if (name === "tickets") pageShow("tickets");
     if (name === "config") renderSettings();
     if (name === "settings") loadMembers();
     if (name === "log") load();
+    // 模块页自己画：它的 show 收得到现在是哪个页签
+    pageShow(name);
     return name;
-  }
-
-  // ------------------------------------------------------------------ roster ops
-  function editStudent(id) {
-    var s = S.byId[id];
-    if (!s) return;
-    var m = LT.modal(
-      '<h2>编辑 ' + LT.esc(s.name) + "</h2>" +
-      '<div class="field"><label>姓名</label><input id="edName" type="text" value="' + LT.esc(s.name) + '"></div>' +
-      '<div class="field"><label>学号</label><input id="edSid" type="text" value="' + LT.esc(s.sid) + '" disabled></div>' +
-      '<div class="field"><label>班级</label><input id="edGrp" type="text" value="' + LT.esc(s.grp || "") + '"></div>' +
-
-      '<div class="field"><label>备注</label><input id="edNote" type="text" value="' + LT.esc(s.note || "") + '"></div>' +
-      '<div class="field"><label>身份</label><select id="edRole">' +
-      ['participant', 'staff', 'volunteer'].map(function (r) {
-        return '<option value="' + r + '"' + ((s.role || "participant") === r ? " selected" : "") + ">" +
-          ({ participant: "参加人员", staff: "工作人员", volunteer: "志愿者" })[r] + "</option>";
-      }).join("") + "</select></div>" +
-      '<div class="row" style="justify-content:space-between;margin-top:14px">' +
-      '<button class="btn danger" id="edDel"' + (S.unlocked ? "" : ' disabled title="先解锁"') + ">删除此人</button>" +
-      '<div class="row"><button class="btn" id="edCancel">取消</button>' +
-      '<button class="btn primary" id="edSave">保存</button></div></div>'
-    );
-    $("#edCancel", m).onclick = function () { m.close(); };
-    $("#edSave", m).onclick = function () {
-      LT.api("/api/admin/student", {
-        method: "POST",
-        body: {
-          id: id,
-          name: $("#edName", m).value.trim(),
-          grp: $("#edGrp", m).value.trim(),
-          note: $("#edNote", m).value.trim(),
-          role: $("#edRole", m).value
-        }
-      }).then(function () { m.close(); return load(); }).then(function () { ok("已保存"); }).catch(bad);
-    };
-    $("#edDel", m).onclick = function () {
-      LT.confirm({
-        title: "删除学生",
-        danger: true,
-        okText: "删除",
-        html: "会同时删除 <b>" + LT.esc(s.name) + "</b> 的标记与奖票，且不能恢复。确认？"
-      }).then(function (yes) {
-        if (!yes) return;
-        LT.api("/api/admin/student_delete", { method: "POST", body: { id: id } })
-          .then(function () { m.close(); return load(); })
-          .then(function () { ok("已删除"); })
-          .catch(bad);
-      });
-    };
-  }
-
-  function importRoster() {
-    var text = $("#importText").value;
-    if (!text.trim()) { bad("先粘贴或选择名单内容"); return; }
-    LT.api("/api/admin/import", { method: "POST", body: { text: text } })
-      .then(function (d) {
-        var r = d.result;
-        $("#importNote").textContent = "新增 " + r.added + " 人，更新 " + r.updated + " 人" +
-          (r.skipped ? "，跳过 " + r.skipped + " 行" : "");
-        return load().then(function () { ok("导入完成：新增 <b>" + r.added + "</b>，更新 <b>" + r.updated + "</b>"); });
-      })
-      .catch(bad);
-  }
-
-  function addStudent() {
-    var sid = $("#addSid").value.trim();
-    var name = $("#addName").value.trim();
-    if (!sid || !name) { bad("学号和姓名都要填"); return; }
-    LT.api("/api/admin/student", {
-      method: "POST",
-      body: { sid: sid, name: name, grp: $("#addGrp").value.trim() }
-    }).then(function () {
-      $("#addSid").value = ""; $("#addName").value = "";
-      return load();
-    }).then(function () { ok("已添加 <b>" + LT.esc(name) + "</b>"); }).catch(bad);
   }
 
   // ------------------------------------------------------------------ tickets
@@ -1577,6 +987,13 @@
   }
 
   // ------------------------------------------------------------------ boot
+  /* 正在往表单里打字就别重画；搜索框随时都是焦点，不算在内 */
+  function isTyping() {
+    var el = document.activeElement;
+    if (!el || !/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return false;
+    return el.type !== "search";
+  }
+
   /* 服务有效性：服务端按一次读数推出来的提示（占用偏高、盘快写不进去了）。
      只读、不进库；条件消失，提示跟着消失。 */
   function drawService(items) {
@@ -1595,24 +1012,13 @@
   }
 
   function boot() {
-    bindSearch();
     bindGlobal();
     bindSettings();
 
-    $("#importBtn").addEventListener("click", importRoster);
-    $("#addBtn").addEventListener("click", addStudent);
-    $("#pickFileBtn").addEventListener("click", function () { $("#importFile").click(); });
-    $("#importFile").addEventListener("change", function (e) {
-      var f = e.target.files[0];
-      if (!f) return;
-      var reader = new FileReader();
-      reader.onload = function () { $("#importText").value = reader.result; };
-      reader.readAsText(f, "utf-8");
-    });
     // 模块算完计划会发这个事件：平台据此更新结算/重置按钮
-  document.addEventListener("module-plan", renderDrawButtons);
+    document.addEventListener("module-plan", renderDrawButtons);
 
-  $("#finalizeBtn").addEventListener("click", finalize);
+    $("#finalizeBtn").addEventListener("click", finalize);
     $("#unfinalizeBtn").addEventListener("click", unfinalize);
     $("#resetTicketsBtn").addEventListener("click", resetTickets);
     $("#phaseSigninBtn").addEventListener("click", function () { setPhase("signin"); });
@@ -1639,12 +1045,7 @@
       if (inputs.length) inputs[inputs.length - 1].focus();
     });
 
-    $$("#filters button").forEach(function (b) {
-      if (b.getAttribute("data-filter") === "all") b.classList.add("primary");
-    });
-
     load().then(function () {
-      $("#q").focus();
       if (S.config.finalized) showTab("draw");
     });
 
@@ -1659,9 +1060,7 @@
     LT.watch(function (revs, before) {
       if (!before || JSON.stringify(revs) === JSON.stringify(before)) return;
       if (document.hidden) return;
-      var el = document.activeElement;
-      var editing = el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) && el.id !== "q";
-      if (editing) return;
+      if (isTyping()) return;
       clearTimeout(S.remoteTimer);
       S.remoteTimer = setTimeout(function () { load().catch(function () {}); }, 300);
     });
@@ -1674,9 +1073,7 @@
     setInterval(renderUnlock, 1000);
     setInterval(function () {
       if (document.hidden || document.querySelector(".modal-back")) return;
-      var el = document.activeElement;
-      var editing = el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) && el.id !== "q";
-      if (editing) return;
+      if (isTyping()) return;
       LT.api("/api/admin/state").then(function (d) {
         applyState(d);
       }).catch(function (e) { if (e.status === 401) location.href = LT.panelLoginUrl(); });

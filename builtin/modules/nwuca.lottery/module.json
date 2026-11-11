@@ -15,6 +15,9 @@
     "checkin",
     "admin"
   ],
+  "scripts": [
+    "common"
+  ],
   "pages": [
     {
       "id": "ops",

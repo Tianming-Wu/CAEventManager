@@ -51,6 +51,7 @@
   "description": "签到、任务进度、奖票与抽奖",
   "author": "…", "homepage": "…", "license": "…",
   "pages": [{"id": "ops", "title": "操作台"}],
+  "scripts": ["common"],
   "external": ["board", "screen", "checkin", "admin"],
   "features": {"search": {}, "shortlink": {}},
   "actions": { … 见下 … },
@@ -66,6 +67,7 @@
 | `api` | 平台 | 接口版本，见上一节 |
 | `requires` | 平台 | 需要的平台版本 |
 | `pages` | 平台 | 申请哪些页签；`id` 任意小写串 |
+| `scripts` | 平台 | 页签脚本之前先载入的共用脚本，写文件名去掉 `.js`（如 `common`） |
 | `external` | 平台 | 要哪些公开页面：`board` / `screen` / `checkin` / `admin` |
 | `features` | 平台 | 能力声明（`search` / `shortlink` / 将来的 `super.*`） |
 | `actions` | 平台 | 写操作声明，平台据此生成接口、鉴权、审计与版本号 |
@@ -158,22 +160,24 @@ def checkin(ctx, payload):
 
 ## 页面与资源
 
-模块的页签由平台画外壳，内容由模块给：
+模块的页签由平台画外壳，内容与脚本由模块给：
 
 ```
+pages/common.js         几页共用的脚本，写在 module.json 的 scripts 里（可选）
 pages/ops.html          这个页签的内容（一段 HTML，不含 <html> 外壳）
-pages/ops.js            这个页签的脚本（还没做：现在脚本仍在平台的控制台里按 id 绑定）
+pages/ops.js            这个页签的脚本（可选）
 pages/ops.css           可选
 ```
 
 **HTML**：平台读 `pages/<页签>.html`，按 `pages` 的顺序拼进后台外壳的 `{{MODULE_PAGES}}`。
 
-**脚本**：模块可以放 `pages/<页签>.js`，平台在后台启动、拿到页签清单之后依次载入
-（`/<token>/module/<页签>.js`），然后按下面的契约调用它：
+**脚本**：平台先载 `module.json` 里 `scripts` 声明的共用脚本，再按 `pages` 的顺序载入
+`pages/<页签>.js`（地址是 `/<token>/module/<名字>.js`）。载入到不存在的文件不算错（回一份
+空 JS），所以不是每一页都得有脚本。载完按下面的契约调用：
 
 ```js
 window.MODULE.pages.tickets = {
-  mount(ctx) {},              // 启动时一次；ctx = {LT, state, tab, page, reload}
+  mount(ctx) {},              // 启动时一次；ctx = {LT, state, tab, page, reload, showTab}
   refresh(state, tab) {},     // 平台每次拉到新状态
   show(tab) {},               // 切到这个页签（返回值是 Promise 也行）
 };
@@ -183,21 +187,16 @@ window.MODULE.pages.tickets = {
   平台内部的 `$`、`bad` 这类私有函数，要什么自己取
 - `state` 是平台的状态对象（同一个引用），模块可以往里挂自己的字段
 - `ctx.reload()` 让平台重新拉一次状态（模块改了东西之后要重读时用）
+- `ctx.showTab(id)` 切到另一个页签：模块自己的几页之间跳转用，例如名单页把一个人交给操作台
+- 同一模块的页面之间可以直接调对方的入口（`window.MODULE.pages.ops.select(name)`），
+  几页共用的画法放 `MODULE.lib`，由共用脚本定义
+- 页签里的按钮由模块自己在 `mount` 里接；平台只认平台外壳上那几个 `data-*`
 - 平台不直接调模块的函数，只走 `button → pageShow/pageRefresh`；模块要通知平台也用事件，
   例如算完计划后 `document.dispatchEvent(new Event("module-plan"))`
 - 平台自己的按钮状态（结算、重置）由平台维护，模块不要碰
 
-**已搬**：「奖票」页（`renderPlan` / `loadPlan`）→ `pages/tickets.js`；「抽奖」页
-（奖品列表、抽取节奏、抽奖记录）→ `pages/draw.js`。平台侧只剩调度。
-剩下操作台、名单、奖票设置三页，按同一份契约逐个搬。
-
-平台注入时提供两样东西：
-
-- `LT`：`esc` / `toast` / `modal` / `confirm` / `api` / `panelApi` / `fmtTime` 这些现成件
-- `page`：`{ id, event, account, seat, refresh() }`；`refresh()` 重新拉一次 `state`
-
-模块脚本的入口是 `window.MODULE.pages.ops = { mount(page), unmount() }`。
-不提供 `unmount` 就什么也不做。
+**已经搬完的**：五个页签的标记全在模块里；脚本已搬「奖票」「抽奖」「操作台」「名单」四页，
+平台侧只剩调度与主站功能（活动设置、日志、短链、成员）。剩下的「奖票设置」按同一份契约搬。
 
 ## 数据
 

@@ -84,7 +84,7 @@
   // The audience only needs two things from this screen: how to get in, and who
   // won. Task counters and ticket totals are admin information, not signage.
   function renderStats() {
-    var st = data.stats || {};
+    var st = data.present.stats || {};
     var half = '<span class="sstat-of">/' + (st.participants || st.total) + "</span>";
     var cards = phase() === "signin"
       ? [["green", st.checkin + half, "已签到"]]
@@ -100,7 +100,7 @@
 
   function renderWinners() {
     var el = $("#winnersStrip");
-    var list = (data.winners || []).slice().reverse();  // oldest first, reads left to right
+    var list = (data.present.winners || []).slice().reverse();  // oldest first, reads left to right
     if (!list.length) { el.innerHTML = ""; return; }
     var shown = list.slice(-MAX_WINNERS);
     var hidden = list.length - shown.length;
@@ -125,7 +125,7 @@
       return;
     }
     var showSid = !!(data.config && data.config.show_sid);
-    wall.innerHTML = (data.students || []).map(function (s) {
+    wall.innerHTML = (data.present.students || []).map(function (s) {
       var codes = s.codes || [];
       var right = codes.length
         ? codes.map(function (c) { return LT.code(c.code); }).join(" ")
@@ -150,8 +150,8 @@
     var codeEl = $("#dCode");
     var winnerEl = $("#dWinner");
     var person = draw.mode === "person";
-    var pool = Math.max(1, (data.stats && data.stats.max_code) || (data.stats && data.stats.pool_size) || 200);
-    var names = (data.students || []).filter(function (s) { return s.progress > 0; })
+    var pool = Math.max(1, (data.present.stats && data.present.stats.max_code) || (data.present.stats && data.present.stats.pool_size) || 200);
+    var names = (data.present.students || []).filter(function (s) { return s.progress > 0; })
       .map(function (s) { return s.name; });
     var sidHtml = data.config.show_sid && draw.sid
       ? ' <span class="sid2">' + LT.esc(draw.sid) + "</span>" : "";
@@ -211,9 +211,9 @@
     if (!list.length) return;
     var person = batch.mode === "person";
     var showSid = !!(data.config && data.config.show_sid);
-    var names = (data.students || []).filter(function (s) { return s.progress > 0; })
+    var names = (data.present.students || []).filter(function (s) { return s.progress > 0; })
       .map(function (s) { return s.name; });
-    var pool = Math.max(1, (data.stats && data.stats.max_code) || (data.stats && data.stats.pool_size) || 200);
+    var pool = Math.max(1, (data.present.stats && data.present.stats.max_code) || (data.present.stats && data.present.stats.pool_size) || 200);
     if (!person) {
       // ticket numbers ascending: the audience reads the list like a roster
       list.sort(function (a, b) { return (a.code || 0) - (b.code || 0); });
@@ -256,14 +256,15 @@
 
   // ---------------------------------------------------------------- render --
   function render() {
+    if (!data || !data.present) return;
     renderStats();
     renderWinners();
     applyLayout();
     renderQR();
     renderWall();
-    var d = data.lastDraw;
+    var d = data.present.lastDraw;
     if (d && lastSeq !== null && d.seq !== lastSeq) {
-      var batch = data.lastBatch;
+      var batch = data.present.lastBatch;
       if (batch && batch.winners && batch.winners.length > 1) playBatch(batch);
       else playDraw(d);
     }

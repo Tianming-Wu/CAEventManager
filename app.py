@@ -68,7 +68,7 @@ TPL_DIR = os.path.join(BASE_DIR, "tpl")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.11.1.62"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.11.1.63"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -331,25 +331,6 @@ def favicon_markup():
 
 def fmt_ts(ts):
     return None if ts is None else round(float(ts), 3)
-
-
-def student_public(conn, stu, cfg):
-    show_times = bool(cfg.get("show_times", True))
-    show_sid = bool(cfg.get("show_sid", False))
-    out = {
-        "id": stu["id"],
-        "name": stu["name"],
-        "grp": stu.get("grp") or "",
-        "role": stu.get("role") or "participant",
-        "codes": [{"code": t["code"], "kind": t["kind"]} for t in (stu.get("tickets") or [])],
-        "progress": stu.get("progress", 0),
-        "tasks": stu.get("tasks", 0),
-    }
-    if show_sid:
-        out["sid"] = stu["sid"]
-    if show_times:
-        out["times"] = {k: fmt_ts(v) for k, v in (stu.get("marks") or {}).items()}
-    return out
 
 
 def student_admin(stu, with_pinyin=True):
@@ -3362,17 +3343,12 @@ class Handler(BaseHTTPRequestHandler):
 
         # ---- public ----
         if path == "/api/board" and method == "GET":
+            # 公示页与大屏的公开数据：平台出壳（活动名、时间、版本），里面是什么由模块说
             cfg = db.all_config(conn)
-            students = model.snapshot(conn, cfg)
-            st = model.stats(conn, cfg, students)
             payload = {
                 "ok": True,
                 "config": db.public_config_view(conn),
-                "stats": st,
-                "students": [student_public(conn, s, cfg) for s in students],
-                "lastDraw": model.last_draw(conn),
-                "lastBatch": model.last_batch(conn),
-                "winners": [d for d in model.draw_history(conn, 100) if not d["voided_at"]],
+                "present": model.present(conn, cfg),
                 "serverTime": time.time(),
             }
             return self._json_cached(payload)

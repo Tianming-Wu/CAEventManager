@@ -321,14 +321,16 @@ def main():
     check("drawn counter catches up", one["drawn"] == 2 and one["remaining"] == 0, one)
 
     board = call("/api/board")
-    modes = sorted(w["mode"] for w in (board["winners"] if board else []))
+    shown = (board or {}).get("present") or {}
+    modes = sorted(w["mode"] for w in shown.get("winners", []))
     check("board exposes every winner", len(modes) == 5, modes)
     check("board keeps both draw modes apart",
           modes == ["person", "person", "person", "ticket", "ticket"], modes)
-    check("board hides student ids by default", "sid" not in board["students"][0])
+    check("board hides student ids by default", "sid" not in shown["students"][0])
     check("board lists participants only",
-          all((x.get("role") or "participant") == "participant" for x in board["students"]),
-          [x.get("role") for x in board["students"]])
+          all((x.get("role") or "participant") == "participant"
+              for x in shown["students"]),
+          [x.get("role") for x in shown["students"]])
 
     print("== settings guards ==")
     live = 6 + 6 + 3 + plan["summary"]["bonus_pool"]

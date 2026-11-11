@@ -1287,3 +1287,40 @@ def sync_from_roster(conn, entries, actor="admin"):
              % (added, updated, restored, same, len(missing)), actor=actor)
     return {"added": added, "updated": updated, "restored": restored,
             "same": same, "missing": sorted(missing, key=lambda x: x["sid"])}
+
+
+# --------------------------------------------------------------------------- #
+# 公示页与大屏要的数据
+# --------------------------------------------------------------------------- #
+def _public_student(stu, cfg):
+    """公示页上一个人长什么样：给多少、留多少，由模块和活动设置说了算。"""
+    show_times = bool(cfg.get("show_times", True))
+    show_sid = bool(cfg.get("show_sid", False))
+    out = {
+        "id": stu["id"],
+        "name": stu["name"],
+        "grp": stu.get("grp") or "",
+        "role": stu.get("role") or "participant",
+        "codes": [{"code": t["code"], "kind": t["kind"]} for t in (stu.get("tickets") or [])],
+        "progress": stu.get("progress", 0),
+        "tasks": stu.get("tasks", 0),
+    }
+    if show_sid:
+        out["sid"] = stu["sid"]
+    if show_times:
+        out["times"] = {k: (None if v is None else round(float(v), 3))
+                        for k, v in (stu.get("marks") or {}).items()}
+    return out
+
+
+def present(conn, cfg=None):
+    """公示页与大屏要的东西，形状由模块自己定，平台原样转发、不认识里面的字段。"""
+    cfg = cfg or db.all_config(conn)
+    students = snapshot(conn, cfg)
+    return {
+        "stats": stats(conn, cfg, students),
+        "students": [_public_student(s, cfg) for s in students],
+        "lastDraw": last_draw(conn),
+        "lastBatch": last_batch(conn),
+        "winners": [d for d in draw_history(conn, 100) if not d["voided_at"]],
+    }

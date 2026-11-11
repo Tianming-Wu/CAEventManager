@@ -13,7 +13,7 @@
   }
 
   function renderStats(d) {
-    var st = d.stats || {};
+    var st = d.present.stats || {};
     var html = [
       statCard("green", st.checkin + "/" + st.total, "已签到"),
       statCard("blue", st.task1, "完成任务一"),
@@ -26,7 +26,7 @@
   }
 
   function renderWinners(d) {
-    var list = d.winners || [];
+    var list = d.present.winners || [];
     if (!list.length) { $("#winnersBox").classList.add("hidden"); return; }
     $("#winnersBox").classList.remove("hidden");
     $("#winners").innerHTML = list.map(function (w) {
@@ -48,7 +48,7 @@
   function renderCards() {
     var d = data;
     // staff and volunteers have no tickets, so they do not belong on this board
-    var students = (d.students || []).filter(function (x) {
+    var students = (d.present.students || []).filter(function (x) {
       return (x.role || "participant") === "participant";
     });
     var showSid = !!(d.config && d.config.show_sid);
@@ -83,7 +83,7 @@
   }
 
   function render() {
-    if (!data) return;
+    if (!data || !data.present) return;
     var cfg = data.config || {};
     $("#title").textContent = cfg.title || "抽奖";
     $("#subtitle").textContent = cfg.subtitle || "";

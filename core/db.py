@@ -15,6 +15,7 @@ Design notes
 
 import os
 import base64
+import json
 import modules
 import rng
 import paths
@@ -25,8 +26,7 @@ import time
 BASE_DIR = paths.APP_ROOT
 DATA_DIR = os.environ.get("LOTTERY_DATA_DIR") or os.path.join(BASE_DIR, "data")
 
-# One file per event, named after its numeric id.  The id is a counter, so the
-# name cannot collide, and the file is the unit of backup, export and deletion.
+# 一个活动一个文件夹：业务库、审计日志与元数据都在里面，打包就是整个文件夹
 EVENTS_DIR = os.path.join(DATA_DIR, "events")
 
 
@@ -44,11 +44,135 @@ def use_data_dir(path):
     _local.seq = None
 
 
+def event_dir(seq):
+    """活动的目录；文件夹本身就是归档与备份的单位。"""
+    return os.path.join(EVENTS_DIR, str(int(seq)))
+
+
 def event_path(seq):
-    return os.path.join(EVENTS_DIR, "%s.sqlite3" % int(seq))
+    """活动业务库：文件夹里的 data.sqlite3。"""
+    return os.path.join(event_dir(seq), "data.sqlite3")
+
+
+def audit_path(seq):
+    """活动的审计日志：只追加，与业务库分开，随活动一起打包。"""
+    return os.path.join(event_dir(seq), "audit.sqlite3")
+
+
+def meta_path(seq):
+    return os.path.join(event_dir(seq), "meta.json")
+
+
+def write_meta(seq, **fields):
+    """活动文件夹的元数据：打包之后外面还认得出这是哪一场。"""
+    path = meta_path(seq)
+    data = read_meta(seq)
+    data.update({k: v for k, v in fields.items() if v is not None})
+    os.makedirs(event_dir(seq), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(data, fh, ensure_ascii=False, indent=2)
+        fh.write("\n")
+    return data
+
+
+def read_meta(seq):
+    try:
+        with open(meta_path(seq), encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 
+
+
+def migrate_to_folders():
+    """把旧的 `events/<号>.sqlite3` 搬成 `events/<号>/data.sqlite3`，并把审计日志分出去。
+
+    只跑一次：文件夹已经存在就跳过。搬完把旧的 audit 表内容写进 audit.sqlite3，
+    旧库里的那张表留着不删——它不再被读，但也不该在搬迁时丢东西。
+    """
+    if not os.path.isdir(EVENTS_DIR):
+        return []
+    moved = []
+    for name in sorted(os.listdir(EVENTS_DIR)):
+        if not name.endswith(".sqlite3") or name.endswith("-wal") or name.endswith("-shm"):
+            continue
+        stem = name[:-len(".sqlite3")]
+        if not stem.isdigit():
+            continue
+        seq = int(stem)
+        old = os.path.join(EVENTS_DIR, name)
+        new = event_path(seq)
+        if not os.path.isfile(old) or os.path.exists(new):
+            continue
+        os.makedirs(event_dir(seq), exist_ok=True)
+        os.replace(old, new)
+        for suffix in ("-wal", "-shm"):
+            side = old + suffix
+            if os.path.exists(side):
+                os.replace(side, new + suffix)
+        with sqlite3.connect(new) as conn:
+            try:
+                rows = conn.execute(
+                    "SELECT ts, actor, action, detail FROM audit ORDER BY id").fetchall()
+            except sqlite3.Error:
+                rows = []
+        if rows:
+            with audit_tx(seq) as ac:
+                ac.executemany(
+                    "INSERT INTO audit (ts, actor, action, detail, student_id, kind)"
+                    " VALUES (?,?,?,?,NULL,NULL)", rows)
+        moved.append(seq)
+    return moved
+
+
+AUDIT_SCHEMA = """
+CREATE TABLE IF NOT EXISTS audit (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts          REAL    NOT NULL,
+    actor       TEXT,
+    action      TEXT    NOT NULL,
+    student_id  INTEGER,
+    kind        TEXT,
+    detail      TEXT
+);
+CREATE INDEX IF NOT EXISTS audit_ts ON audit(ts);
+"""
+
+
+def audit_connect(seq=None):
+    """活动审计库的连接：一个活动一个文件，只追加。"""
+    seq = event_id() if seq is None else int(seq)
+    os.makedirs(event_dir(seq), exist_ok=True)
+    conn = sqlite3.connect(audit_path(seq), timeout=15.0, isolation_level=None)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.executescript(AUDIT_SCHEMA)
+    return conn
+
+
+class audit_tx(object):
+    """审计库的写事务；与业务库分开，失败也不影响业务写入。"""
+
+    def __init__(self, seq=None, conn=None):
+        self.seq = seq
+        self.conn = conn
+
+    def __enter__(self):
+        self.conn = self.conn or audit_connect(self.seq)
+        self.conn.execute("BEGIN IMMEDIATE")
+        return self.conn
+
+    def __exit__(self, exc_type, exc, tb):
+        try:
+            self.conn.execute("COMMIT" if exc_type is None else "ROLLBACK")
+        finally:
+            self.conn.close()
+            self.conn = None
+        return False
 
 
 def set_event(seq):
@@ -169,6 +293,8 @@ def init_db(kind=None):
     with _init_lock:
         conn = connect()
         conn.executescript(PLATFORM_SCHEMA)
+        conn.execute("PRAGMA user_version")  # 打开一次，确保文件真的建出来
+        audit_connect().close()             # 审计库也建出来，归档时两个文件都在
         # 干什么用的模块决定了它自己那几张表；没写 kind 就看库里的配置
         cfg_kind = kind or get_config(conn, "kind") or DEFAULT_CONFIG["kind"]
         module_schema = modules.kind_schema(cfg_kind)
@@ -269,14 +395,21 @@ def public_config_view(conn):
 # audit
 # --------------------------------------------------------------------------- #
 def audit(conn, action, student_id=None, kind=None, detail=None, actor="admin"):
-    conn.execute(
-        "INSERT INTO audit (ts, actor, action, student_id, kind, detail) VALUES (?,?,?,?,?,?)",
-        (time.time(), actor, action, student_id, kind, detail),
-    )
+    """活动级审计：写在活动自己的 audit.sqlite3 里，与业务库分开。"""
+    with audit_tx(event_id()) as ac:
+        ac.execute(
+            "INSERT INTO audit (ts, actor, action, student_id, kind, detail)"
+            " VALUES (?,?,?,?,?,?)",
+            (time.time(), actor, action, student_id, kind, detail),
+        )
 
 
-def audit_tail(conn, limit=200):
-    rows = conn.execute(
-        "SELECT * FROM audit ORDER BY id DESC LIMIT ?", (limit,)
-    ).fetchall()
-    return [dict(r) for r in rows]
+def audit_tail(conn=None, limit=200):
+    """最近的活动审计；从活动自己的审计库里读。"""
+    ac = audit_connect()
+    try:
+        rows = ac.execute(
+            "SELECT * FROM audit ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        ac.close()

@@ -66,7 +66,9 @@ shortlinks.py     短链：平台级的转发表，按活动记（core/shortlink
 | --- | --- |
 | `data/panel.sqlite3` | 账号、会话、令牌、活动索引、名单与报名索引、通知、审计、助手存档、短链 |
 | `data/lists.sqlite3` | 名单、名单成员、人员库、报名提交 |
-| `data/events/<seq>.sqlite3` | 每场活动自己的奖票、签到、任务、抽奖记录 |
+| `data/events/<活动号>/data.sqlite3` | 这个活动的业务库：平台表（config / audit 钩子）+ 模块的表 |
+| `data/events/<活动号>/audit.sqlite3` | 这个活动的审计日志，只追加，与业务库分开 |
+| `data/events/<活动号>/meta.json` | 活动名、模块、创建时间——打包之后还认得出这是哪一场 |
 
 分库的理由是生命周期不同：活动会一场场地产生、归档、被导出；面板与名单是长期资产。
 一场活动的库单独拿走就能完整还原那一场。

@@ -110,11 +110,12 @@ reset)
     fi
     "$0" stop >/dev/null 2>&1 || true
     stamp=$(date +%Y%m%d-%H%M%S)
-    for f in data/events/*.sqlite3 data/events/*.sqlite3-wal data/events/*.sqlite3-shm; do
-        if [ -f "$f" ]; then
-            cp "$f" "data/backup-$stamp-$(basename "$f")" 2>/dev/null || true
-            rm -f "$f"
-        fi
+    # 一个活动一个文件夹：整个目录打一份备份再删掉
+    for d in data/events/*/; do
+        [ -d "$d" ] || continue
+        seq=$(basename "$d")
+        tar -czf "data/backup-$stamp-event-$seq.tgz" -C data/events "$seq" 2>/dev/null || true
+        rm -rf "$d"
     done
     rm -f data/service.pid
     echo "已清空（备份在 data/backup-$stamp-*）"

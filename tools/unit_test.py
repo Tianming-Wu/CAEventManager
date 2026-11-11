@@ -618,6 +618,27 @@ def main():
     check("内置模块声明了动作", "mark" in (builtin.get("actions") or {}),
           sorted((builtin.get("actions") or {})))
 
+    print("== 活动目录：一个活动一个文件夹 ==")
+    check("业务库在文件夹里", app.db.event_path(1).replace("\\", "/").endswith("/1/data.sqlite3"),
+          app.db.event_path(1))
+    check("审计日志与业务库分开",
+          app.db.audit_path(1).replace("\\", "/").endswith("/1/audit.sqlite3"),
+          app.db.audit_path(1))
+    app.db.set_event(1)
+    app.db.write_meta(1, title="演示活动", kind="nwuca.lottery")
+    meta = app.db.read_meta(1)
+    check("元数据写得进去读得出来", meta.get("title") == "演示活动", meta)
+    app.db.audit(app.db.connect(), "unit_probe", detail="写一条审计")
+    tail = app.db.audit_tail(None, 5)
+    check("审计写进活动自己的库",
+          any(r["action"] == "unit_probe" for r in tail), [r["action"] for r in tail])
+    import sqlite3 as _sq
+    with _sq.connect(app.db.event_path(1)) as biz:
+        biz_actions = [r[0] for r in biz.execute("SELECT action FROM audit").fetchall()] \
+            if biz.execute("SELECT count(*) FROM sqlite_master WHERE name='audit'").fetchone()[0] \
+            else []
+    check("业务库里不再写审计", "unit_probe" not in biz_actions, biz_actions[:5])
+
     print("== 服务安全模式 ==")
     app.safemode.reset()
     check("默认不进安全模式", app.safemode.enabled() is False)

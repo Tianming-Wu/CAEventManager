@@ -82,11 +82,15 @@ python tools/bump_version.py --show
 | --- | --- |
 | `panel.sqlite3` | 账号、活动索引、名单与报名索引、令牌、助手存档 |
 | `lists.sqlite3` | 名单与人员库 |
-| `events/<seq>.sqlite3` | 每场活动一个库 |
+| `events/<活动号>/data.sqlite3` | 这个活动的业务库 |
+| `events/<活动号>/audit.sqlite3` | 这个活动的审计日志，只追加 |
+| `events/<活动号>/meta.json` | 活动名、开始时间、用的模块 |
 | `owner_password.txt` | 首次启动生成的站长密码 |
 | `avatars/` | 头像 |
 
 活动**没有删除操作**，只有存档：存档之后数据库文件不动，随时可以查。所以备份就是复制 `data/`。
+
+一个活动就是一个文件夹：`data/events/<活动号>/` 里的东西自足，把一个文件夹拷走就能单独还原那一场。
 
 还原：停服务 → 用备份覆盖 `data/` → `./bin/service.sh start`。注意 SQLite 的 `-wal` 与 `-shm`
 要和主库一起复制，或者在停服务之后复制（那时 WAL 已经落盘）。

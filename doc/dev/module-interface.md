@@ -173,7 +173,7 @@ pages/ops.css           可选
 
 ```js
 window.MODULE.pages.tickets = {
-  mount(ctx) {},              // 启动时一次；ctx = {LT, state, tab, page}
+  mount(ctx) {},              // 启动时一次；ctx = {LT, state, tab, page, reload}
   refresh(state, tab) {},     // 平台每次拉到新状态
   show(tab) {},               // 切到这个页签（返回值是 Promise 也行）
 };
@@ -182,12 +182,14 @@ window.MODULE.pages.tickets = {
 - `LT` 是平台给的共用件（`esc` / `toast` / `modal` / `api` / `fmtTime` …）；模块脚本**拿不到**
   平台内部的 `$`、`bad` 这类私有函数，要什么自己取
 - `state` 是平台的状态对象（同一个引用），模块可以往里挂自己的字段
+- `ctx.reload()` 让平台重新拉一次状态（模块改了东西之后要重读时用）
 - 平台不直接调模块的函数，只走 `button → pageShow/pageRefresh`；模块要通知平台也用事件，
   例如算完计划后 `document.dispatchEvent(new Event("module-plan"))`
 - 平台自己的按钮状态（结算、重置）由平台维护，模块不要碰
 
-**已搬**：「奖票」页（`renderPlan` / `loadPlan`）在 `pages/tickets.js` 里，平台侧只剩调度。
-其余四个页签的脚本还在平台，按同一份契约逐个搬。
+**已搬**：「奖票」页（`renderPlan` / `loadPlan`）→ `pages/tickets.js`；「抽奖」页
+（奖品列表、抽取节奏、抽奖记录）→ `pages/draw.js`。平台侧只剩调度。
+剩下操作台、名单、奖票设置三页，按同一份契约逐个搬。
 
 平台注入时提供两样东西：
 

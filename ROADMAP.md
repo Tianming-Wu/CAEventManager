@@ -729,8 +729,8 @@ colspan 单元格会把表头重新分配一遍，一有数据表头又跳回来
    抽奖、奖票设置）移进 `builtin/modules/nwuca.lottery/pages/*.html`，平台按 `pages` 的顺序
    拼进外壳的 `{{MODULE_PAGES}}`；外壳从 451 行减到 179 行
 3b. **脚本接口已定**：模块放 `pages/<页签>.js`，平台载入后按 `mount / refresh / show` 调用；
-   「奖票」页的逻辑（`renderPlan` / `loadPlan`）已搬进 `pages/tickets.js`，平台侧只剩调度。
-   其余四页按同一份契约逐个搬
+   「奖票」页→`pages/tickets.js`，「抽奖」页（奖品列表、节奏、抽奖记录）→`pages/draw.js`；
+   平台侧只剩调度。剩下操作台、名单、奖票设置三页按同一份契约逐个搬
 3. 展示数据：公示页/大屏改吃 `present()`，平台只画壳
 4. 验收：两个玩法完全不同的模块同时跑，平台代码里 grep 不到玩法名词
 

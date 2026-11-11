@@ -62,7 +62,7 @@
       list.forEach(function (p) {
         var page = modulePage(p.id);
         if (page && page.mount) {
-          page.mount({ LT: LT, state: S, tab: S.tab, page: p });
+          page.mount({ LT: LT, state: S, tab: S.tab, page: p, reload: load });
         }
       });
       // 脚本是异步来的：载入的时候可能已经切到某个页签了，补画一次
@@ -389,108 +389,14 @@
   }
 
   // Mirrors model.normalize_prizes(): a stored prize may still be a bare name.
-  function normalizePrizes(list) {
-    return (list || []).map(function (p) {
-      if (typeof p === "string") return { name: p, count: 1, mode: "ticket", batch: false };
-      return {
-        name: (p && p.name) || "",
-        count: Number(p && p.count) || 0,
-        mode: p && p.mode === "person" ? "person" : "ticket",
-        batch: !!(p && p.batch)
-      };
-    }).filter(function (p) { return p.name; });
-  }
 
   // 「逐个」 draws one winner per click; 「一次抽完」 draws the whole remaining
   // quota of that prize in one go. Stored with the prize, so it survives a
   // reload and both operators see the same choice.
-  function paceSwitch(index, oneShot) {
-    return '<div class="seg" role="group">' +
-      '<button type="button" class="seg-btn' + (oneShot ? "" : " on") +
-      '" data-pace="step" data-i="' + index + '">逐个</button>' +
-      '<button type="button" class="seg-btn' + (oneShot ? " on" : "") +
-      '" data-pace="batch" data-i="' + index + '">一次抽完</button></div>';
-  }
 
-  function renderPrizeList() {
-    var body = $("#prizeTable tbody");
-    if (!body) return;
-    var prizes = S.prizes || [];
-    if (!prizes.length) {
-      body.innerHTML = '<tr><td colspan="6" class="empty">还没有配置奖品</td></tr>';
-      return;
-    }
-    body.innerHTML = prizes.map(function (p, i) {
-      var done = p.remaining <= 0;
-      var blocked = p.mode === "ticket" && !S.config.finalized;
-      var label = p.mode === "person" ? "均等" : "按票";
-      var why = done ? "已抽完" : (blocked ? "需先结算奖票" : "");
-      var act = p.batch ? "抽完" : "抽";
-      return "<tr" + (done ? ' class="done-row"' : "") + ">" +
-        "<td><b>" + LT.esc(p.name) + "</b></td>" +
-        '<td style="color:var(--muted)">' + label + "</td>" +
-        "<td>" + paceSwitch(i, p.batch) + "</td>" +
-        '<td class="right left-n">' + p.drawn + "</td>" +
-        '<td class="right left-n">' + p.remaining + " / " + p.count + "</td>" +
-        '<td class="right"><button class="btn draw-btn ' + (done ? "" : "primary") +
-        '" data-draw="' + i + '"' + (done || blocked ? " disabled" : "") +
-        ' title="' + why + '">' + act + "</button></td></tr>";
-    }).join("");
-  }
 
-  function setPace(index, oneShot) {
-    var prizes = S.prizes || [];
-    if (!prizes[index] || !!prizes[index].batch === oneShot) return;
-    var payload = prizes.map(function (p, i) {
-      return {
-        name: p.name,
-        count: p.count,
-        mode: p.mode,
-        batch: i === index ? oneShot : !!p.batch
-      };
-    });
-    LT.api("/api/admin/settings", { method: "POST", body: { prizes: payload } })
-      .then(function () { return load(); })
-      .catch(bad);
-  }
 
-  function renderPrizeEditor() {
-    var box = $("#prizeEditor");
-    if (!box) return;
-    var prizes = normalizePrizes(S.config.prizes);
-    box.innerHTML = prizes.map(function (p, i) {
-      return '<div class="prize-row" data-i="' + i + '" data-batch="' + (p.batch ? "1" : "0") + '">' +
-        '<input class="p-name" type="text" value="' + LT.esc(p.name) + '" placeholder="奖品名称">' +
-        '<input class="p-count" type="number" min="0" max="999" value="' + p.count + '">' +
-        '<select class="p-mode">' +
-        '<option value="ticket"' + (p.mode === "ticket" ? " selected" : "") + ">按票</option>" +
-        '<option value="person"' + (p.mode === "person" ? " selected" : "") + ">均等</option>" +
-        "</select>" +
-        '<button class="btn sm danger" data-prize-del="' + i + '">删除</button>' +
-        "</div>";
-    }).join("") || '<p class="note">还没有配置奖品</p>';
-  }
 
-  function renderDraws() {
-    $("#drawTable tbody").innerHTML = S.draws.map(function (d) {
-      var voided = !!d.voided_at;
-      var person = d.mode === "person";
-      return "<tr" + (voided ? ' style="opacity:.4"' : "") + ">" +
-        '<td class="num right">' + d.seq + "</td>" +
-        "<td>" + LT.esc(d.prize || "") + "</td>" +
-        "<td>" + (person
-          ? '<span class="chip" style="padding:1px 7px;font-size:.75rem">人级均等</span>'
-          : '<span class="chip" style="padding:1px 7px;font-size:.75rem">按票</span>') + "</td>" +
-        '<td class="num">' + (person ? '<span style="color:var(--dim)">—</span>'
-          : '<span class="tkt">' + LT.code(d.code) + "</span>") + "</td>" +
-        "<td><b>" + LT.esc(d.name || "?") + "</b> <span style='color:var(--dim)'>" + LT.esc(d.sid || "") + "</span></td>" +
-        '<td class="num">' + LT.fmtDateTime(d.ts) + "</td>" +
-        '<td class="right">' + (voided
-          ? '<span class="note">已作废</span>'
-          : '<button class="btn sm danger" data-void="' + d.id + '"' + (S.unlocked ? "" : " disabled") + ">作废</button>") +
-        "</td></tr>";
-    }).join("") || '<tr><td colspan="7" class="empty">还没有抽奖记录</td></tr>';
-  }
 
 
   function renderPhase() {
@@ -677,7 +583,7 @@
       $("#setAllowBonus").checked = c.allow_bonus !== false;
       $("#setUniqueInside").checked = c.draw_unique_inside !== false;
       $("#setUniqueAcross").checked = c.draw_unique_across === true;
-      renderPrizeEditor();
+      pageRefresh("draw");
     }
     $("#exportLink").href = LT.PREFIX + "/api/admin/export.csv";
     $("#secretUrl").textContent = S.publicBaseUrl + "/";
@@ -739,12 +645,12 @@
   function renderAll() {
     renderHead();
     renderPhase();
-    renderPrizeList();
+    pageRefresh("draw");
     renderUnlock();
     renderHits();
     renderTable();
     renderFullTable();
-    renderDraws();
+    pageShow("draw");
     renderLog();
     if (S.tab === "config") renderSettings();
     if (S.tab === "tickets") pageRefresh("tickets");
@@ -1028,13 +934,17 @@
       var dp = t.getAttribute && t.getAttribute("data-draw");
       if (dp) { drawPrize(Number(dp)); return; }
       var pc = t.getAttribute && t.getAttribute("data-pace");
-      if (pc) { setPace(Number(t.getAttribute("data-i")), pc === "batch"); return; }
+      if (pc) {
+      var dp = modulePage("draw");
+      if (dp && dp.setPace) dp.setPace(Number(t.getAttribute("data-i")), pc === "batch");
+      return;
+    }
       var pd = t.getAttribute && t.getAttribute("data-prize-del");
       if (pd) {
         var kept = collectPrizes();
         kept.splice(Number(pd), 1);
         S.config.prizes = kept;
-        renderPrizeEditor();
+        pageRefresh("draw");
         return;
       }
       var vd = t.getAttribute && t.getAttribute("data-void");
@@ -1140,7 +1050,7 @@
       renderUnlock();
       renderTable();
       pageRefresh("tickets");
-      renderDraws();
+      pageRefresh("draw");
       ok(on ? "已解锁" : "已上锁");
     }).catch(bad);
   }
@@ -1413,7 +1323,7 @@
       })
       .then(function () {
         $("#prizeNote").textContent = "已保存";
-        renderPrizeEditor();
+        pageRefresh("draw");
       })
       .catch(bad);
   }
@@ -1724,7 +1634,7 @@
     $("#prizeAddBtn").addEventListener("click", function () {
       var list = collectPrizes().concat([{ name: "", count: 1, mode: "ticket", batch: false }]);
       S.config.prizes = list;
-      renderPrizeEditor();
+      pageRefresh("draw");
       var inputs = $$("#prizeEditor .p-name");
       if (inputs.length) inputs[inputs.length - 1].focus();
     });

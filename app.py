@@ -53,6 +53,7 @@ import modules
 import pinyintable
 import policy
 import rng
+import safemode
 import presets
 import shortlinks
 import localconfig
@@ -66,7 +67,7 @@ TPL_DIR = os.path.join(BASE_DIR, "tpl")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.9.2.43"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.9.3.44"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -425,7 +426,17 @@ def service_items():
         disk = shutil.disk_usage(db.DATA_DIR)
     except OSError:
         disk = None
-    return health.signals(host_stats_cached(), disk)
+    items = health.signals(host_stats_cached(), disk)
+    if safemode.enabled():
+        items.insert(0, {
+            "id": "svc:safe-mode",
+            "kind": "service",
+            "level": "important",
+            "title": "服务处于安全模式",
+            "body": "活动内的数据暂不开放，平台设置仍可修改；改完配置文件重启即退出。",
+            "sticky": True,
+        })
+    return items
 
 
 class Conflict(model.ApiError):
@@ -1034,6 +1045,9 @@ class Handler(BaseHTTPRequestHandler):
                 )
             db.set_event(seq)
             self._token = token
+            if safemode.enabled():
+                # 安全模式：活动页与活动接口一律不提供。数据原样留着，不兜底、不改写
+                raise safemode.refuse()
             if path.startswith("/api/"):
                 self._scope = "event:%s" % seq
                 self._api(method, path, query)
@@ -1294,6 +1308,8 @@ class Handler(BaseHTTPRequestHandler):
             username = (data.get("username") or "").strip()
             row = conn.execute("SELECT * FROM accounts WHERE lower(username)=lower(?)",
                                (username,)).fetchone()
+            if row is not None and safemode.login_blocked(row):
+                raise safemode.refuse_login()
             if row is None or not panel.verify_password(data.get("password") or "", row["pass"]):
                 fails = _PANEL_FAILS.get(ip + ":n", 0) + 1
                 _PANEL_FAILS[ip + ":n"] = fails

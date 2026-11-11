@@ -618,6 +618,28 @@ def main():
     check("内置模块声明了动作", "mark" in (builtin.get("actions") or {}),
           sorted((builtin.get("actions") or {})))
 
+    print("== 服务安全模式 ==")
+    app.safemode.reset()
+    check("默认不进安全模式", app.safemode.enabled() is False)
+    check("模块照常加载", len(app.modules.all_modules(app.VERSION)) >= 1)
+    os.environ["LOTTERY_SAFE_MODE"] = "1"
+    app.safemode.reset()
+    try:
+        check("读到开关", app.safemode.enabled() is True)
+        check("模块一个都不加载",
+              app.modules.all_modules(app.VERSION) == [], app.modules.all_modules(app.VERSION))
+        refused = app.safemode.refuse()
+        check("写入被拒是 503", getattr(refused, "code", None) == 503, getattr(refused, "code", None))
+        check("别的账号登录被拒",
+              bool(app.safemode.login_blocked({"role": "admin"})))
+        check("站长还能进", app.safemode.login_blocked({"role": "owner"}) is None)
+    finally:
+        os.environ.pop("LOTTERY_SAFE_MODE", None)
+        app.safemode.reset()
+    check("关掉之后恢复正常",
+          app.safemode.enabled() is False
+          and len(app.modules.all_modules(app.VERSION)) >= 1)
+
     print("== 随机源 ==")
     check("报得出来源", app.rng.source() in ("hwrng", "krng"), app.rng.source())
     check("字节长度对", len(app.rng.bytes(13)) == 13)

@@ -48,6 +48,8 @@ DEFAULTS = {
 # 单个活动同时能持有多条短链，超出就拒绝生成。
 STATIC_DEFAULTS = {
     "shortlink_per_event": 5,
+    # 服务安全模式：启动时生效，外部资源不加载、活动内数据只读
+    "safe_mode": False,
 }
 
 SECRET_LEN = 32

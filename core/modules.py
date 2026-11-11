@@ -26,6 +26,7 @@ import importlib.util
 import json
 import os
 import paths
+import safemode
 import sys
 import re
 
@@ -588,6 +589,9 @@ def all_modules(version, include_broken=False, disabled=()):
     out = []
     seen = set()
     disabled = {(str(x)).strip() for x in (disabled or ())}
+    if safemode.enabled():
+        # 安全模式：外部资源一律不加载，内置模块也算外部资源
+        return out
     for folder, builtin in module_dirs():
         name = os.path.basename(folder)
         try:

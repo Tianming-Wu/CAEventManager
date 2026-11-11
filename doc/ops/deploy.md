@@ -56,6 +56,18 @@ python tools/bump_version.py --show
 - 大屏：抽奖动画播完再刷新
 - 公示页：直接换
 
+## 安全模式
+
+出配置或数据问题时，把 `config.json` 里的 `safe_mode` 改成 `true` 再重启，服务进入安全模式：
+
+- 外部资源一个都不加载，内置模块也算；活动页与活动接口一律不提供（返回 503 与一句说明），
+  数据原样留在 `data/` 里，不做兜底改写
+- **平台自己的东西照常可改**：账号、角色、模块启用状态、短链、通知、配置
+- 只有站长能登录，其他账号会看到 `Service is under maintenance`
+- 顶栏通知中心里常挂一条「服务处于安全模式」，写明怎么退出
+
+退出：把开关改回 `false` 再重启。
+
 ## 日志
 
 `data/service.log`。写到 8 MB 自己换一份：改名成 `.1`，旧的依次往后挪，最多留三份（`.1`~`.3`）。
@@ -105,6 +117,7 @@ python tools/prod_check.py https://example.org/mount <活动 token>   # 线上�
 | `public_base_prefix` | 生成绝对链接用的前缀，不参与路由 |
 | `owner_username` / `owner_name` | 站长的登录名与称呼 |
 | `shortlink_per_event` | 静态设置：一个活动最多同时持有几条短链（默认 5），改完重启生效 |
+| `safe_mode` | 静态设置：服务安全模式（默认 `false`），改完重启生效 |
 
 随机源：有 `/dev/hwrng` 就与内核的混合着用，没有就只用内核的 CSPRNG。想知道这台机器用的是哪一种，
 看服务启动后在服务器上执行 `python3 -c "import sys; sys.path.insert(0,'core'); import rng; print(rng.source())"`。

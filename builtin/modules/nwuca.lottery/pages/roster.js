@@ -76,7 +76,7 @@ window.MODULE = window.MODULE || { pages: {} };
   }
 
   function editStudent(id) {
-    var s = S.byId[id];
+    var s = lib.byId(S)[id];
     if (!s) return;
     var m = LT.modal(
       '<h2>编辑 ' + LT.esc(s.name) + "</h2>" +
@@ -158,7 +158,7 @@ window.MODULE = window.MODULE || { pages: {} };
 
   /* 「选中」把这个人交给操作台的搜索框：两页都在模块里，直接过去 */
   function selectInOps(id) {
-    var s = S.byId[id];
+    var s = lib.byId(S)[id];
     if (!s) return;
     if (ctx && ctx.showTab) ctx.showTab("ops");
     var ops = window.MODULE.pages.ops;

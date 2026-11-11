@@ -195,6 +195,8 @@ window.MODULE.pages.tickets = {
   平台只提供那块地方，不认识上面写的是什么
 - 进来先落到哪一页由模块说了算：共用脚本里定义 `window.MODULE.landing(state)` 返回页签名，
   平台只问一次
+- 解锁开关那句话由模块说：`window.MODULE.unlockNote`（字符串，或返回字符串的函数），
+  平台只认识开关本身
 - 页签里的按钮由模块自己在 `mount` 里接；平台只认平台外壳上那几个 `data-*`
 - 平台不直接调模块的函数，只走 `button → pageShow/pageRefresh`
 

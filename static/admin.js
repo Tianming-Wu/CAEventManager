@@ -5,17 +5,16 @@
   var $ = function (sel, root) { return (root || document).querySelector(sel); };
   var $$ = function (sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); };
 
+  /* 状态的形状由模块和平台接口商量：平台只认自己那几个键（config、审计、成员），
+     其余原样摊在身上，不解释 */
   var S = {
-    students: [],
-    byId: {},
     config: {},
     audit: [],
-    draws: [],
-    unlocked: false,
     members: [],
     seat: {},
+    unlocked: false,
     unlockUntil: 0,
-    tab: "ops"
+    tab: ""
   };
 
   // ------------------------------------------------------------------ utils
@@ -143,7 +142,14 @@
     }).join("");
   }
 
-  /* 模块可以挑一个落脚页签（例如已经结算就直接去抽奖页），只挑一次 */
+  /* 解锁之后能动什么，由模块说；平台只认识这个开关本身 */
+  function unlockNote() {
+    var note = window.MODULE && window.MODULE.unlockNote;
+    if (typeof note === "function") note = note();
+    return note || "解锁后可以改动已经记下的内容。";
+  }
+
+  /* 模块可以挑一个落脚页签，平台只问一次 */
   function applyLanding() {
     if (S.landed || !window.MODULE || !window.MODULE.landing) return;
     var want = "";
@@ -295,36 +301,31 @@
     if (note) note.textContent = owner ? "" : "只有该活动的负责人能归档";
   }
 
+  /* 模块的每一页都重画一次；画不画由那一页自己看 */
+  function refreshPages() {
+    (S.pages || []).forEach(function (page) { pageRefresh(page.id); });
+  }
+
   function renderAll() {
     renderHead();
     renderUnlock();
     renderLog();
-    pageRefresh("ops");
-    pageRefresh("roster");
-    pageRefresh("tickets");
-    pageRefresh("draw");
-    pageRefresh("config");
+    refreshPages();
     renderPageCounts();
     applyLanding();
   }
 
   // ------------------------------------------------------------------ data
   function applyState(d) {
-    S.features = d.features || {};
-    S.seq = d.seq || 0;
-    S.config = d.config || {};
-    S.prizes = d.prizes || [];
-    S.screenPacks = d.screenPacks || [];
-    S.roster = d.roster || null;
-    S.publicBaseUrl = (d.publicBaseUrl || S.config.public_base_url || "").replace(/\/+$/, "");
-    S.students = d.students || [];
-    S.byId = {};
-    S.students.forEach(function (s) { S.byId[s.id] = s; });
-    S.audit = d.audit || [];
-    S.features = d.features || {};
-    S.draws = d.draws || [];
-    S.unlocked = !!d.unlocked;
-    S.unlockUntil = d.unlockUntil || 0;
+    d = d || {};
+    Object.keys(d).forEach(function (k) { S[k] = d[k]; });
+    if (!S.config) S.config = {};
+    if (!S.audit) S.audit = [];
+    S.unlocked = !!S.unlocked;
+    S.unlockUntil = S.unlockUntil || 0;
+    // 公示页地址是平台算的：去掉结尾的斜杠，拼路径的地方就不用操心
+    S.publicBaseUrl = String(
+      d.publicBaseUrl || S.config.public_base_url || "").replace(/\/+$/, "");
     renderAll();
   }
 
@@ -352,8 +353,7 @@
           title: "打开解锁修改？",
           danger: true,
           okText: "打开",
-          html: "解锁后可以：撤销标记、修改完成时间、删除学生、作废抽奖、重置奖票。<br>" +
-            "30 秒无操作自动上锁。"
+          html: unlockNote() + "<br>30 秒无操作自动上锁。"
         }).then(function (yes) {
           if (!yes) { e.target.checked = false; return; }
           setUnlock(true);
@@ -391,9 +391,7 @@
       S.unlocked = d.unlocked;
       S.unlockUntil = d.unlockUntil;
       renderUnlock();
-      pageRefresh("ops");
-      pageRefresh("tickets");
-      pageRefresh("draw");
+      refreshPages();
       renderPageCounts();
       ok(on ? "已解锁" : "已上锁");
     }).catch(bad);

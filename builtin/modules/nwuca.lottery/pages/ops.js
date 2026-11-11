@@ -109,7 +109,7 @@ window.MODULE = window.MODULE || { pages: {} };
   }
 
   function mark(studentId, kind) {
-    var stu = S.byId[studentId];
+    var stu = lib.byId(S)[studentId];
     if (!stu) return;
     if (stu.marks[kind]) {
       lib.ok("<b>" + LT.esc(stu.name) + "</b> 的" + lib.kindLabel(kind) + "早就完成了");
@@ -137,7 +137,7 @@ window.MODULE = window.MODULE || { pages: {} };
   }
 
   function undo(studentId, kind) {
-    var stu = S.byId[studentId];
+    var stu = lib.byId(S)[studentId];
     if (!stu) return;
     if (!S.unlocked) { lib.fail("撤销需要先打开右上角的「解锁修改」开关"); return; }
     var deps = kind === "checkin"
@@ -308,7 +308,7 @@ window.MODULE = window.MODULE || { pages: {} };
       if (!hit) return;
       S.sel = Number(hit.getAttribute("data-i"));
       renderHits();
-      var stu = S.byId[Number(hit.getAttribute("data-id"))];
+      var stu = lib.byId(S)[Number(hit.getAttribute("data-id"))];
       if (stu && stu.next) mark(stu.id, stu.next);
     });
 

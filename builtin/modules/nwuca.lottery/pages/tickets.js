@@ -32,7 +32,7 @@ window.MODULE = window.MODULE || { pages: {} };
     lib.$("#planSummary").innerHTML = chips.join("");
 
     lib.$("#planTable tbody").innerHTML = (p.rows || []).map(function (r) {
-      var stu = S.byId[r.id] || {};
+      var stu = lib.byId(S)[r.id] || {};
       return "<tr>" +
         '<td class="num right">' + r.pos + "</td>" +
         "<td><b>" + LT.esc(r.name) + "</b> <span style='color:var(--dim);font-size:.8em'>" + LT.esc(r.sid) + "</span></td>" +

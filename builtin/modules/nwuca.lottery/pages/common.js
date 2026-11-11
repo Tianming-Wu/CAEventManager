@@ -35,6 +35,18 @@ window.MODULE.lib = (function () {
 
   function state() { return S; }
 
+  /* 清单按 id 建个索引：清单换了引用就重建，各页不用自己记 */
+  var INDEX_OF = null, INDEX = {};
+  function byId(state) {
+    var list = ((state || S || {}).students) || [];
+    if (list !== INDEX_OF) {
+      INDEX_OF = list;
+      INDEX = {};
+      list.forEach(function (s) { INDEX[s.id] = s; });
+    }
+    return INDEX;
+  }
+
   function $(sel, root) { return (root || document).querySelector(sel); }
   function $$(sel, root) {
     return Array.prototype.slice.call((root || document).querySelectorAll(sel));
@@ -220,8 +232,11 @@ window.MODULE.lib = (function () {
     return state && state.config && state.config.finalized ? "draw" : "";
   };
 
+  /* 解锁之后能动什么：平台只认识那个开关，这句话由模块说 */
+  window.MODULE.unlockNote = "解锁后可以：撤销标记、修改完成时间、删除学生、作废抽奖、重置奖票。";
+
   return {
-    bind: bind, ready: ready, state: state, reloadState: reloadState,
+    bind: bind, ready: ready, state: state, reloadState: reloadState, byId: byId,
     $: $, $$: $$, ok: ok, fail: fail, bad: bad,
     KINDS: KINDS, PREV: PREV, ROLE_TAG: ROLE_TAG,
     kindLabel: kindLabel, isParticipant: isParticipant, roleLabel: roleLabel,

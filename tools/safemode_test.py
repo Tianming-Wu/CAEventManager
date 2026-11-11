@@ -71,6 +71,8 @@ def boot(safe):
     env["PYTHONIOENCODING"] = "utf-8"
     env["LOTTERY_DATA_DIR"] = os.path.join(DATA, "data")
     env["LOTTERY_PACKS_DIR"] = os.path.join(DATA, "packs")
+    # 这套会改静态设置：配置文件也放进自己的目录，别写到仓库里那份
+    env["LOTTERY_CONFIG"] = os.path.join(DATA, "config.json")
     if safe:
         env["LOTTERY_SAFE_MODE"] = "1"
     else:
@@ -161,6 +163,24 @@ def main():
         code, made = post("/api/panel/events/create", {"template": "nwuca.salon"})
         check("安全模式下建不出活动，并说明原因",
               code == 409 and "安全模式" in (made.get("error") or ""), (code, made))
+
+        # 一键开关：没有 sudo 时被拒，进了 sudo 才动
+        code, refused = post("/api/panel/service/safe_mode", {"on": False})
+        check("退出安全模式要先进 sudo",
+              code == 403 and refused.get("sudoRequired"), (code, refused))
+        post("/api/panel/sudo", {"password": pw})
+        code, off = post("/api/panel/service/safe_mode", {"on": False})
+        check("进了 sudo 就能改开关", code == 200 and off.get("safeMode") is False,
+              (code, off))
+        check("不是看护进程起的服务：只改配置，不自己重启",
+              off.get("restarting") is False, off)
+        raw_cfg = json.load(open(os.path.join(DATA, "config.json"), encoding="utf-8"))
+        check("开关写进了 config.json", raw_cfg.get("safe_mode") is False, raw_cfg)
+        code, again = post("/api/panel/service/safe_mode", {"on": False})
+        check("重复点也不出错，配置还是关着的",
+              code == 200 and again.get("safeMode") is False
+              and json.load(open(os.path.join(DATA, "config.json"),
+                                 encoding="utf-8")).get("safe_mode") is False, again)
     finally:
         stop(proc)
 

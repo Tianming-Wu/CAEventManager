@@ -3808,8 +3808,80 @@
     // UNWIRED(event-approvals): 活动申请队列不存在，默认自动通过。
   }
 
+  /* 安全模式：服务信息里一行状态，下面一张卡管进出 */
+  function safeModeOn() {
+    return !!(S.hostMeta && S.hostMeta.safeMode);
+  }
+
+  function drawSafeMode() {
+    var chip = $("#safeModeChip");
+    var btn = $("#safeModeBtn");
+    var note = $("#safeModeNote");
+    if (!chip || !btn) return;
+    var on = safeModeOn();
+    chip.textContent = on ? "安全模式中" : "正常";
+    chip.className = "chip" + (on ? " gold live" : "");
+    btn.textContent = on ? "退出安全模式" : "进入安全模式";
+    btn.className = "btn " + (on ? "" : "danger");
+    btn.disabled = !isOwner();
+    if (note) {
+      note.textContent = (S.hostMeta && S.hostMeta.supervised === false)
+        ? "这台服务不是由 service.sh 看着的：改完开关需要自己重启一次"
+        : "";
+    }
+  }
+
+  /* 重启要等它回来：服务起来之前 /host 会连不上，连上了再看状态对不对 */
+  function waitForRestart(want) {
+    var started = Date.now();
+    var probe = function () {
+      PX.api("/host").then(function (d) {
+        S.users = (d && d.users) || null;
+        S.hostMeta = { safeMode: !!(d && d.safeMode), supervised: d && d.supervised };
+        applyHost(d && d.host ? d.host : null);
+        if (S.hostMeta.safeMode === want) {
+          location.reload();
+          return;
+        }
+        if (Date.now() - started > 45000) {
+          PX.toast("服务还没按预期回来，去服务器上看一眼", true, 6000);
+          return;
+        }
+        setTimeout(probe, 1200);
+      }).catch(function () {
+        if (Date.now() - started > 45000) return;
+        setTimeout(probe, 700);
+      });
+    };
+    setTimeout(probe, 500);
+  }
+
+  function toggleSafeMode() {
+    var want = !safeModeOn();
+    var title = want ? "进入安全模式？" : "退出安全模式？";
+    var note = want
+      ? "活动页会立刻显示维护提示，所有人暂时打不开；数据原样不动，面板照常可用。<br>修好之后再退出安全模式。"
+      : "活动页会恢复开放，服务重启一次。";
+    var label = want ? "进入安全模式" : "退出安全模式";
+    confirmHighRisk(title, note, label, want, function () {
+      apiSudo("/service/safe_mode", { method: "POST", body: { on: want } }, label)
+        .then(function (d) {
+          S.hostMeta = { safeMode: !!d.safeMode, supervised: d.supervised };
+          drawSafeMode();
+          if (d.restarting) {
+            PX.toast(want ? "正在进入安全模式，服务重启中…" : "正在退出安全模式，服务重启中…");
+            waitForRestart(want);
+          } else {
+            PX.toast("配置已改，重启服务之后生效");
+          }
+        })
+        .catch(fail);
+    });
+  }
+
   function drawServer() {
     var h = S.host;
+    drawSafeMode();
     $("#srvCpu").textContent = h ? pct(h.cpu) : "–";
     $("#srvMem").textContent = h ? pct(h.mem) : "–";
     $("#srvUptime").textContent = h && h.uptime ? humanUptime(h.uptime) : "–";
@@ -3832,6 +3904,7 @@
     } else {
       rows.push(["状态", "这台机器读不到设备占用（非 Linux 或 /proc 不可用）"]);
     }
+    rows.push(["安全模式", safeModeOn() ? "是" : "否"]);
     $("#srvInfo").innerHTML = rows.map(function (r) {
       return "<dt>" + PX.esc(r[0]) + "</dt><dd>" + PX.esc(r[1]) + "</dd>";
     }).join("");
@@ -4757,6 +4830,7 @@
     PX.api("/host")
       .then(function (d) {
         S.users = (d && d.users) || null;
+        S.hostMeta = { safeMode: !!(d && d.safeMode), supervised: d && d.supervised };
         applyHost(d && d.host ? d.host : null);
       })
       .catch(function () { applyHost(null); });
@@ -5216,6 +5290,8 @@
     refreshHost();
     PX.toast("已刷新");
   });
+
+  $("#safeModeBtn").addEventListener("click", toggleSafeMode);
 
   $("#pwBtn").addEventListener("click", function () {
     var err = $("#pwErr");

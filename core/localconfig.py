@@ -95,14 +95,8 @@ def load():
     return cfg
 
 
-def save(cfg):
-    payload = {
-        "host": cfg.get("host") or DEFAULTS["host"],
-        "port": int(cfg.get("port") or DEFAULTS["port"]),
-        "public_base_prefix": (cfg.get("public_base_prefix") or DEFAULTS["public_base_prefix"]).rstrip("/"),
-        "owner_username": (cfg.get("owner_username") or DEFAULTS["owner_username"]).strip(),
-        "owner_name": (cfg.get("owner_name") or DEFAULTS["owner_name"]).strip(),
-    }
+def _write(payload):
+    """整份写回：临时文件 + 原子替换，权限 600。"""
     directory = os.path.dirname(CONFIG_PATH) or "."
     os.makedirs(directory, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=directory, prefix=".config-", suffix=".json")
@@ -119,6 +113,32 @@ def save(cfg):
             pass
         raise
     return payload
+
+
+def save(cfg):
+    payload = {
+        "host": cfg.get("host") or DEFAULTS["host"],
+        "port": int(cfg.get("port") or DEFAULTS["port"]),
+        "public_base_prefix": (cfg.get("public_base_prefix") or DEFAULTS["public_base_prefix"]).rstrip("/"),
+        "owner_username": (cfg.get("owner_username") or DEFAULTS["owner_username"]).strip(),
+        "owner_name": (cfg.get("owner_name") or DEFAULTS["owner_name"]).strip(),
+    }
+    # 文件里已经写下的静态设置（安全模式这类）原样留着，别被一次 save 抹掉
+    written = raw()
+    for key in STATIC_DEFAULTS:
+        if key in written:
+            payload[key] = written[key]
+    return _write(payload)
+
+
+def set_static(key, value):
+    """改写一个静态设置，其余键（包括运维手写的）原样保留。"""
+    if key not in STATIC_DEFAULTS:
+        raise KeyError(key)
+    data = raw()
+    data[key] = value
+    _write(data)
+    return value
 
 
 def public_url(cfg):

@@ -1220,16 +1220,19 @@
         <dl class="kv" id="srvInfo"></dl>
       </div>
 
-      <!-- UNWIRED(ops): 备份、重启服务、日志查看 -->
-      <div class="card">
-        <div class="card-head"><h2>运维操作</h2></div>
-        <div class="unwired-note">
-          备份、重启服务、查看日志还没有接入。现在只能在服务器上跑 service.sh。
+      <div class="card" id="safeModeCard">
+        <div class="card-head">
+          <h2>安全模式</h2>
+          <div class="spacer"></div>
+          <span class="chip" id="safeModeChip"></span>
         </div>
+        <p class="panel-hint">
+          出配置或数据问题时把服务收起来：活动页显示维护提示，数据原样不动，面板照常可用。
+          修好之后退出安全模式，服务会重启一次。
+        </p>
         <div class="row">
-          <button class="btn" disabled>下载数据备份</button>
-          <button class="btn" disabled>重启服务</button>
-          <button class="btn" disabled>查看日志</button>
+          <button class="btn danger" id="safeModeBtn" type="button">进入安全模式</button>
+          <span class="note" id="safeModeNote"></span>
         </div>
       </div>
     </section>

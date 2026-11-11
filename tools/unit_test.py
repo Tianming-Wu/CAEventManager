@@ -639,6 +639,33 @@ def main():
             else []
     check("业务库里不再写审计", "unit_probe" not in biz_actions, biz_actions[:5])
 
+    print("== 静态设置写回 ==")
+    import tempfile as _tempfile
+    import shutil as _shutil
+    box = _tempfile.mkdtemp(prefix="cfg-")
+    old_path = app.localconfig.CONFIG_PATH
+    try:
+        app.localconfig.CONFIG_PATH = os.path.join(box, "config.json")
+        app.localconfig.set_static("safe_mode", True)
+        cfg = app.localconfig.load()
+        check("写进去的静态设置读得回来", cfg.get("safe_mode") is True, cfg.get("safe_mode"))
+        app.localconfig.save({"host": "0.0.0.0", "port": 8931,
+                              "public_base_prefix": "http://example",
+                              "owner_username": "owner", "owner_name": "站长"})
+        kept = app.localconfig.raw()
+        check("一次 save 不会把安全模式抹掉", kept.get("safe_mode") is True, kept)
+        check("save 也没有丢掉服务配置", kept.get("port") == 8931, kept)
+        app.localconfig.set_static("safe_mode", False)
+        check("改回 false 也照写", app.localconfig.raw().get("safe_mode") is False)
+        try:
+            app.localconfig.set_static("nope", True)
+            check("不认识的静态设置名会报错", False)
+        except KeyError:
+            check("不认识的静态设置名会报错", True)
+    finally:
+        app.localconfig.CONFIG_PATH = old_path
+        _shutil.rmtree(box, ignore_errors=True)
+
     print("== 服务安全模式 ==")
     app.safemode.reset()
     check("默认不进安全模式", app.safemode.enabled() is False)

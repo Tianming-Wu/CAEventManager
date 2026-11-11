@@ -1,11 +1,16 @@
 #!/bin/sh
 # Small service manager: start / stop / restart / status / log / check
+#
+# start 起的是 bin/supervise.sh（看护进程），它再去跑 bin/run.sh。
+# 面板里的重启与安全模式开关都靠这一层：app 自己退出，看护进程把它重新起来。
 set -eu
 # 工作目录一律取**脚本所在目录的上一级**，与调用时所在的目录无关：
 # 相对路径先解析成绝对路径，再往上一级，从哪个目录调用都不会跑偏。
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 cd "$HERE/.."
 PIDFILE="data/service.pid"
+SUPPID="data/supervise.pid"
+STOPREQ="data/stop.request"
 LOG="data/service.log"
 PORT=$(python3 -c "import json;print(json.load(open('config.json')).get('port', 8931))" 2>/dev/null || echo 8931)
 
@@ -28,7 +33,8 @@ start)
         exit 0
     fi
     mkdir -p data
-    setsid nohup ./bin/run.sh >/dev/null 2>&1 &
+    rm -f "$STOPREQ"
+    setsid nohup ./bin/supervise.sh >/dev/null 2>&1 &
     i=0
     while [ $i -lt 40 ]; do
         sleep 0.25
@@ -43,9 +49,24 @@ start)
     exit 1
     ;;
 stop)
+    # 先让看护进程闭嘴，否则它立刻又把服务拉起来
+    touch "$STOPREQ"
+    if [ -f "$SUPPID" ]; then
+        sp=$(cat "$SUPPID" 2>/dev/null || true)
+        if [ -n "${sp:-}" ] && kill -0 "$sp" 2>/dev/null; then
+            kill "$sp" 2>/dev/null || true
+            i=0
+            while [ $i -lt 20 ] && kill -0 "$sp" 2>/dev/null; do
+                sleep 0.25
+                i=$((i + 1))
+            done
+            kill -9 "$sp" 2>/dev/null || true
+        fi
+        rm -f "$SUPPID"
+    fi
     if ! running; then
         echo "not running"
-        rm -f "$PIDFILE"
+        rm -f "$PIDFILE" "$STOPREQ"
         exit 0
     fi
     p=$(pid)
@@ -56,7 +77,7 @@ stop)
         i=$((i + 1))
     done
     kill -9 "$p" 2>/dev/null || true
-    rm -f "$PIDFILE"
+    rm -f "$PIDFILE" "$STOPREQ"
     echo "stopped"
     ;;
 restart)
@@ -117,7 +138,7 @@ reset)
         tar -czf "data/backup-$stamp-event-$seq.tgz" -C data/events "$seq" 2>/dev/null || true
         rm -rf "$d"
     done
-    rm -f data/service.pid
+    rm -f data/service.pid data/supervise.pid data/stop.request
     echo "已清空（备份在 data/backup-$stamp-*）"
     "$0" start
     ;;

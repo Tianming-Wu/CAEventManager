@@ -68,7 +68,7 @@ TPL_DIR = os.path.join(BASE_DIR, "tpl")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.11.1.65"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.0.66"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -122,6 +122,27 @@ def module_pages_html(cfg):
     kind = cfg.get("kind") or db.DEFAULT_CONFIG["kind"]
     mod = _modules_by_id(panel.connect()).get(kind) or {}
     return "\n".join(modules.page_fragments(kind, mod.get("pages") or []))
+
+
+def supervised():
+    """服务是不是由 bin/supervise.sh 看着：是的话，让进程退出就等于重启。"""
+    return bool(os.environ.get("LOTTERY_SUPERVISED"))
+
+
+def restart_after_response():
+    """回完这一条就把进程退掉；看护进程会立刻把它重新起来。"""
+    import threading
+
+    def bye():
+        try:
+            sys.stdout.flush()
+        except Exception:
+            pass
+        os._exit(0)
+
+    timer = threading.Timer(0.6, bye)
+    timer.daemon = True
+    timer.start()
 
 
 def safe_mode_banner():
@@ -2441,6 +2462,27 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True, "version": VERSION,
                                "at": time.time(), "items": service_items()})
 
+        if path == "/service/safe_mode" and method == "POST":
+            # 进/出安全模式是主站破坏性动作：站长 + 重输一次密码，并记审计
+            need("owner")
+            need_sudo()
+            data = body()
+            if "on" not in data:
+                raise model.ApiError("请说明是进入还是退出安全模式")
+            want = bool(data.get("on"))
+            if want == safemode.enabled():
+                return self._json({"ok": True, "safeMode": want, "already": True,
+                                   "supervised": supervised()})
+            localconfig.set_static("safe_mode", want)
+            with panel.tx() as tx:
+                panel.audit(tx, acc["username"],
+                            "safemode_on" if want else "safemode_off", None, "")
+            can_restart = supervised()
+            if can_restart:
+                restart_after_response()
+            return self._json({"ok": True, "safeMode": want, "restarting": can_restart,
+                               "supervised": can_restart})
+
         if path == "/notices/read" and method == "POST":
             data = body()
             ids = data.get("ids") or []
@@ -2455,7 +2497,9 @@ class Handler(BaseHTTPRequestHandler):
             need("owner")
             # 设备占用只有 Linux 读得到；用户数是面板自己的账，哪里都算得出
             return self._json({"ok": True, "host": host_stats_cached(),
-                               "users": panel.presence(conn)})
+                               "users": panel.presence(conn),
+                               "safeMode": safemode.enabled(),
+                               "supervised": supervised()})
 
         # ---- 运维助手：模型配置与一次对话 ----
         if path == "/assistant" and method == "GET":

@@ -2140,6 +2140,20 @@ def brand_left(page):
         ".getBoundingClientRect().left)")
 
 
+def server_page(page):
+    print("== 服务器管理 ==")
+    page.goto(BASE + "/panel#/server")
+    page.wait_for_timeout(700)
+    body = page.inner_text('[data-page="server"]')
+    check("运维操作那张占位卡没有了", "还没有接入" not in body, body[:120])
+    check("换成了安全模式卡", page.locator("#safeModeBtn").count() == 1)
+    check("按钮写的是进入安全模式",
+          page.inner_text("#safeModeBtn").strip() == "进入安全模式",
+          page.inner_text("#safeModeBtn"))
+    check("服务信息里有一行安全模式", "安全模式" in page.inner_text("#srvInfo"),
+          page.inner_text("#srvInfo"))
+
+
 def sudo_page(page):
     """The elevated mode: what it looks like, what it says, and how it ends."""
     print("== sudo mode ==")
@@ -2969,6 +2983,7 @@ def main():
                 dialog_page(page)
                 theme_page(page)
                 audit_page(page)
+                server_page(page)
                 search_page(page)
                 check("no javascript error on the owner's session", not page._errors,
                       "; ".join(page._errors)[:200])

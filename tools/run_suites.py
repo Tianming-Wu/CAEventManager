@@ -34,10 +34,15 @@ def boot(tag):
     env["PYTHONIOENCODING"] = "utf-8"
     env["LOTTERY_DATA_DIR"] = os.path.join(data, "data")
     env["LOTTERY_PACKS_DIR"] = os.path.join(data, "packs")
+    # 自己的 config.json：仓库那份写着生产的对外前缀，测试照着它跳会跳到线上
+    base = "http://127.0.0.1:%d" % port
+    config_path = os.path.join(data, "config.json")
+    with open(config_path, "w", encoding="utf-8") as fh:
+        json.dump({"port": port, "public_base_prefix": base}, fh)
+    env["LOTTERY_CONFIG"] = config_path
     log = open(os.path.join(data, "server.log"), "wb")
     proc = subprocess.Popen([PY, "app.py", "--port", str(port)], cwd=ROOT, env=env,
                             stdout=log, stderr=subprocess.STDOUT)
-    base = "http://127.0.0.1:%d" % port
     for _ in range(80):
         try:
             with urllib.request.urlopen(base + "/login", timeout=2) as res:

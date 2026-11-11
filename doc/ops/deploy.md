@@ -26,7 +26,8 @@ cd ~/apps/lottery
 ```
 
 `bin/run.sh` 是前台运行器：用 `flock` 保证只有一个实例，`python3 -u app.py` 的输出追加到
-`data/service.log`。服务**不会自动拉起**，重启机器之后要手动 `start`（或交给 systemd 之类的守护）。
+`data/service.log`。看护进程会重启退出的服务，但**整台机器重启之后**仍要手动 `start`
+（或者交给 systemd 之类的守护）。
 
 ## 版本号
 
@@ -70,7 +71,23 @@ python tools/bump_version.py --show
 - 只有站长能登录，其他账号会看到 `Service is under maintenance`
 - 登录页与面板顶上各挂一条「服务处于安全模式」的横幅；面板的服务器管理里也有同一条提示
 
-退出：把开关改回 `false` 再重启。
+退出：把开关改回 `false` 再重启；或者由站长在面板「服务器管理」里点 [退出安全模式]，
+服务会自己重启一次。
+
+改开关的接口是 `POST /api/panel/service/safe_mode`（`{"on": true|false}`），站长加 sudo 才动得了，
+进出都记审计。写的是 `config.json` 里的 `safe_mode`，别的键原样保留。
+
+## 日志
+
+### 看护进程
+
+`bin/service.sh start` 起的是 `bin/supervise.sh`，它在前台跑 `bin/run.sh`，app 退出就重新起来。
+面板里的重启与安全模式开关都靠这一层：app 回完响应自己退出，看护进程把它拉起来，
+安全模式在启动时重新读一次。所以：
+
+- 停服务用 `./bin/service.sh stop`（它先停看护进程，再停 app），别直接 kill app
+- `data/service.pid` 是 app 的 pid，`data/supervise.pid` 是看护进程的
+- 服务不是由看护进程起的（比如手工 `./bin/run.sh`），面板只改配置、不会自己重启
 
 ## 日志
 

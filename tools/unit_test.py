@@ -591,6 +591,26 @@ def main():
           app.policy.verdict({"role": "admin"}, "read_doc", {})[0]
           and app.policy.verdict({"role": "owner"}, "list_docs", {})[0])
 
+    print("== 随机源 ==")
+    check("报得出来源", app.rng.source() in ("hwrng", "krng"), app.rng.source())
+    check("字节长度对", len(app.rng.bytes(13)) == 13)
+    check("两次不一样", app.rng.bytes(16) != app.rng.bytes(16))
+    check("below 落在区间内",
+          all(0 <= app.rng.below(7) < 7 for _ in range(200)))
+    check("below 不取模（区间不整除也均匀地落进来）",
+          len({app.rng.below(6) for _ in range(400)}) == 6)
+    try:
+        app.rng.below(0)
+        bad = False
+    except ValueError:
+        bad = True
+    check("上限为 0 直接拒绝", bad)
+    pick = app.rng.sample(list(range(5)), 3)
+    check("不放回抽样", len(pick) == 3 and len(set(pick)) == 3, pick)
+    deck = list(range(20))
+    app.rng.shuffle(deck)
+    check("洗牌只换顺序", sorted(deck) == list(range(20)), deck[:5])
+
     print("== 服务有效性提示 ==")
 
     class Disk(object):

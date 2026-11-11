@@ -14,7 +14,9 @@ Design notes
 """
 
 import os
+import base64
 import modules
+import rng
 import paths
 import sqlite3
 import threading
@@ -155,8 +157,7 @@ def checkin_secret(conn):
     secret = get_config(conn, "checkin_secret")
     if secret:
         return secret
-    import secrets as _secrets
-    secret = _secrets.token_urlsafe(24)[:32]
+    secret = base64.urlsafe_b64encode(rng.bytes(24)).decode()[:32]
     with tx(conn):
         set_config_raw(conn, "checkin_secret", secret)
     return secret

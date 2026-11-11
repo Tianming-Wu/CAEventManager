@@ -19,6 +19,7 @@ db.py             每场活动一个库；活动配置与状态
 model.py / expr.py / auth.py / checkin.py / exporter.py / packs.py / modules.py / presets.py / bus.py
 xlsx.py           表格读写（一个工作表、文本单元格）：名单与报名的导出导入都用它
 errors.py         ApiError：平台与模块共用的错误类型
+rng.py            随机源：有 /dev/hwrng 就与内核 CSPRNG 混合，没有就只用内核的
 pinyin.py         姓名 → 逐字音节与首字母（姓用姓氏读音）
 model.py          **加载器**：按活动所用的模块，把它的 model.py 载进来
 surnames.py       姓氏读音（曾 = zeng 这类），算拼音时先查它
@@ -30,6 +31,16 @@ shortlinks.py     短链：平台级的转发表，按活动记（core/shortlink
 
 路由判定不依赖外部前缀：路径里出现已知活动 token 就按活动处理，否则把剩余路径按面板路由匹配。
 所以本机直连、反向代理前缀、将来的子域名都不用改代码；`public_base_prefix` 只用于生成绝对链接。
+
+## 随机
+
+平台的随机只有一处：`core/rng.py`。
+
+- 读得到 `/dev/hwrng` 时，把它的字节与 `os.urandom` 按字节异或混合——只用硬件会在设备坏掉时
+  悄悄退化成可预测的值，只用内核又浪费了手边那点真随机
+- `below()` 用拒绝采样，不取模，所以区间不整除时也均匀
+- 短链号、活动 token、会话与令牌、签到的签名密钥、抽奖抽票都走它；`rng.source()` 能问出
+  这台机器实际用的是哪一种
 
 ## 模块提供什么
 

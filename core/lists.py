@@ -22,7 +22,8 @@ import json
 import os
 import paths
 import pinyin
-import secrets
+import base64
+import rng
 import sqlite3
 import threading
 import time
@@ -817,7 +818,7 @@ def normalize_fields(raw):
 
 
 def new_token():
-    return secrets.token_urlsafe(24)
+    return base64.urlsafe_b64encode(rng.bytes(24)).decode().rstrip("=")
 
 
 def _fields_of(row):

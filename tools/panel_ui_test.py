@@ -66,8 +66,18 @@ def new_page(browser, width=1440, height=900, touch=False, mobile=False, dpr=1):
         is_mobile=mobile, device_scale_factor=dpr)
     page = ctx.new_page()
     page._errors = []
-    page.on("pageerror", lambda e: page._errors.append(str(e)))
-    page.on("console", lambda m: page._errors.append("console: " + m.text)
+
+    def keep_error(text):
+        # 收尾时页面被关掉、请求被中止，这类网络噪声不是 JS 错误：
+        # 面板在后台轮询通知、服务提示与机器占用，关上下文时正好可能撞上
+        for noise in ("ERR_CONNECTION_CLOSED", "ERR_ABORTED", "ERR_CONNECTION_RESET",
+                      "Failed to load resource: net::"):
+            if noise in text:
+                return
+        page._errors.append(text)
+
+    page.on("pageerror", lambda e: keep_error(str(e)))
+    page.on("console", lambda m: keep_error("console: " + m.text)
             if m.type == "error" else None)
     return ctx, page
 

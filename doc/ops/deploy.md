@@ -106,6 +106,9 @@ python tools/prod_check.py https://example.org/mount <活动 token>   # 线上�
 | `owner_username` / `owner_name` | 站长的登录名与称呼 |
 | `shortlink_per_event` | 静态设置：一个活动最多同时持有几条短链（默认 5），改完重启生效 |
 
+随机源：有 `/dev/hwrng` 就与内核的混合着用，没有就只用内核的 CSPRNG。想知道这台机器用的是哪一种，
+看服务启动后在服务器上执行 `python3 -c "import sys; sys.path.insert(0,'core'); import rng; print(rng.source())"`。
+
 环境变量可以覆盖：`LOTTERY_DATA_DIR`、`LOTTERY_PACKS_DIR`、`LOTTERY_PORT`、
 `LOTTERY_VERSION`（测试用）、`LOTTERY_LOG_MAX`、`LOTTERY_ASSISTANT_PROMPT`。
 

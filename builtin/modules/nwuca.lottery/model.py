@@ -28,7 +28,6 @@ ticket is created or destroyed.  ``beta`` controls how steep the reward is:
 import csv
 import hashlib
 import io
-import random
 import time
 import uuid
 
@@ -36,6 +35,7 @@ import db
 import errors
 import expr
 import pinyin
+import rng
 
 ApiError = errors.ApiError
 normalize_pinyin = pinyin.pi
@@ -65,7 +65,7 @@ def ensure_seed(conn):
     if not seed:
         seed = int(db.get_config(conn, "deck_seed", 0) or 0)  # older database
         if not seed:
-            seed = random.SystemRandom().randrange(1, 2**31 - 1)
+            seed = rng.randrange(1, 2**31 - 1)
         db.set_config_raw(conn, "tie_seed", seed)
     return seed
 
@@ -996,7 +996,7 @@ def draw_next(conn, prize="", actor="admin", batch=None):
             raise ApiError("没有可抽的奖票了（剩下的票属于已经中过奖的人）", 409)
         raise ApiError("没有可抽的奖票了", 409)
     _require_prize_quota(conn, cfg, prize, "ticket")
-    code = random.SystemRandom().choice(sorted(pool))
+    code = rng.choice(sorted(pool))
     winner = live[code]
     seq = _next_seq(conn)
     conn.execute(
@@ -1048,7 +1048,7 @@ def draw_person(conn, prize="特等奖", actor="admin", batch=None):
         candidates = present
 
     _require_prize_quota(conn, db.all_config(conn), prize, "person")
-    winner = random.SystemRandom().choice(sorted(candidates, key=lambda s: s["sid"]))
+    winner = rng.choice(sorted(candidates, key=lambda s: s["sid"]))
     seq = _next_seq(conn)
     conn.execute(
         "INSERT INTO draws (seq, prize, mode, code, student_id, ts, batch) "

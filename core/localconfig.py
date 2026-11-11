@@ -22,7 +22,8 @@ file is only for things that must be known before the database is opened.
 import json
 import os
 import paths
-import secrets
+import base64
+import rng
 import tempfile
 
 BASE_DIR = paths.APP_ROOT
@@ -54,7 +55,7 @@ SECRET_LEN = 32
 
 def new_secret():
     """32 URL-safe base64 characters."""
-    return secrets.token_urlsafe(24)[:SECRET_LEN]
+    return base64.urlsafe_b64encode(rng.bytes(24)).decode()[:SECRET_LEN]
 
 
 def raw():

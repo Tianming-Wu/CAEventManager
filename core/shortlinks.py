@@ -9,7 +9,7 @@
 
 表在 `panel.sqlite3` 里：短链要能在不知道活动上下文的时候被解析出来。
 """
-import secrets
+import rng
 import time
 
 CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"   # 去掉 0 O 1 I 这类易混字符，全大写
@@ -26,7 +26,8 @@ class ShortlinkError(Exception):
 
 
 def _code():
-    return "".join(secrets.choice(CODE_ALPHABET) for _ in range(CODE_LEN))
+    # 有硬件随机源就与内核的混着用（见 core/rng.py）
+    return "".join(rng.choice(CODE_ALPHABET) for _ in range(CODE_LEN))
 
 
 def _view(row, now=None):

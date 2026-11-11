@@ -14,10 +14,12 @@ status  pending (待审核, cannot sign in) / active / disabled / rejected
 Registration always creates admin + pending; only approval flips it to active.
 """
 
+import base64
 import json
 import os
 import paths
 import re
+import rng
 import secrets
 import sqlite3
 import threading
@@ -421,7 +423,7 @@ def init_db():
 def hash_password(password, salt=None, iterations=180000):
     import hashlib
 
-    salt = salt or secrets.token_bytes(16)
+    salt = salt or rng.bytes(16)
     dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations)
     return "pbkdf2_sha256$%d$%s$%s" % (iterations, salt.hex(), dk.hex())
 
@@ -443,7 +445,7 @@ def verify_password(password, stored):
 
 
 def create_session(conn, account_id, ip=""):
-    token = secrets.token_urlsafe(32)
+    token = base64.urlsafe_b64encode(rng.bytes(32)).decode().rstrip("=")
     now = time.time()
     conn.execute(
         "INSERT INTO sessions (token, account_id, created_at, expires_at, ip, seen_at) "
@@ -686,7 +688,7 @@ def _token_hash(plain):
 
 def new_token():
     """(明文, 前四位, 末五位)。前缀让人一眼看出这串东西是什么，也方便以后换算法。"""
-    secret = secrets.token_urlsafe(32)
+    secret = base64.urlsafe_b64encode(rng.bytes(32)).decode().rstrip("=")
     plain = TOKEN_PREFIX + secret
     return plain, secret[:4], secret[-5:]
 
@@ -1042,7 +1044,7 @@ def bootstrap(cfg, log=print):
     if owner is None:
         username = (cfg.get("owner_username") or "owner").strip() or "owner"
         display = (cfg.get("owner_name") or "").strip()
-        password = os.environ.get("XTPANEL_OWNER_PASSWORD") or secrets.token_urlsafe(9)
+        password = os.environ.get("XTPANEL_OWNER_PASSWORD") or base64.urlsafe_b64encode(rng.bytes(9)).decode().rstrip("=")
         with tx() as t:
             t.execute(
                 "INSERT INTO accounts (username, name, role, status, pass, note, created_at) "

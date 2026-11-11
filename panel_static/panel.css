@@ -880,7 +880,8 @@ a.stat:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   display: flex;
   flex-direction: column;
 }
-.card-menu button {
+.card-menu button,
+.card-menu .menu-link {
   appearance: none;
   display: flex;
   align-items: center;
@@ -896,7 +897,11 @@ a.stat:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   min-height: 36px;
   cursor: pointer;
 }
-.card-menu button:hover:not(:disabled) { background: var(--surface-2); }
+.card-menu .menu-link { text-decoration: none; }
+.card-menu button:hover:not(:disabled),
+.card-menu .menu-link:hover { background: var(--surface-2); }
+/* 图标与文字同一个中线：定死尺寸，别让每颗 SVG 自己撑高度 */
+.card-menu svg { width: 16px; height: 16px; flex: 0 0 auto; }
 .card-menu button:disabled { color: var(--dim); cursor: default; }
 .card-menu button.danger { color: var(--danger); }
 .card-menu button.danger:hover:not(:disabled) { background: var(--danger-soft); }

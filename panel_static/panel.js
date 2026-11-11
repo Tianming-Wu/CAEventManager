@@ -118,7 +118,7 @@
   var ICON_PENCIL = '<svg viewBox="0 0 20 20" aria-hidden="true">' +
     '<path d="M4.2 15.8h3.1l7.5-7.5a1.6 1.6 0 0 0-2.3-2.3l-7.5 7.5v2.3Z"/>' +
     '<path d="M11.5 7l2.3 2.3"/></svg>';
-  var ICON_GEAR = '<svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="10" r="2.4"/><path d="M10 3.2v1.6M10 15.2v1.6M3.2 10h1.6M15.2 10h1.6M5.2 5.2l1.1 1.1M13.7 13.7l1.1 1.1M14.8 5.2l-1.1 1.1M6.3 13.7l-1.1 1.1"/></svg>';
+  var ICON_GEAR = '<svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8.183 5.503 L8.745 5.315 L9.03 3.876 L10.97 3.876 L11.255 5.315 L11.817 5.503 L11.895 5.536 L12.425 5.8 L13.644 4.984 L15.016 6.356 L14.2 7.575 L14.464 8.105 L14.497 8.183 L14.685 8.745 L16.124 9.03 L16.124 10.97 L14.685 11.255 L14.497 11.817 L14.464 11.895 L14.2 12.425 L15.016 13.644 L13.644 15.016 L12.425 14.2 L11.895 14.464 L11.817 14.497 L11.255 14.685 L10.97 16.124 L9.03 16.124 L8.745 14.685 L8.183 14.497 L8.105 14.464 L7.575 14.2 L6.356 15.016 L4.984 13.644 L5.8 12.425 L5.536 11.895 L5.503 11.817 L5.315 11.255 L3.876 10.97 L3.876 9.03 L5.315 8.745 L5.503 8.183 L5.536 8.105 L5.8 7.575 L4.984 6.356 L6.356 4.984 L7.575 5.8 L8.105 5.536 Z"/><circle cx="10" cy="10" r="1.95"/></svg>';
   var ICON_REFRESH = '<svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M16.2 10a6.2 6.2 0 1 1-1.9-4.4"/><path d="M16.4 3.6v3.2h-3.2"/></svg>';
   var ICON_LINK = '<svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8.4 11.6a3.4 3.4 0 0 0 4.8 0l2.1-2.1a3.4 3.4 0 0 0-4.8-4.8l-1 1"/><path d="M11.6 8.4a3.4 3.4 0 0 0-4.8 0l-2.1 2.1a3.4 3.4 0 0 0 4.8 4.8l1-1"/></svg>';
   var ICON_RECLAIM = '<svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4.2 10a5.8 5.8 0 0 1 10-4"/><path d="M14.2 3.6v2.8h-2.8"/><path d="M15.8 10a5.8 5.8 0 0 1-10 4"/><path d="M5.8 16.4v-2.8h2.8"/></svg>';
@@ -597,11 +597,6 @@
           ICON_REFRESH + "重置访问地址</button>" +
           '<button type="button" role="menuitem" class="danger" ' +
           'data-archive="' + e.seq + '">' + ICON_ARCHIVE + "归档</button>"
-        : "") +
-      (isSuper()
-        ? '<div class="menu-sep"></div>' +
-          '<button type="button" role="menuitem" data-reclaim="' + e.seq + '">' +
-          ICON_RECLAIM + "回收站内资源</button>"
         : "");
     document.body.appendChild(menu);
 
@@ -701,8 +696,7 @@
     var e = S.events.filter(function (x) { return String(x.seq) === String(seq); })[0];
     closeCardMenu();
     confirmHighRisk("回收站内资源",
-      "会销毁这场活动的全部短链，已经发出去的短链地址立即失效。"
-      + (e ? "<br>活动：" + PX.esc(eventTitle(e)) : ""),
+      "确认回收？" + (e ? "<br>活动：" + PX.esc(eventTitle(e)) : ""),
       "回收", true,
       function () {
         apiSudo("/event/reclaim", { method: "POST", body: { seq: Number(seq) } },
@@ -716,6 +710,19 @@
   }
 
   /* 已归档活动的三个提权动作：下载完整数据、取消归档、彻底删除 */
+  /* 别人的活动：强制归档也是破坏性操作，只在活动管理页出现 */
+  function forceArchive(seq) {
+    confirmHighRisk("强制归档", "确认继续？", "强制归档", true, function () {
+      apiSudo("/event/force_archive", { method: "POST", body: { seq: Number(seq) } },
+        "强制归档活动")
+        .then(function () {
+          PX.toast("已归档");
+          return reloadAll();
+        })
+        .catch(fail);
+    });
+  }
+
   function archivedDownload(seq) {
     var w = window.open((PX.panelRoot || "") + "/api/panel/event/download?seq=" + seq,
       "_blank");
@@ -723,9 +730,7 @@
   }
 
   function archivedRestore(seq) {
-    confirmHighRisk("取消归档",
-      "会把归档包解开，活动恢复成可打开的状态，负责人就能下载数据。"
-      + "已经销毁的短链不会回来。",
+    confirmHighRisk("取消归档", "确认取消归档？",
       "取消归档", false, function () {
         apiSudo("/event/unarchive", { method: "POST", body: { seq: Number(seq) } },
           "取消归档")
@@ -739,16 +744,24 @@
 
   function archivedDelete(seq) {
     confirmHighRisk("彻底删除归档的活动",
-      "会删掉服务器上这场活动的全部内容，不可逆。要留数据请先点「下载」。",
+      "删除后不可恢复。确认继续？",
       "彻底删除", true,
       function () {
         apiSudo("/event/delete", { method: "POST", body: { seq: Number(seq) } },
           "彻底删除归档的活动")
           .then(function () {
             PX.toast("已删除");
-            return reloadAll();
+            return loadArchived(true);
           })
-          .catch(fail);
+          .catch(function (e) {
+            if (e && e.status === 404) {
+              // 别处已经删掉了：刷新一遍列表，别让人对着一条已经不存在的记录再点
+              PX.toast("这场活动已经不在了", true);
+              loadArchived(true);
+              return;
+            }
+            fail(e);
+          });
       });
   }
 
@@ -756,8 +769,7 @@
     var e = S.events.filter(function (x) { return String(x.seq) === String(seq); })[0];
     closeCardMenu();
     confirmHighRisk("重置访问地址",
-      "会生成一个新的 token，之前所有指向该活动的链接立即失效。"
-      + (e ? "<br>活动：" + PX.esc(eventTitle(e)) : ""),
+      "确认重新生成？" + (e ? "<br>活动：" + PX.esc(eventTitle(e)) : ""),
       "重新生成", false,
       function () {
         apiSudo("/event/rotate", { method: "POST", body: { seq: Number(seq) } }, "重置访问地址")
@@ -773,8 +785,7 @@
     var e = S.events.filter(function (x) { return String(x.seq) === String(seq); })[0];
     closeCardMenu();
     confirmHighRisk("归档活动",
-      "归档后这个活动不再出现在列表里，链接与短链都会失效；服务端会把它的数据打包，"
-      + "只留元数据，活动不再保证能打开。要留数据请在归档前下载。"
+      "确认归档？"
       + (e ? "<br>存档：" + PX.esc(eventTitle(e)) : ""),
       "归档", true,
       function () {
@@ -3627,6 +3638,11 @@
         "<td>" + PX.esc(e.ownerName || "—") + "</td>" +
         '<td class="mono">' + PX.when(e.createdAt) + "</td>" +
         '<td class="actions">' +
+        '<button class="btn sm" type="button" data-reclaim="' + e.seq + '">' +
+        ICON_RECLAIM + '回收资源</button>' +
+        '<button class="btn sm danger" type="button" data-force-archive="' + e.seq +
+        '">强制归档</button></td>' +
+        '<td class="actions">' +
         // the public board, the projector page and the console are all reachable
         // from inside an event; this list only needs the way in
         '<a class="btn sm primary" href="' + PX.esc(e.admin) + '" target="_blank" ' +
@@ -4878,6 +4894,8 @@
 
     var archiveBtn = t.closest("[data-archive]");
     if (archiveBtn) return archiveEvent(archiveBtn.getAttribute("data-archive"));
+    var forceBtn = t.closest("[data-force-archive]");
+    if (forceBtn) return forceArchive(forceBtn.getAttribute("data-force-archive"));
     var reclaimBtn = t.closest("[data-reclaim]");
     if (reclaimBtn) return reclaimEvent(reclaimBtn.getAttribute("data-reclaim"));
     var dlBtn = t.closest("[data-arch-download]");

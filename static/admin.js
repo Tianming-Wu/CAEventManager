@@ -608,6 +608,42 @@
     });
   }
 
+  /* 活动级提权：接口回 403 + sudoRequired 时弹一次密码，提完把同一个请求重发一遍。
+     它只对「这个浏览器会话 × 这个活动」生效，30 秒后就没了 */
+  function apiEventSudo(path, options, what) {
+    return LT.api(path, options).catch(function (e) {
+      if (!e.sudo) throw e;
+      return askEventPassword(what).then(function () {
+        return LT.api(path, options);
+      });
+    });
+  }
+
+  function askEventPassword(what) {
+    return new Promise(function (resolve, reject) {
+      var action = what ? "「" + LT.esc(what) + "」" : "";
+      var back = LT.modal("<h2>需要确认</h2>"
+        + '<p class="page-sub">' + action + "需要重新输入一次密码"
+        + "（30 秒内本活动内有效）。</p>"
+        + '<div class="field"><label for="eventPw">登录密码</label>'
+        + '<input id="eventPw" type="password" autocomplete="current-password"></div>'
+        + '<div class="row" style="margin-top:16px;justify-content:flex-end">'
+        + '<button class="btn" id="eventPwCancel" type="button">取消</button>'
+        + '<button class="btn primary" id="eventPwGo" type="button">确认</button></div>');
+      var box = $("#eventPw");
+      if (box) box.focus();
+      $("#eventPwCancel").addEventListener("click", function () {
+        back.close();
+        reject(new Error("cancelled"));
+      });
+      $("#eventPwGo").addEventListener("click", function () {
+        LT.api("/api/sudo", { method: "POST", body: { password: $("#eventPw").value || "" } })
+          .then(function () { back.close(); resolve(true); })
+          .catch(function (e) { bad(e); });
+      });
+    });
+  }
+
   /* 提权：活动级的动作要回面板去输一次密码；面板的 sudo 是会话级的，这里借用同一次登录 */
   function askPanelPassword() {
     return new Promise(function (resolve, reject) {

@@ -68,7 +68,7 @@ TPL_DIR = os.path.join(BASE_DIR, "tpl")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.11.1.64"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.11.1.65"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -124,13 +124,25 @@ def module_pages_html(cfg):
     return "\n".join(modules.page_fragments(kind, mod.get("pages") or []))
 
 
+def safe_mode_banner():
+    """安全模式下贴在页面顶上的一条：说清为什么只能看、怎么退出。"""
+    if not safemode.enabled():
+        return ""
+    return (
+        '<div class="svc-band"><b>服务处于安全模式</b>：活动内的数据暂不开放，'
+        "平台的账号、模块与设置仍可修改；改完配置重启即可退出。</div>"
+    )
+
+
 def substitute_page(body, cfg):
-    """页面里的占位符：标题、版本、图标、以及模块的页签片段。"""
+    """页面里的占位符：标题、版本、图标、模块页签片段、安全模式横幅。"""
     body = body.replace(b"{{TITLE}}", str(cfg.get("title") or "抽奖").encode("utf-8"))
     body = body.replace(b"{{VERSION}}", VERSION.encode("utf-8"))
     body = body.replace(b"{{FAVICON}}", favicon_markup().encode("utf-8"))
     if b"{{MODULE_PAGES}}" in body:
         body = body.replace(b"{{MODULE_PAGES}}", module_pages_html(cfg).encode("utf-8"))
+    if b"{{SAFE_MODE}}" in body:
+        body = body.replace(b"{{SAFE_MODE}}", safe_mode_banner().encode("utf-8"))
     return body
 
 
@@ -1059,6 +1071,9 @@ class Handler(BaseHTTPRequestHandler):
             self._token = token
             if safemode.enabled():
                 # 安全模式：活动页与活动接口一律不提供。数据原样留着，不兜底、不改写
+                if not path.startswith("/api/"):
+                    # 页面给一张维护页，地址不动：服务恢复后刷新就回到原来那页
+                    return self._maintenance_page(cfg=None)
                 raise safemode.refuse()
             if path.startswith("/api/"):
                 self._scope = "event:%s" % seq
@@ -1187,7 +1202,8 @@ class Handler(BaseHTTPRequestHandler):
         except OSError:
             return self._err("not found", 404)
         body = body.replace(b"{{FOOTER}}", panel.FOOTER.encode("utf-8"))
-        body = body.replace(b"{{VERSION}}", VERSION.encode("utf-8"))
+        # 面板页面不属于任何活动：只补安全模式那条横幅，不碰活动的占位符
+        body = substitute_page(body, {})
         return self._send(200, body, "text/html; charset=utf-8")
 
     def _panel_token(self):
@@ -1943,6 +1959,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True})
 
         if path == "/events/create" and method == "POST":
+            if safemode.enabled():
+                # 安全模式不加载模块，模板全都依赖模块：先说清楚，别让人以为模块坏了
+                raise safemode.refuse_create()
             data = body()
             by_id = _modules_by_id(conn)
             chosen = presets.get(conn, (data.get("template") or "").strip(), by_id,
@@ -3262,6 +3281,24 @@ class Handler(BaseHTTPRequestHandler):
         body = body.replace(b"{{FOOTER}}", panel.FOOTER.encode("utf-8"))
         body = body.replace(b"{{VERSION}}", VERSION.encode("utf-8"))
         return self._send(200, body, "text/html; charset=utf-8")
+
+    def _maintenance_page(self, cfg=None):
+        """安全模式下活动页的替身：503、地址不变、自己重试。"""
+        try:
+            cfg = cfg if cfg is not None else db.all_config(db.connect())
+        except Exception:
+            cfg = {}
+        with open(os.path.join(TPL_DIR, "maintenance.html"), "rb") as fh:
+            body = substitute_page(fh.read(), cfg)
+        self.send_response(503)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Retry-After", "15")
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(body)
 
     def _page_body(self, name):
         """公开页的正文：模块自带这一页就用模块的，没有才回落到平台模板。"""

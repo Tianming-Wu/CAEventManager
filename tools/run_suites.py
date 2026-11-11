@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """跑套件：自己挑空闲端口、起实例、跑测试、收摊。
 
-    python tmp/run_suites.py unit panel_test panel_ui_test smoke_test ui_test
+    python tools/run_suites.py unit panel_test panel_ui_test smoke ui safemode
 """
 import os
 import shutil
@@ -127,6 +127,8 @@ SUITES = {
     "panel_ui_test": ([("panel_ui_test.py", ["--accounts"])], True),
     "smoke": ([("smoke_test.py", [])], True),
     "ui": ([("seed_demo.py", []), ("ui_test.py", [])], True),
+    # 自己起两次实例（正常 → 安全模式 → 恢复），不需要外面再给一个
+    "safemode": ([("safemode_test.py", [])], False),
 }
 
 wanted = sys.argv[1:] or ["unit", "panel_test", "panel_ui_test"]

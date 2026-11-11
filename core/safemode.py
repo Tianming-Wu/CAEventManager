@@ -50,6 +50,11 @@ def login_blocked(account):
     return None if role == "owner" else refuse_login()
 
 
+def refuse_create():
+    """安全模式下新建活动：模板都依赖模块，说清为什么建不出来。"""
+    return errors.ApiError("安全模式不加载模块，退出安全模式之后才能新建活动", 409)
+
+
 def refuse_login():
     """安全模式下别的账号登录被拒；提示只写一句英文，登录页原样显示。"""
     return errors.ApiError(LOGIN_MESSAGE, 503)

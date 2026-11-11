@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>服务暂时不可用 · {{TITLE}}</title>
+{{FAVICON}}
+<link rel="stylesheet" href="static/app.css">
+</head>
+<body>
+<div class="maint-wrap">
+  <h1>服务暂时不可用</h1>
+  <p>这个活动的数据暂时不开放，页面保持原地址不动。</p>
+  <p class="note" id="maintNote">正在自动重试，服务恢复后本页会自己回到原来的内容。</p>
+  <div class="row" style="justify-content:center;gap:10px;margin-top:18px">
+    <button class="btn" id="maintRetry" type="button">立即重试</button>
+  </div>
+  <div class="site-foot">CAEventManager | Powered with ❤ by Tianming &amp; Deepseek ❤🐋</div>
+</div>
+<script>
+(function () {
+  "use strict";
+  var note = document.getElementById("maintNote");
+  var wait = 15;
+
+  function tick() {
+    note.textContent = wait + " 秒后自动重试，服务恢复后本页会自己回到原来的内容。";
+    if (wait <= 0) { location.reload(); return; }
+    wait -= 1;
+    setTimeout(tick, 1000);
+  }
+
+  document.getElementById("maintRetry").addEventListener("click", function () {
+    location.reload();
+  });
+  tick();
+})();
+</script>
+</body>
+</html>

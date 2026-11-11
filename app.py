@@ -68,7 +68,7 @@ TPL_DIR = os.path.join(BASE_DIR, "tpl")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.10.4.49"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.10.5.50"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -2087,6 +2087,43 @@ class Handler(BaseHTTPRequestHandler):
             size = do_archive(seq, row["title"])
             return self._json({"ok": True, "seq": seq, "archived": True,
                                "title": row["title"], "bytes": size})
+
+        if path == "/event/transfer" and method == "POST":
+            # 转移负责人：负责人自己能做；负责人登不进来时由超管提权代做，
+            # 否则这一场就卡死在没人能管的状态
+            data = body()
+            seq = int(data.get("seq") or 0)
+            who = str(data.get("username") or "").strip()
+            seat = seat_of(seq)
+            mine = seat is not None and seat["role"] == "owner" and seat["state"] == "active"
+            if not mine:
+                need("superadmin", "owner")
+                need_sudo()
+            row = event_row(seq)
+            target = conn.execute(
+                "SELECT id, username, name, status FROM accounts"
+                " WHERE lower(username)=lower(?)", (who,)).fetchone()
+            if target is None:
+                raise model.ApiError("没有这个账号", 404)
+            if target["status"] != "active":
+                raise model.ApiError("这个账号不是正常状态，不能当负责人", 409)
+            if target["id"] == row["owner_id"]:
+                return self._json({"ok": True, "seq": seq, "owner": who, "already": True})
+            now = time.time()
+            with panel.tx() as tx:
+                tx.execute("UPDATE events SET owner_id=? WHERE seq=?", (target["id"], seq))
+                tx.execute(
+                    "INSERT INTO event_members (seq, account_id, role, state, added_at)"
+                    " VALUES (?,?,?,?,?) ON CONFLICT(seq, account_id)"
+                    " DO UPDATE SET role='owner', state='active'",
+                    (seq, target["id"], "owner", "active", now))
+                tx.execute(
+                    "UPDATE event_members SET role='member'"
+                    " WHERE seq=? AND account_id=? AND account_id<>?",
+                    (seq, row["owner_id"] or 0, target["id"]))
+                panel.audit(tx, acc["username"], "event_transfer", str(seq),
+                            "%s -> %s" % (row["title"] or seq, who))
+            return self._json({"ok": True, "seq": seq, "owner": target["name"] or who})
 
         if path == "/event/reclaim" and method == "POST":
             # 站内资源回收：超管显式把这场活动占着的东西收回来（目前是短链）

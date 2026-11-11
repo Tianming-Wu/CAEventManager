@@ -244,7 +244,7 @@
   // 允许点遮罩关闭的弹窗（都是没有输入、关掉不丢东西的）
   var OVERLAY_OUTSIDE_CLOSE = { presets: true, info: true };
 
-  function openOverlay(kind, title, html) {
+  function openOverlay(kind, title, html, after) {
     overlayKind = kind;
     var card = $("#overlay").firstElementChild;
     if (card) {
@@ -264,6 +264,7 @@
     document.body.style.overflow = "hidden";
     var close = $("#overlayClose");
     if (close && kind !== "sudo") close.focus();
+    if (typeof after === "function") after(body);
   }
 
   function closeOverlay() {
@@ -710,6 +711,78 @@
   }
 
   /* 已归档活动的三个提权动作：下载完整数据、取消归档、彻底删除 */
+  /* 活动详情弹窗：活动管理页里点活动名打开，高权限动作都在这里 */
+  function openEventDetail(seq) {
+    var e = S.events.filter(function (x) { return String(x.seq) === String(seq); })[0] ||
+            S.archived.filter(function (x) { return String(x.seq) === String(seq); })[0];
+    if (!e) return;
+    var archived = !!e.archivedAt;
+    var rows = [
+      ["活动号", String(e.seq)],
+      ["token", e.id],
+      ["负责人", e.ownerName || "—"],
+      ["模块", e.kind || "—"],
+      [archived ? "归档时间" : "创建时间",
+       archived ? PX.whenExact(e.archivedAt) : PX.when(e.createdAt)]
+    ];
+    var acts = [
+      { text: "打开活动设置 ↗", kind: "ghost",
+        run: function () { window.open(e.admin, "_blank"); } }
+    ];
+    if (archived) {
+      acts.push({ text: "下载完整数据", kind: "", run: function () { archivedDownload(seq); } });
+      acts.push({ text: "取消归档", kind: "", run: function () { archivedRestore(seq); } });
+      acts.push({ text: "彻底删除", kind: "danger", run: function () { archivedDelete(seq); } });
+    } else {
+      acts.push({ text: "下载数据", kind: "", run: function () { archivedDownload(seq); } });
+      acts.push({ text: "转移负责人", kind: "", run: function () { transferOwner(seq); } });
+      acts.push({ text: "回收站内资源", kind: "", run: function () { reclaimEvent(seq); } });
+      acts.push({ text: "强制归档", kind: "danger", run: function () { forceArchive(seq); } });
+    }
+    var html = '<dl class="kv">' + rows.map(function (r) {
+      return "<dt>" + PX.esc(r[0]) + "</dt><dd>" + PX.esc(r[1]) + "</dd>";
+    }).join("") + "</dl>" +
+      '<div class="detail-actions">' + acts.map(function (a, i) {
+        return '<button class="btn ' + a.kind + '" type="button" data-detail-act="' + i +
+          '">' + PX.esc(a.text) + "</button>";
+      }).join("") + "</div>";
+    openOverlay("event-detail", eventTitle(e), html, function (card) {
+      card.querySelectorAll("[data-detail-act]").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          var act = acts[Number(btn.getAttribute("data-detail-act"))];
+          closeOverlay();
+          if (act) act.run();
+        });
+      });
+    });
+  }
+
+  /* 转移负责人：负责人自己能做；负责人不在时由超管提权代做 */
+  function transferOwner(seq) {
+    var e = S.events.filter(function (x) { return String(x.seq) === String(seq); })[0];
+    var html = '<p class="page-sub">把这场的负责人换成另一个账号（按登录名）。</p>'
+      + '<div class="field"><label for="transferTo">新负责人的登录名</label>'
+      + '<input id="transferTo" type="text" autocomplete="off" spellcheck="false"></div>'
+      + '<div class="row" style="margin-top:16px;justify-content:flex-end">'
+      + '<button class="btn" data-close-overlay="1" type="button">取消</button>'
+      + '<button class="btn primary" id="transferGo" type="button">转移</button></div>';
+    openOverlay("event-transfer", "转移负责人" + (e ? "：" + eventTitle(e) : ""), html,
+      function (card) {
+        card.querySelector("#transferGo").addEventListener("click", function () {
+          var who = (card.querySelector("#transferTo").value || "").trim();
+          if (!who) return;
+          closeOverlay();
+          apiSudo("/event/transfer",
+            { method: "POST", body: { seq: Number(seq), username: who } }, "转移负责人")
+            .then(function () {
+              PX.toast("已转移给 " + who);
+              return reloadAll();
+            })
+            .catch(fail);
+        });
+      });
+  }
+
   /* 别人的活动：强制归档也是破坏性操作，只在活动管理页出现 */
   function forceArchive(seq) {
     confirmHighRisk("强制归档", "确认继续？", "强制归档", true, function () {
@@ -3601,15 +3674,12 @@
     body.innerHTML = S.archived.length ? S.archived.map(function (e) {
       // 已归档的活动已经归平台管：下载、取消归档、彻底删除都在这一行的操作列里
       return "<tr>" +
-        "<td><b>" + PX.esc(eventTitle(e)) + "</b></td>" +
+        '<td><button class="link-btn" type="button" data-event-detail="' + e.seq + '">' +
+        "<b>" + PX.esc(eventTitle(e)) + "</b></button></td>" +
+        '<td class="num mono">' + e.seq + "</td>" +
         "<td>" + PX.esc(e.ownerName || "—") + "</td>" +
         '<td class="mono">' + PX.whenExact(e.archivedAt) + "</td>" +
-        '<td class="mono">' + PX.esc(shortToken(e.id)) + "</td>" +
-        '<td class="actions">' +
-        '<button class="btn sm" type="button" data-arch-download="' + e.seq + '">下载</button>' +
-        '<button class="btn sm" type="button" data-arch-restore="' + e.seq + '">取消归档</button>' +
-        '<button class="btn sm danger" type="button" data-arch-delete="' + e.seq +
-        '">彻底删除</button></td></tr>' ;
+        '<td class="mono">' + PX.esc(shortToken(e.id)) + "</td></tr>";
     }).join("") : emptyRow(5, S.archivedTotal === 0
       ? "还没有归档的活动"
       : "正在读取…");
@@ -3631,23 +3701,16 @@
       loadArchived(true);
     }
     $("#allEventsTable tbody").innerHTML = S.events.length ? S.events.map(function (e) {
+      // 首列点开详情；高权限动作都在详情里，表里不塞按钮
       return "<tr>" +
-        "<td><b>" + PX.esc(eventTitle(e)) + "</b></td>" +
+        '<td><button class="link-btn" type="button" data-event-detail="' + e.seq + '">' +
+        "<b>" + PX.esc(eventTitle(e)) + "</b></button></td>" +
+        '<td class="num mono">' + e.seq + "</td>" +
         '<td class="mono" style="font-size:.78rem" title="' + PX.esc(e.id) + '">' +
         PX.esc(shortToken(e.id)) + "</td>" +
         "<td>" + PX.esc(e.ownerName || "—") + "</td>" +
         '<td class="mono">' + PX.when(e.createdAt) + "</td>" +
-        '<td class="actions">' +
-        '<button class="btn sm" type="button" data-reclaim="' + e.seq + '">' +
-        ICON_RECLAIM + '回收资源</button>' +
-        '<button class="btn sm danger" type="button" data-force-archive="' + e.seq +
-        '">强制归档</button></td>' +
-        '<td class="actions">' +
-        // the public board, the projector page and the console are all reachable
-        // from inside an event; this list only needs the way in
-        '<a class="btn sm primary" href="' + PX.esc(e.admin) + '" target="_blank" ' +
-        'rel="noopener">管理</a>' +
-        "</td></tr>";
+        "</tr>";
     }).join("") : emptyRow(5, "还没有活动");
   }
 
@@ -4894,6 +4957,8 @@
 
     var archiveBtn = t.closest("[data-archive]");
     if (archiveBtn) return archiveEvent(archiveBtn.getAttribute("data-archive"));
+    var detailBtn = t.closest("[data-event-detail]");
+    if (detailBtn) return openEventDetail(detailBtn.getAttribute("data-event-detail"));
     var forceBtn = t.closest("[data-force-archive]");
     if (forceBtn) return forceArchive(forceBtn.getAttribute("data-force-archive"));
     var reclaimBtn = t.closest("[data-reclaim]");
@@ -5200,7 +5265,6 @@
     if (file) importPreset(file);
   });
   // 活动管理 is a superadmin view; creating from there uses the same flow
-  $("#createEventBtn").addEventListener("click", newEvent);
 
   /* ---- 名单 ---- */
   $("#rosterNewBtn").addEventListener("click", function () { rosterDialog(null); });

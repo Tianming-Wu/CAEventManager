@@ -2009,25 +2009,30 @@ def users_table(page):
 
 
 def events_table(page):
-    print("== 活动管理 lists the way in, not every page ==")
+    print("== 活动管理：首列点开详情 ==")
     page.goto(BASE + "/panel#/all-events")
     page.wait_for_timeout(420)
-    links = page.evaluate("""() => Array.from(
+    rows = page.evaluate("""() => Array.from(
         document.querySelectorAll('#allEventsTable tbody tr'))
-        .map(tr => Array.from(tr.querySelectorAll('a'))
-            .map(a => a.textContent.trim()))""")
-    check("every row has exactly one link", links and all(len(r) == 1 for r in links),
-          links)
-    check("and it is 管理", links and all(r[0] == "管理" for r in links), links)
-    target = page.evaluate(
-        "() => document.querySelector('#allEventsTable tbody a').getAttribute('target')")
-    check("it opens in a new tab", target == "_blank", target)
-
-    print("== signing out lives on the account page ==")
-    page.goto(BASE + "/panel#/account")
-    page.wait_for_timeout(400)
-    check("the account page offers 退出登录",
-          page.locator("#logoutBtn").is_visible())
+        .map(tr => ({
+            cells: tr.children.length,
+            hasDetail: !!tr.querySelector('[data-event-detail]'),
+            seq: (tr.querySelector('.num') || {}).textContent || ''
+        }))""")
+    check("每行都有打开详情的按钮", rows and all(r["hasDetail"] for r in rows), rows)
+    check("活动号那一列有数字", rows and all(r["seq"].strip().isdigit() for r in rows), rows)
+    # 表里不再塞按钮：高权限动作都在详情弹窗里
+    buttons = page.locator("#allEventsTable tbody .btn").count()
+    check("表里不塞操作按钮", buttons == 0, buttons)
+    page.click("#allEventsTable tbody [data-event-detail]")
+    page.wait_for_timeout(300)
+    acts = page.evaluate("""() => Array.from(
+        document.querySelectorAll('#overlayBody .detail-actions .btn'))
+        .map(b => b.textContent.trim())""")
+    check("详情里列出高权限动作", len(acts) >= 4, acts)
+    check("详情里有转移负责人", any("转移负责人" in a for a in acts), acts)
+    page.click("#overlayClose")
+    page.wait_for_timeout(150)
 
 
 def create_page(browser):
@@ -2573,14 +2578,14 @@ def touch_page(browser):
         page.goto(BASE + "/panel#/all-events")
         page.wait_for_timeout(900)
         btn = page.evaluate("""() => {
-            const b = document.querySelector('#allEventsTable td.actions .btn');
+            const b = document.querySelector('#allEventsTable tbody [data-event-detail]');
             if (!b) return null;
             const wrap = b.closest('.tblwrap').getBoundingClientRect();
             const r = b.getBoundingClientRect();
             return {w: Math.round(r.width), right: Math.round(r.right),
                     wrapRight: Math.round(wrap.right)};
         }""")
-        check("活动管理的「管理」按钮整颗都在容器里",
+        check("活动管理首列的活动名整颗都在容器里",
               btn and btn["w"] > 40 and btn["right"] <= btn["wrapRight"] + 1, btn)
     finally:
         ctx.close()

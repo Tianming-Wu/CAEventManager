@@ -1,19 +1,16 @@
 /* 模块自己的页签脚本：平台在活动后台启动后按 pages 声明依次载入，
  * 然后调用 MODULE.pages.<页签>.mount(ctx)。ctx 里是平台给的那几件东西。
  *
- * 这一段是「奖票」页：把可抽的票、保底与速度奖励算出来的结果画出来。
+ * 这一段是「奖票」页：把可抽的票、保底与速度奖励算出来的结果画出来，
+ * 以及结算、取消结算、重置这三颗按钮。
  * 数据来自 /api/admin/plan，口算在模块的 model.py 里。
  */
 window.MODULE = window.MODULE || { pages: {} };
 
 (function () {
-  var LT, ctx, S;
+  var LT, ctx, S, lib, bound = false;
 
-  // 模块脚本不共享平台的内部件：要什么自己取
-  function $(sel) { return document.querySelector(sel); }
-  function fail(e) { LT.toast(LT.esc((e && e.message) || "出错了"), true); }
-
-    function renderPlan() {
+  function renderPlan() {
     var p = S.plan;
     if (!p) return;
     var sum = p.summary || {};
@@ -32,9 +29,9 @@ window.MODULE = window.MODULE || { pages: {} };
     }
     if (sum.finalized) chips.push('<span class="chip gold live">已结算</span>');
     if (!sum.allow_bonus) chips.push('<span class="chip">速度奖励已关闭</span>');
-    $("#planSummary").innerHTML = chips.join("");
+    lib.$("#planSummary").innerHTML = chips.join("");
 
-    $("#planTable tbody").innerHTML = (p.rows || []).map(function (r) {
+    lib.$("#planTable tbody").innerHTML = (p.rows || []).map(function (r) {
       var stu = S.byId[r.id] || {};
       return "<tr>" +
         '<td class="num right">' + r.pos + "</td>" +
@@ -47,19 +44,83 @@ window.MODULE = window.MODULE || { pages: {} };
         '<td class="num right">' + (stu.ticket_count || 0) + "</td></tr>";
     }).join("") || '<tr><td colspan="8" class="empty">还没有人签到</td></tr>';
 
-    $("#planNote").textContent = sum.finalized
-      ? "已结算于 " + LT.fmtDateTime(S.config.finalized_at)
+    lib.$("#planNote").textContent = sum.finalized
+      ? "已结算于 " + LT.fmtDateTime((S.config || {}).finalized_at)
       : "预览，点击「结算」才会真正发票";
-    $("#finalizeBtn").disabled = !!sum.finalized;
+    renderButtons();
   }
 
-    function loadPlan() {
+  /* 结算、取消结算、重置：状态跟着计划与解锁开关走 */
+  function renderButtons() {
+    var sum = (S.plan && S.plan.summary) || {};
+    var fin = lib.$("#finalizeBtn");
+    if (fin) fin.disabled = !!sum.finalized;
+    var un = lib.$("#unfinalizeBtn");
+    if (un) un.disabled = !sum.finalized || !S.unlocked;
+    var reset = lib.$("#resetTicketsBtn");
+    if (reset) reset.disabled = !S.unlocked;
+  }
+
+  function loadPlan() {
     return LT.api("/api/admin/plan").then(function (d) {
       S.plan = d;
       renderPlan();
-      // 平台自己也有依赖这份计划的按钮状态，通知它一声
-      document.dispatchEvent(new Event("module-plan"));
-    }).catch(fail);
+    }).catch(lib.fail);
+  }
+
+  function finalize() {
+    var sum = (S.plan && S.plan.summary) || {};
+    LT.confirm({
+      title: "结算奖票？",
+      okText: "结算",
+      html: "将为 <b>" + sum.present + "</b> 位到场同学按速度分配 <b style='color:var(--gold)'>" +
+        sum.bonus_pool + "</b> 张剩余奖票。<br>结算后不能继续标记（需要先取消结算）。"
+    }).then(function (yes) {
+      if (!yes) return;
+      LT.api("/api/admin/finalize", { method: "POST" }).then(function (d) {
+        lib.ok("结算完成，发放了 <b>" + d.result.assigned + "</b> 张奖励票");
+        return lib.reloadState().then(loadPlan);
+      }).catch(lib.bad);
+    });
+  }
+
+  function unfinalize() {
+    LT.confirm({
+      title: "取消结算", danger: true, okText: "取消结算",
+      html: "会收回所有「速度奖励」奖票，之后可以继续标记。<br>确认？"
+    }).then(function (yes) {
+      if (!yes) return;
+      LT.api("/api/admin/unfinalize", { method: "POST" })
+        .then(function () {
+          lib.ok("已取消结算");
+          return lib.reloadState().then(loadPlan);
+        })
+        .catch(lib.bad);
+    });
+  }
+
+  function resetTickets() {
+    LT.confirm({
+      title: "重置全部奖票", danger: true, okText: "重置",
+      html: "会收回所有人的奖票号码并取消结算，标记本身保留。<br>" +
+        "重新标记/签到时会重新发号，号码可能变化。<br>确认？"
+    }).then(function (yes) {
+      if (!yes) return;
+      LT.api("/api/admin/reset_tickets", { method: "POST" })
+        .then(function () {
+          lib.ok("已重置奖票");
+          return lib.reloadState().then(loadPlan);
+        })
+        .catch(lib.bad);
+    });
+  }
+
+  function bindOnce() {
+    if (bound) return;
+    bound = true;
+    lib.$("#finalizeBtn").addEventListener("click", finalize);
+    lib.$("#unfinalizeBtn").addEventListener("click", unfinalize);
+    lib.$("#resetTicketsBtn").addEventListener("click", resetTickets);
   }
 
   window.MODULE.pages.tickets = {
@@ -68,15 +129,21 @@ window.MODULE = window.MODULE || { pages: {} };
       LT = page.LT;
       ctx = page;
       S = page.state || {};
+      lib = window.MODULE.lib;
+      lib.bind(page);
+      bindOnce();
     },
     // 平台每次拉到新状态就调一次；只重画自己这一段
     refresh: function (state, tab) {
       S = state || S;
+      lib.ready();
       if (ctx && tab) ctx.tab = tab;
       if (ctx && ctx.tab === "tickets") renderPlan();
+      else renderButtons();
     },
     // 切到这个页签时调一次：重新算一遍再画
     show: function (tab) {
+      lib.ready();
       if (ctx && tab) ctx.tab = tab;
       return loadPlan();
     },

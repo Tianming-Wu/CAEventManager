@@ -15,7 +15,6 @@
     members: [],
     seat: {},
     unlockUntil: 0,
-    plan: null,
     tab: "ops"
   };
 
@@ -68,6 +67,7 @@
       renderHead();
       renderPageCounts();
       if (S.tab) pageShow(S.tab);
+      applyLanding();
     });
   }
 
@@ -101,8 +101,7 @@
     }
   }
 
-  /* 页签上的数字也由模块给：有 count 的页才有那个角标 */
-  function renderPageCounts() {
+  /* 页签上的数字也由模块给：有 count 的页才有那个角标 */  function renderPageCounts() {
     (S.pages || []).forEach(function (p) {
       var btn = $('#tabs button[data-tab="' + p.id + '"]');
       if (!btn) return;
@@ -120,17 +119,6 @@
       }
       badge.textContent = n;
     });
-  }
-
-  /* 结算/重置这两颗按钮是平台动作，状态由平台自己管 */
-  function renderDrawButtons() {
-    var sum = (S.plan && S.plan.summary) || {};
-    var fin = $("#finalizeBtn");
-    if (fin) fin.disabled = !!sum.finalized;
-    var un = $("#unfinalizeBtn");
-    if (un) un.disabled = !sum.finalized || !S.unlocked;
-    var reset = $("#resetTicketsBtn");
-    if (reset) reset.disabled = !S.unlocked;
   }
 
   function renderUnlock() {
@@ -155,24 +143,17 @@
     }).join("");
   }
 
-  function renderPhase() {
-    var p = S.config.screen_phase || "signin";
-    var el = $("#phaseNow");
-    if (!el) return;
-    el.textContent = "当前：" + (p === "draw" ? "抽奖阶段" : "签到阶段");
-    el.className = "chip " + (p === "draw" ? "gold" : "green");
-    $("#phaseSigninBtn").classList.toggle("primary", p !== "draw");
-    $("#phaseDrawBtn").classList.toggle("primary", p === "draw");
-  }
-
-  function setPhase(phase) {
-    LT.api("/api/admin/phase", { method: "POST", body: { phase: phase } })
-      .then(function (d) {
-        S.config.screen_phase = d.phase;
-        renderPhase();
-        ok(d.phase === "draw" ? "大屏已切到抽奖阶段" : "大屏已切到签到阶段（二维码每 10 秒刷新）");
-      })
-      .catch(bad);
+  /* 模块可以挑一个落脚页签（例如已经结算就直接去抽奖页），只挑一次 */
+  function applyLanding() {
+    if (S.landed || !window.MODULE || !window.MODULE.landing) return;
+    var want = "";
+    try {
+      want = window.MODULE.landing(S) || "";
+    } catch (e) {
+      want = "";
+    }
+    S.landed = true;
+    if (want && want !== S.tab) showTab(want);
   }
 
   /* ---- 短链：活动的平台资产，模块申请 features.shortlink 之后才有入口 ---- */
@@ -255,9 +236,6 @@
       .catch(bad);
   }
 
-  // A reload arrives after every write and every other session's change.  While
-  // the operator is editing the settings form it must not overwrite what they
-  // typed: the fields are only re-read from the server once they save.
   function archiveEvent() {
     if (!S.seq) return;
     LT.confirm("归档活动",
@@ -319,16 +297,15 @@
 
   function renderAll() {
     renderHead();
-    renderPhase();
-    pageRefresh("draw");
     renderUnlock();
+    renderLog();
     pageRefresh("ops");
     pageRefresh("roster");
-    pageShow("draw");
-    renderLog();
+    pageRefresh("tickets");
+    pageRefresh("draw");
     pageRefresh("config");
-    if (S.tab === "tickets") pageRefresh("tickets");
     renderPageCounts();
+    applyLanding();
   }
 
   // ------------------------------------------------------------------ data
@@ -361,20 +338,6 @@
 
   // ------------------------------------------------------------------ events
   function bindGlobal() {
-    document.addEventListener("click", function (e) {
-      var t = e.target;
-      var dp = t.getAttribute && t.getAttribute("data-draw");
-      if (dp) { drawPrize(Number(dp)); return; }
-      var pc = t.getAttribute && t.getAttribute("data-pace");
-      if (pc) {
-      var dp = modulePage("draw");
-      if (dp && dp.setPace) dp.setPace(Number(t.getAttribute("data-i")), pc === "batch");
-      return;
-    }
-      var vd = t.getAttribute && t.getAttribute("data-void");
-      if (vd) { voidDraw(Number(vd)); return; }
-    });
-
     $("#tabs").addEventListener("click", function (e) {
       var btn = e.target.closest("button[data-tab]");
       if (btn) showTab(btn.getAttribute("data-tab"));
@@ -468,100 +431,6 @@
     // 模块页自己画：它的 show 收得到现在是哪个页签
     pageShow(name);
     return name;
-  }
-
-  // ------------------------------------------------------------------ tickets
-  function finalize() {
-    var sum = (S.plan && S.plan.summary) || {};
-    LT.confirm({
-      title: "结算奖票？",
-      okText: "结算",
-      html: "将为 <b>" + sum.present + "</b> 位到场同学按速度分配 <b style='color:var(--gold)'>" +
-        sum.bonus_pool + "</b> 张剩余奖票。<br>结算后不能继续标记（需要先取消结算）。"
-    }).then(function (yes) {
-      if (!yes) return;
-      LT.api("/api/admin/finalize", { method: "POST" }).then(function (d) {
-        ok("结算完成，发放了 <b>" + d.result.assigned + "</b> 张奖励票");
-        return load().then(function () { pageShow("tickets"); });
-      }).catch(bad);
-    });
-  }
-
-  function unfinalize() {
-    LT.confirm({
-      title: "取消结算", danger: true, okText: "取消结算",
-      html: "会收回所有「速度奖励」奖票，之后可以继续标记。<br>确认？"
-    }).then(function (yes) {
-      if (!yes) return;
-      LT.api("/api/admin/unfinalize", { method: "POST" })
-        .then(function () { ok("已取消结算"); return load().then(function () { pageShow("tickets"); }); })
-        .catch(bad);
-    });
-  }
-
-  function resetTickets() {
-    LT.confirm({
-      title: "重置全部奖票", danger: true, okText: "重置",
-      html: "会收回所有人的奖票号码并取消结算，标记本身保留。<br>" +
-        "重新标记/签到时会重新发号，号码可能变化。<br>确认？"
-    }).then(function (yes) {
-      if (!yes) return;
-      LT.api("/api/admin/reset_tickets", { method: "POST" })
-        .then(function () { ok("已重置奖票"); return load().then(function () { pageShow("tickets"); }); })
-        .catch(bad);
-    });
-  }
-
-  // ------------------------------------------------------------------ draw
-  function winnerRow(w) {
-    var tail = w.mode === "person"
-      ? '<span class="code" style="font-family:inherit">均等</span>'
-      : '<span class="code">#' + LT.code(w.code) + "</span>";
-    return '<div class="winner"><span class="prize">' + LT.esc(w.prize) + "</span>" +
-      '<span class="who">' + LT.esc(w.name) +
-      " <span style='color:var(--dim)'>" + LT.esc(w.sid) + "</span></span>" + tail + "</div>";
-  }
-
-  function renderDrawResult(list, stopped) {
-    var box = $("#drawResult");
-    if (!box) return;
-    var html;
-    if (list.length > 1) {
-      html = '<div class="winner-head">本次抽出 ' + list.length + " 人</div>" +
-        '<div class="winner-grid">' + list.map(function (w) {
-          return '<span class="winner-cell">' + LT.esc(w.name) +
-            (w.mode === "person" ? "" : ' <span class="tkt">' + LT.code(w.code) + "</span>") +
-            "</span>";
-        }).join("") + "</div>";
-    } else {
-      html = winnerRow(list[0]);
-    }
-    if (stopped) {
-      html += '<p class="note" style="margin-top:8px">只抽出 ' + list.length +
-        " 人：" + LT.esc(stopped) + "</p>";
-    }
-    box.innerHTML = html;
-  }
-
-  function drawPrize(index) {
-    var p = (S.prizes || [])[index];
-    if (!p) return;
-    var body = { prize: p.name, mode: p.mode };
-    if (p.batch) body.batch = true;
-    LT.api("/api/admin/draw", { method: "POST", body: body })
-      .then(function (d) {
-        renderDrawResult(d.draws || [d.draw], d.stopped);
-        return load();
-      })
-      .catch(bad);
-  }
-
-  function voidDraw(id) {
-    LT.confirm({ title: "作废这条抽奖记录？", danger: true, okText: "作废" }).then(function (yes) {
-      if (!yes) return;
-      LT.api("/api/admin/draw_void", { method: "POST", body: { id: id } })
-        .then(function () { ok("已作废"); return load(); }).catch(bad);
-    });
   }
 
   // ------------------------------------------------------------ 活动设置
@@ -822,15 +691,6 @@
     bindGlobal();
     $("#exportLink").href = LT.PREFIX + "/api/admin/export.csv";
 
-    // 模块算完计划会发这个事件：平台据此更新结算/重置按钮
-    document.addEventListener("module-plan", renderDrawButtons);
-
-    $("#finalizeBtn").addEventListener("click", finalize);
-    $("#unfinalizeBtn").addEventListener("click", unfinalize);
-    $("#resetTicketsBtn").addEventListener("click", resetTickets);
-    $("#phaseSigninBtn").addEventListener("click", function () { setPhase("signin"); });
-    $("#phaseDrawBtn").addEventListener("click", function () { setPhase("draw"); });
-    $("#shortlinkBtn").addEventListener("click", mintShortlink);
     $("#memberInviteBtn").addEventListener("click", openInviteSearch);
     $("#eventNameSave").addEventListener("click", saveEventName);
     $("#rosterSyncBtn").addEventListener("click", syncRoster);
@@ -845,7 +705,7 @@
     });
 
     load().then(function () {
-      if (S.config.finalized) showTab("draw");
+      applyLanding();
     });
 
     // who is signed in: the console has no account of its own any more

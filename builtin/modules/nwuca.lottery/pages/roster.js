@@ -16,8 +16,8 @@ window.MODULE = window.MODULE || { pages: {} };
   /* 整份名单按搜索框与表头排一遍：搜索算法在平台，排序在模块 */
   function rosterRows() {
     var q = (S.rosterQ || "").trim();
-    var list = q ? LT.queryStudents(S.students, q, 999, lib.searchSpec())
-                 : S.students.slice();
+    var all = S.students || [];
+    var list = q ? LT.queryStudents(all, q, 999, lib.searchSpec()) : all.slice();
     var key = S.sortKey;
     var dir = S.sortDir;
     var rank = { participant: 0, staff: 1, volunteer: 2 };
@@ -69,9 +69,10 @@ window.MODULE = window.MODULE || { pages: {} };
         '<button class="btn sm ' + (s.next ? "green" : "") + '" data-row="' + s.id + '">选中</button>' +
         "</td></tr>";
     }).join("") || '<tr><td colspan="9" class="empty">没有匹配的学生</td></tr>';
-    lib.$("#rosterCount").textContent = rows.length === S.students.length
-      ? S.students.length + " 人"
-      : rows.length + " / " + S.students.length + " 人";
+    var total = (S.students || []).length;
+    lib.$("#rosterCount").textContent = rows.length === total
+      ? total + " 人"
+      : rows.length + " / " + total + " 人";
   }
 
   function editStudent(id) {
@@ -209,11 +210,13 @@ window.MODULE = window.MODULE || { pages: {} };
     },
     refresh: function (state, tab) {
       S = state || S;
+      lib.ready();
       if (ctx && tab) ctx.tab = tab;
       ensureState();
       if (ctx && ctx.tab === "roster") renderFullTable();
     },
     show: function (tab) {
+      lib.ready();
       if (ctx && tab) ctx.tab = tab;
       ensureState();
       renderFullTable();

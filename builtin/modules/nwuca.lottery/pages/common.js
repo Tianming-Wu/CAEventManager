@@ -17,6 +17,20 @@ window.MODULE.lib = (function () {
     LT = page.LT || LT;
     S = page.state || S;
     reload = page.reload || reload;
+    ready();
+  }
+
+  /* 状态还没拉到的时候先给个空壳：脚本比第一次状态快的时候会先画一轮 */
+  function ready() {
+    if (!S) return null;
+    if (!S.students) S.students = [];
+    if (!S.config) S.config = {};
+    if (!S.features) S.features = {};
+    if (!S.prizes) S.prizes = [];
+    if (!S.draws) S.draws = [];
+    if (!S.screenPacks) S.screenPacks = [];
+    if (typeof S.publicBaseUrl !== "string") S.publicBaseUrl = "";
+    return S;
   }
 
   function state() { return S; }
@@ -140,18 +154,21 @@ window.MODULE.lib = (function () {
 
   /* 自动模式下奖票池跟着到场人数走 */
   function poolSize(state, st) {
-    if ((state.config.pool_mode || "auto") === "fixed") return Number(state.config.pool_size) || 0;
-    return st.checkin * 3 + (Number(state.config.bonus_constant) || 0);
+    var cfg = (state && state.config) || {};
+    if ((cfg.pool_mode || "auto") === "fixed") return Number(cfg.pool_size) || 0;
+    return st.checkin * 3 + (Number(cfg.bonus_constant) || 0);
   }
 
   function stats(state) {
     state = state || S;
+    var list = (state && state.students) || [];
+    var cfg = (state && state.config) || {};
     var st = {
-      total: state.students.length, participants: 0, staff: 0, staff_present: 0,
+      total: list.length, participants: 0, staff: 0, staff_present: 0,
       checkin: 0, task1: 0, task2: 0,
-      live_tickets: 0, max_code: 0, finalized: !!state.config.finalized
+      live_tickets: 0, max_code: 0, finalized: !!cfg.finalized
     };
-    state.students.forEach(function (s) {
+    list.forEach(function (s) {
       if (isParticipant(s)) {
         st.participants++;
         KINDS.forEach(function (k) { if (s.marks[k]) st[k]++; });
@@ -165,8 +182,8 @@ window.MODULE.lib = (function () {
       });
     });
     st.guaranteed = st.checkin + st.task1 + st.task2;
-    st.pool_mode = state.config.pool_mode || "auto";
-    st.bonus_constant = Number(state.config.bonus_constant) || 0;
+    st.pool_mode = cfg.pool_mode || "auto";
+    st.bonus_constant = Number(cfg.bonus_constant) || 0;
     st.pool_size = poolSize(state, st);
     st.bonus_pool = Math.max(0, st.pool_size - st.guaranteed);
     st.remaining = st.pool_size - st.live_tickets;
@@ -176,6 +193,7 @@ window.MODULE.lib = (function () {
   /* 顶栏的状态条由模块填：平台只管那块地方，不认识上面写的是什么 */
   function headHtml(state) {
     state = state || S;
+    if (!state) return "";
     var st = stats(state);
     var html = [
       '<span class="chip green"><b>' + st.checkin + "</b>/" + st.participants + " 已签到</span>",
@@ -187,7 +205,7 @@ window.MODULE.lib = (function () {
       html.push('<span class="chip">工作人员 <b>' + st.staff_present + "</b>/" + st.staff + "</span>");
     }
     if (st.finalized) html.push('<span class="chip gold live">已结算</span>');
-    if (state.unlocked) {
+    if (state && state.unlocked) {
       html.push('<span class="chip" style="border-color:#6b2020;color:#ffb4b4">修改已解锁</span>');
     }
     return html.join("");
@@ -197,8 +215,13 @@ window.MODULE.lib = (function () {
     render: function (state) { return headHtml(state); }
   };
 
+  /* 已经结算过就直接落到抽奖页：接着要做的多半是抽奖 */
+  window.MODULE.landing = function (state) {
+    return state && state.config && state.config.finalized ? "draw" : "";
+  };
+
   return {
-    bind: bind, state: state, reloadState: reloadState,
+    bind: bind, ready: ready, state: state, reloadState: reloadState,
     $: $, $$: $$, ok: ok, fail: fail, bad: bad,
     KINDS: KINDS, PREV: PREV, ROLE_TAG: ROLE_TAG,
     kindLabel: kindLabel, isParticipant: isParticipant, roleLabel: roleLabel,

@@ -16,8 +16,8 @@ window.MODULE = window.MODULE || { pages: {} };
 
   function filtered() {
     var q = (S.q || "").trim();
-    var list = q ? LT.queryStudents(S.students, q, 999, lib.searchSpec())
-                 : S.students.slice();
+    var all = S.students || [];
+    var list = q ? LT.queryStudents(all, q, 999, lib.searchSpec()) : all.slice();
     return list.filter(function (s) {
       switch (S.filter) {
         case "in": return !!s.marks.checkin;
@@ -47,7 +47,8 @@ window.MODULE = window.MODULE || { pages: {} };
           '<td class="right">' + lib.actionButtons(s, false) + "</td></tr>";
       }).join("");
     }
-    lib.$("#rosterNote").textContent = "显示 " + rows.length + " / " + S.students.length + " 人";
+    lib.$("#rosterNote").textContent = "显示 " + rows.length + " / " +
+      (S.students || []).length + " 人";
   }
 
   /* 正在打 `#` 词的时候，把手上的标签列出来（点一下就能补全），不要求谁记住语法 */
@@ -76,7 +77,7 @@ window.MODULE = window.MODULE || { pages: {} };
     var box = lib.$("#hits");
     if (!box) return;
     if (!(S.q || "").trim()) {
-      box.innerHTML = S.students.length
+      box.innerHTML = (S.students || []).length
         ? '<div class="empty">输入姓名、拼音或学号</div>'
         : '<div class="empty">名单还是空的 —— 去「名单」页导入。</div>';
       return;
@@ -359,11 +360,13 @@ window.MODULE = window.MODULE || { pages: {} };
     },
     refresh: function (state, tab) {
       S = state || S;
+      lib.ready();
       if (ctx && tab) ctx.tab = tab;
       ensureState();
       if (ctx && ctx.tab === "ops") renderAll();
     },
     show: function (tab) {
+      lib.ready();
       if (ctx && tab) ctx.tab = tab;
       ensureState();
       renderAll();

@@ -91,7 +91,7 @@ window.MODULE = window.MODULE || { pages: {} };
 
   function render() {
     if (!S) return;
-    var c = S.config;
+    var c = S.config || {};
     if (!formTouched) {
       lib.$("#setTitle").value = c.title || "";
       lib.$("#setSubtitle").value = c.subtitle || "";
@@ -236,10 +236,12 @@ window.MODULE = window.MODULE || { pages: {} };
     },
     refresh: function (state, tab) {
       S = state || S;
+      lib.ready();
       if (ctx && tab) ctx.tab = tab;
       if (ctx && ctx.tab === "config") render();
     },
     show: function (tab) {
+      lib.ready();
       if (ctx && tab) ctx.tab = tab;
       render();
     },

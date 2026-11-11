@@ -193,12 +193,14 @@ window.MODULE.pages.tickets = {
   几页共用的画法放 `MODULE.lib`，由共用脚本定义
 - 顶栏那条状态由模块填：共用脚本里定义 `window.MODULE.head = { render(state) → HTML }`，
   平台只提供那块地方，不认识上面写的是什么
+- 进来先落到哪一页由模块说了算：共用脚本里定义 `window.MODULE.landing(state)` 返回页签名，
+  平台只问一次
 - 页签里的按钮由模块自己在 `mount` 里接；平台只认平台外壳上那几个 `data-*`
 - 平台不直接调模块的函数，只走 `button → pageShow/pageRefresh`
 
-**已经搬完的**：五个页签的标记与脚本全在模块里（`ops` / `roster` / `tickets` / `draw` /
-`config` 五份脚本加一份共用件）。平台侧只剩页签调度与主站功能：活动设置（成员、名单来源、
-短链、数据、危险区域）、日志、解锁开关。
+**已经搬完的**：五个页签的标记、脚本与动作全在模块里（`ops` / `roster` / `tickets` /
+`draw` / `config` 五份脚本加一份共用件）。平台侧只剩页签调度与主站功能：活动设置（成员、
+名单来源、短链、数据、危险区域）、日志、解锁开关。
 
 ## 数据
 

@@ -240,12 +240,24 @@
   /* ---------------------------------------------------------------- overlay */
   var overlayKind = null;
   var overlayOpener = null;
+  var overlayAfter = null;
 
   // 允许点遮罩关闭的弹窗（都是没有输入、关掉不丢东西的）
-  var OVERLAY_OUTSIDE_CLOSE = { presets: true, info: true };
+  var OVERLAY_OUTSIDE_CLOSE = { presets: true, info: true, "event-detail": true,
+                                "event-transfer": true };
 
-  function openOverlay(kind, title, html, after) {
+  /* 叠放：sudo 提示这类"盖在当前弹窗上的小窗"关掉之后要回到原来那一层，
+     不能把下面的详情一起关掉 */
+  var OVERLAY_STACK = [];
+
+  function openOverlay(kind, title, html, after, stack) {
+    if (stack && !$("#overlay").hidden && overlayKind) {
+      OVERLAY_STACK.push({ kind: overlayKind, title: $("#overlayTitle").textContent,
+                           html: $("#overlayBody").innerHTML,
+                           after: overlayAfter });
+    }
     overlayKind = kind;
+    overlayAfter = after;
     var card = $("#overlay").firstElementChild;
     if (card) {
       // the password prompt is its own thing: narrow, and with the title
@@ -269,6 +281,14 @@
 
   function closeOverlay() {
     if ($("#overlay").hidden) return;
+    if (OVERLAY_STACK.length) {
+      // 回到上一层弹窗，而不是把它一起关掉
+      var back = OVERLAY_STACK.pop();
+      $("#overlay").hidden = true;
+      $("#overlayBody").innerHTML = "";
+      openOverlay(back.kind, back.title, back.html, back.after);
+      return;
+    }
     var asked = overlayKind === "sudo";
     $("#overlay").hidden = true;
     $("#overlayBody").innerHTML = "";
@@ -465,7 +485,7 @@
         '<div class="sudo-prompt-foot">' +
         '<button class="btn" type="button" id="sudoCancel">取消</button>' +
         '<button class="btn primary" type="button" id="sudoEnter">进入 sudo 模式</button>' +
-        "</div></div>");
+        "</div></div>", null, true);
       var box = $("#sudoPass");
       if (box) {
         box.focus();
@@ -725,14 +745,17 @@
       [archived ? "归档时间" : "创建时间",
        archived ? PX.whenExact(e.archivedAt) : PX.when(e.createdAt)]
     ];
-    var acts = [
-      { text: "打开活动设置 ↗", kind: "ghost",
-        run: function () { window.open(e.admin, "_blank"); } }
-    ];
+    var acts = [];
+    if (!archived) {
+      acts.push({ text: "打开活动设置 ↗", kind: "ghost",
+                  run: function () { window.open(e.admin, "_blank"); } });
+    }
     if (archived) {
       acts.push({ text: "下载完整数据", kind: "", run: function () { archivedDownload(seq); } });
-      acts.push({ text: "取消归档", kind: "", run: function () { archivedRestore(seq); } });
-      acts.push({ text: "彻底删除", kind: "danger", run: function () { archivedDelete(seq); } });
+      acts.push({ text: "取消归档", kind: "", leaves: true,
+                  run: function () { archivedRestore(seq); } });
+      acts.push({ text: "彻底删除", kind: "danger", leaves: true,
+                  run: function () { archivedDelete(seq); } });
     } else {
       acts.push({ text: "下载数据", kind: "", run: function () { archivedDownload(seq); } });
       acts.push({ text: "转移负责人", kind: "", run: function () { transferOwner(seq); } });
@@ -750,8 +773,11 @@
       card.querySelectorAll("[data-detail-act]").forEach(function (btn) {
         btn.addEventListener("click", function () {
           var act = acts[Number(btn.getAttribute("data-detail-act"))];
-          closeOverlay();
-          if (act) act.run();
+          if (!act) return;
+          // 取消归档、彻底删除会让这场活动整个变样：那两步离开详情。
+          // 下载、转移、回收、强制归档留在详情里，取消也不至于把页面跳走
+          if (act.leaves) closeOverlay();
+          act.run();
         });
       });
     });
@@ -3679,7 +3705,9 @@
         '<td class="num mono">' + e.seq + "</td>" +
         "<td>" + PX.esc(e.ownerName || "—") + "</td>" +
         '<td class="mono">' + PX.whenExact(e.archivedAt) + "</td>" +
-        '<td class="mono">' + PX.esc(shortToken(e.id)) + "</td></tr>";
+        '<td class="mono">' + PX.esc(shortToken(e.id)) + "</td>" +
+        '<td class="actions"><button class="detail-btn" type="button" ' +
+        'data-event-detail="' + e.seq + '">详情</button></td>' + "</tr>";
     }).join("") : emptyRow(5, S.archivedTotal === 0
       ? "还没有归档的活动"
       : "正在读取…");
@@ -3710,7 +3738,8 @@
         PX.esc(shortToken(e.id)) + "</td>" +
         "<td>" + PX.esc(e.ownerName || "—") + "</td>" +
         '<td class="mono">' + PX.when(e.createdAt) + "</td>" +
-        "</tr>";
+        '<td class="actions"><button class="detail-btn" type="button" ' +
+        'data-event-detail="' + e.seq + '">详情</button></td>' + "</tr>";
     }).join("") : emptyRow(5, "还没有活动");
   }
 

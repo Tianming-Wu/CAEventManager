@@ -68,7 +68,7 @@ TPL_DIR = os.path.join(BASE_DIR, "tpl")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.10.5.50"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.10.6.51"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -116,6 +116,24 @@ SHORTLINK_SUGGEST = [
     {"key": "checkin", "label": "签到页"},
     {"key": "admin", "label": "活动后台"},
 ]
+
+def not_found_page():
+    """404 的页面：tpl/404.html 在就用它，没有就用一句白话。状态码始终是 404。"""
+    path = os.path.join(TPL_DIR, "404.html")
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            html = fh.read()
+        return html.replace("{{VERSION}}", VERSION).encode("utf-8")
+    except OSError:
+        return (b"<!doctype html><meta charset=utf-8><title>404</title>"
+            b"<body style=\"font-family:system-ui;padding:3em;color:#888\">"
+            b"404 Not Found</body>")
+
+
+NOT_FOUND_PAGE = (
+    "<!doctype html><meta charset=utf-8><title>404</title>"
+    "<body style=\"font-family:system-ui;padding:3em;color:#888\">404 Not Found</body>"
+)
 
 SHORTLINK_MISS_PAGE = (
     "<!doctype html><meta charset=utf-8><title>链接已失效</title>"
@@ -1038,12 +1056,7 @@ class Handler(BaseHTTPRequestHandler):
             path = route
             if seq is None or path is None:
                 # No panel route and no event token: nothing to serve.
-                return self._send(
-                    404,
-                    b"<!doctype html><meta charset=utf-8><title>404</title>"
-                    b"<body style=\"font-family:system-ui;padding:3em;color:#888\">404 Not Found</body>",
-                    "text/html; charset=utf-8",
-                )
+                return self._send(404, not_found_page(), "text/html; charset=utf-8")
             db.set_event(seq)
             self._token = token
             if safemode.enabled():

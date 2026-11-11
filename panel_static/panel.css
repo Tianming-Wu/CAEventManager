@@ -573,11 +573,25 @@ button.nav-item {
   line-height: 1.6;
 }
 .sudo-prompt-action {
-  margin: 0 0 16px;
+  margin: 0 0 4px;
   text-align: center;
   font-size: .84rem;
   color: var(--accent-strong);
   font-weight: 600;
+}
+/* 动作说明：高度写死两行，描述再长也只占这块地方，弹窗宽度与按钮位置都不动 */
+.sudo-prompt-desc {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  height: 2.9em;
+  margin: 0 0 14px;
+  overflow: hidden;
+  text-align: center;
+  font-size: .8rem;
+  line-height: 1.45;
+  color: var(--muted);
+  word-break: break-word;
 }
 .sudo-prompt-label {
   margin-bottom: 6px;

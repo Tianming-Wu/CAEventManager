@@ -2117,6 +2117,10 @@ def create_page(browser):
                   page.locator("#sudoPass").count() == 1)
             entered = page.inner_text("#overlayBody")
             check("and names the action", "归档" in entered, entered[:60])
+            check("and says what it will do", "确认归档？" in entered, entered[:120])
+            desc_h = page.evaluate("() => { const el = document.querySelector('.sudo-prompt-desc');"
+                                   " return el ? Math.round(el.getBoundingClientRect().height) : 0; }")
+            check("描述那块留了固定的高度", desc_h > 0, desc_h)
             check("the prompt has no header bar",
                   page.evaluate("() => getComputedStyle("
                                 "document.querySelector('.overlay-card .overlay-head'))"

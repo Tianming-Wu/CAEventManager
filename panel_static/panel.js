@@ -473,7 +473,7 @@
     }, 320);
   }
 
-  function askSudoPassword(what) {
+  function askSudoPassword(what, note) {
     if (SUDO.asker) return SUDO.asker.promise;
     var cancel = null;
     var promise = new Promise(function (resolve, reject) {
@@ -485,6 +485,7 @@
         '<h2 class="sudo-prompt-title">sudo 模式</h2>' +
         '<p class="sudo-prompt-note">您正在进入 sudo 模式，十分钟内敏感操作将不需要认证</p>' +
         (action ? '<p class="sudo-prompt-action">' + action + "</p>" : "") +
+        '<p class="sudo-prompt-desc">' + (note || "") + "</p>" +
         '<label class="sudo-prompt-label" for="sudoPass">当前账号密码</label>' +
         '<input id="sudoPass" type="password" autocomplete="current-password" ' +
         'maxlength="128">' +
@@ -568,10 +569,10 @@
 
   // Same contract as PX.api, except a "needs the password again" refusal is
   // answered with the password prompt and the request is repeated once.
-  function apiSudo(path, options, what) {
+  function apiSudo(path, options, what, note) {
     return PX.api(path, options).catch(function (e) {
       if (!e.sudo) throw e;
-      return askSudoPassword(what).then(function () {
+      return askSudoPassword(what, note).then(function () {
         return PX.api(path, options);
       });
     });
@@ -706,7 +707,8 @@
   // skipped - typing it is already deliberate, and cancelling it leaves no
   // trace because nothing ever reached the server.
   function confirmHighRisk(title, note, label, danger, run, opts) {
-    if (!sudoActive()) return run();
+    // 没进 sudo：这一步本身就是确认，把说明交给它的弹窗，别让这句话丢掉
+    if (!sudoActive()) return run(note);
     openOverlay("confirm", title,
       '<p class="page-sub">' + note + "</p>"
       + '<div class="row" style="margin-top:18px;justify-content:flex-end">'
@@ -730,9 +732,9 @@
     confirmHighRisk("回收站内资源",
       "确认回收？" + (e ? "<br>活动：" + PX.esc(eventTitle(e)) : ""),
       "回收", true,
-      function () {
+      function (note) {
         apiSudo("/event/reclaim", { method: "POST", body: { seq: Number(seq) } },
-          "回收站内资源")
+          "回收站内资源", note)
           .then(function (d) {
             PX.toast("已回收 " + ((d && d.shortlinks) || 0) + " 条短链");
             return reloadAll();
@@ -832,9 +834,9 @@
 
   /* 别人的活动：强制归档也是破坏性操作，只在活动管理页出现 */
   function forceArchive(seq) {
-    confirmHighRisk("强制归档", "确认继续？", "强制归档", true, function () {
+    confirmHighRisk("强制归档", "确认继续？", "强制归档", true, function (note) {
       apiSudo("/event/force_archive", { method: "POST", body: { seq: Number(seq) } },
-        "强制归档活动")
+        "强制归档活动", note)
         .then(function () {
           PX.toast("已归档");
           return reloadAll();
@@ -852,9 +854,9 @@
   function archivedRestore(seq) {
     return new Promise(function (resolve) {
       confirmHighRisk("取消归档", "确认取消归档？",
-        "取消归档", false, function () {
+        "取消归档", false, function (note) {
           apiSudo("/event/unarchive", { method: "POST", body: { seq: Number(seq) } },
-            "取消归档")
+            "取消归档", note)
             .then(function () {
               PX.toast("已取消归档");
               resolve(true);
@@ -870,9 +872,9 @@
     confirmHighRisk("彻底删除归档的活动",
       "删除后不可恢复。确认继续？",
       "彻底删除", true,
-      function () {
+      function (note) {
         apiSudo("/event/delete", { method: "POST", body: { seq: Number(seq) } },
-          "彻底删除归档的活动")
+          "彻底删除归档的活动", note)
           .then(function () {
             PX.toast("已删除");
             resolve(true);
@@ -899,8 +901,9 @@
     confirmHighRisk("重置访问地址",
       "确认重新生成？" + (e ? "<br>活动：" + PX.esc(eventTitle(e)) : ""),
       "重新生成", false,
-      function () {
-        apiSudo("/event/rotate", { method: "POST", body: { seq: Number(seq) } }, "重置访问地址")
+      function (note) {
+        apiSudo("/event/rotate", { method: "POST", body: { seq: Number(seq) } },
+          "重置访问地址", note)
           .then(function () {
             PX.toast("已生成新的访问地址");
             return reloadAll();
@@ -916,8 +919,9 @@
       "确认归档？"
       + (e ? "<br>存档：" + PX.esc(eventTitle(e)) : ""),
       "归档", true,
-      function () {
-        apiSudo("/event/archive", { method: "POST", body: { seq: Number(seq) } }, "归档活动")
+      function (note) {
+        apiSudo("/event/archive", { method: "POST", body: { seq: Number(seq) } },
+          "归档活动", note)
           .then(function () {
             PX.toast("已归档");
             return reloadAll();
@@ -3855,8 +3859,8 @@
   function restartService() {
     confirmHighRisk("重启服务？",
       "正在进行的操作会短暂断开，几秒后恢复。",
-      "重启", false, function () {
-        apiSudo("/service/restart", { method: "POST" }, "重启")
+      "重启", false, function (note) {
+        apiSudo("/service/restart", { method: "POST" }, "重启", note)
           .then(function (d) {
             if (d.restarting) {
               PX.toast("服务重启中…");
@@ -3876,8 +3880,8 @@
       ? "活动页会立刻显示维护提示，所有人暂时打不开；数据原样不动，面板照常可用。<br>修好之后再退出安全模式。"
       : "活动页会恢复开放，服务重启一次。";
     var label = want ? "进入安全模式" : "退出安全模式";
-    confirmHighRisk(title, note, label, want, function () {
-      apiSudo("/service/safe_mode", { method: "POST", body: { on: want } }, label)
+    confirmHighRisk(title, note, label, want, function (note) {
+      apiSudo("/service/safe_mode", { method: "POST", body: { on: want } }, label, note)
         .then(function (d) {
           S.hostMeta = { safeMode: !!d.safeMode, supervised: d.supervised };
           drawSafeMode();

@@ -59,6 +59,53 @@ def is_participant(stu):
 # --------------------------------------------------------------------------- #
 # ticket numbers
 # --------------------------------------------------------------------------- #
+def action(name, ctx, payload):
+    """模块的动作入口：平台按 module.json 的 actions 声明调到这里。
+
+    平台已经做完鉴权、解锁、结算与参数校验（见 doc/dev/module-interface.md），
+    这里只负责「做什么」，返回 dict 给前端；想写审计就在里面带一个 audit 字段。
+    """
+    conn = ctx["conn"]
+    if name == "mark":
+        res = mark(conn, payload["student"], payload["kind"],
+                   actor=ctx["account"]["name"], at=payload.get("at"),
+                   allow_skip=ctx["unlocked"])
+        return {"result": res}
+
+    if name == "undo":
+        return {"result": unmark(conn, payload["student"], payload["kind"],
+                                 actor=ctx["account"]["name"])}
+
+    if name == "set_time":
+        return {"result": set_mark_time(conn, payload["student"], payload["kind"],
+                                        payload["at"], actor=ctx["account"]["name"])}
+
+    if name == "add_student":
+        return {"student": add_student(conn, payload["sid"], payload["name"],
+                                       grp=payload.get("grp"), note=payload.get("note"),
+                                       role=payload.get("role") or "participant")}
+
+    if name == "update_student":
+        fields = {k: payload[k] for k in ("name", "grp", "note", "role") if k in payload}
+        return {"student": update_student(conn, payload["id"],
+                                          actor=ctx["account"]["name"], **fields)}
+
+    if name == "delete_student":
+        return {"result": delete_student(conn, payload["id"],
+                                         actor=ctx["account"]["name"])}
+
+    if name == "finalize":
+        return {"result": finalize(conn, actor=ctx["account"]["name"])}
+
+    if name == "unfinalize":
+        return {"result": unfinalize(conn, actor=ctx["account"]["name"])}
+
+    if name == "reset_tickets":
+        return {"result": reset_tickets(conn, actor=ctx["account"]["name"])}
+
+    raise ApiError("这个模块没有这个动作：%s" % name, 404)
+
+
 def ensure_seed(conn):
     """Seed for the deterministic remainder tie-break (not for the numbering)."""
     seed = int(db.get_config(conn, "tie_seed", 0) or 0)

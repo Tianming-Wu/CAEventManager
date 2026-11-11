@@ -568,6 +568,29 @@ def main():
           first.startswith("data: ") and "revs" in first, first)
     stream.close()
 
+    print("== 模块动作：/<token>/api/do/<name> ==")
+    # 放在最后：这里会加一个人再删掉，不碰前面那些断言的口径
+    made = post("/api/do/add_student", {"sid": "2026ACT001", "name": "动作测试"})
+    check("动作跑通了", bool(made and made.get("ok")), made)
+    check("动作带回了版本号对象", (made or {}).get("target", "").startswith("event:"),
+          (made or {}).get("target"))
+    listed = [x for x in (call("/api/admin/state") or {}).get("students", [])
+              if x["sid"] == "2026ACT001"]
+    check("动作落到数据上", len(listed) == 1, len(listed))
+    if listed:
+        # 前面的用例可能把「解锁修改」打开了：先关上，才能验证拦截
+        post("/api/admin/unlock", {"on": False})
+        refused = post("/api/do/delete_student", {"id": listed[0]["id"]}, expect=403)
+        check("要解锁的动作没解锁时被拒", bool(refused and refused.get("error")), refused)
+        post("/api/admin/unlock", {"on": True})
+        gone = post("/api/do/delete_student", {"id": listed[0]["id"]})
+        check("解锁之后删得掉", bool(gone and gone.get("ok")), gone)
+        post("/api/admin/unlock", {"on": False})
+    miss = post("/api/do/nope", {}, expect=404)
+    check("没声明的动作是 404", bool(miss and miss.get("error")), miss)
+    bad = post("/api/do/mark", {"kind": "checkin"}, expect=400)
+    check("缺必填参数是 400", bool(bad and bad.get("error")), bad)
+
     print()
     if failures:
         print("FAILED %d check(s):" % len(failures))

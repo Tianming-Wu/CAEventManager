@@ -66,7 +66,7 @@ TPL_DIR = os.path.join(BASE_DIR, "tpl")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.9.1.42"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.9.2.43"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -3114,6 +3114,49 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
 
     # ---------------- api ----------------
+    def _module_action(self, me, name):
+        """执行模块声明的动作。鉴权、解锁、结算、参数、审计、版本号都在这里。"""
+        self._check_csrf()
+        conn = db.connect()
+        cfg = db.all_config(conn)
+        kind = cfg.get("kind") or db.DEFAULT_CONFIG["kind"]
+        mod = _modules_by_id(panel.connect()).get(kind) or {}
+        decl = (mod.get("actions") or {}).get(name)
+        if not decl:
+            raise model.ApiError("这个活动没有这个动作：%s" % name, 404)
+        if decl["seat"] == "owner" and me.role != "owner":
+            raise model.ApiError("只有该活动的负责人能做这个操作", 403)
+        if decl["unlock"] and not me.unlocked():
+            raise model.ApiError("这个操作需要先打开「解锁修改」开关", 403)
+        if decl["finalized"] == "block" and (cfg.get("finalized") or False):
+            raise model.ApiError("已结算，如需继续请先取消结算", 409)
+        try:
+            payload = modules.coerce_action_args(decl, self._body())
+        except (TypeError, ValueError) as exc:
+            raise model.ApiError(str(exc))
+        ctx = {
+            "conn": conn, "cfg": cfg,
+            "event": {"seq": db.event_id(), "title": cfg.get("title") or "",
+                      "kind": kind},
+            "account": me.acc, "seat": me.role,
+            "unlocked": me.unlocked(), "now": time.time(),
+        }
+        with db.tx(conn):
+            result = model.action(name, ctx, payload)
+        if not isinstance(result, dict):
+            result = {"result": result}
+        scope = decl.get("target") or "event"
+        for arg, value in payload.items():
+            scope = scope.replace("{%s}" % arg, str(value))
+        scope = "event:%s:%s" % (db.event_id(), scope)
+        bus.bump(scope)
+        detail = str(result.pop("audit", "") or "")
+        db.audit(conn, name, detail=(detail or decl["title"])[:200],
+                 actor=me.name)
+        payload_out = {"ok": True, "action": name, "target": scope}
+        payload_out.update(result)
+        return self._json(payload_out)
+
     def _api(self, method, path, query):
         global LOCAL_CFG
         conn = db.connect()
@@ -3236,6 +3279,12 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/login" and method == "POST":
             # there is no console password any more; the panel is the only door
             raise model.ApiError("活动后台已改用面板账号登录", 410)
+
+        # ---- 模块的动作：/<token>/api/do/<name> ----
+        # 平台按 module.json 的 actions 声明做鉴权、解锁、结算、参数与审计，模块只管做什么
+        if path.startswith("/api/do/") and method == "POST":
+            me = self._require_console()
+            return self._module_action(me, path[len("/api/do/"):])
 
         # ---- everything below needs a seat on this activity ----
         me = self._require_console()

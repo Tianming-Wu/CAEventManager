@@ -591,6 +591,33 @@ def main():
           app.policy.verdict({"role": "admin"}, "read_doc", {})[0]
           and app.policy.verdict({"role": "owner"}, "list_docs", {})[0])
 
+    print("== 模块动作的声明 ==")
+    errs = []
+    acts = app.modules.normalize_actions({
+        "mark": {"title": "标记完成", "unlock": True,
+                 "args": {"student": {"type": "int", "required": True}},
+                 "target": "student:{student}"},
+        "Bad": {},
+        "weird": {"args": {"x": {"type": "nope"}}},
+    }, errs)
+    check("合法的动作留下", list(acts) == ["mark"], list(acts))
+    check("写错的动作丢掉并记原因", len(errs) == 2, errs)
+    check("默认席位是成员", acts["mark"]["seat"] == "member", acts["mark"])
+    check("声明原样带过来",
+          acts["mark"]["unlock"] is True and acts["mark"]["title"] == "标记完成", acts["mark"])
+    try:
+        app.modules.coerce_action_args(acts["mark"], {})
+        missing = False
+    except ValueError:
+        missing = True
+    check("缺必填参数直接拒绝", missing)
+    got = app.modules.coerce_action_args(acts["mark"], {"student": "7", "extra": 1})
+    check("参数按声明转类型，多余的丢掉", got == {"student": 7}, got)
+    builtin = app.modules.get("nwuca.lottery", app.VERSION) or {}
+    check("内置模块声明了接口版本", builtin.get("api") == 1, builtin.get("api"))
+    check("内置模块声明了动作", "mark" in (builtin.get("actions") or {}),
+          sorted((builtin.get("actions") or {})))
+
     print("== 随机源 ==")
     check("报得出来源", app.rng.source() in ("hwrng", "krng"), app.rng.source())
     check("字节长度对", len(app.rng.bytes(13)) == 13)

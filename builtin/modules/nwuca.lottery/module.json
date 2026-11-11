@@ -2,6 +2,7 @@
   "id": "nwuca.lottery",
   "name": "奖票抽奖",
   "version": "1.0.0",
+  "api": 1,
   "author": "Tianming",
   "homepage": "https://github.com/Tianming-Wu/CAEventManager",
   "license": "MIT",
@@ -134,5 +135,156 @@
       ]
     },
     "shortlink": {}
+  },
+  "actions": {
+    "mark": {
+      "title": "标记完成",
+      "args": {
+        "student": {
+          "type": "int",
+          "required": true
+        },
+        "kind": {
+          "type": "str",
+          "required": true,
+          "max": 16
+        },
+        "at": {
+          "type": "float"
+        }
+      },
+      "seat": "member",
+      "unlock": false,
+      "target": "student:{student}"
+    },
+    "undo": {
+      "title": "撤销标记",
+      "args": {
+        "student": {
+          "type": "int",
+          "required": true
+        },
+        "kind": {
+          "type": "str",
+          "required": true,
+          "max": 16
+        }
+      },
+      "seat": "member",
+      "unlock": true,
+      "target": "student:{student}"
+    },
+    "set_time": {
+      "title": "改签到时间",
+      "args": {
+        "student": {
+          "type": "int",
+          "required": true
+        },
+        "kind": {
+          "type": "str",
+          "required": true,
+          "max": 16
+        },
+        "at": {
+          "type": "float",
+          "required": true
+        }
+      },
+      "seat": "member",
+      "unlock": true,
+      "target": "student:{student}"
+    },
+    "add_student": {
+      "title": "手动加人",
+      "args": {
+        "sid": {
+          "type": "str",
+          "required": true,
+          "max": 32
+        },
+        "name": {
+          "type": "str",
+          "required": true,
+          "max": 40
+        },
+        "grp": {
+          "type": "str",
+          "max": 40
+        },
+        "note": {
+          "type": "str",
+          "max": 200
+        },
+        "role": {
+          "type": "str",
+          "max": 16
+        }
+      },
+      "seat": "member",
+      "unlock": false,
+      "target": "roster"
+    },
+    "update_student": {
+      "title": "改学生资料",
+      "args": {
+        "id": {
+          "type": "int",
+          "required": true
+        },
+        "name": {
+          "type": "str",
+          "max": 40
+        },
+        "grp": {
+          "type": "str",
+          "max": 40
+        },
+        "note": {
+          "type": "str",
+          "max": 200
+        },
+        "role": {
+          "type": "str",
+          "max": 16
+        }
+      },
+      "seat": "member",
+      "unlock": false,
+      "target": "student:{id}"
+    },
+    "delete_student": {
+      "title": "移出学生",
+      "args": {
+        "id": {
+          "type": "int",
+          "required": true
+        }
+      },
+      "seat": "member",
+      "unlock": true,
+      "target": "student:{id}"
+    },
+    "finalize": {
+      "title": "结算奖票",
+      "args": {},
+      "seat": "owner",
+      "unlock": true,
+      "target": "draw"
+    },
+    "unfinalize": {
+      "title": "取消结算",
+      "args": {},
+      "seat": "owner",
+      "unlock": true,
+      "target": "draw"
+    },
+    "reset_tickets": {
+      "title": "重置奖票",
+      "args": {},
+      "seat": "owner",
+      "unlock": true,
+      "target": "draw"
+    }
   }
 }

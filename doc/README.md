@@ -61,6 +61,7 @@
 | [dev/architecture.md](dev/architecture.md) | 结构：三个数据库、路由家族、实时同步、权限层次、模块能力声明 |
 | [dev/assistant.md](dev/assistant.md) | 运维助手的设计：为什么沿用账号权限、工具面、策略层 |
 | [dev/modules.md](dev/modules.md) | 模块开发指南：module.json、能力声明（features）、页面与屏幕 |
+| [dev/module-interface.md](dev/module-interface.md) | 模块接口：平台与模块各管什么、接口版本与兼容政策、动作声明 |
 
 ## 写文档的约定
 

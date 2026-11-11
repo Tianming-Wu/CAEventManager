@@ -3,6 +3,9 @@
 模块是活动的内容：装上并启用某个模块，才有它的页面、设置与现场玩法。平台只提供每个活动都有的那几页
 （公示页、大屏、签到、活动设置、日志）。
 
+**接口约定单独一份**：[模块接口](module-interface.md)——那边写清平台保证什么、模块必须提供什么、
+`module.json` 的每个字段、动作（`actions`）的声明方式与兼容政策。这份讲怎么打包与申请能力。
+
 ## 目录与 `module.json`
 
 ```
@@ -22,6 +25,7 @@ modules/<id>/                    实例自己装的模块（不进版本库）
   "id": "nwuca.lottery",
   "name": "奖票抽奖",
   "version": "1.0.0",
+  "api": 1,
   "requires": ">=1.4",
   "external": ["board", "screen", "checkin", "admin"],
   "pages": [{"id": "ops", "title": "操作台"}],
@@ -32,6 +36,7 @@ modules/<id>/                    实例自己装的模块（不进版本库）
 | 字段 | 说明 |
 | --- | --- |
 | `id` | 唯一标识，形如 `nwuca.lottery`；模块之间的完全限定名就以它开头 |
+| `api` | 接口版本（见[模块接口](module-interface.md)）；缺省按 1 算 |
 | `requires` | 需要的平台版本，不满足就不出现在创建列表里 |
 | `pages` | 申请哪些控制台页面（平台提供的那几种画法） |
 | `external` | 需要哪些公开页面（公示页、大屏、签到） |
@@ -129,5 +134,6 @@ python tools/run_suites.py ui            # 起一个实例、灌演示数据、�
 ## 相关文档
 
 - [结构](architecture.md)
+- [模块接口](module-interface.md)
 - [短链接口](../reference/api-shortlink.md)
 - [奖票抽奖](../../builtin/modules/nwuca.lottery/doc.md)

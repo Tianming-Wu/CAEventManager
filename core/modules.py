@@ -37,6 +37,9 @@ INSTANCE_MODULES_DIR = os.path.join(BASE_DIR, "modules")
 
 ID_RE = re.compile(r"^[a-z0-9]+(\.[a-z0-9_-]+)+$")
 # `super.` 是平台保留给高危功能的命名空间（见 RESERVED_PREFIX），模块 id 与功能名都不能用
+# 平台支持的接口版本；模块声明的 api 不在这个范围里就不加载
+SUPPORTED_API = (1,)
+
 RESERVED_PREFIX = "super."
 SUPER_FEATURES = {
     "super.anyshortlink": "不限目标的短链接跳转：可以指向活动地址之外的地方",
@@ -258,6 +261,98 @@ def console_pages(module_id, version, disabled=()):
     return pages
 
 
+ACTION_TYPES = {
+    "int": int,
+    "str": str,
+    "bool": bool,
+    "float": float,
+    "json": (dict, list),
+}
+
+
+def normalize_actions(raw, errors=None):
+    """把 module.json 的 actions 解析成平台认的形状；写错的那一条丢掉并记原因。
+
+    这一层只管声明：字段是否合法、类型认不认识。真正执行时怎么鉴权、怎么记审计，
+    在接口文档里（doc/dev/module-interface.md）。
+    """
+    out = {}
+    if raw is None:
+        return out
+    if not isinstance(raw, dict):
+        _note(errors, "actions 应该是一个对象")
+        return out
+    for name, spec in raw.items():
+        name = str(name or "").strip()
+        if not name or not re.match(r"^[a-z][a-z0-9_]{0,31}$", name):
+            _note(errors, "动作名不合法：%s" % name)
+            continue
+        if spec is None:
+            spec = {}
+        if not isinstance(spec, dict):
+            _note(errors, "动作 %s 的声明应该是一个对象" % name)
+            continue
+        args = {}
+        bad = None
+        for arg, info in (spec.get("args") or {}).items():
+            info = info if isinstance(info, dict) else {}
+            kind = str(info.get("type") or "str").strip()
+            if kind not in ACTION_TYPES:
+                bad = "动作 %s 的参数 %s 类型不认识：%s" % (name, arg, kind)
+                break
+            args[str(arg)] = {
+                "type": kind,
+                "required": bool(info.get("required")),
+                "max": int(info.get("max") or 0),
+            }
+        if bad:
+            _note(errors, bad)
+            continue
+        seat = str(spec.get("seat") or "member")
+        if seat not in ("member", "owner"):
+            _note(errors, "动作 %s 的席位只能是 member 或 owner" % name)
+            seat = "member"
+        out[name] = {
+            "name": name,
+            "title": str(spec.get("title") or name)[:40],
+            "args": args,
+            "seat": seat,
+            "unlock": bool(spec.get("unlock")),
+            "sudo": bool(spec.get("sudo")),
+            "finalized": "allow" if spec.get("finalized") == "allow" else "block",
+            "target": str(spec.get("target") or "event")[:60],
+        }
+    return out
+
+
+def coerce_action_args(decl, payload):
+    """按声明取值并校验；缺必填、类型不对、超长都抛 ValueError（平台翻成 400）。"""
+    given = payload if isinstance(payload, dict) else {}
+    out = {}
+    for arg, info in (decl.get("args") or {}).items():
+        if arg not in given or given[arg] in (None, ""):
+            if info["required"]:
+                raise ValueError("缺少参数：%s" % arg)
+            continue
+        value = given[arg]
+        kind = info["type"]
+        if kind == "int":
+            value = int(value)
+        elif kind == "float":
+            value = float(value)
+        elif kind == "bool":
+            value = bool(value)
+        elif kind == "str":
+            value = str(value)
+            if info["max"] and len(value) > info["max"]:
+                raise ValueError("参数 %s 太长（最多 %d 个字）" % (arg, info["max"]))
+        else:
+            if not isinstance(value, (dict, list)):
+                raise ValueError("参数 %s 应该是 JSON 对象或数组" % arg)
+        out[arg] = value
+    return out
+
+
 def kind_dir(kind_id):
     """模块目录：实例自己装的优先，其次内置。"""
     kind_id = str(kind_id or "").strip()
@@ -331,6 +426,15 @@ def load_module(folder, version, builtin=False, enabled=True):
     except ValueError as exc:
         raise KindError("module.json 不是合法 JSON：%s" % exc)
 
+    api = meta.get("api", 1)
+    try:
+        api = int(api)
+    except (TypeError, ValueError):
+        raise KindError("api 应该是一个整数")
+    if api not in SUPPORTED_API:
+        raise KindError("接口版本 %d 这个平台不支持（支持：%s）"
+                        % (api, ", ".join(str(v) for v in SUPPORTED_API)))
+
     kind_id = str(meta.get("id") or "").strip()
     if not ID_RE.match(kind_id):
         raise KindError("id 需要形如 nwuca.lottery")
@@ -379,7 +483,8 @@ def load_module(folder, version, builtin=False, enabled=True):
     if os.path.isdir(tpl_dir):
         templates = sorted(n[:-5] for n in os.listdir(tpl_dir) if n.endswith(".json"))
 
-    features = resolve_features(meta.get("features"))
+    notes = []
+    features = resolve_features(meta.get("features"), notes)
 
     return {
         "id": kind_id,
@@ -394,6 +499,9 @@ def load_module(folder, version, builtin=False, enabled=True):
         "pages": normalize_pages(meta.get("pages")),
         "external": normalize_external(meta.get("external")),
         "features": features,
+        "api": api,
+        "actions": normalize_actions(meta.get("actions"), notes),
+        "notes": notes,
         "fields": fields,
         "templates": templates,
         "path": folder,

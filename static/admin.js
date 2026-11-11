@@ -29,6 +29,47 @@
   };
 
   // ------------------------------------------------------------------ utils
+  /* ---- 模块页面的脚本 ----
+     平台按 module.json 的 pages 声明依次载入 pages/<id>.js，然后调 mount/refresh/show。
+     平台自己的代码不直接碰模块的函数，只走这两个入口。 */
+  function modulePage(id) {
+    return (window.MODULE && window.MODULE.pages && window.MODULE.pages[id]) || null;
+  }
+
+  function pageRefresh(id) {
+    var page = modulePage(id);
+    if (page && page.refresh) page.refresh(S, S.tab);
+  }
+
+  function pageShow(id) {
+    var page = modulePage(id);
+    if (page && page.show) return page.show();
+    return undefined;
+  }
+
+  function loadModuleScripts(pages) {
+    var base = (window.LT && LT.PREFIX) || "";
+    var list = (pages || []).filter(function (p) { return p && p.id; });
+    return Promise.all(list.map(function (p) {
+      return new Promise(function (resolve) {
+        var el = document.createElement("script");
+        el.src = base + "/module/" + encodeURIComponent(p.id) + ".js";
+        el.onload = function () { resolve(true); };
+        el.onerror = function () { resolve(false); };   // 没有脚本的页签是正常的
+        document.head.appendChild(el);
+      });
+    })).then(function () {
+      list.forEach(function (p) {
+        var page = modulePage(p.id);
+        if (page && page.mount) {
+          page.mount({ LT: LT, state: S, tab: S.tab, page: p });
+        }
+      });
+      // 脚本是异步来的：载入的时候可能已经切到某个页签了，补画一次
+      if (S.tab) pageShow(S.tab);
+    });
+  }
+
   function kindLabel(k) { return LT.KIND_LABEL[k] || k; }
 
   function canMark(stu, kind) {
@@ -143,6 +184,17 @@
     var badge = $("#nRoster");
     if (badge) badge.textContent = st.total;
     document.title = "后台 · " + (S.config.title || "抽奖");
+  }
+
+  /* 结算/重置这两颗按钮是平台动作，状态由平台自己管 */
+  function renderDrawButtons() {
+    var sum = (S.plan && S.plan.summary) || {};
+    var fin = $("#finalizeBtn");
+    if (fin) fin.disabled = !!sum.finalized;
+    var un = $("#unfinalizeBtn");
+    if (un) un.disabled = !sum.finalized || !S.unlocked;
+    var reset = $("#resetTicketsBtn");
+    if (reset) reset.disabled = !S.unlocked;
   }
 
   function renderUnlock() {
@@ -440,47 +492,6 @@
     }).join("") || '<tr><td colspan="7" class="empty">还没有抽奖记录</td></tr>';
   }
 
-  function renderPlan() {
-    var p = S.plan;
-    if (!p) return;
-    var sum = p.summary || {};
-    var chips = [
-      '<span class="chip green"><b>' + sum.present + "</b> 人可参与</span>",
-      '<span class="chip">保底 <b>' + sum.guaranteed + "</b> 张</span>",
-      '<span class="chip gold">速度奖励 <b>' + sum.bonus_pool + "</b> 张</span>",
-      '<span class="chip">总计 <b>' + sum.pool_size + "</b> 张全部发完</span>",
-      '<span class="chip">β = <b>' + sum.beta + "</b></span>"
-    ];
-    chips.push('<span class="chip">' + (sum.pool_mode === "fixed"
-      ? "固定池 " + sum.fixed_pool_size + " 张"
-      : "自动池 = " + sum.present + "×3 + " + sum.bonus_constant) + "</span>");
-    if (sum.present) {
-      chips.push('<span class="chip blue">最多一人 <b>+' + sum.max_bonus + "</b> 张</span>");
-    }
-    if (sum.finalized) chips.push('<span class="chip gold live">已结算</span>');
-    if (!sum.allow_bonus) chips.push('<span class="chip">速度奖励已关闭</span>');
-    $("#planSummary").innerHTML = chips.join("");
-
-    $("#planTable tbody").innerHTML = (p.rows || []).map(function (r) {
-      var stu = S.byId[r.id] || {};
-      return "<tr>" +
-        '<td class="num right">' + r.pos + "</td>" +
-        "<td><b>" + LT.esc(r.name) + "</b> <span style='color:var(--dim);font-size:.8em'>" + LT.esc(r.sid) + "</span></td>" +
-        '<td class="num right">' + r.tasks + "</td>" +
-        '<td class="num right">' + r.mean_rank.toFixed(3) + "</td>" +
-        '<td class="num right">' + r.weight.toFixed(2) + "</td>" +
-        '<td class="num right">' + r.expected.toFixed(2) + "</td>" +
-        '<td class="num right">' + (r.bonus ? '<b style="color:var(--gold)">+' + r.bonus + "</b>" : '<span style="color:var(--dim)">0</span>') + "</td>" +
-        '<td class="num right">' + (stu.ticket_count || 0) + "</td></tr>";
-    }).join("") || '<tr><td colspan="8" class="empty">还没有人签到</td></tr>';
-
-    $("#planNote").textContent = sum.finalized
-      ? "已结算于 " + LT.fmtDateTime(S.config.finalized_at)
-      : "预览，点击「结算」才会真正发票";
-    $("#finalizeBtn").disabled = !!sum.finalized;
-    $("#unfinalizeBtn").disabled = !sum.finalized || !S.unlocked;
-    $("#resetTicketsBtn").disabled = !S.unlocked;
-  }
 
   function renderPhase() {
     var p = S.config.screen_phase || "signin";
@@ -736,7 +747,7 @@
     renderDraws();
     renderLog();
     if (S.tab === "config") renderSettings();
-    if (S.tab === "tickets") renderPlan();
+    if (S.tab === "tickets") pageRefresh("tickets");
   }
 
   // ------------------------------------------------------------------ data
@@ -767,12 +778,6 @@
     });
   }
 
-  function loadPlan() {
-    return LT.api("/api/admin/plan").then(function (d) {
-      S.plan = d;
-      renderPlan();
-    }).catch(bad);
-  }
 
   // 模块在 module.json 的 features.search 里说清楚"哪份清单、哪个字段是姓名"，
   // 搜索的算法留在平台：这里只是把那份声明递给 LT
@@ -1134,7 +1139,7 @@
       S.unlockUntil = d.unlockUntil;
       renderUnlock();
       renderTable();
-      renderPlan();
+      pageRefresh("tickets");
       renderDraws();
       ok(on ? "已解锁" : "已上锁");
     }).catch(bad);
@@ -1146,6 +1151,8 @@
     var nav = $("#tabs");
     LT.api("/api/admin/console").then(function (d) {
       S.pages = d.pages || [];
+      // 模块页面的脚本：载入之后调 mount，平台这边只留页签条与调度
+      loadModuleScripts(S.pages);
       nav.innerHTML = S.pages.map(function (page) {
         var extra = page.id === "roster"
           ? '<span class="badge-n" id="nRoster">0</span>' : "";
@@ -1171,7 +1178,7 @@
     $$("#tabs button").forEach(function (b) { b.classList.toggle("active", b.getAttribute("data-tab") === name); });
     $$("main > section").forEach(function (s) { s.classList.toggle("hidden", s.id !== "tab-" + name); });
     if (name === "ops") { $("#q").focus(); }
-    if (name === "tickets") loadPlan();
+    if (name === "tickets") pageShow("tickets");
     if (name === "config") renderSettings();
     if (name === "settings") loadMembers();
     if (name === "log") load();
@@ -1266,7 +1273,7 @@
       if (!yes) return;
       LT.api("/api/admin/finalize", { method: "POST" }).then(function (d) {
         ok("结算完成，发放了 <b>" + d.result.assigned + "</b> 张奖励票");
-        return load().then(loadPlan);
+        return load().then(function () { pageShow("tickets"); });
       }).catch(bad);
     });
   }
@@ -1278,7 +1285,7 @@
     }).then(function (yes) {
       if (!yes) return;
       LT.api("/api/admin/unfinalize", { method: "POST" })
-        .then(function () { ok("已取消结算"); return load().then(loadPlan); })
+        .then(function () { ok("已取消结算"); return load().then(function () { pageShow("tickets"); }); })
         .catch(bad);
     });
   }
@@ -1291,7 +1298,7 @@
     }).then(function (yes) {
       if (!yes) return;
       LT.api("/api/admin/reset_tickets", { method: "POST" })
-        .then(function () { ok("已重置奖票"); return load().then(loadPlan); })
+        .then(function () { ok("已重置奖票"); return load().then(function () { pageShow("tickets"); }); })
         .catch(bad);
     });
   }
@@ -1380,7 +1387,7 @@
       .then(function () {
         $("#settingsNote").textContent = "已保存";
         ok("设置已保存");
-        if (S.tab === "tickets") loadPlan();
+        if (S.tab === "tickets") pageShow("tickets");
       })
       .catch(bad);
   }
@@ -1692,7 +1699,10 @@
       reader.onload = function () { $("#importText").value = reader.result; };
       reader.readAsText(f, "utf-8");
     });
-    $("#finalizeBtn").addEventListener("click", finalize);
+    // 模块算完计划会发这个事件：平台据此更新结算/重置按钮
+  document.addEventListener("module-plan", renderDrawButtons);
+
+  $("#finalizeBtn").addEventListener("click", finalize);
     $("#unfinalizeBtn").addEventListener("click", unfinalize);
     $("#resetTicketsBtn").addEventListener("click", resetTickets);
     $("#phaseSigninBtn").addEventListener("click", function () { setPhase("signin"); });

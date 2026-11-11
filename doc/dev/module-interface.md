@@ -166,9 +166,28 @@ pages/ops.js            这个页签的脚本（还没做：现在脚本仍在�
 pages/ops.css           可选
 ```
 
-**现状**：HTML 已经归模块——平台读 `pages/<页签>.html`，按 `pages` 的顺序拼进后台外壳的
-`{{MODULE_PAGES}}`；脚本暂时还在平台那边（`static/admin.js`），因为它按元素 id 绑定，
-等接口稳定后再搬。
+**HTML**：平台读 `pages/<页签>.html`，按 `pages` 的顺序拼进后台外壳的 `{{MODULE_PAGES}}`。
+
+**脚本**：模块可以放 `pages/<页签>.js`，平台在后台启动、拿到页签清单之后依次载入
+（`/<token>/module/<页签>.js`），然后按下面的契约调用它：
+
+```js
+window.MODULE.pages.tickets = {
+  mount(ctx) {},              // 启动时一次；ctx = {LT, state, tab, page}
+  refresh(state, tab) {},     // 平台每次拉到新状态
+  show(tab) {},               // 切到这个页签（返回值是 Promise 也行）
+};
+```
+
+- `LT` 是平台给的共用件（`esc` / `toast` / `modal` / `api` / `fmtTime` …）；模块脚本**拿不到**
+  平台内部的 `$`、`bad` 这类私有函数，要什么自己取
+- `state` 是平台的状态对象（同一个引用），模块可以往里挂自己的字段
+- 平台不直接调模块的函数，只走 `button → pageShow/pageRefresh`；模块要通知平台也用事件，
+  例如算完计划后 `document.dispatchEvent(new Event("module-plan"))`
+- 平台自己的按钮状态（结算、重置）由平台维护，模块不要碰
+
+**已搬**：「奖票」页（`renderPlan` / `loadPlan`）在 `pages/tickets.js` 里，平台侧只剩调度。
+其余四个页签的脚本还在平台，按同一份契约逐个搬。
 
 平台注入时提供两样东西：
 

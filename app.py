@@ -68,7 +68,7 @@ TPL_DIR = os.path.join(BASE_DIR, "tpl")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.10.11.56"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.11.0.57"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -3215,6 +3215,19 @@ class Handler(BaseHTTPRequestHandler):
         if path in routes:
             _page_id, name, ctype = routes[path]
             return self._serve_file(os.path.join(TPL_DIR, name), ctype, cache=False)
+        if path.startswith("/module/") and path.endswith(".js"):
+            # 模块页面脚本：只认 pages/<页签>.js，路径里不许有花活
+            name = path[len("/module/"):-len(".js")]
+            if not name or "/" in name or ".." in name or name.startswith("."):
+                return self._err("not found", 404)
+            kind = db.get_config(db.connect(), "kind") or db.DEFAULT_CONFIG["kind"]
+            folder = modules.kind_dir(kind)
+            full = os.path.join(folder, "pages", name + ".js") if folder else ""
+            if not full or not os.path.isfile(full):
+                # 没有脚本的页签很正常：回一份空的 JS，别让浏览器报 404
+                return self._send(200, b"/* this page has no script */",
+                                  "application/javascript; charset=utf-8")
+            return self._serve_file(full, "application/javascript; charset=utf-8", cache=True)
         if path.startswith("/static/"):
             rel = path[len("/static/"):]
             if ".." in rel or rel.startswith("/"):

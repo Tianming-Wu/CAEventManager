@@ -146,7 +146,7 @@
   }
 
   function renderUnlock() {
-    S.unlocked = $("#unlockToggle").checked;
+
     var on = S.unlocked && S.unlockUntil * 1000 > Date.now();
     $("#unlockToggle").checked = on;
     $("#unlockWrap").classList.toggle("on", on);
@@ -589,10 +589,6 @@
 
   function archiveEvent() {
     if (!S.seq) return;
-    if (!S.unlocked) {
-      ok("归档前请先在右上角打开「解锁修改」");
-      return;
-    }
     LT.confirm("归档活动",
       "归档后这场活动不再出现在列表里，链接与短链同时失效；数据会被打包，只留元数据。"
       + "归档之后活动不再保证能打开。",
@@ -605,16 +601,8 @@
         })
         .catch(function (e) {
           if (e && e.sudo) {
-            // 一次性确认：这一次请求带上密码，不打开任何提权窗口
-            askOncePassword("归档活动").then(function (password) {
-              LT.panelApi("/api/panel/event/archive",
-                { method: "POST", body: { seq: S.seq, password: password } })
-                .then(function () {
-                  ok("已归档，正在回到总览");
-                  setTimeout(function () { location.href = LT.panelLoginUrl(); }, 1200);
-                })
-                .catch(bad);
-            }).catch(function () {});
+            // 主站提权：输一次密码，十分钟内有效——归档是主站动作，走这一套
+            askPanelPassword().then(function () { archiveEvent(); }).catch(function () {});
             return;
           }
           bad(e);
@@ -622,29 +610,6 @@
     });
   }
 
-  /* 一次性确认：只验这一次请求的密码，不开提权窗口 */
-  function askOncePassword(what) {
-    return new Promise(function (resolve, reject) {
-      var back = LT.modal("<h2>需要确认</h2>"
-        + '<p class="page-sub">' + LT.esc(what) + '：请输入登录密码。</p>'
-        + '<div class="field"><label for="oncePw">登录密码</label>'
-        + '<input id="oncePw" type="password" autocomplete="current-password"></div>'
-        + '<div class="row" style="margin-top:16px;justify-content:flex-end">'
-        + '<button class="btn" id="onceCancel" type="button">取消</button>'
-        + '<button class="btn primary" id="onceGo" type="button">确认</button></div>');
-      var box = $("#oncePw");
-      if (box) box.focus();
-      $("#onceCancel").addEventListener("click", function () {
-        back.close();
-        reject(new Error("cancelled"));
-      });
-      $("#onceGo").addEventListener("click", function () {
-        var pw = ($("#oncePw").value || "");
-        back.close();
-        resolve(pw);
-      });
-    });
-  }
 
   /* 提权：活动级的动作要回面板去输一次密码；面板的 sudo 是会话级的，这里借用同一次登录 */
   function askPanelPassword() {

@@ -68,7 +68,7 @@ TPL_DIR = os.path.join(BASE_DIR, "tpl")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.10.9.54"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.10.10.55"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -1423,22 +1423,6 @@ class Handler(BaseHTTPRequestHandler):
                 raise model.ApiError("当前账号无权执行该操作", 403)
             return acc
 
-        def need_sudo_once(data=None):
-            """一次性提权：不设有效期，验证这一次请求带的密码。
-
-            活动设置里的「归档」这类是主站操作的快捷入口——现场不想等十分钟的提权窗口，
-            但也不能不做确认，所以一次一验。
-            """
-            if getattr(self, "_via_token", None) is not None:
-                raise model.ApiError("这个操作需要重新输入密码，令牌做不到", 403)
-            if panel.session_sudo(conn, sess) > time.time():
-                return True
-            password = str((data or {}).get("password") or "")
-            if password and panel.verify_password(password, acc["pass"]):
-                with panel.tx() as tx:
-                    panel.audit(tx, acc["username"], "sudo_once", None, "一次性确认")
-                return True
-            raise SudoRequired()
 
         def need_sudo():
             """Elevation is per session, so this is the only place it is checked."""
@@ -2103,7 +2087,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/event/archive" and method == "POST":
             # 归档是负责人对自己活动的软删除：服务端把文件夹打包，外面只留元数据。
-            # 它本质是主站动作，活动设置里只是快捷入口，所以允许当次带密码做一次性确认
+            # 它本质是主站动作，活动设置里只是快捷入口——所以走主站 sudo，与「解锁修改」无关
             data = body()
             seq = int(data.get("seq") or 0)
             seat = seat_of(seq)
@@ -2113,7 +2097,7 @@ class Handler(BaseHTTPRequestHandler):
             if row["archived_at"]:
                 return self._json({"ok": True, "seq": seq, "archived": True,
                                    "already": True})
-            need_sudo_once(data)
+            need_sudo()
             refuse_stale()
             size = do_archive(seq, row["title"])
             return self._json({"ok": True, "seq": seq, "archived": True,

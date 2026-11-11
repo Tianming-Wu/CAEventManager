@@ -38,7 +38,7 @@
 ## 活动数据的归档与下载
 
 ```
-POST /api/panel/event/archive        负责人归档自己的活动（要提权；请求里带 password 可做一次性确认）
+POST /api/panel/event/archive        负责人归档自己的活动（要主站 sudo）
 POST /api/panel/event/force_archive  超管强制归档别人的活动（要 sudo）
 POST /api/panel/event/unarchive      超管取消归档（要 sudo）
 GET  /api/panel/event/download?seq=  下载：开启时负责人与参与者；已归档时超管 + sudo（含归档包）

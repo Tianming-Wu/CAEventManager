@@ -87,7 +87,9 @@ python tools/bump_version.py --show
 
 - 停服务用 `./bin/service.sh stop`（它先停看护进程，再停 app），别直接 kill app
 - `data/service.pid` 是 app 的 pid，`data/supervise.pid` 是看护进程的
-- 服务不是由看护进程起的（比如手工 `./bin/run.sh`），面板只改配置、不会自己重启
+- **面板「服务器管理」里的安全模式开关依赖这一层**：服务必须由 `bin/service.sh` 启动，
+  页面上的进出才会自己重启。手工 `./bin/run.sh` 起的服务没有看护进程，页面上会写
+  「服务管理未运行，无法自动重启」，只改配置不重启
 
 ## 日志
 

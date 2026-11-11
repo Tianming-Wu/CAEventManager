@@ -3823,10 +3823,9 @@
     chip.className = "chip" + (on ? " gold live" : "");
     btn.textContent = on ? "退出安全模式" : "进入安全模式";
     btn.className = "btn " + (on ? "" : "danger");
-    btn.disabled = !isOwner();
     if (note) {
       note.textContent = (S.hostMeta && S.hostMeta.supervised === false)
-        ? "这台服务不是由 service.sh 看着的：改完开关需要自己重启一次"
+        ? "服务管理未运行，无法自动重启。详见服务文档"
         : "";
     }
   }

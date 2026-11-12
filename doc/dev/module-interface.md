@@ -68,6 +68,7 @@
 | `requires` | 平台 | 需要的平台版本 |
 | `pages` | 平台 | 申请哪些页签；`id` 任意小写串 |
 | `scripts` | 平台 | 页签脚本之前先载入的共用脚本，写文件名去掉 `.js`（如 `common`） |
+| `settings` | 平台 | 哪些配置项可以从界面改；类型取自 `defaults.json` 里那个默认值 |
 | `external` | 平台 | 要哪些公开页面：`board` / `screen` / `checkin` / `admin`；声明了就自带那一页 |
 | `features` | 平台 | 能力声明（`search` / `shortlink` / 将来的 `super.*`） |
 | `actions` | 平台 | 写操作声明，平台据此生成接口、鉴权、审计与版本号 |
@@ -97,6 +98,27 @@ def snapshot(conn, cfg):
     """后台「名单」页要的行：id / sid / name / grp / role / 状态字段由模块定，
     平台只按 features.search 的声明取值。"""
 ```
+
+### 设置（可选）
+
+```python
+def check_settings(conn, updates):
+    """设置项的语义校验。平台已经按类型收过一遍，这里管"这个值合不合理"。"""
+```
+
+界面能改哪些键由 `module.json` 的 `settings` 声明；类型取自模块 `defaults.json` 里那个
+默认值（所以每个可改的键都要在 `defaults.json` 里有默认值）。平台自己的几个键
+（标题、副标题、公示地址、自助登记开关、展示屏幕）不写在模块里。
+
+### 导出（可选）
+
+```python
+def export_sheets(conn, cfg):
+    """要导出的表：[{"name": "01-汇总.csv", "text": "…", "primary": True}, …]"""
+```
+
+平台只负责打包成 zip、给文件起名；表有几张、每张什么列、叫什么名字都是模块的事。
+标 `primary: True` 的那一张会单独当"仅名单 CSV"下载。
 
 ### 动作
 
@@ -199,6 +221,9 @@ window.MODULE.pages.tickets = {
   平台只认识开关本身
 - 页签里的按钮由模块自己在 `mount` 里接；平台只认平台外壳上那几个 `data-*`
 - 平台不直接调模块的函数，只走 `button → pageShow/pageRefresh`
+
+模块还能带的东西：页签标记与脚本、公开页、预设、外观、导出表、设置校验。平台留给自己的
+只剩"壳"：页签调度、账号与席位、名单库、短链、通知、审计、备份归档、大屏与页面外壳。
 
 **已经搬完的**：五个页签的标记、脚本与动作全在模块里（`ops` / `roster` / `tickets` /
 `draw` / `config` 五份脚本加一份共用件）。平台侧只剩页签调度与主站功能：活动设置（成员、

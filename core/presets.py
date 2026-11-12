@@ -16,7 +16,7 @@ A preset file declares what it needs:
     {
       "id": "nwuca.salon",
       "name": "计算机杂谈活动",
-      "dependency": { "module": "nwuca.lottery", "template": "nwuca.lottery.salon" },
+      "dependency": { "module": "nwuca.<名字>", "template": "nwuca.<名字>.<预设>" },
       "params": { "pool_mode": "auto" }
     }
 

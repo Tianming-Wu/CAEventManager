@@ -192,11 +192,11 @@ def event_id():
 
 # 平台自己的默认配置；玩法相关的默认值在模块的 defaults.json 里，建活动时一并写入
 DEFAULT_CONFIG = {
-    "kind": "nwuca.lottery",      # 这个活动用的是哪个模块
+    "kind": "",                   # 这个活动用的是哪个模块，建活动时写定
     "title": "",
     "subtitle": "",
     "public_base_url": "",        # 对外地址由前缀 + token 算出来，这里只留旧值备用
-    "self_checkin": True,         # 允许扫大屏二维码自助签到
+    "self_checkin": True,         # 允许扫大屏二维码自助登记
     "event_timezone_offset": 8,   # 导出与文案里的时区
 }
 
@@ -313,7 +313,7 @@ def connect():
 
 
 def checkin_secret(conn):
-    """这个活动的签到签名密钥；第一次用到时生成并写进它自己的库。"""
+    """这个活动的自助登记签名密钥；第一次用到时生成并写进它自己的库。"""
     secret = get_config(conn, "checkin_secret")
     if secret:
         return secret
@@ -332,13 +332,16 @@ def init_db(kind=None):
         conn.execute("PRAGMA user_version")  # 打开一次，确保文件真的建出来
         audit_connect().close()             # 审计库也建出来，归档时两个文件都在
         # 干什么用的模块决定了它自己那几张表；没写 kind 就看库里的配置
-        cfg_kind = kind or get_config(conn, "kind") or DEFAULT_CONFIG["kind"]
+        cfg_kind = kind or get_config(conn, "kind") or ""
         module_schema = modules.kind_schema(cfg_kind)
         if module_schema:
             conn.executescript(module_schema)
         now = time.time()
         defaults = dict(DEFAULT_CONFIG)
-        defaults.setdefault("kind", cfg_kind)
+        # kind 由这个活动自己说了算：平台不再给默认模块
+        defaults.pop("kind", None)
+        if cfg_kind:
+            defaults["kind"] = cfg_kind
         # 模块的默认配置只在它自己的键缺的时候才写，平台的键以平台为准
         for key, val in modules.kind_defaults(cfg_kind).items():
             defaults.setdefault(key, val)

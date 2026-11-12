@@ -148,7 +148,12 @@ def audit_words():
         for path in sorted(paths):
             rel = os.path.relpath(path, ROOT).replace("\\", "/")
             found = []
+            skipped = 0
             for lineno, line in enumerate(read(path).splitlines(), 1):
+                if "audit-ignore" in line:
+                    # 有意保留的引用（历史迁移、表头别名、示例）在行尾标一下
+                    skipped += 1
+                    continue
                 for word in WORDS:
                     if word in line:
                         found.append((lineno, word, line.strip()[:70]))
@@ -160,6 +165,8 @@ def audit_words():
                 print("     %4d  [%s] %s" % (lineno, word, line))
             if len(found) > 5:
                 print("           … 还有 %d 处" % (len(found) - 5))
+            if skipped:
+                print("           （另有 %d 行标了 audit-ignore，跳过）" % skipped)
             hits += len(found)
     print("\n   合计 %d 处" % hits)
     return hits

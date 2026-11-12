@@ -427,7 +427,7 @@ TOOLS = [
      "description": "列出这个账号能看到的活动（含自己在其中的角色）",
      "parameters": {"type": "object", "properties": {}}},
     {"name": "event_board", "run": _tool_event_board,
-     "description": "读一场活动的公示数据：人数、签到、奖票、奖品与最近中奖",
+     "description": "读一场活动的公示数据（有什么由活动的模块决定）",
      "parameters": {"type": "object",
                     "properties": {"seq": {"type": "string",
                                            "description": "活动的 seq 或访问标识"}},

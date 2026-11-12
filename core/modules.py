@@ -159,6 +159,17 @@ def normalize_scripts(raw):
     return out
 
 
+def normalize_settings(raw):
+    """模块声明"哪些配置项可以从界面改"；写错的名字丢掉。"""
+    out = []
+    for item in raw or []:
+        key = str(item or "").strip()
+        if not re.match(r"^[a-z][a-z0-9_]{0,31}$", key) or key in out:
+            continue
+        out.append(key)
+    return out
+
+
 def normalize_external(raw):
     """The public page ids a module declares; unknown ids are dropped."""
     if raw is None:
@@ -273,7 +284,7 @@ def external_routes(module_id, version):
 
 
 def external_dir(kind_id):
-    """模块自带的公开页目录（公示页、签到页这些），没有就是空串。"""
+    """模块自带的公开页目录（公示页、登记页这些），没有就是空串。"""
     folder = kind_dir(kind_id)
     if not folder:
         return ""
@@ -507,7 +518,7 @@ def load_module(folder, version, builtin=False, enabled=True):
 
     kind_id = str(meta.get("id") or "").strip()
     if not ID_RE.match(kind_id):
-        raise KindError("id 需要形如 nwuca.lottery")
+        raise KindError("id 需要形如 nwuca.<名字>")
     if is_super_feature(kind_id):
         raise KindError("%s 是平台保留的命名空间，模块 id 不能用" % RESERVED_PREFIX)
     if not str(meta.get("name") or "").strip():
@@ -568,6 +579,7 @@ def load_module(folder, version, builtin=False, enabled=True):
         "requires": requires,
         "pages": normalize_pages(meta.get("pages")),
         "scripts": normalize_scripts(meta.get("scripts")),
+        "settings": normalize_settings(meta.get("settings")),
         "external": normalize_external(meta.get("external")),
         "features": features,
         "api": api,

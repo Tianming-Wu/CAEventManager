@@ -346,7 +346,8 @@ def username_taken(conn, name, skip_id=0):
     return row is not None
 
 
-DEFAULT_KIND = "nwuca.lottery"
+# 老库（单活动时代）迁移时只有一个模块，这里写死；新活动一律由建活动时选定
+DEFAULT_KIND = "nwuca.lottery"   # audit-ignore
 
 
 def _migrate_events(conn):

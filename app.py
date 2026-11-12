@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Ticket lottery service - stdlib only, no dependencies.
+"""Activity service - stdlib only, no dependencies.
 
 Pages
 -----
@@ -68,7 +68,7 @@ PAGES_DIR = os.path.join(BASE_DIR, "pages")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.0.74"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.0.75"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -113,13 +113,13 @@ def _note_register_hit(ip):
 SHORTLINK_SUGGEST = [
     {"key": "", "label": "公示页"},
     {"key": "screen", "label": "大屏"},
-    {"key": "checkin", "label": "签到页"},
+    {"key": "checkin", "label": "登记页"},
     {"key": "admin", "label": "活动后台"},
 ]
 
 def module_pages_html(cfg):
     """模块自己那几张页签的标记，平台把它们拼进外壳的 {{MODULE_PAGES}}。"""
-    kind = cfg.get("kind") or db.DEFAULT_CONFIG["kind"]
+    kind = cfg.get("kind") or ""
     mod = _modules_by_id(panel.connect()).get(kind) or {}
     return "\n".join(modules.page_fragments(kind, mod.get("pages") or []))
 
@@ -157,7 +157,7 @@ def safe_mode_banner():
 
 def substitute_page(body, cfg):
     """页面里的占位符：标题、版本、图标、模块页签片段、安全模式横幅。"""
-    body = body.replace(b"{{TITLE}}", str(cfg.get("title") or "抽奖").encode("utf-8"))
+    body = body.replace(b"{{TITLE}}", str(cfg.get("title") or "活动").encode("utf-8"))
     body = body.replace(b"{{VERSION}}", VERSION.encode("utf-8"))
     body = body.replace(b"{{FAVICON}}", favicon_markup().encode("utf-8"))
     if b"{{MODULE_PAGES}}" in body:
@@ -3258,7 +3258,7 @@ class Handler(BaseHTTPRequestHandler):
                 )
             secret = db.checkin_secret(conn)
             if token and checkin.verify(secret, token):
-                # cookie 的路径按这个活动自己的 token 来：不同活动的签到互不影响
+                # cookie 的路径按这个活动自己的 token 来：不同活动之间互不影响
                 cookie_path = sanitize_cookie_path("/" + (self._token or "") + "/")
                 return self._page_html(
                     "checkin.html",
@@ -3273,7 +3273,7 @@ class Handler(BaseHTTPRequestHandler):
             rel = path[len("/external/"):]
             if not rel or "/" in rel or ".." in rel or rel.startswith("."):
                 return self._err("not found", 404)
-            kind = db.get_config(db.connect(), "kind") or db.DEFAULT_CONFIG["kind"]
+            kind = db.get_config(db.connect(), "kind") or ""
             full = modules.external_file(kind, rel)
             if not full:
                 return self._err("not found", 404)
@@ -3283,7 +3283,7 @@ class Handler(BaseHTTPRequestHandler):
             name = path[len("/module/"):-len(".js")]
             if not name or "/" in name or ".." in name or name.startswith("."):
                 return self._err("not found", 404)
-            kind = db.get_config(db.connect(), "kind") or db.DEFAULT_CONFIG["kind"]
+            kind = db.get_config(db.connect(), "kind") or ""
             folder = modules.kind_dir(kind)
             full = os.path.join(folder, "pages", name + ".js") if folder else ""
             if not full or not os.path.isfile(full):
@@ -3351,7 +3351,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _page_body(self, name):
         """公开页的正文：模块自带这一页就用模块的，没有才回落到平台模板。"""
-        kind = db.get_config(db.connect(), "kind") or db.DEFAULT_CONFIG["kind"]
+        kind = db.get_config(db.connect(), "kind") or ""
         full = modules.external_file(kind, name)
         if full:
             with open(full, "rb") as fh:
@@ -3409,7 +3409,7 @@ class Handler(BaseHTTPRequestHandler):
         self._check_csrf()
         conn = db.connect()
         cfg = db.all_config(conn)
-        kind = cfg.get("kind") or db.DEFAULT_CONFIG["kind"]
+        kind = cfg.get("kind") or ""
         mod = _modules_by_id(panel.connect()).get(kind) or {}
         decl = (mod.get("actions") or {}).get(name)
         if not decl:
@@ -3497,7 +3497,7 @@ class Handler(BaseHTTPRequestHandler):
                     "ok": True,
                     "enabled": bool(cfg.get("self_checkin", True)),
                     "verified": verified,
-                    "title": cfg.get("title") or "抽奖",
+                    "title": cfg.get("title") or "",
                     "subtitle": cfg.get("subtitle") or "",
                     "checkin_count": st["checkin"],
                     "total": st["total"],
@@ -3512,9 +3512,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._err("尝试太频繁了，请 %d 秒后再试" % wait, 429)
             cfg = db.all_config(conn)
             if not cfg.get("self_checkin", True):
-                return self._err("本活动未开启自助签到，请找工作人员", 403)
+                return self._err("本活动未开启自助登记，请找工作人员", 403)
             if not has_presence(self.headers, db.checkin_secret(conn)):
-                return self._err("签到二维码已过期，请重新扫描现场大屏上的二维码", 403)
+                return self._err("登记二维码已过期，请重新扫描现场大屏上的二维码", 403)
             data = self._body()
             try:
                 with db.tx(conn):
@@ -3699,7 +3699,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/admin/console" and method == "GET":
             cfg = db.all_config(conn)
-            kind_id = cfg.get("module") or cfg.get("kind") or "nwuca.lottery"
+            kind_id = cfg.get("module") or cfg.get("kind") or ""
             disabled = panel.disabled_modules(panel.connect())
             return self._json({"ok": True,
                                "pages": modules.console_pages(kind_id, VERSION,
@@ -3777,7 +3777,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/admin/undo" and method == "POST":
             self._check_csrf()
             if not me.unlocked():
-                return self._err("撤销操作需要先打开「解锁修改」开关", 403)
+                return self._err("这个操作需要先打开「解锁修改」开关", 403)
             data = self._body()
             with db.tx(conn):
                 res = model.unmark(
@@ -3795,7 +3795,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/admin/set_time" and method == "POST":
             self._check_csrf()
             if not me.unlocked():
-                return self._err("改完成时间需要先打开「解锁修改」开关", 403)
+                return self._err("这个操作需要先打开「解锁修改」开关", 403)
             data = self._body()
             with db.tx(conn):
                 res = model.set_mark_time(
@@ -3856,7 +3856,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/admin/student_delete" and method == "POST":
             self._check_csrf()
             if not me.unlocked():
-                return self._err("删除学生需要先打开「解锁修改」开关", 403)
+                return self._err("这个操作需要先打开「解锁修改」开关", 403)
             data = self._body()
             with db.tx(conn):
                 res = model.delete_student(conn, int(data.get("id")))
@@ -3878,63 +3878,36 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/admin/settings" and method == "POST":
             self._check_csrf()
             data = self._body()
-            allowed = {
+            # 平台自己的键写在这里，玩法相关的键由模块在 module.json 的 settings 里声明；
+            # 类型取自模块 defaults.json 里那个默认值
+            platform_keys = {
                 "title": str,
                 "subtitle": str,
-                "pool_mode": str,
-                "pool_size": int,
-                "pool_expr": str,
-                "bonus_constant": int,
-                "nominal_guaranteed": int,
-                "beta": float,
                 "public_base_url": str,
-                "show_times": bool,
-                "show_sid": bool,
-                "allow_bonus": bool,
-                "person_draw_no_repeat": bool,
-                "draw_unique_inside": bool,
-                "draw_unique_across": bool,
                 "self_checkin": bool,
-                "screen_show_wall": bool,
-                "prizes": list,
-                "event_timezone_offset": float,
                 "screen_pack": str,
             }
+            kind = db.get_config(conn, "kind") or ""
+            declared = set((modules.get(kind, VERSION) or {}).get("settings") or [])
+            defaults = modules.kind_defaults(kind)
             updates = {}
-            for key, typ in allowed.items():
-                if key not in data:
-                    continue
+            for key, value in data.items():
+                if key in platform_keys:
+                    typ = platform_keys[key]
+                elif key in declared:
+                    typ = type(defaults.get(key))
+                    if typ is int and isinstance(value, bool):
+                        typ = bool
+                else:
+                    raise model.ApiError("没有这个设置项：%s" % key)
                 try:
-                    val = typ(data[key])
+                    updates[key] = typ(value)
                 except Exception:
                     raise model.ApiError("设置项 %s 格式不对" % key)
-                updates[key] = val
-            if "pool_mode" in updates and updates["pool_mode"] not in ("auto", "fixed", "expr"):
-                raise model.ApiError("奖票池模式只能是 auto 或 fixed")
-            if "bonus_constant" in updates:
-                if not (0 <= updates["bonus_constant"] <= 1000):
-                    raise model.ApiError("额外奖票常数需在 0..1000 之间")
-            if "pool_size" in updates:
-                if updates["pool_size"] < 1 or updates["pool_size"] > 5000:
-                    raise model.ApiError("奖票池数量需在 1..5000 之间")
-                # Shrinking is fine as long as it does not invalidate tickets
-                # that were already handed out - no reset needed.
-                live = model.live_ticket_count(conn)
-                if updates["pool_size"] < live:
-                    raise model.ApiError(
-                        "已经发出 %d 张奖票,奖票池不能小于 %d(不用重置,调大或改成自动模式即可)"
-                        % (live, live)
-                    )
-            if updates.get("pool_mode") == "expr" or "pool_expr" in updates:
-                text = updates.get("pool_expr")
-                if text is None:
-                    text = db.get_config(conn, "pool_expr") or ""
-                try:
-                    expr.check(text, model.POOL_NAMES)
-                except expr.ExprError as exc:
-                    raise model.ApiError(str(exc))
-            if "beta" in updates and not (-0.0 <= updates["beta"] <= 5.0):
-                raise model.ApiError("beta 需在 0..5 之间")
+            # 语义校验由模块自己说（池子够不够大这类）
+            check = getattr(model.current(), "check_settings", None)
+            if callable(check):
+                check(conn, updates)
             if "screen_pack" in updates:
                 # 空表示这一项不引用外部资源，用活动自带的展示页
                 want = (updates["screen_pack"] or "").strip()
@@ -3961,7 +3934,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/admin/unfinalize" and method == "POST":
             self._check_csrf()
             if not me.unlocked():
-                return self._err("取消结算需要先打开「解锁修改」开关", 403)
+                return self._err("这个操作需要先打开「解锁修改」开关", 403)
             with db.tx(conn):
                 res = model.unfinalize(conn)
                 me.touch_unlock()
@@ -3970,7 +3943,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/admin/reset_tickets" and method == "POST":
             self._check_csrf()
             if not me.unlocked():
-                return self._err("重置奖票需要先打开「解锁修改」开关", 403)
+                return self._err("这个操作需要先打开「解锁修改」开关", 403)
             with db.tx(conn):
                 res = model.reset_tickets(conn)
                 me.touch_unlock()
@@ -4060,7 +4033,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/admin/draw_void" and method == "POST":
             self._check_csrf()
             if not me.unlocked():
-                return self._err("作废抽奖记录需要先打开「解锁修改」开关", 403)
+                return self._err("这个操作需要先打开「解锁修改」开关", 403)
             data = self._body()
             with db.tx(conn):
                 res = model.void_draw(conn, int(data.get("id")))
@@ -4075,11 +4048,13 @@ class Handler(BaseHTTPRequestHandler):
             return self._export_csv(conn)
 
         if path == "/api/admin/export.zip" and method == "GET":
+            # 表由模块给，平台只打包；文件名带上活动名
             name, data = exporter.build(conn)
             self.send_response(200)
             self.send_header("Content-Type", "application/zip")
             self.send_header("Content-Length", str(len(data)))
-            self.send_header("Content-Disposition", 'attachment; filename="%s"' % name)
+            for key, val in [_attachment_header(name)]:
+                self.send_header(key, val)
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
             if self.command != "HEAD":
@@ -4090,58 +4065,19 @@ class Handler(BaseHTTPRequestHandler):
 
     # ---------------- csv export ----------------
     def _export_csv(self, conn):
-        cfg = db.all_config(conn)
-        students = model.snapshot(conn, cfg)
-        plan = model.plan_bonus(conn, cfg, students)
-        pos = {r["id"]: r["pos"] for r in plan["rows"]}
-        off = float(cfg.get("event_timezone_offset") or 8)
-
-        def fmt(ts):
-            if ts is None:
-                return ""
-            return time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(float(ts) + off * 3600))
-
-        buf = io.StringIO()
-        writer = csv.writer(buf, lineterminator="\r\n")
-        writer.writerow(
-            [
-                "学号",
-                "姓名",
-                "班级",
-                "签到时间",
-                "任务一时间",
-                "任务二时间",
-                "完成数",
-                "速度名次",
-                "奖票数",
-                "奖票号码",
-            ]
-        )
-        for s in students:
-            codes = sorted(t["code"] for t in (s.get("tickets") or []))
-            writer.writerow(
-                [
-                    s["sid"],
-                    s["name"],
-                    s.get("grp") or "",
-                    fmt(s["marks"].get("checkin")),
-                    fmt(s["marks"].get("task1")),
-                    fmt(s["marks"].get("task2")),
-                    s["tasks"],
-                    pos.get(s["id"], ""),
-                    len(codes),
-                    " ".join("%03d" % c for c in codes),
-                ]
-            )
-        body = "\ufeff" + buf.getvalue()
+        """仅名单 CSV：模块标了 primary 的那一张。"""
+        name, text = exporter.primary_csv(conn)
+        if not text:
+            return self._err("这个活动没有名单可以导出", 404)
         stamp = time.strftime("%Y%m%d-%H%M%S")
+        title = re.sub(r'[\\/:*?"<>|]+', "_", (db.get_config(conn, "title") or "").strip())[:40]
+        filename = "%s-%s.csv" % (title or "activity", stamp)
+        data = ("\ufeff" + text).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/csv; charset=utf-8")
-        data = body.encode("utf-8")
         self.send_header("Content-Length", str(len(data)))
-        self.send_header(
-            "Content-Disposition", 'attachment; filename="lottery-%s.csv"' % stamp
-        )
+        for key, val in [_attachment_header(filename)]:
+            self.send_header(key, val)
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         if self.command != "HEAD":

@@ -171,7 +171,7 @@ def expressions():
     db.use_data_dir(root)
     try:
         db.set_event(1)
-        db.init_db()
+        db.init_db("nwuca.lottery")
         conn = db.connect()
         with db.tx(conn):
             db.set_config_raw(conn, "pool_mode", "expr")
@@ -206,7 +206,7 @@ def _seed_batch(students, prizes, pool=40, inside=True):
     os.environ["LOTTERY_DATA_DIR"] = root
     db.use_data_dir(root)
     db.set_event(1)
-    db.init_db()
+    db.init_db("nwuca.lottery")
     conn = db.connect()
     with db.tx(conn):
         db.set_config_raw(conn, "pool_mode", "fixed")

@@ -56,12 +56,12 @@ def signals(stats=None, disk=None):
         if pct <= DISK_OUT_PCT or free_mb <= DISK_OUT_MB:
             out.append(_item(
                 "svc:disk", "critical", "数据盘空间几乎用尽",
-                "只剩 %s（%.0f%%）。写满之后，报名、签到与操作记录都写不进去。"
+                "只剩 %s（%.0f%%）。写满之后，报名、登记与操作记录都写不进去。"
                 % (_gb(free), pct), sticky=True))
         elif pct <= DISK_LOW_PCT or free_mb <= DISK_LOW_MB:
             out.append(_item(
                 "svc:disk", "important", "数据盘空间不足",
-                "只剩 %s（%.0f%%）。空间用尽后，报名、签到与操作记录都写不进去。"
+                "只剩 %s（%.0f%%）。空间用尽后，报名、登记与操作记录都写不进去。"
                 % (_gb(free), pct), sticky=True))
 
     return out

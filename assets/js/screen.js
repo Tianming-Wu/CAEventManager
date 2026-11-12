@@ -1,7 +1,7 @@
 /* 大屏外壳：二维码、阶段版式、以及模块填进来的几块内容。
 
-   平台只负责"怎么画"：数字条、名单条、名字墙、中区卡片、抽奖那种揭示动画。
-   "画什么"全在 `present().screen` 里——平台不认识奖票、名次这些词，换一个模块
+   平台只负责"怎么画"：数字条、名单条、名字墙、中区卡片、揭示动画。
+   "画什么"全在 `present().screen` 里——平台不认识里面的词，换一个模块
    照样能用这块屏。哪一块没给就不画哪一块。 */
 (function () {
   "use strict";
@@ -70,7 +70,7 @@
           var url = boardUrl() + "/checkin?t=" + d.token;
           if (url !== qrUrl) {
             qrUrl = url;
-            drawQR(url, caption("signin", "扫码签到 · 每 10 秒刷新"));
+            drawQR(url, caption("signin", "扫码登记 · 每 10 秒刷新"));
           }
         })
         .catch(function () {});

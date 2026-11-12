@@ -1,6 +1,7 @@
 {
   "pool_mode": "auto",
   "pool_size": 200,
+  "pool_expr": "",
   "bonus_constant": 20,
   "nominal_guaranteed": 180,
   "beta": 1.0,

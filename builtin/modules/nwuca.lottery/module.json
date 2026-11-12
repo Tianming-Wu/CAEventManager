@@ -18,6 +18,23 @@
   "scripts": [
     "common"
   ],
+  "settings": [
+    "pool_mode",
+    "pool_size",
+    "pool_expr",
+    "bonus_constant",
+    "nominal_guaranteed",
+    "beta",
+    "show_times",
+    "show_sid",
+    "allow_bonus",
+    "person_draw_no_repeat",
+    "draw_unique_inside",
+    "draw_unique_across",
+    "screen_phase",
+    "screen_show_wall",
+    "prizes"
+  ],
   "pages": [
     {
       "id": "ops",

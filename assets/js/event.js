@@ -18,7 +18,7 @@
   var watchers = [];
 
   /* 服务端版本：重新部署之后，这台机器上的页面还在跑旧脚本。
-     第一次收到只记下来，之后变了才换页面；投影页正在抽奖时由页面自己延后。 */
+     第一次收到只记下来，之后变了才换页面；正在播放内容的页面由它自己延后。 */
   var bootVersion = "";
   var outdatedHandler = null;
 
@@ -316,7 +316,7 @@
     return whole ? 320 : 300;
   }
 
-  /* 一个词对一个学生的匹配分：姓名与学号直接比，拼音按上面的规则。 */
+  /* 一个词对一条记录的匹配分：姓名字段与 key 字段直接比，拼音按上面的规则。 */
   function termScore(stu, term) {
     var sid = (stu.sid || "").toLowerCase();
     var name = stu.name || "";
@@ -351,7 +351,7 @@
     return termScore(stu, term);
   }
 
-  /* 模块申请了 search 就按它声明的字段与词表来；没有就用内置的那张（抽奖模块的老样子） */
+  /* 模块申请了 search 就按它声明的字段与词表来；没申请就没有标签可用 */
   /* 模块没声明词表就没有标签可用：词表由 features.search.tags 提供，平台不再自带 */
   function tagsFromSpec(spec) {
     if (!spec || !spec.tags || !spec.tags.length) return [];

@@ -152,7 +152,7 @@ def main():
           (page or b"")[:60])
     reg = call(anon, "/register")
     check("register lives at /register", isinstance(reg, bytes)
-          and "注册".encode() in reg and "参加抽奖并不需要注册账户".encode() in reg,
+          and "注册".encode() in reg and "参加活动并不需要注册账户".encode() in reg,
           (reg or b"")[:60])
     landed = call(anon, "/panel")
     check("anonymous /panel lands on login",

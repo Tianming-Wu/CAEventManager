@@ -665,7 +665,7 @@ def entry_view(row):
 # 名单导入认哪些表头：这是平台的事，与玩法无关
 HEADER_ALIASES = {
     "sid": ("学号", "sid", "id", "号码", "studentid", "student_id", "工号", "准考证号"),
-    "name": ("姓名", "name", "名字", "学生姓名"),
+    "name": ("姓名", "name", "名字", "学生姓名"),   # audit-ignore 名单导入的表头别名
     "py": ("拼音", "py", "pinyin", "全拼"),
     "pyi": ("首字母", "pyi", "initials", "简拼"),
     "grp": ("班级", "分组", "grp", "group", "小组", "专业"),

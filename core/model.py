@@ -2,7 +2,7 @@
 """活动的业务模型由模块提供，这一层只负责按活动所用的模块把它取出来。
 
 调用方写的还是 ``model.xxx(...)``：先按当前活动的 ``kind`` 找到模块的 ``model.py``，
-再把属性转过去。平台自己不认识任何玩法字段——奖票、任务链这些词都只出现在模块里。
+再把属性转过去。平台自己不认识任何玩法字段——那些词只出现在模块里。
 """
 import db
 import errors
@@ -18,8 +18,10 @@ def model_for(kind_id):
 
 def current():
     """当前活动的业务模型：按它自己的 kind 取。"""
-    cfg = db.get_config(db.connect(), "kind") or db.DEFAULT_CONFIG["kind"]
-    return model_for(cfg)
+    kind = str(db.get_config(db.connect(), "kind") or "").strip()
+    if not kind:
+        raise errors.ApiError("这个活动没有指定模块", 500)
+    return model_for(kind)
 
 
 def ensure_event(conn=None):

@@ -1414,3 +1414,217 @@ def present(conn, cfg=None):
         "winners": winners,
         "screen": _screen_block(cfg, st, students, last, batch, winners),
     }
+
+
+# --------------------------------------------------------------------------- #
+# 数据导出：模块说导出哪几张表，平台只负责打包
+# --------------------------------------------------------------------------- #
+ROLE_LABEL = {"participant": "参加人员", "staff": "工作人员", "volunteer": "志愿者"}
+
+
+def _csv(rows):
+    buf = io.StringIO()
+    writer = csv.writer(buf, lineterminator="\r\n")
+    for row in rows:
+        writer.writerow(row)
+    return buf.getvalue()
+
+
+def _clock(cfg, ts):
+    if not ts:
+        return ""
+    off = float(cfg.get("event_timezone_offset") or 8)
+    return time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(float(ts) + off * 3600))
+
+
+def _role(cfg, role):
+    return ROLE_LABEL.get(role, role or "")
+
+
+def _sheet_summary(conn, cfg, students):
+    st = stats(conn, cfg, students)
+    prizes = prize_status(conn, cfg)
+    plans = plan_bonus(conn, cfg, students)["summary"]
+    rows = [["项目", "值"]]
+    rows += [
+        ["活动标题", cfg.get("title") or ""],
+        ["导出时间", _clock(cfg, time.time())],
+        ["", ""],
+        ["名单总人数", st["total"]],
+        ["参加人员", st["participants"]],
+        ["工作人员 / 志愿者", st["staff"]],
+        ["参加人员已签到", st["checkin"]],
+        ["工作人员已到场", st["staff_present"]],
+        ["特等奖候选人数", st["present_all"]],
+        ["完成任务一", st["task1"]],
+        ["完成任务二", st["task2"]],
+        ["", ""],
+        ["奖票池", st["pool_size"]],
+        ["奖票池模式", "自动（到场×3+常数）" if st["pool_mode"] == "auto" else "固定"],
+        ["额外奖票常数", st["bonus_constant"]],
+        ["保底奖票", st["guaranteed"]],
+        ["速度奖励票", st["bonus_pool"]],
+        ["已发出奖票", st["live_tickets"]],
+        ["是否已结算", "是" if st["finalized"] else "否"],
+        ["结算时间", _clock(cfg, cfg.get("finalized_at"))],
+        ["参与速度排名人数", plans.get("present")],
+        ["速度权重 β", plans.get("beta")],
+        ["", ""],
+        ["中奖记录", "%d 条有效（另有 %d 条作废）" % (
+            conn.execute("SELECT COUNT(*) c FROM draws WHERE voided_at IS NULL").fetchone()["c"],
+            conn.execute("SELECT COUNT(*) c FROM draws WHERE voided_at IS NOT NULL").fetchone()["c"],)],
+    ]
+    if st["live_tickets"] != st["pool_size"]:
+        off = st["live_tickets"] - st["pool_size"]
+        rows.append(["票池核对", "已发出 %d 张，奖票池 %d 张，差 %+d"
+                     % (st["live_tickets"], st["pool_size"], off)])
+    rows.append(["", ""])
+    rows.append(["奖品", "中奖方式 / 数量 / 已抽 / 剩余"])
+    for p in prizes:
+        rows.append([
+            p["name"],
+            "%s / %d / %d / %d" % (
+                "到场均等" if p["mode"] == "person" else "按票",
+                p["count"], p["drawn"], p["remaining"]),
+        ])
+    return _csv(rows)
+
+
+def _sheet_roster(conn, cfg, students):
+    order = {r["id"]: r["pos"] for r in plan_bonus(conn, cfg, students)["rows"]}
+    rows = [["学号", "姓名", "班级/院系", "身份", "签到时间", "任务一时间", "任务二时间",
+             "完成任务数", "速度名次", "奖票数", "奖票号码"]]
+    for s in students:
+        codes = sorted(t["code"] for t in (s.get("tickets") or []))
+        marks = s.get("marks") or {}
+        rows.append([
+            s["sid"], s["name"], s.get("grp") or "", _role(cfg, s["role"]),
+            _clock(cfg, marks.get("checkin")),
+            _clock(cfg, marks.get("task1")),
+            _clock(cfg, marks.get("task2")),
+            s["tasks"], order.get(s["id"], ""), len(codes),
+            " ".join("%03d" % c for c in codes),
+        ])
+    return _csv(rows)
+
+
+def _sheet_tickets(conn, cfg):
+    rows = [["奖票号码", "持有人", "学号", "身份", "来源", "发出时间", "状态"]]
+    for r in conn.execute(
+        "SELECT t.code, t.kind, t.assigned_at, t.released_at, s.name, s.sid, s.role "
+        "FROM tickets t LEFT JOIN students s ON s.id=t.student_id ORDER BY t.code"
+    ):
+        # 学生被删了票还在：删掉这一行会让明细和汇总里的发出数对不上
+        rows.append([
+            "%03d" % r["code"], r["name"] or "（记录已删除）", r["sid"] or "",
+            _role(cfg, r["role"]),
+            KIND_LABEL.get(r["kind"], r["kind"]),
+            _clock(cfg, r["assigned_at"]),
+            "已作废" if r["released_at"] else "有效",
+        ])
+    return _csv(rows)
+
+
+def _sheet_draws(conn, cfg):
+    rows = [["序号", "奖品", "抽取方式", "奖票号码", "得主", "学号", "身份", "时间", "状态"]]
+    for r in conn.execute(
+        "SELECT d.*, s.name, s.sid, s.role FROM draws d "
+        "LEFT JOIN students s ON s.id=d.student_id ORDER BY d.seq"
+    ):
+        person = r["mode"] == "person"
+        rows.append([
+            r["seq"], r["prize"] or "",
+            "到场均等" if person else "按票",
+            "" if person or r["code"] is None else "%03d" % r["code"],
+            r["name"] or "", r["sid"] or "",
+            _role(cfg, r["role"]),
+            _clock(cfg, r["ts"]),
+            "已作废" if r["voided_at"] else "有效",
+        ])
+    return _csv(rows)
+
+
+def _sheet_winners(conn, cfg):
+    """一人一行：按票抽的奖，一个人可以中多次。"""
+    bucket = {}
+    for r in conn.execute(
+        "SELECT d.prize, d.mode, d.code, d.ts, d.student_id, s.name, s.sid, s.role "
+        "FROM draws d LEFT JOIN students s ON s.id=d.student_id "
+        "WHERE d.voided_at IS NULL ORDER BY d.seq"
+    ):
+        key = r["student_id"] or -1
+        row = bucket.setdefault(key, {
+            "name": r["name"] or "", "sid": r["sid"] or "",
+            "role": _role(cfg, r["role"]), "won": [],
+        })
+        label = r["prize"] or ""
+        if r["mode"] != "person" and r["code"] is not None:
+            label += " #%03d" % r["code"]
+        row["won"].append(label)
+    rows = [["姓名", "学号", "身份", "中奖次数", "中奖明细"]]
+    for row in sorted(bucket.values(), key=lambda x: -len(x["won"])):
+        rows.append([row["name"], row["sid"], row["role"], len(row["won"]), "；".join(row["won"])])
+    return _csv(rows)
+
+
+def _sheet_log(conn, cfg, limit=5000):
+    """纯文本日志：这一张是拿来读的，套进 CSV 反而要调列宽。"""
+    lines = []
+    for r in conn.execute(
+        "SELECT a.*, s.name FROM audit a LEFT JOIN students s ON s.id=a.student_id "
+        "ORDER BY a.id LIMIT ?", (limit,)
+    ):
+        who = r["name"] or ""
+        if r["kind"]:
+            who = (who + " " + KIND_LABEL.get(r["kind"], r["kind"])).strip()
+        bits = [_clock(cfg, r["ts"]) or "-", r["action"] or "-"]
+        if who:
+            bits.append(who)
+        line = "  ".join(bits)
+        if r["detail"]:
+            line += "  |  " + str(r["detail"])
+        lines.append(line)
+    return "\n".join(lines) + ("\n" if lines else "")
+
+
+def export_sheets(conn, cfg=None):
+    """平台打包用：哪几张表、每张什么内容。"""
+    cfg = cfg or db.all_config(conn)
+    students = snapshot(conn, cfg)
+    return [
+        {"name": "01-汇总.csv", "text": _sheet_summary(conn, cfg, students)},
+        {"name": "02-名单.csv", "text": _sheet_roster(conn, cfg, students), "primary": True},
+        {"name": "03-奖票明细.csv", "text": _sheet_tickets(conn, cfg)},
+        {"name": "04-抽奖记录.csv", "text": _sheet_draws(conn, cfg)},
+        {"name": "05-中奖汇总.csv", "text": _sheet_winners(conn, cfg)},
+        {"name": "06-操作日志.log", "text": _sheet_log(conn, cfg)},
+    ]
+
+
+def check_settings(conn, updates):
+    """设置项的语义校验：平台只按类型收，规则在这套玩法自己这里。"""
+    if "pool_mode" in updates and updates["pool_mode"] not in ("auto", "fixed", "expr"):
+        raise ApiError("奖票池模式只能是 auto、fixed 或 expr")
+    if "bonus_constant" in updates:
+        if not (0 <= updates["bonus_constant"] <= 1000):
+            raise ApiError("额外奖票常数需在 0..1000 之间")
+    if "pool_size" in updates:
+        size = updates["pool_size"]
+        if size < 1 or size > 5000:
+            raise ApiError("奖票池数量需在 1..5000 之间")
+        # 只要不小于已经发出去的张数就可以缩小，不需要重置
+        live = live_ticket_count(conn)
+        if size < live:
+            raise ApiError(
+                "已经发出 %d 张奖票，奖票池不能小于 %d（不用重置，调大或改成自动模式即可）"
+                % (live, live))
+    if updates.get("pool_mode") == "expr" or "pool_expr" in updates:
+        text = updates.get("pool_expr")
+        if text is None:
+            text = db.get_config(conn, "pool_expr") or ""
+        try:
+            expr.check(text, POOL_NAMES)
+        except expr.ExprError as exc:
+            raise ApiError(str(exc))
+    if "beta" in updates and not (-0.0 <= updates["beta"] <= 5.0):
+        raise ApiError("beta 需在 0..5 之间")

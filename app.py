@@ -68,7 +68,7 @@ PAGES_DIR = os.path.join(BASE_DIR, "pages")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.0.86"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.0.87"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -1552,11 +1552,12 @@ class Handler(BaseHTTPRequestHandler):
             until = panel.session_sudo(conn, sess)
             if until <= time.time():
                 if until:
-                    # 提权已经过期：清掉并记一次，reason 与手动退出分开写
+                    # 提权已经过期：清掉并记一次，reason 与手动退出分开写；
+                    # 两个会话同时开着 sudo 时，靠 ip 分清关的是哪一个
                     with panel.tx() as tx:
                         panel.set_sudo(tx, sess, 0)
                         panel.audit(tx, acc["username"], "sudo_off", None,
-                                    panel.audit_note(reason="timeout"))
+                                    panel.audit_note(ip=ip, reason="timeout"))
                 raise SudoRequired()
 
         if path == "/sudo" and method == "POST":
@@ -1586,7 +1587,7 @@ class Handler(BaseHTTPRequestHandler):
             with panel.tx() as tx:
                 panel.set_sudo(tx, sess, 0)
                 panel.audit(tx, acc["username"], "sudo_off", None,
-                            panel.audit_note(reason="manual"))
+                            panel.audit_note(ip=ip, reason="manual"))
             return self._json({"ok": True, "sudoUntil": 0})
 
         if path == "/invite" and method == "POST":

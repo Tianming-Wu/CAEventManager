@@ -2855,6 +2855,11 @@
     loadService();
     syncSudo();
     if (wanted === "server" || wanted === "overview") refreshHost();
+    // 活动列表进页就问一次服务端：模块开关、归档、别人新建的活动都在这里体现。
+    // 只靠实时通知不够——一条断掉的流会让人以为活动还坏着，非要整页刷新
+    if (wanted === "events" || wanted === "all-events" || wanted === "overview") {
+      loadEvents().then(draw);
+    }
     if (wanted === "audit" && canAudit() && !S.audit.length) loadAudit().then(draw);
     if (wanted === "rosters") {
       S.rosterScope = S.rosterScope || "joined";
@@ -3239,7 +3244,9 @@
               label, why)
         .then(function () {
           PX.toast(on ? "已启用" : "已停用");
-          return loadTemplates(true).then(drawModules);
+          // 活动列表跟着刷新：卡片上的「不可用」标记由它决定，别等实时通知
+          return Promise.all([loadTemplates(true), loadEvents()])
+            .then(function () { drawModules(); });
         })
         .catch(fail);
     });
@@ -4122,8 +4129,10 @@
     if (more) more.hidden = S.audit.length >= (S.auditTotal || 0);
     $("#auditTable tbody").innerHTML = S.audit.length ? S.audit.map(function (r) {
       return '<tr><td class="mono">' + PX.whenExact(r.ts) + "</td>" +
-        // 操作人：库里存编号，这里显示「名字 (编号)」
-        "<td>" + PX.esc(r.actorLabel || r.actor || "") + "</td>" +
+        // 操作人：库里存编号，这里显示名字，编号淡一档跟在后面
+        "<td>" + PX.esc(r.actorName || r.actorLabel || r.actor || "") +
+        (r.actorId ? ' <span class="dim">(' + PX.esc(r.actorId) + ")</span>" : "") +
+        "</td>" +
         "<td>" + PX.esc(r.action) + "</td>" +
         "<td>" + PX.esc(r.target || "") + "</td>" +
         '<td class="wrap mono">' + PX.esc(r.detail || "") + "</td></tr>";

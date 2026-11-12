@@ -1440,10 +1440,12 @@ def main():
     check("说明都写成 key: value",
           all(not a["detail"] or ":" in a["detail"] for a in items),
           [a["detail"] for a in items if a["detail"]][:3])
-    check("sudo 的进出都带原因与来源",
+    check("sudo 的进出都带 ip 与原因",
           any(a["action"] == "sudo_on" and (a["detail"] or "").startswith("ip: ")
               for a in (call(owner, "/api/panel/audit?q=sudo&limit=40")["audit"]))
-          and any(a["action"] == "sudo_off" and "reason: " in (a["detail"] or "")
+          and any(a["action"] == "sudo_off"
+                  and "ip: " in (a["detail"] or "")
+                  and "reason: " in (a["detail"] or "")
                   for a in (call(owner, "/api/panel/audit?q=sudo_off&limit=40")["audit"])))
 
     post(owner, "/api/panel/token/revoke", {"id": writer["item"]["id"]})

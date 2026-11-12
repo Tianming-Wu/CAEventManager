@@ -2385,6 +2385,53 @@ def leave_guard_page(browser):
         ctx.close()
 
 
+def module_refresh_page(browser):
+    """停用/启用模块之后，主站的活动卡片自己更新，不用整页刷新。"""
+    print("== 模块开关：卡片自己更新 ==")
+    owner = owner_opener()
+    made = call(owner, "/api/panel/events/create",
+                {"template": "nwuca.salon", "title": "模块开关测试"})
+    check("先建一场用来观察的活动", bool(made and made.get("event")), made)
+    module_id = (made or {}).get("event", {}).get("kind") or "nwuca.lottery"
+    ctx, page = new_page(browser, 1280, 860)
+    try:
+        ui_login(page)
+        page.goto(BASE + "/panel#/modules")
+        page.wait_for_timeout(800)
+        # 停用（第一次要密码）
+        page.click('#moduleTable [data-module-toggle="%s"]' % module_id)
+        page.wait_for_selector("#sudoPass", timeout=8000)
+        page.fill("#sudoPass", PASSWORD)
+        page.click("#sudoEnter")
+        page.wait_for_timeout(1600)
+        check("停用之后模块表自己更新",
+              page.locator('#moduleTable [data-module-toggle="%s"][data-on="1"]'
+                           % module_id).count() == 1)
+        page.click('[data-nav="events"]')
+        page.wait_for_timeout(1200)
+        check("活动卡片上出现「不可用」",
+              page.locator("#ownedEvents .badge-off").count() >= 1,
+              page.locator("#ownedEvents .badge-off").count())
+        # 启用（已经提权，只多问一句）；全程不刷新页面
+        page.click('[data-nav="modules"]')
+        page.wait_for_timeout(800)
+        page.click('#moduleTable [data-module-toggle="%s"]' % module_id)
+        page.wait_for_timeout(500)
+        if page.locator("#confirmGo").count():
+            page.click("#confirmGo")
+        page.wait_for_timeout(1400)
+        page.click('[data-nav="events"]')
+        page.wait_for_timeout(1200)
+        check("不刷新页面，胶囊就自己消失了",
+              page.locator("#ownedEvents .badge-off").count() == 0,
+              page.locator("#ownedEvents .badge-off").count())
+    finally:
+        # 这一套件后面的用例还要用这个模块，无论成败都打开
+        call(owner, "/api/panel/sudo", {"password": PASSWORD})
+        call(owner, "/api/panel/module/toggle", {"id": module_id, "enabled": True})
+        ctx.close()
+
+
 def brand_left(page):
     """The product name's left edge: sudo mode pushes it over, it never moves otherwise."""
     return page.evaluate(
@@ -3268,6 +3315,7 @@ def main():
                 card_page(page)
                 create_page(browser)
                 leave_guard_page(browser)
+                module_refresh_page(browser)
                 # profile_page edits the signed-in account, so it only runs on a
                 # throw-away instance
                 if WITH_ACCOUNTS:

@@ -835,12 +835,15 @@ def with_actor_labels(conn, rows):
         if text.isdigit():
             uid = int(text)
             if uid == 0:
-                item["actorLabel"] = "system (0)"
+                item["actorName"] = "system"
             else:
-                who = names.get(uid) or ("账号 #%d" % uid)
-                item["actorLabel"] = "%s (%d)" % (who, uid)
+                item["actorName"] = names.get(uid) or ("账号 #%d" % uid)
+            item["actorId"] = text
+            item["actorLabel"] = "%s (%s)" % (item["actorName"], text)
         else:
-            item["actorLabel"] = text      # 历史行：当时存的就是登录名
+            item["actorName"] = text      # 历史行：当时存的就是登录名
+            item["actorId"] = ""
+            item["actorLabel"] = text
         out.append(item)
     return out
 

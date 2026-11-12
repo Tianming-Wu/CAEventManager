@@ -66,6 +66,7 @@ EVENTS_DDL = """CREATE TABLE IF NOT EXISTS events (
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS accounts (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    uid         INTEGER NOT NULL DEFAULT 0,   -- 对外编号，见 next_uid()
     username    TEXT    NOT NULL UNIQUE,
     name        TEXT    NOT NULL DEFAULT '',
     role        TEXT    NOT NULL DEFAULT 'admin',
@@ -282,6 +283,8 @@ class tx:
 # Columns added after the first release.  init_db() adds whatever is missing,
 # so an existing database gains them without a migration step on the operator.
 LATE_COLUMNS = (
+    # 账号编号：对外一律用 uid，登录名只是一个可以改的名字（见 next_uid）
+    ("accounts", "uid", "INTEGER NOT NULL DEFAULT 0"),
     ("accounts", "avatar", "TEXT NOT NULL DEFAULT ''"),
     ("accounts", "avatar_at", "REAL NOT NULL DEFAULT 0"),
     ("accounts", "ban_reason", "TEXT NOT NULL DEFAULT ''"),
@@ -404,6 +407,46 @@ def _migrate_events(conn):
     return True
 
 
+# --------------------------------------------------------------------------- #
+# 账号编号（uid）
+# --------------------------------------------------------------------------- #
+UID_START = 10000            # 站长的编号；其后的账号从这里往上发
+UID_MAX = 0xFFFFFFFF         # uint32：编号只在本实例内有意义，不跨实例通用
+
+
+def next_uid(conn):
+    """发一个新的账号编号。
+
+    编号是"这个人是谁"的凭据，登录名不是——登录名要能改。所以发出去的编号
+    不再回收：被删掉的账号留下的空号不会分给下一个注册的人。发到哪儿了记账在
+    settings 的 uid_seq 里，不靠 MAX(uid) 猜。
+    """
+    row = conn.execute("SELECT MAX(uid) AS top FROM accounts").fetchone()
+    top = int((row["top"] or 0) if row is not None else 0)
+    issued = int(get_setting(conn, "uid_seq", "0") or 0)
+    value = max(UID_START, top + 1, issued)
+    if value > UID_MAX:
+        raise ValueError("账号编号已经用尽")
+    set_setting(conn, "uid_seq", str(value + 1), "system")
+    return value
+
+
+def ensure_uids(conn):
+    """给还没有编号的账号补号：站长拿 10000，其余按加入先后。
+
+    老库升级时走一遍；之后每个新建账号自己发号。
+    """
+    rows = conn.execute(
+        "SELECT id, uid FROM accounts"
+        " ORDER BY CASE role WHEN 'owner' THEN 0 ELSE 1 END, id").fetchall()
+    for row in rows:
+        if int(row["uid"] or 0):
+            continue
+        conn.execute("UPDATE accounts SET uid=? WHERE id=?",
+                     (next_uid(conn), row["id"]))
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS accounts_uid ON accounts(uid)")
+
+
 def init_db():
     conn = connect()
     conn.executescript(SCHEMA)
@@ -413,6 +456,7 @@ def init_db():
         have = {row["name"] for row in conn.execute("PRAGMA table_info(%s)" % table)}   # sql-ok 只拼列名/表名/SET 片段，值都走 ?
         if column not in have:
             conn.execute("ALTER TABLE %s ADD COLUMN %s %s" % (table, column, spec))   # sql-ok 只拼列名/表名/SET 片段，值都走 ?
+    ensure_uids(conn)
     conn.execute(
         "INSERT INTO audit (ts, actor, action, detail) VALUES (?,?,?,?)",
         (time.time(), "system", "panel_init", None),
@@ -560,6 +604,17 @@ def member_of(conn, seq, account_id):
         (int(seq), int(account_id))).fetchone()
 
 
+def public_name(name, uid):
+    """界面上给别人看的名字：称呼优先，其次账号编号。
+
+    登录名是登录用的凭据，不拿来当显示名，也不做兜底——那等于把凭据发给别人。
+    """
+    name = (name or "").strip()
+    if name:
+        return name
+    return ("账号 #%d" % int(uid or 0)) if uid else "账号"
+
+
 def event_members(conn, seq):
     """Every seat on one event: those in place first, then pending, then history.
 
@@ -567,8 +622,8 @@ def event_members(conn, seq):
     list keeps it and the interface greys it out.
     """
     return conn.execute(
-        "SELECT m.*, a.username, a.name, a.avatar, a.avatar_at,"
-        "       i.name AS invited_by_name, i.username AS invited_by_username"
+        "SELECT m.*, a.uid, a.name, a.avatar, a.avatar_at,"
+        "       i.name AS invited_by_name, i.uid AS invited_by_uid"
         " FROM event_members m"
         " JOIN accounts a ON a.id = m.account_id"
         " LEFT JOIN accounts i ON i.id = m.invited_by"
@@ -581,7 +636,7 @@ def event_members(conn, seq):
 def seat_view(row):
     return {
         "accountId": row["account_id"],
-        "username": row["username"],
+        "uid": int(row["uid"] or 0) if "uid" in row.keys() else 0,
         "name": row["name"],
         "avatar": row["avatar"] or "",
         "avatarAt": row["avatar_at"] or 0,
@@ -591,7 +646,7 @@ def seat_view(row):
         "stateLabel": SEAT_STATE_LABEL.get(row["state"], row["state"]),
         "addedAt": row["added_at"],
         "stateAt": row["state_at"] or 0,
-        "invitedBy": row["invited_by_name"] or row["invited_by_username"] or "",
+        "invitedBy": public_name(row["invited_by_name"], row["invited_by_uid"]),
     }
 
 
@@ -599,7 +654,7 @@ def invites_for(conn, account_id):
     """Invitations waiting on this account, newest first."""
     return conn.execute(
         "SELECT m.seq, m.role, m.added_at, e.title, e.token,"
-        "       i.name AS inviter_name, i.username AS inviter_username"
+        "       i.uid AS inviter_uid, i.name AS inviter_name, i.username AS inviter_username"
         " FROM event_members m"
         " JOIN events e ON e.seq = m.seq"
         " LEFT JOIN accounts i ON i.id = m.invited_by"
@@ -962,6 +1017,7 @@ def view(row):
         return None
     return {
         "id": row["id"],
+        "uid": int(row["uid"] or 0) if "uid" in row.keys() else 0,
         "username": row["username"],
         "name": row["name"],
         "role": row["role"],
@@ -1051,9 +1107,9 @@ def bootstrap(cfg, log=print):
         password = os.environ.get("XTPANEL_OWNER_PASSWORD") or base64.urlsafe_b64encode(rng.bytes(9)).decode().rstrip("=")
         with tx() as t:
             t.execute(
-                "INSERT INTO accounts (username, name, role, status, pass, note, created_at) "
-                "VALUES (?,?,?,?,?,?,?)",
-                (username, display, "owner", "active", hash_password(password), "",
+                "INSERT INTO accounts (uid, username, name, role, status, pass, note, created_at) "
+                "VALUES (?,?,?,?,?,?,?,?)",
+                (next_uid(t), username, display, "owner", "active", hash_password(password), "",
                  time.time()),
             )
             audit(t, "system", "bootstrap_owner", username, None)

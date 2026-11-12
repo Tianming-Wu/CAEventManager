@@ -218,6 +218,12 @@ def main():
     pending = [a for a in accs["accounts"] if a["status"] == "pending"]
     check("owner sees the pending request", len(pending) == 1, accs["accounts"])
     teacher_id = pending[0]["id"]
+    check("the owner is numbered from 10000",
+          [a["uid"] for a in accs["accounts"] if a["role"] == "owner"] == [10000],
+          accs["accounts"])
+    check("every account has its own number",
+          len({a["uid"] for a in accs["accounts"]}) == len(accs["accounts"]),
+          accs["accounts"])
 
     print("== sudo mode ==")
     check("a fresh session is not elevated", me.get("sudoUntil") == 0, me)
@@ -535,15 +541,17 @@ def main():
     roster = call(owner, base + "/api/admin/members")
     check("the owner can read the roster", roster and roster["members"], roster)
     check("it starts with just the owner",
-          [m["username"] for m in roster["members"]] == ["owner"], roster["members"])
+          [m["name"] for m in roster["members"]] == ["站长"], roster["members"])
     found = call(owner, base + "/api/admin/members/search?q=teach")
     check("a search finds an account that is not in yet",
-          found and [a["username"] for a in found["accounts"]] == ["teacher"], found)
+          found and [a["name"] for a in found["accounts"]] == ["张老师"], found)
+    check("and never hands out a login name",
+          found and all("username" not in a for a in found["accounts"]), found)
     post(owner, base + "/api/admin/member",
          {"accountId": teacher_id, "action": "invite"}, marker="CAEventManager")
     check("the invitation is waiting for them", True)
     roster = call(owner, base + "/api/admin/members")
-    seat = [m for m in roster["members"] if m["username"] == "teacher"][0]
+    seat = [m for m in roster["members"] if m["name"] == "张老师"][0]
     check("a pending seat is not a seat yet", seat["state"] == "pending", seat)
     check("and it says who asked", seat["invitedBy"] == "站长", seat)
     invites = call(teacher, "/api/panel/invites")
@@ -565,7 +573,7 @@ def main():
     post(owner, base + "/api/admin/member",
          {"accountId": teacher_id, "action": "revoke"}, marker="CAEventManager")
     roster = call(owner, base + "/api/admin/members")
-    seat = [m for m in roster["members"] if m["username"] == "teacher"][0]
+    seat = [m for m in roster["members"] if m["accountId"] == teacher_id][0]
     check("a revoked seat stays on the record", seat["state"] == "revoked", seat)
     check("with the time it happened", seat["stateAt"] > 0, seat)
     check("their console access ends",
@@ -578,7 +586,7 @@ def main():
           call(teacher, "/api/panel/invites")["invites"][0]["seq"] == ev["seq"])
     post(teacher, "/api/panel/invite", {"seq": ev["seq"], "action": "decline"})
     roster = call(owner, base + "/api/admin/members")
-    seat = [m for m in roster["members"] if m["username"] == "teacher"][0]
+    seat = [m for m in roster["members"] if m["accountId"] == teacher_id][0]
     check("a decline is recorded too", seat["state"] == "declined", seat)
     post(owner, base + "/api/admin/member",
          {"accountId": owner_id, "action": "revoke"}, expect=400,

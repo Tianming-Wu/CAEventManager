@@ -2142,6 +2142,90 @@ def create_page(browser):
         ctx.close()
 
 
+def leave_guard_page(browser):
+    """离开创建页：地址先退回原处再问，敲进去的东西一样都不能丢。"""
+    print("== 未保存的创建页怎么走 ==")
+    opener = owner_opener()
+    made = []
+    for i in range(2):
+        user = "guard%d%s" % (i, TAG)
+        call(opener, "/api/panel/register",
+             {"username": user, "name": "守卫%d" % i, "password": "guard-pass-1", "note": ""})
+        made.append(user)
+    for a in call(opener, "/api/panel/accounts?limit=200")["accounts"]:
+        if a["username"] in made and a["status"] == "pending":
+            call(opener, "/api/panel/account/decide", {"id": a["id"], "action": "approve"})
+    ctx, page = new_page(browser, 1280, 860)
+    try:
+        ui_login(page)
+        page.goto(BASE + "/panel#/new-event/nwuca.salon")
+        page.wait_for_timeout(800)
+        page.fill("#neTitle", "半天的活动")
+
+        print("== 邀请成员那个弹窗 ==")
+        page.click("#invitePick")
+        page.wait_for_selector("#inviteFind", timeout=8000)
+        page.wait_for_timeout(500)
+        check("一打开就有人可选，不用先打字",
+              page.locator("#inviteTiles .pick-tile").count() >= 2,
+              page.locator("#inviteTiles .pick-tile").count())
+        shown = page.inner_text("#overlayBody")
+        check("只写称呼，不写登录名", "guard" not in shown and "user0" not in shown, shown[:120])
+        check("搜索框没有标签，只有占位词",
+              page.locator("#overlayBody label").count() == 0
+              and page.get_attribute("#inviteFind", "placeholder") == "搜索用户")
+        check("标题下面没有分隔线", page.evaluate(
+            "() => getComputedStyle(document.querySelector('.overlay-card.invite "
+            ".overlay-head')).borderBottomWidth") == "0px")
+        tall = page.locator("#inviteTiles").bounding_box()["height"]
+        page.fill("#inviteFind", "守卫")
+        page.wait_for_timeout(350)
+        check("筛完弹窗不变高变矮",
+              abs(page.locator("#inviteTiles").bounding_box()["height"] - tall) < 1,
+              (tall, page.locator("#inviteTiles").bounding_box()["height"]))
+        page.click("#inviteTiles .pick-tile")
+        page.wait_for_timeout(250)
+        check("点过的人排到页面上", page.locator("#inviteChips .invite-chip").count() == 1)
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(250)
+
+        print("== 选过人之后再点别处 ==")
+        page.click('[data-nav="overview"]')
+        page.wait_for_timeout(600)
+        check("先问一句，不先跳走",
+              page.locator("#overlay").is_visible()
+              and "离开创建活动" in page.inner_text("#overlayTitle"),
+              page.inner_text("#overlayTitle"))
+        check("地址还在表单那一页", page.url.endswith("#/new-event/nwuca.salon"), page.url)
+        check("敲进去的名字还在",
+              page.locator("#neTitle").input_value() == "半天的活动",
+              page.locator("#neTitle").input_value())
+        page.click('#overlayBody [data-close-overlay="1"]')
+        page.wait_for_timeout(300)
+        check("继续编辑：弹窗关上，原地不动",
+              page.locator("#overlay").is_hidden()
+              and page.url.endswith("#/new-event/nwuca.salon"), page.url)
+        check("选的人也没丢", page.locator("#inviteChips .invite-chip").count() == 1)
+
+        print("== 丢弃之后才真的走 ==")
+        page.click('[data-nav="overview"]')
+        page.wait_for_timeout(600)
+        page.click("#draftDrop")
+        page.wait_for_timeout(900)
+        check("丢弃之后到了总览",
+              page.url.endswith("#/overview") and page.locator("#overlay").is_hidden(),
+              page.url)
+        page.goto(BASE + "/panel#/new-event/nwuca.salon")
+        page.wait_for_timeout(900)
+        check("再回来是一张空表单，草稿没有留下",
+              page.locator("#neTitle").input_value() != "半天的活动",
+              page.locator("#neTitle").input_value())
+        check("这一段没有 javascript 错误", not page._errors,
+              "; ".join(page._errors)[:200])
+    finally:
+        ctx.close()
+
+
 def brand_left(page):
     """The product name's left edge: sudo mode pushes it over, it never moves otherwise."""
     return page.evaluate(
@@ -2987,6 +3071,7 @@ def main():
                 notice_page(page)
                 card_page(page)
                 create_page(browser)
+                leave_guard_page(browser)
                 # profile_page edits the signed-in account, so it only runs on a
                 # throw-away instance
                 if WITH_ACCOUNTS:

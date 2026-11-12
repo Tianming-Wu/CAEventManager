@@ -559,8 +559,9 @@
           m.accountId + '">重新邀请</button>';
       }
       return '<tr' + (gone ? ' class="muted-row"' : "") + '>' +
-        '<td><b>' + LT.esc(m.name || m.username) + '</b>' +
-        '<br><span class="note">' + LT.esc(m.username) + '</span></td>' +
+        '<td><b>' + LT.esc(m.name || (m.uid ? "账号 #" + m.uid : "账号")) + '</b>' +
+        (m.name && m.uid
+          ? '<br><span class="note">#' + m.uid + "</span>" : "") + '</td>' +
         '<td>' + LT.esc(m.roleLabel) + '</td>' +
         '<td>' + LT.esc(m.stateLabel) +
         (m.state === "pending" && m.invitedBy
@@ -610,19 +611,19 @@
       });
   }
 
-  function memberAction(accountId, action) {
+  function memberAction(accountId, action, name) {
     var who = (S.members || []).filter(function (m) {
       return m.accountId === accountId;
     })[0] || {};
-    var name = who.name || who.username || "这个人";
+    var label = name || who.name || (who.uid ? "账号 #" + who.uid : "") || "这个人";
     var ask = {
-      invite: { title: "邀请 " + name + "？",
+      invite: { title: "邀请 " + label + "？",
                 html: "对方会在自己的面板里收到邀请，确认之后才能进这个活动后台。",
                 ok: "邀请", danger: false },
-      revoke: { title: "移出 " + name + "？",
+      revoke: { title: "移出 " + label + "？",
                 html: "席位会变成「已移出」，姓名和加入时间留在名单里，随时可以重新邀请。",
                 ok: "移出", danger: true },
-      cancel: { title: "取消发给 " + name + " 的邀请？",
+      cancel: { title: "取消发给 " + label + " 的邀请？",
                 html: "对方还没确认，取消之后这条邀请就作废了。",
                 ok: "取消邀请", danger: true }
     }[action];
@@ -639,43 +640,65 @@
       });
   }
 
+  /* 给别人看的名字：登录名是登录用的凭据，界面上一律不出现；
+     没有称呼就退到账号编号（uid 一次性发放、不回收，改登录名也不动它） */
+  function accountLabel(acc) {
+    if (!acc) return "";
+    return acc.name || (acc.uid ? "账号 #" + acc.uid : "账号");
+  }
+
+  function avatarUrl(acc) {
+    if (!acc || !acc.avatar) return "";
+    if (/^https?:\/\//i.test(acc.avatar)) return acc.avatar;
+    return (LT.PANEL || "") + "/api/panel/avatar/" + acc.id +
+      "?v=" + Math.round(acc.avatarAt || 0);
+  }
+
+  function inviteTiles(hits) {
+    if (!hits.length) return '<p class="note">没有匹配的账号</p>';
+    return '<div class="pick-grid">' + hits.map(function (a) {
+      var label = accountLabel(a);
+      var url = avatarUrl(a);
+      return '<button class="pick-tile" type="button" data-pick="' + a.id +
+        '" data-who="' + LT.esc(label) + '">' +
+        '<span class="avatar">' + (url
+          ? '<img alt="" src="' + LT.esc(url) + '">'
+          : LT.esc(label.charAt(0))) + "</span>" +
+        '<span class="pick-name">' + LT.esc(label) + "</span></button>";
+    }).join("") + "</div>";
+  }
+
+  /* 邀请成员：和面板里那个邀请弹窗同一套——先看人再点，输入只是筛 */
   function openInviteSearch() {
     var back = LT.modal(
       '<h2>邀请成员</h2>' +
-      '<div class="field"><label>按登录名或称呼搜索</label>' +
-      '<input id="invQ" type="text" autocomplete="off" autofocus></div>' +
-      '<div id="invHits" class="pick-list"></div>' +
-      '<div class="row" style="justify-content:flex-end;margin-top:12px">' +
-      '<button class="btn" id="invDone">关闭</button></div>');
+      '<input id="invQ" type="search" autocomplete="off" placeholder="搜索用户"' +
+      ' aria-label="搜索用户" autofocus>' +
+      '<div id="invHits" class="invite-pick"><p class="note">正在读取账号</p></div>' +
+      '<div class="invite-foot"><button class="btn" id="invDone">完成</button></div>');
+    var card = back.querySelector(".modal");
+    if (card) card.classList.add("invite");
     $("#invDone").addEventListener("click", back.close);
     var box = $("#invQ");
     var timer = null;
+    var load = function () {
+      var q = box.value.trim();
+      LT.api("/api/admin/members/search" + (q ? "?q=" + encodeURIComponent(q) : ""))
+        .then(function (d) { $("#invHits").innerHTML = inviteTiles(d.accounts || []); })
+        .catch(bad);
+    };
     box.addEventListener("input", function () {
       clearTimeout(timer);
-      var q = box.value.trim();
-      if (!q) {
-        $("#invHits").innerHTML = "";
-        return;
-      }
-      timer = setTimeout(function () {
-        LT.api("/api/admin/members/search?q=" + encodeURIComponent(q))
-          .then(function (d) {
-            var hits = d.accounts || [];
-            $("#invHits").innerHTML = hits.length ? hits.map(function (a) {
-              return '<button class="pick" type="button" data-pick="' + a.id + '">' +
-                "<b>" + LT.esc(a.name || a.username) + "</b>" +
-                '<span class="note">' + LT.esc(a.username) + " · " +
-                LT.esc(a.roleLabel) + "</span></button>";
-            }).join("") : '<p class="note">没有匹配的账号</p>';
-          }).catch(bad);
-      }, 220);
+      timer = setTimeout(load, 180);
     });
+    load();
     box.focus();
     $("#invHits").addEventListener("click", function (e) {
       var btn = e.target.closest("[data-pick]");
       if (!btn) return;
       back.close();
-      memberAction(Number(btn.getAttribute("data-pick")), "invite");
+      memberAction(Number(btn.getAttribute("data-pick")), "invite",
+                   btn.getAttribute("data-who") || "");
     });
   }
 

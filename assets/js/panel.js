@@ -150,6 +150,14 @@
     return s.trim().charAt(0);
   }
 
+  /* 给别人看的名字：登录名是登录用的凭据，不进界面；没有称呼就退到账号编号。
+     编号（uid）在实例内一次性发放、不再回收，改登录名不会动它。 */
+  function accountLabel(acc) {
+    if (!acc) return "";
+    if (acc.name) return acc.name;
+    return acc.uid ? "\u8d26\u53f7 #" + acc.uid : "\u8d26\u53f7";
+  }
+
   // The avatar endpoint is session-guarded, so a plain <img> is enough - the
   // cookie rides along.  ?v= busts the cache when the picture changes.
   function avatarUrl(acc) {
@@ -265,6 +273,8 @@
       // the password prompt is its own thing: narrow, and with the title
       // inside the body under the mark instead of a header bar with an x
       card.classList.toggle("narrow", kind === "sudo");
+      // 邀请成员也是一类：窄一点，标题下面直接接搜索框，中间不画线
+      card.classList.toggle("invite", kind === "invite");
       if (kind === "sudo") card.setAttribute("aria-label", title);
       else card.removeAttribute("aria-label");
     }
@@ -2703,13 +2713,19 @@
 
   function onRoute() {
     var prevRoute = S.route;                 // 上一页有没有返回键，全靠它
+    // routeFromHash() 会重算 templateId，所以先把它留在手里：离开表单时地址要退回原样
+    var prevTemplate = S.templateId;
     var wanted = routeFromHash() || FALLBACK_ROUTE;
     // 换一页就把会话抽屉收回去：返回键回到别处时，它不该还浮在上面
     closeAssistantDrawer();
     if (!guardBypass && S.route === "new-event" && wanted !== "new-event" && S.dirty) {
-      // put the address back where the form is, then ask what to do with it
-      var here = "#/" + S.route + (S.templateId ? "/" + encodeURIComponent(S.templateId) : "");
-      location.replace(here);
+      // 地址退回表单那一页，但不许重画：location.replace 会再触发一次 hashchange，
+      // 表单会按预设重填一遍，填过的内容和脏标记当场都没了（"继续编辑"也就无从恢复）
+      var here = "#/" + S.route +
+        (prevTemplate ? "/" + encodeURIComponent(prevTemplate) : "");
+      try {
+        history.replaceState(null, "", here);
+      } catch (e) { /* 极老的浏览器：地址留在原处，内容还在 */ }
       askDraftChoice(wanted);
       return;
     }
@@ -2718,6 +2734,8 @@
       showDenied(wanted);
       return;
     }
+    // 走了就把这张表单忘掉：下次进来该是干净的一张（草稿另存，回来时再填）
+    if (prevRoute === "new-event" && wanted !== "new-event") forgetKindForm();
     S.route = wanted;
     S.typed = false;         // 换了一页，"这一页敲过字"重新算
     // 助手页把输入框钉在底部，页脚就不跟它抢这点高度了
@@ -3171,6 +3189,18 @@
 
   function markDirty() { S.dirty = true; }
 
+  /* 离开创建页时把这张表单清空：不然下次进来还挂着上一次的名字与人像。
+     已经存成草稿的内容不走这里——回来时 restoreDraft 会把它填回去。 */
+  function forgetKindForm() {
+    S.invited = [];
+    S.currentFields = [];
+    var title = $("#neTitle");
+    var note = $("#neNote");
+    if (title) title.value = "";
+    if (note) note.value = "";
+    renderInviteChips();
+  }
+
   var reloadTimer = null;
   function scheduleReload() {
     if (reloadTimer) return;
@@ -3420,8 +3450,6 @@
     renderInviteChips();
     bindShowWhen($("#kindFields"));
     S.dirty = false;
-    $("#kindForm").addEventListener("input", markDirty);
-    $("#kindForm").addEventListener("change", markDirty);
     restoreDraft(tpl);
   }
 
@@ -3519,15 +3547,14 @@
       return '<span class="invite-chip">' +
         '<span class="avatar">' + (url
           ? '<img alt="" src="' + PX.esc(url) + '">'
-          : PX.esc(initialOf(a))) + "</span>" +
-        '<span class="nm">' + PX.esc(displayName(a)) + "</span>" +
+          : PX.esc(accountLabel(a).charAt(0))) + "</span>" +
+        '<span class="nm">' + PX.esc(accountLabel(a)) + "</span>" +
         '<button type="button" data-uninvite="' + a.id + '" aria-label="移出">×</button>' +
         "</span>";
     }).join("");
     $("#inviteChips").innerHTML = html;
-    $("#inviteHint").textContent = S.invited.length
-      ? "\u5df2\u9009 " + S.invited.length + " \u4eba\uff0c\u521b\u5efa\u540e\u53d1\u51fa\u9080\u8bf7"
-      : "";
+    // 只说明这一步的后果，不报数：谁被选中，上面的人像已经写着
+    $("#inviteHint").textContent = S.invited.length ? "创建后发出邀请" : "";
   }
 
   function inviteTiles(query) {
@@ -3535,9 +3562,8 @@
     var rows = S.accounts.filter(function (a) {
       if (a.id === (S.me && S.me.id)) return false;
       if (!q) return true;
-      return (displayName(a) || "").toLowerCase().indexOf(q) >= 0
-        || (a.username || "").toLowerCase().indexOf(q) >= 0
-        || (a.name || "").toLowerCase().indexOf(q) >= 0;
+      return (accountLabel(a) || "").toLowerCase().indexOf(q) >= 0
+        || (a.username || "").toLowerCase().indexOf(q) >= 0;
     });
     if (!rows.length) {
       return '<div class="empty">' + (q
@@ -3551,9 +3577,8 @@
         '" data-invite="' + a.id + '">' +
         '<span class="avatar">' + (url
           ? '<img alt="" src="' + PX.esc(url) + '">'
-          : PX.esc(initialOf(a))) + "</span>" +
-        '<span class="pick-name">' + PX.esc(displayName(a)) + "</span>" +
-        '<span class="tag">' + PX.esc(a.roleLabel) + "</span></button>";
+          : PX.esc(accountLabel(a).charAt(0))) + "</span>" +
+        '<span class="pick-name">' + PX.esc(accountLabel(a)) + "</span></button>";
     }).join("") + "</div>";
   }
 
@@ -3583,40 +3608,29 @@
   }
 
   function showInvitePicker() {
-    // 与「活动设置 › 邀请成员」同一个逻辑：先搜再点，选多了也能取消
+    // 与「活动设置 › 邀请成员」同一套做法：先看人再点，点错了再点一次取消。
+    // 标题下面直接是搜索框，不写标签也不写"输入一部分即可"这种话
     openOverlay("invite", "邀请成员",
-      '<div class="field"><label for="inviteFind">按名字或登录名搜索</label>' +
-      '<input id="inviteFind" type="search" autocomplete="off" placeholder="输入一部分即可">' +
-      "</div>" +
-      '<div id="inviteTiles">' + inviteTiles("") + "</div>" +
-      '<div class="row" style="margin-top:16px;justify-content:space-between">' +
-      '<span class="note" id="inviteCount"></span>' +
-      '<button class="btn primary" type="button" data-close-overlay="1">完成</button>' +
-      "</div>");
+      '<input type="search" id="inviteFind" autocomplete="off" placeholder="搜索用户"' +
+      ' aria-label="搜索用户">' +
+      '<div class="invite-pick" id="inviteTiles">' + inviteTiles("") + "</div>" +
+      '<div class="invite-foot">' +
+      '<button class="btn" type="button" data-close-overlay="1">完成</button></div>');
     var box = $("#inviteFind");
-    var paint = function () {
-      $("#inviteTiles").innerHTML = inviteTiles(box.value);
-      paintInviteCount();
-    };
     // 点选交给文档上那一处统一处理（面板里所有 data-invite 都走它），这里只管筛
-    box.addEventListener("input", paint);
-    paint();
+    box.addEventListener("input", function () {
+      $("#inviteTiles").innerHTML = inviteTiles(box.value);
+    });
     box.focus();
-  }
-
-  function paintInviteCount() {
-    var el = $("#inviteCount");
-    if (el) {
-      el.textContent = S.invited.length ? "已选 " + S.invited.length + " 人" : "";
-    }
   }
 
   function toggleInvite(id) {
     var at = S.invited.indexOf(id);
     if (at >= 0) S.invited.splice(at, 1);
     else S.invited.push(id);
+    // 选人发生在弹窗里，表单收不到 input 事件：脏标记要在这里单独记一笔
+    markDirty();
     renderInviteChips();
-    paintInviteCount();
     var tile = $('[data-invite="' + id + '"]');
     if (tile) tile.classList.toggle("on", at < 0);
   }
@@ -3730,6 +3744,7 @@
     if (!a) return;
 
     var rows = [
+      ["编号", "#" + (a.uid || 0)],
       ["用户名", a.username],
       ["称呼", a.name || "—"],
       ["角色", a.roleLabel],
@@ -6122,6 +6137,9 @@
     go("events");
   });
   $("#kindCreate").addEventListener("click", createEvent);
+  // 表单是整块重画的，脏标记交给容器一次性代理；点选成员在弹窗里发生，另外记一笔
+  $("#kindForm").addEventListener("input", markDirty);
+  $("#kindForm").addEventListener("change", markDirty);
   $("#kindImport").addEventListener("click", function () {
     $("#kindImportFile").click();
   });

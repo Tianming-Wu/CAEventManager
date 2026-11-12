@@ -68,7 +68,7 @@ PAGES_DIR = os.path.join(BASE_DIR, "pages")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.0.77"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.0.78"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -694,12 +694,12 @@ def _can_manage_packs(acc):
 
 
 def _account_label(conn, account_id):
-    """A human name for a notice body; falls back to the login name."""
-    row = conn.execute("SELECT name, username FROM accounts WHERE id=?",
+    """A human name for a notice body; never the login name (that is a credential)."""
+    row = conn.execute("SELECT name, uid FROM accounts WHERE id=?",
                        (int(account_id or 0),)).fetchone()
     if row is None:
         return "有人"
-    return row["name"] or row["username"]
+    return panel.public_name(row["name"], row["uid"])
 
 
 def _roster_viewable(acc, row):
@@ -1350,7 +1350,7 @@ class Handler(BaseHTTPRequestHandler):
                  "role": r["role"],
                  "roleLabel": panel.SEAT_LABEL.get(r["role"], r["role"]),
                  "addedAt": r["added_at"],
-                 "invitedBy": r["inviter_name"] or r["inviter_username"] or ""}
+                 "invitedBy": panel.public_name(r["inviter_name"], r["inviter_uid"])}
                 for r in rows]})
 
         if path == "/register" and method == "POST":
@@ -1378,10 +1378,10 @@ class Handler(BaseHTTPRequestHandler):
                     _note_register_hit(ip)
                     raise model.ApiError(panel.USERNAME_TAKEN, 409)
                 tx.execute(
-                    "INSERT INTO accounts (username, name, role, status, pass, note, created_at) "
-                    "VALUES (?,?,?,?,?,?,?)",
-                    (username, name, "admin", "pending", panel.hash_password(password),
-                     note, time.time()))
+                    "INSERT INTO accounts (uid, username, name, role, status, pass, note, created_at) "
+                    "VALUES (?,?,?,?,?,?,?,?)",
+                    (panel.next_uid(tx), username, name, "admin", "pending",
+                     panel.hash_password(password), note, time.time()))
                 panel.audit(tx, "anon", "register", username, note)
             return self._json({"ok": True, "status": "pending"})
 
@@ -3342,6 +3342,15 @@ class Handler(BaseHTTPRequestHandler):
             return self._serve_file(full, None, cache=True)
         return self._err("not found", 404)
 
+    def _screen_fill(self, body, conn):
+        """大屏页面和面板页面用同一套占位符：标题、版本、图标、安全模式横幅。
+
+        外观包只认这几个名字，缺一个就会原样漏在页面上（{{FAVICON}} 甚至会变成
+        左上角的一行字），所以替补规则集中在这里，别再各写一份。
+        """
+        body = substitute_page(body, db.all_config(conn))
+        return body.replace(b"{{FOOTER}}", panel.FOOTER.encode("utf-8"))
+
     def _screen_pack(self, path):
         """展示屏幕是一个可替换的插接件：只需一份 screen.html（和它自己的 js/css）。
 
@@ -3362,14 +3371,12 @@ class Handler(BaseHTTPRequestHandler):
             if ctype.startswith("text/") or ctype == "application/javascript":
                 ctype += "; charset=utf-8"
             if rel == "screen.html":
-                body = body.replace(b"{{FOOTER}}", panel.FOOTER.encode("utf-8"))
-                body = body.replace(b"{{VERSION}}", VERSION.encode("utf-8"))
+                body = self._screen_fill(body, conn)
             return self._send(200, body, ctype, [("Cache-Control", "no-store")])
         # 包不见了：退回 classic，别让现场黑屏
         with open(os.path.join(packs.THEME_DIR, "classic", "screen.html"), "rb") as fh:
             body = fh.read()
-        body = body.replace(b"{{FOOTER}}", panel.FOOTER.encode("utf-8"))
-        body = body.replace(b"{{VERSION}}", VERSION.encode("utf-8"))
+        body = self._screen_fill(body, conn)
         return self._send(200, body, "text/html; charset=utf-8")
 
     def _maintenance_page(self, cfg=None):
@@ -3655,20 +3662,22 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/admin/members/search" and method == "GET":
             need_owner()
+            # 不搜也给一屏候选：邀请成员先看人再点，和面板那边一样。
+            # 登录名是登录用的凭据，这里不往外给（回的是 uid 与称呼）。
             q = (query.get("q") or [""])[0].strip()
-            if len(q) < 1:
-                return self._json({"ok": True, "accounts": []})
-            like = "%" + q + "%"
-            rows = me.conn.execute(
-                "SELECT id, username, name, role FROM accounts"
-                " WHERE status='active'"
-                "   AND (username LIKE ? OR name LIKE ?)"
-                "   AND id NOT IN (SELECT account_id FROM event_members WHERE seq=?)"
-                " ORDER BY CASE role WHEN 'owner' THEN 0 WHEN 'superadmin' THEN 1 ELSE 2 END,"
-                "          name, username LIMIT 8",
-                (like, like, db.event_id())).fetchall()
+            sql = ("SELECT uid, id, name, avatar, avatar_at, role FROM accounts"
+                   " WHERE status='active'"
+                   "   AND id NOT IN (SELECT account_id FROM event_members WHERE seq=?)")
+            args = [db.event_id()]
+            if q:
+                sql += " AND (username LIKE ? OR name LIKE ?)"
+                args += ["%" + q + "%", "%" + q + "%"]
+            sql += (" ORDER BY CASE role WHEN 'owner' THEN 0 WHEN 'superadmin' THEN 1 ELSE 2 END,"
+                    "          name, id LIMIT 24")
+            rows = me.conn.execute(sql, args).fetchall()
             return self._json({"ok": True, "accounts": [
-                {"id": r["id"], "username": r["username"], "name": r["name"],
+                {"id": r["id"], "uid": int(r["uid"] or 0), "name": r["name"],
+                 "avatar": r["avatar"] or "", "avatarAt": r["avatar_at"] or 0,
                  "role": r["role"], "roleLabel": panel.ROLE_LABEL.get(r["role"], r["role"])}
                 for r in rows]})
 

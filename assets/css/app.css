@@ -490,7 +490,8 @@ table.tbl th.sorted[data-dir="desc"]::after { content: " \25BC"; }
 .modal h2 { margin-bottom: 10px; }
 .field { margin-bottom: 10px; }
 .field label { display: block; font-size: .79rem; color: var(--muted); margin-bottom: 4px; }
-input[type="text"], input[type="password"], input[type="number"], select, textarea {
+input[type="text"], input[type="password"], input[type="search"], input[type="number"],
+select, textarea {
   width: 100%;
   padding: 7px 9px;
   font-family: inherit;
@@ -991,6 +992,59 @@ textarea { resize: vertical; min-height: 120px; font-family: var(--mono); font-s
 .kv dd { margin: 0; word-break: break-all; }
 
 .pick-list { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+
+/* ---------- 选人（邀请成员）：头像在上、名字在下，只认称呼 ---------- */
+.pick-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 8px;
+}
+.pick-tile {
+  appearance: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 10px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.pick-tile:hover { background: var(--surface-2); }
+.pick-tile:active { background: var(--surface-3); }
+.pick-tile .avatar {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  color: var(--accent-strong);
+  font-size: .95rem;
+  font-weight: 700;
+}
+.pick-tile .avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.pick-name {
+  font-size: .8rem;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 邀请成员：标题下面直接接搜索框，名单固定留三行，搜与不搜弹窗一样大 */
+.modal.invite { width: min(432px, 100%); }
+.modal.invite h2 { margin-bottom: 10px; }
+.modal.invite .invite-pick { height: 265px; overflow-y: auto; overscroll-behavior: contain; }
+.modal.invite .invite-foot { display: flex; justify-content: flex-end; margin-top: 14px; }
+@media (max-width: 560px) {
+  /* 小屏上跟着屏幕走，别把弹窗顶出视野 */
+  .modal.invite .invite-pick { height: auto; max-height: 46dvh; }
+}
 .pick {
   appearance: none;
   display: flex;

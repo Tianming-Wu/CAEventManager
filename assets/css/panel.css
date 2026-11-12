@@ -1381,6 +1381,30 @@ select:invalid { color: var(--dim); }
   white-space: nowrap;
 }
 
+/* 邀请成员：标题下面直接接搜索框，中间不画分隔线；名单留三行高度，
+   搜与不搜弹窗都一样大，不会跟着结果跳 */
+.overlay-card.invite { width: min(432px, 100%); }
+.overlay-card.invite .overlay-head { padding: 16px 12px 2px 20px; border-bottom: 0; }
+.overlay-card.invite .overlay-head h2 { font-size: 1.02rem; }
+.overlay-card.invite .overlay-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 10px 20px 18px;
+}
+.overlay-card.invite #inviteFind { margin-bottom: 12px; }
+.overlay-card.invite .invite-pick {
+  flex: 0 0 auto;
+  height: 265px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.overlay-card.invite .invite-foot {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 14px;
+}
+
 /* ---------- segmented control ---------- */
 .seg {
   display: inline-flex;
@@ -2139,6 +2163,8 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
 .auth-card h1 { margin-bottom: 16px; }
 .auth-card .field { margin-bottom: 12px; }
 .hint { font-size: .78rem; color: var(--dim); }
+/* 次要说明：与正文分开的淡色小字（面板原来缺这一条，.note 会按正文字号渲染） */
+.note { font-size: .78rem; color: var(--dim); }
 .err { color: var(--danger); font-size: .82rem; min-height: 1.3em; }
 .msg { font-size: .85rem; color: var(--accent-strong); }
 .auth-foot { margin-top: 12px; text-align: center; font-size: .8rem; color: var(--muted); }
@@ -2295,6 +2321,9 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   }
   .overlay-head { padding-left: max(14px, env(safe-area-inset-left)); }
   .overlay-body { padding-bottom: calc(18px + env(safe-area-inset-bottom)); }
+  /* 手机上弹窗本来就占满一屏：名单跟着余下的高度走，"完成"钉在底部 */
+  .overlay-card.invite .overlay-body { flex: 1 1 auto; }
+  .overlay-card.invite .invite-pick { flex: 1 1 auto; height: auto; min-height: 0; }
 
   /* ---------- 手机上的表格 ----------
      竖屏放不下五六列：与其把每列压成省略号，不如让表格横向滚动。

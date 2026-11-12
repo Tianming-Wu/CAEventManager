@@ -2686,6 +2686,21 @@ def audit_page(page):
         .map(td => td.textContent.trim()).filter(Boolean)""")
     check("说明是 key: value 的写法",
           all(":" in d for d in details), details[:3])
+    widths = page.evaluate("""() => Array.from(
+        document.querySelectorAll('#auditTable thead th'))
+        .map(th => Math.round(th.getBoundingClientRect().width))""")
+    check("时间那一列只占一个时间戳的宽度", widths and widths[0] <= 150, widths)
+    check("多出来的宽度给了操作人", len(widths) >= 3 and widths[1] > widths[2], widths)
+    gap = page.evaluate("""() => {
+        const cell = document.querySelector('#auditTable tbody tr td:first-child');
+        const next = document.querySelector('#auditTable tbody tr td:nth-child(2)');
+        if (!cell || !next) return -1;
+        const range = document.createRange();
+        range.selectNodeContents(cell);
+        return Math.round(next.getBoundingClientRect().left -
+                          range.getBoundingClientRect().right);
+    }""")
+    check("日期不贴着操作人", gap >= 8, gap)
 
 
 def theme_page(page):

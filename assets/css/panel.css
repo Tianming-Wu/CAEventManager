@@ -1948,9 +1948,10 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
 #rosterTable th:nth-child(3), #rosterTable td:nth-child(3) { width: 14%; }
 #rosterTable th:nth-child(4), #rosterTable td:nth-child(4) { width: 24%; }
 #rosterTable th:nth-child(5), #rosterTable td:nth-child(5) { width: 14%; }
-/* 名单成员表：八列，操作列要放得下两个按钮，所以给它留够宽度 */
-#auditTable th:nth-child(1), #auditTable td:nth-child(1) { width: 17%; }
-#auditTable th:nth-child(2), #auditTable td:nth-child(2) { width: 12%; }
+/* 审计日志：时间那一列只给够放一个时间戳，多出来的宽度让给操作人；
+   动作/对象/说明的起点因此原地不动，说明吃掉剩下的宽度（它也是唯一会折行的列） */
+#auditTable th:nth-child(1), #auditTable td:nth-child(1) { width: 140px; }
+#auditTable th:nth-child(2), #auditTable td:nth-child(2) { width: calc(29% - 140px); }
 #auditTable th:nth-child(3), #auditTable td:nth-child(3) { width: 13%; }
 #auditTable th:nth-child(4), #auditTable td:nth-child(4) { width: 14%; }
 #auditTable th:nth-child(5), #auditTable td:nth-child(5) { width: 44%; }

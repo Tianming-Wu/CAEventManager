@@ -1,0 +1,37 @@
+<!-- 模块自己的页签：平台按 pages 声明注入到活动后台 -->
+  <section id="tab-agenda">
+    <div class="panel">
+      <div class="row" style="margin-bottom:10px">
+        <h2 style="margin:0">议程</h2>
+        <span class="chip" id="agendaNow">没有在讲的小节</span>
+        <div class="spacer"></div>
+        <button class="btn" id="endSectionBtn" type="button">结束当前小节</button>
+      </div>
+      <div class="tblwrap">
+        <table class="tbl" id="agendaTable">
+          <thead><tr>
+            <th class="num">序</th><th>小节</th><th class="num">计划</th>
+            <th>状态</th><th class="right">操作</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>添加小节</h2>
+      <div class="row">
+        <div class="field" style="flex:2;min-width:180px">
+          <label for="secTitle">标题</label>
+          <input id="secTitle" type="text" maxlength="60" autocomplete="off">
+        </div>
+        <div class="field" style="min-width:110px">
+          <label for="secMinutes">分钟</label>
+          <input id="secMinutes" type="number" min="1" max="600" value="15">
+        </div>
+        <button class="btn primary" id="secAddBtn" type="button">添加</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= 提问 ======================= -->

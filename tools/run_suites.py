@@ -140,6 +140,8 @@ SUITES = {
     "ui": ([("seed_demo.py", []), ("ui_test.py", [])], True),
     # 自己起两次实例（正常 → 安全模式 → 恢复），不需要外面再给一个
     "safemode": ([("safemode_test.py", [])], False),
+    # 两个玩法完全不同的模块同时跑：讲座（自带页签与公示页）与抽奖
+    "modules": ([("modules_test.py", [])], False),
 }
 
 wanted = sys.argv[1:] or ["unit", "panel_test", "panel_ui_test"]

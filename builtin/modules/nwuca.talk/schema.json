@@ -1,0 +1,13 @@
+{
+  "comment": "创建时定下、之后不再更改的参数。key 与活动库的配置项同名，创建时直接写进去。",
+  "fields": [
+    {
+      "key": "talk_show_questions",
+      "label": "公示页显示提问",
+      "type": "bool",
+      "required": false,
+      "default": true,
+      "help": "关掉之后公示页只显示议程，提问留在后台"
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "id": "nwuca.talk.salon",
+  "name": "分享会（讲座）",
+  "note": "按议程推进，现场记提问",
+  "dependency": {
+    "module": "nwuca.talk"
+  },
+  "board": {
+    "title": "议程"
+  },
+  "params": {
+    "talk_show_questions": true
+  }
+}

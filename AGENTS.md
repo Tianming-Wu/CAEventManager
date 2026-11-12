@@ -18,7 +18,7 @@
 ## 改动之后
 
 ```powershell
-python tools/run_suites.py unit panel_test panel_ui_test smoke ui safemode   # 全套件
+python tools/run_suites.py unit panel_test panel_ui_test smoke ui safemode modules   # 全套件
 python tools/normalize_eol.py                                        # 行尾统一为 LF
 python tools/bump_version.py                                         # 推进版本号
 ```

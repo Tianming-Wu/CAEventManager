@@ -97,9 +97,10 @@ def _read_json(path):
         return json.load(fh)
 
 
-# The pages a kind may ask for.  Anything else is the platform's, not the module's,
-# so a module cannot invent a page the console has no section for.
-MODULE_PAGES = ("ops", "roster", "tickets", "draw", "config")
+# 平台最常给的那几张页签：模块不写标题时用这里的名字。页签 id 本身由模块自己起，
+# 平台只按 id 注入标记、载入脚本、切换显示，不预设玩法。
+DEFAULT_MODULE_PAGES = ("ops", "roster", "tickets", "draw", "config")
+PAGE_ID_RE = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
 PLATFORM_PAGES = (("settings", "\u6d3b\u52a8\u8bbe\u7f6e"), ("log", "\u65e5\u5fd7"))
 # The public pages the core can draw.  A module declares which of them it uses;
 # anything undeclared is a 404 for that activity.
@@ -121,7 +122,7 @@ PAGE_TITLE = {
 
 
 def normalize_pages(raw):
-    """Turn a module's page list into [{"id", "title"}], dropping what we cannot draw."""
+    """模块的页签声明 → [{"id", "title"}]，写坏的那一条丢掉。"""
     out = []
     seen = set()
     for item in raw or []:
@@ -132,10 +133,10 @@ def normalize_pages(raw):
         else:
             continue
         page_id = page_id.strip()
-        if page_id not in MODULE_PAGES or page_id in seen:
+        if not PAGE_ID_RE.match(page_id) or page_id in seen:
             continue
         seen.add(page_id)
-        out.append({"id": page_id, "title": title or PAGE_TITLE[page_id]})
+        out.append({"id": page_id, "title": title or PAGE_TITLE.get(page_id, page_id)})
     return out
 
 
@@ -305,7 +306,7 @@ def console_pages(module_id, version, disabled=()):
     """Every page the console should show, in order: the module's, then the platform's."""
     kind = get(module_id, version, disabled=disabled) if module_id else None
     pages = list(kind["pages"]) if kind else [
-        {"id": pid, "title": PAGE_TITLE[pid]} for pid in MODULE_PAGES]
+        {"id": pid, "title": PAGE_TITLE[pid]} for pid in DEFAULT_MODULE_PAGES]
     for page_id, title in PLATFORM_PAGES:
         pages.append({"id": page_id, "title": title, "platform": True})
     return pages

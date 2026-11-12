@@ -528,10 +528,13 @@ def main():
           any("w" in t["keys"] for t in perms["search"]["tags"])
           and any("未签到" in t["keys"] for t in perms["search"]["tags"]),
           [t.get("label") for t in perms["search"]["tags"]])
-    stu = {"id": 1, "sid": "2024001", "name": "高勇", "marks": {}, "tickets": []}
+    rec = {"id": 1, "sid": "2024001", "name": "高勇", "marks": {}, "tickets": []}
+    spec = perms["search"]
     check("没申请搜索就不发拼音索引",
-          "pys" not in app.student_admin(stu, with_pinyin=False)
-          and "pys" in app.student_admin(stu))
+          "pys" not in app.module_record(rec, spec, with_pinyin=False)
+          and "pys" in app.module_record(rec, spec))
+    check("记录整包透传，平台不改形状",
+          app.module_record(rec, spec, with_pinyin=False)["tickets"] == [])
 
     print("== 提示词里的变量 ==")
     acc = {"id": 7, "username": "laffey", "name": "吴天明", "role": "owner"}

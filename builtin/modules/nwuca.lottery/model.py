@@ -1398,6 +1398,13 @@ def _screen_block(cfg, st, students, last, batch, winners):
     }
 
 
+def roster_info(conn, cfg=None):
+    """绑定名单之后留在这边的信息：已经不在名单里的人有多少。"""
+    n = conn.execute(
+        "SELECT COUNT(*) AS n FROM students WHERE detached_at<>0").fetchone()["n"]
+    return {"detached": int(n or 0)}
+
+
 def present(conn, cfg=None):
     """公示页与大屏要的东西，形状由模块自己定，平台原样转发、不认识里面的字段。"""
     cfg = cfg or db.all_config(conn)

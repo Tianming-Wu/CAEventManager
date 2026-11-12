@@ -68,7 +68,7 @@ PAGES_DIR = os.path.join(BASE_DIR, "pages")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.0.75"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.0.76"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -116,6 +116,41 @@ SHORTLINK_SUGGEST = [
     {"key": "checkin", "label": "登记页"},
     {"key": "admin", "label": "活动后台"},
 ]
+
+def conn_kind(conn):
+    """这个活动用的模块 id。"""
+    return str(db.get_config(conn, "kind") or "").strip()
+
+
+def _record_by_id(conn, rec_id):
+    """动作做完回一条记录给前端：按 id 在模块快照里找，形状原样带下去。"""
+    cfg = db.all_config(conn)
+    spec = ((modules.get(conn_kind(conn), VERSION) or {}).get("features") or {}).get("search")
+    for rec in model.snapshot(conn, cfg):
+        if rec.get("id") == rec_id:
+            return module_record(rec, spec)
+    return None
+
+
+def module_extra(name, *args):
+    """模块有就调，没有就返回 None——平台不假设任何玩法都有这一份数据。"""
+    try:
+        fn = getattr(model.current(), name, None)
+    except Exception:
+        return None
+    return fn(*args) if callable(fn) else None
+
+
+def module_roster(conn, cfg, roster_id, roster_name):
+    """绑定名单的几条信息；模块想补（例如"已不在名单"多少人）就实现 roster_info。"""
+    info = {"id": roster_id, "name": roster_name,
+            "syncedAt": cfg.get("roster_synced_at") or 0}
+    extra = module_extra("roster_info", conn, cfg)
+    if isinstance(extra, dict):
+        info.update(extra)
+    info.setdefault("detached", 0)
+    return info
+
 
 def module_pages_html(cfg):
     """模块自己那几张页签的标记，平台把它们拼进外壳的 {{MODULE_PAGES}}。"""
@@ -366,27 +401,18 @@ def fmt_ts(ts):
     return None if ts is None else round(float(ts), 3)
 
 
-def student_admin(stu, with_pinyin=True):
-    out = {
-        "id": stu["id"],
-        "sid": stu["sid"],
-        "name": stu["name"],
-        "py": stu.get("py"),
-        "pyi": stu.get("pyi"),
-        "grp": stu.get("grp") or "",
-        "note": stu.get("note") or "",
-        "marks": {k: fmt_ts(v) for k, v in (stu.get("marks") or {}).items()},
-        "role": stu.get("role") or "participant",
-        "tickets": stu.get("tickets") or [],
-        "next": stu.get("next"),
-        "progress": stu.get("progress", 0),
-        "tasks": stu.get("tasks", 0),
-        "ticket_count": stu.get("ticket_count", 0),
-    }
+def module_record(rec, spec=None, with_pinyin=True):
+    """模块给的记录原样带下去，平台只按搜索声明补读音索引。
+
+    平台不认识记录里的字段（那是模块的快照形状）；唯一插手的地方是"姓名字段怎么念"——
+    前端没有汉字读音表，所以这里按 `features.search.name` 指的那个字段算好。
+    """
+    out = dict(rec or {})
     if with_pinyin:
-        # 逐字音节：混合搜索按音节做前缀匹配要用它（见 ROADMAP 三b）。
-        # 前端没有汉字读音表，所以由服务端算好带下来；没申请 search 的模块拿不到。
-        out["pys"] = model.name_syllables(stu.get("name") or "")
+        field = (spec or {}).get("name") or ""
+        text = str(out.get(field) or "") if field else ""
+        if text:
+            out["pys"] = model.name_syllables(text)
     return out
 
 # --------------------------------------------------------------------------- #
@@ -2054,6 +2080,9 @@ class Handler(BaseHTTPRequestHandler):
                 for key, val in params.items():
                     db.set_config_raw(event_conn, key, val)
                 db.audit(event_conn, "event_create", detail="kind=%s" % kind["id"])
+            # 模块自己的初始化（幂等）：例如先给一节议程，免得界面空着
+            model.ensure_event(event_conn)
+            bootstrap_secrets()
 
             row = conn.execute(
                 "SELECT e.*, 'owner' AS my_role, ? AS owner_name FROM events e"
@@ -3713,36 +3742,34 @@ class Handler(BaseHTTPRequestHandler):
             # 拼音音节是搜索用的索引：模块申请了 search 才发，没申请就一个字节也不发
             want_search = "search" in ((modules.get(kind_id, VERSION) or {})
                                        .get("features") or {})
-            students = model.snapshot(conn, cfg)
+            records = model.snapshot(conn, cfg)
+            spec = ((modules.get(kind_id, VERSION) or {}).get("features") or {}).get("search")
+            records_key = (spec or {}).get("records") or "records"
             roster_id = int(cfg.get("roster_id") or 0)
             roster_name = ""
             if roster_id:
                 row = lists.roster(lists.connect(), roster_id)
                 roster_name = row["name"] if row else ""
-            detached = conn.execute(
-                "SELECT COUNT(*) AS n FROM students WHERE detached_at<>0"
-            ).fetchone()["n"]
             return self._json(
                 {
                     "ok": True,
                     "config": db.config_view(conn),
-                    "roster": {"id": roster_id, "name": roster_name,
-                               "syncedAt": cfg.get("roster_synced_at") or 0,
-                               "detached": int(detached or 0)},
+                    "roster": module_roster(conn, cfg, roster_id, roster_name),
                     "publicBaseUrl": public_base_url(),
                     "seq": db.event_id(),
                     "shortlinkLimit": localconfig.static_limit(
                         LOCAL_CFG, "shortlink_per_event"),
-                    "stats": model.stats(conn, cfg, students),
-                    "prizes": model.prize_status(conn, cfg),
+                    "stats": model.stats(conn, cfg, records),
+                    "data": module_extra("console_data", conn, cfg) or {},
+                    "prizes": module_extra("prize_status", conn, cfg) or [],
                     "features": (modules.get(kind_id, VERSION) or {}).get(
                         "features") or {},
-                    "students": [student_admin(s, with_pinyin=want_search)
-                                 for s in students],
+                    records_key: [module_record(s, spec, with_pinyin=want_search)
+                                  for s in records],
                     "unlockUntil": me.unlock_until(),
                     "unlocked": me.unlocked(),
                     "audit": db.audit_tail(conn, 60),
-                    "draws": model.draw_history(conn, 30),
+                    "draws": module_extra("draw_history", conn, 30) or [],
                     "screenPacks": [p["id"] for p in _screen_packs()],
                     "version": VERSION,
                 }
@@ -3752,9 +3779,11 @@ class Handler(BaseHTTPRequestHandler):
             q = (query.get("q") or [""])[0]
             limit = min(30, max(1, int((query.get("limit") or ["10"])[0] or 10)))
             cfg = db.all_config(conn)
-            students = model.snapshot(conn, cfg)
-            hits = model.search(conn, q, limit, students)
-            return self._json({"ok": True, "results": [student_admin(s) for s in hits]})
+            records = model.snapshot(conn, cfg)
+            hits = model.search(conn, q, limit, records)
+            spec = ((modules.get(conn_kind(conn), VERSION) or {}).get("features") or {}).get("search")
+            return self._json({"ok": True,
+                               "results": [module_record(s, spec) for s in hits]})
 
         if path == "/api/admin/mark" and method == "POST":
             self._check_csrf()
@@ -3770,9 +3799,8 @@ class Handler(BaseHTTPRequestHandler):
                     # audit line then says so
                     allow_skip=me.unlocked(),
                 )
-            stu = model.snapshot(conn, db.all_config(conn))
-            cur = next((s for s in stu if s["id"] == int(data.get("student_id"))), None)
-            return self._json({"ok": True, "result": res, "student": student_admin(cur) if cur else None})
+            cur = _record_by_id(conn, int(data.get("student_id")))
+            return self._json({"ok": True, "result": res, "student": cur})
 
         if path == "/api/admin/undo" and method == "POST":
             self._check_csrf()
@@ -3787,9 +3815,8 @@ class Handler(BaseHTTPRequestHandler):
                     cascade=bool(data.get("cascade")),
                 )
                 me.touch_unlock()
-            stu = model.snapshot(conn, db.all_config(conn))
-            cur = next((s for s in stu if s["id"] == int(data.get("student_id"))), None)
-            return self._json({"ok": True, "result": res, "student": student_admin(cur) if cur else None,
+            cur = _record_by_id(conn, int(data.get("student_id")))
+            return self._json({"ok": True, "result": res, "student": cur,
                                "unlockUntil": time.time() + panel.EVENT_UNLOCK_TTL})
 
         if path == "/api/admin/set_time" and method == "POST":

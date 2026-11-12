@@ -1,0 +1,126 @@
+{
+  "id": "nwuca.talk",
+  "name": "讲座",
+  "version": "1.0.0",
+  "api": 1,
+  "author": "Tianming",
+  "homepage": "https://github.com/Tianming-Wu/CAEventManager",
+  "license": "MIT",
+  "builtin": true,
+  "requires": ">=1.4",
+  "description": "按议程推进的讲座与分享会：小节计时、观众提问与当场回答",
+  "external": [
+    "board",
+    "admin"
+  ],
+  "scripts": [
+    "common"
+  ],
+  "settings": [
+    "talk_show_questions"
+  ],
+  "pages": [
+    {
+      "id": "agenda",
+      "title": "议程"
+    },
+    {
+      "id": "questions",
+      "title": "提问"
+    },
+    {
+      "id": "config",
+      "title": "设置"
+    }
+  ],
+  "actions": {
+    "start_section": {
+      "title": "开始这一节",
+      "args": {
+        "id": {
+          "type": "int",
+          "required": true
+        }
+      },
+      "seat": "member",
+      "unlock": false,
+      "target": "section:{id}"
+    },
+    "end_section": {
+      "title": "结束当前小节",
+      "args": {},
+      "seat": "member",
+      "unlock": false,
+      "target": "section"
+    },
+    "add_section": {
+      "title": "添加小节",
+      "args": {
+        "title": {
+          "type": "str",
+          "required": true,
+          "max": 60
+        },
+        "minutes": {
+          "type": "int"
+        }
+      },
+      "seat": "member",
+      "unlock": false,
+      "target": "agenda"
+    },
+    "drop_section": {
+      "title": "删除小节",
+      "args": {
+        "id": {
+          "type": "int",
+          "required": true
+        }
+      },
+      "seat": "member",
+      "unlock": true,
+      "target": "section:{id}"
+    },
+    "ask": {
+      "title": "记一条提问",
+      "args": {
+        "who": {
+          "type": "str",
+          "max": 40
+        },
+        "text": {
+          "type": "str",
+          "required": true,
+          "max": 200
+        }
+      },
+      "seat": "member",
+      "unlock": false,
+      "target": "questions"
+    },
+    "answer": {
+      "title": "标记已回答",
+      "args": {
+        "id": {
+          "type": "int",
+          "required": true
+        }
+      },
+      "seat": "member",
+      "unlock": false,
+      "target": "question:{id}"
+    },
+    "drop_question": {
+      "title": "删除提问",
+      "args": {
+        "id": {
+          "type": "int",
+          "required": true
+        }
+      },
+      "seat": "member",
+      "unlock": true,
+      "target": "question:{id}"
+    }
+  }
+}

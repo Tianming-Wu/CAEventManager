@@ -457,6 +457,7 @@ def init_db():
         if column not in have:
             conn.execute("ALTER TABLE %s ADD COLUMN %s %s" % (table, column, spec))   # sql-ok 只拼列名/表名/SET 片段，值都走 ?
     ensure_uids(conn)
+    migrate_audit_actors(conn)
     conn.execute(
         "INSERT INTO audit (ts, actor, action, detail) VALUES (?,?,?,?)",
         (time.time(), "0", "panel_init", None),
@@ -794,6 +795,24 @@ def audit(conn, actor, action, target=None, detail=None):
         "INSERT INTO audit (ts, actor, action, target, detail) VALUES (?,?,?,?,?)",
         (time.time(), actor_key(conn, actor), action, target, detail),
     )
+
+
+def migrate_audit_actors(conn):
+    """老行的操作人存的是登录名：能对上账号的换成编号，对不上的留着。
+
+    只跑一次：之后新写入的都是编号，第二遍一条都不用改。
+    """
+    changed = 0
+    for r in conn.execute("SELECT DISTINCT actor FROM audit").fetchall():
+        text = str(r["actor"] or "")
+        if text.isdigit():
+            continue
+        key = actor_key(conn, text)
+        if key == text:
+            continue          # 账号已经删了：原来的名字是唯一的线索，留着
+        conn.execute("UPDATE audit SET actor=? WHERE actor=?", (key, text))
+        changed += 1
+    return changed
 
 
 def with_actor_labels(conn, rows):

@@ -461,6 +461,14 @@
       return;
     }
     var source = null;
+    var offPending = false;
+    // 页面还在解析时被换掉会把剩下的脚本丢在半路（模块脚本会拿到空的 MODULE），
+    // 所以"这一场停用了"这件事等页面加载完再落地
+    var reloadWhenLoaded = function () {
+      offPending = true;
+      if (document.readyState === "complete") location.reload();
+      else window.addEventListener("load", function () { location.reload(); });
+    };
     var open = function () {
       if (source) return;
       source = new EventSource(PREFIX + path);
@@ -470,9 +478,10 @@
         try { data = JSON.parse(event.data); } catch (e) { return; }
         if (data && data.off) {
           // 这一场的模块刚被停用：服务端现在只会给一张说明页，落地去看它
-          location.reload();
+          reloadWhenLoaded();
           return;
         }
+        if (offPending) return;
         if (!data || !data.revs) return;
         if (data.version) version(data.version);
         var before = revs;

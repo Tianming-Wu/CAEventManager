@@ -436,6 +436,9 @@ button.nav-item {
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
+  /* 页面内容一变高变矮，滚动条就在"有/没有"之间跳，居中的那一列跟着左右挪几像素。
+     两侧都留槽：正文是 margin auto 居中的，只留一侧会把整列推偏半格。 */
+  scrollbar-gutter: stable both-edges;
   padding: 22px 26px calc(28px + env(safe-area-inset-bottom));
 }
 .page > * { max-width: 1120px; margin-inline: auto; }

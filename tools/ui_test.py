@@ -746,8 +746,15 @@ def main():
               len(rows) == 1 and "负责人" in rows[0], rows)
         check("the activity card names the activity",
               page.inner_text("#eventInfo").strip() != "", page.inner_text("#eventInfo"))
+        check("邀请一个人、取消掉，版面不会左右挪",
+              page.evaluate("() => getComputedStyle(document.documentElement)"
+                            ".scrollbarGutter").startswith("stable"))
         page.click("#memberInviteBtn")
         page.wait_for_selector(".pp-find", timeout=8000)
+        page.mouse.click(40, 300)
+        page.wait_for_timeout(300)
+        check("pointing outside the picker does not close it",
+              page.locator(".pp-back").count() == 1)
         page.fill(".pp-find", "no-such-account")
         page.wait_for_timeout(700)
         check("a search with no match says so",

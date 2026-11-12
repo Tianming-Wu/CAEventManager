@@ -90,6 +90,15 @@
 }
 ::-webkit-scrollbar-thumb:hover { background: var(--muted); background-clip: padding-box; }
 
+/* 页面一变高变矮，滚动条就在"有/没有"之间来回跳，居中的那一列（.wrap）会跟着
+   左右挪几个像素——活动设置里邀请一个人再取消邀请，就是这么抖一下的。
+   把这条槽常留住，位置才稳。 */
+html { scrollbar-gutter: stable; }
+@supports not (scrollbar-gutter: stable) {
+  /* 老浏览器没有这条属性：常开滚动条，代价是短页面上也留一根槽 */
+  html { overflow-y: scroll; }
+}
+
 html, body {
   margin: 0;
   padding: 0;

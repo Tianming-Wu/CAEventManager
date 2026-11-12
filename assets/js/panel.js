@@ -152,6 +152,15 @@
     return s.trim().charAt(0);
   }
 
+  /* 焦点在不在输入类控件上：弹窗的 ESC 退不退，就看这一条。
+     输入框聚焦时 ESC 一律不退（搜索框还留着"清空"），焦点挪开才关。 */
+  function typingIn(scope) {
+    var el = document.activeElement;
+    if (!el || !scope || !scope.contains(el)) return false;
+    var tag = (el.tagName || "").toLowerCase();
+    return tag === "input" || tag === "textarea" || tag === "select";
+  }
+
   // The avatar endpoint is session-guarded, so a plain <img> is enough - the
   // cookie rides along.  ?v= busts the cache when the picture changes.
   function avatarUrl(acc) {
@@ -6199,7 +6208,12 @@
     if (e.key === "Escape") {
       if (qrMenuEl) return closeQrMenu();
       if (cardMenuEl) return closeCardMenu();
-      if (!$("#overlay").hidden) return closeOverlay();
+      if (!$("#overlay").hidden) {
+        // 弹窗里有输入框正被聚焦时不退：ESC 不是会误触的键，但填了一半的东西
+        // 不该因为按了一下 ESC 就没了（搜索框的 ESC 留给"清空"）
+        if (typingIn($("#overlay"))) return;
+        return closeOverlay();
+      }
       if (assistantDrawerOpen()) return closeAssistantDrawer();
       closePane();
     }

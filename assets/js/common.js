@@ -10,6 +10,18 @@
   }
   var PREFIX = prefix();
 
+  /* 搜索框里按 ESC 就是清空（单活动时代快速名单的老习惯，单子是这么用的）。
+     清完补一次 input 事件，各处已经接好的筛选会自己重跑一遍。 */
+  document.addEventListener("keydown", function (e) {
+    if (e.key !== "Escape") return;
+    var el = e.target;
+    if (!el || !el.matches || !el.matches('input[type="search"]')) return;
+    if (!el.value) return;
+    e.stopPropagation();
+    el.value = "";
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+
   // The revision this page last saw.  A write that carries it is refused if
   // another session moved on in the meantime (first write wins).
   var revs = {};

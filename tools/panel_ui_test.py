@@ -1642,6 +1642,20 @@ def search_page(page):
     check("the box is not autofilled", page.evaluate(
         "() => document.getElementById('userSearch').value") != "owner")
 
+    print("== ESC 清空搜索框 ==")
+    page.fill("#userSearch", "zzz-no-such-account")
+    page.wait_for_timeout(500)
+    check("先确认筛掉了东西",
+          "没有匹配的账号" in page.inner_text("#accountsTable tbody"),
+          page.inner_text("#accountsTable tbody")[:80])
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(600)
+    check("ESC 把搜索框清空",
+          page.evaluate("() => document.getElementById('userSearch').value") == "")
+    check("清空之后名单自己回来了",
+          page.locator("#accountsTable tbody tr").count() >= 1,
+          page.locator("#accountsTable tbody tr").count())
+
 
 def card_page(page):
     print("== 我的活动 is two mutually exclusive cards ==")
@@ -1741,6 +1755,24 @@ def card_page(page):
     check("the copy button reports back", page.evaluate(
         "() => document.querySelector('#ownedEvents .copy-btn').classList"
         ".contains('copied')"))
+
+    print("== ESC 在输入框里不退弹窗 ==")
+    page.click("#ownedEvents .card-menu-btn")
+    page.wait_for_timeout(240)
+    page.click(".card-menu [data-rename]")
+    page.wait_for_selector("#renameTitle", timeout=8000)
+    page.wait_for_timeout(200)
+    check("重命名弹窗里的输入框是聚焦的",
+          page.evaluate("() => document.activeElement.id") == "renameTitle")
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(300)
+    check("输入框聚焦时 ESC 不退弹窗",
+          page.locator("#overlay").is_visible())
+    page.evaluate("() => document.getElementById('overlayClose').focus()")
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(300)
+    check("焦点挪开之后 ESC 才关",
+          not page.locator("#overlay").is_visible())
 
 
 def profile_page(page):
@@ -2250,6 +2282,32 @@ def leave_guard_page(browser):
             "() => getComputedStyle(document.querySelector('.pp-grid'))"
             ".gridTemplateColumns.split(' ').length")
         check("一屏不止三列", cols >= 5, cols)
+        check("版面不会因为滚动条忽有忽无而左右挪",
+              page.evaluate("() => getComputedStyle("
+                            "document.querySelector('.content')).scrollbarGutter")
+              .startswith("stable"))
+
+        print("== 点窗外不关；ESC 看焦点 ==")
+        page.mouse.click(60, 60)
+        page.wait_for_timeout(300)
+        check("点窗外关不掉这个弹窗", page.locator(".pp-back").count() == 1)
+        page.fill(".pp-find", "守卫")
+        page.wait_for_timeout(400)
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(400)
+        check("焦点在搜索框里：ESC 只清空，绝不退出",
+              page.locator(".pp-back").count() == 1
+              and page.locator(".pp-find").input_value() == "")
+        check("清空之后名单自己回来了",
+              page.locator(".pp-tile").count() >= 2, page.locator(".pp-tile").count())
+        page.locator(".pp-tile").first.click()
+        page.wait_for_timeout(250)
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(300)
+        check("焦点挪到方块上，ESC 才关", page.locator(".pp-back").count() == 0)
+        page.click("#invitePick")
+        page.wait_for_selector(".pp-back .pp-find", timeout=8000)
+        page.wait_for_timeout(500)
         page.fill(".pp-find", "守卫")
         page.wait_for_timeout(400)
         check("筛完弹窗不变高变矮",

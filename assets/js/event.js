@@ -12,6 +12,18 @@
 
   var PREFIX = prefix();
 
+  /* 搜索框里按 ESC 就是清空（单活动时代快速名单的老习惯）。
+     清完补一次 input 事件，各处已经接好的筛选会自己重跑一遍。 */
+  document.addEventListener("keydown", function (e) {
+    if (e.key !== "Escape") return;
+    var el = e.target;
+    if (!el || !el.matches || !el.matches('input[type="search"]')) return;
+    if (!el.value) return;
+    e.stopPropagation();
+    el.value = "";
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+
   // What this browser has seen, per object.  A write carries it so the server can
   // tell a real disagreement from two people working on different things.
   var revs = {};
@@ -151,6 +163,15 @@
   }
 
   /* ---- modal confirm (replaces window.confirm, which is ugly on a projector) */
+  /* ESC 的规矩：弹窗里有输入框正被聚焦就永不退出——里面可能填了一半。
+     焦点不在输入框上时，ESC 就是"取消"。 */
+  function typingIn(scope) {
+    var el = document.activeElement;
+    if (!el || !scope || !scope.contains(el)) return false;
+    var tag = (el.tagName || "").toLowerCase();
+    return tag === "input" || tag === "textarea" || tag === "select";
+  }
+
   function confirmBox(opts) {
     return new Promise(function (resolve) {
       var back = document.createElement("div");
@@ -165,7 +186,7 @@
       document.body.appendChild(back);
       function done(v) { back.remove(); document.removeEventListener("keydown", onKey); resolve(v); }
       function onKey(e) {
-        if (e.key === "Escape") done(false);
+        if (e.key === "Escape" && !typingIn(back)) done(false);
         if (e.key === "Enter") done(true);
       }
       back.addEventListener("click", function (e) {
@@ -191,7 +212,7 @@
       document.removeEventListener("keydown", onKey);
     }
     function onKey(e) {
-      if (e.key === "Escape" && opts.dismissable !== false) close();
+      if (e.key === "Escape" && opts.dismissable !== false && !typingIn(back)) close();
     }
     back.addEventListener("click", function (e) {
       if (e.target === back && opts.dismissable !== false) close();

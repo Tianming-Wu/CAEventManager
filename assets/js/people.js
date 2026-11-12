@@ -108,11 +108,26 @@
       doneBtn.disabled = !multi && !Object.keys(chosen).length;
     }
 
+    // ESC 的规矩（与其它弹窗一致）：有输入框正被聚焦就永不退出——搜索框里按 ESC
+    // 只当"清空"用（单活动时代快速名单的老习惯）；焦点不在输入框上，ESC 就是取消。
+    function focusInTextField() {
+      var el = document.activeElement;
+      if (!el || !back.contains(el)) return false;
+      var tag = (el.tagName || "").toLowerCase();
+      return tag === "input" || tag === "textarea" || tag === "select";
+    }
+
     function onKey(e) {
-      if (e.key === "Escape") {
-        e.stopPropagation();
-        close();               // Esc 与 [取消] 一样：什么都不改
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      if (focusInTextField()) {
+        if (box.value) {
+          box.value = "";
+          search();
+        }
+        return;
       }
+      close();                 // 与 [取消] 一样：什么都不改
     }
 
     function draw() {
@@ -175,9 +190,7 @@
       syncDone();
     });
 
-    back.addEventListener("click", function (e) {
-      if (e.target === back) close();      // 点窗外：与 [取消] 一样，什么都不改
-    });
+    // 点窗外不关：这一层里攒着人选，误触就白选了。关掉只有三个明路——[取消]、×、Esc
     back.querySelector(".pp-x").addEventListener("click", close);
     back.querySelector(".pp-cancel").addEventListener("click", close);
     doneBtn.addEventListener("click", function () {

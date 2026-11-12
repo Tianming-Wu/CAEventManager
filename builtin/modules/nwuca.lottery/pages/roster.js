@@ -17,7 +17,7 @@ window.MODULE = window.MODULE || { pages: {} };
   function rosterRows() {
     var q = (S.rosterQ || "").trim();
     var all = S.students || [];
-    var list = q ? LT.queryStudents(all, q, 999, lib.searchSpec()) : all.slice();
+    var list = q ? LT.queryRecords(all, q, 999, lib.searchSpec()) : all.slice();
     var key = S.sortKey;
     var dir = S.sortDir;
     var rank = { participant: 0, staff: 1, volunteer: 2 };

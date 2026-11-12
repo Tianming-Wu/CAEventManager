@@ -19,7 +19,7 @@
     if (!tickets || !tickets.length) return "";
     return tickets.map(function (t) {
       return '<span class="tkt' + (t.kind === "bonus" ? " bonus" : "") + '">' +
-        LT.code(t.code) + "</span>";
+        MODULE.lib.code(t.code) + "</span>";
     }).join(" ");
   }
 

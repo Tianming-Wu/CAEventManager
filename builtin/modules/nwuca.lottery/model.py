@@ -41,6 +41,8 @@ ApiError = errors.ApiError
 normalize_pinyin = pinyin.pi
 name_syllables = pinyin.syllables
 
+KINDS = ("checkin", "task1", "task2")
+KIND_LABEL = {"checkin": "签到", "task1": "任务一", "task2": "任务二", "bonus": "速度奖励"}
 TASK_KINDS = ("task1", "task2")
 ROLES = ("participant", "staff", "volunteer")
 ROLE_LABEL = {"participant": "参加人员", "staff": "工作人员", "volunteer": "志愿者"}
@@ -268,7 +270,7 @@ def mark(conn, student_id, kind, actor="admin", at=None, source="admin",
     audit line says it was out of order, so the deviation is in the record and in
     the exported log rather than silently invisible.
     """
-    if kind not in db.KINDS:
+    if kind not in KINDS:
         raise ApiError("未知的任务类型: %s" % kind)
     stu = _get_student(conn, student_id)
     if db.get_config(conn, "finalized", False):
@@ -285,11 +287,11 @@ def mark(conn, student_id, kind, actor="admin", at=None, source="admin",
         if not allow_skip:
             raise ApiError(
                 "需要先完成「%s」才能标记「%s」"
-                % (db.KIND_LABEL[need], db.KIND_LABEL[kind]), 409
+                % (KIND_LABEL[need], KIND_LABEL[kind]), 409
             )
-        skipped = [k for k in db.KINDS
+        skipped = [k for k in KINDS
                    if k != kind and k not in marks
-                   and db.KINDS.index(k) < db.KINDS.index(kind)]
+                   and KINDS.index(k) < KINDS.index(kind)]
     if kind in marks:
         return {
             "already": True,
@@ -303,11 +305,11 @@ def mark(conn, student_id, kind, actor="admin", at=None, source="admin",
         (student_id, kind, ts, source, actor),
     )
     code = assign_ticket(conn, student_id, kind) if participant else None
-    detail = "%s %s%s" % (stu["name"], db.KIND_LABEL[kind],
+    detail = "%s %s%s" % (stu["name"], KIND_LABEL[kind],
                           (" -> #%03d" % code) if code else " (不计奖票)")
     if skipped:
         detail += "（越序：未完成 %s）" % "、".join(
-            db.KIND_LABEL[k] for k in skipped)
+            KIND_LABEL[k] for k in skipped)
     db.audit(conn, "mark", student_id, kind, detail, actor)
     return {"already": False, "done_at": ts, "code": code,
             "out_of_order": bool(skipped)}
@@ -322,12 +324,12 @@ def _live_code(conn, student_id, kind):
 
 
 def unmark(conn, student_id, kind, actor="admin", cascade=False):
-    if kind not in db.KINDS:
+    if kind not in KINDS:
         raise ApiError("未知的任务类型: %s" % kind)
     stu = _get_student(conn, student_id)
     marks = _marks(conn).get(student_id, {})
     if kind not in marks:
-        raise ApiError("「%s」本来就没有标记" % db.KIND_LABEL[kind], 409)
+        raise ApiError("「%s」本来就没有标记" % KIND_LABEL[kind], 409)
 
     dependents = []
     if kind == "checkin":
@@ -335,10 +337,10 @@ def unmark(conn, student_id, kind, actor="admin", cascade=False):
     elif kind == "task1":
         dependents = [k for k in ("task2",) if k in marks]
     if dependents and not cascade:
-        names = "、".join(db.KIND_LABEL[k] for k in dependents)
+        names = "、".join(KIND_LABEL[k] for k in dependents)
         raise ApiError(
             "「%s」之后已完成「%s」,请先撤销后面的步骤(或确认级联撤销)"
-            % (db.KIND_LABEL[kind], names),
+            % (KIND_LABEL[kind], names),
             409,
         )
 
@@ -357,7 +359,7 @@ def unmark(conn, student_id, kind, actor="admin", cascade=False):
         "%s 撤销 %s%s"
         % (
             stu["name"],
-            "、".join(db.KIND_LABEL[k] for k in targets),
+            "、".join(KIND_LABEL[k] for k in targets),
             ("(级联)" if len(targets) > 1 else ""),
         ),
         actor,
@@ -432,7 +434,7 @@ def set_mark_time(conn, student_id, kind, at, actor="admin"):
     stu = _get_student(conn, student_id)
     marks = _marks(conn).get(student_id, {})
     if kind not in marks:
-        raise ApiError("「%s」还没有标记" % db.KIND_LABEL[kind], 409)
+        raise ApiError("「%s」还没有标记" % KIND_LABEL[kind], 409)
     conn.execute(
         "UPDATE marks SET done_at=? WHERE student_id=? AND kind=?", (float(at), student_id, kind)
     )
@@ -441,7 +443,7 @@ def set_mark_time(conn, student_id, kind, at, actor="admin"):
         "edit_time",
         student_id,
         kind,
-        "%s %s 时间改为 %s" % (stu["name"], db.KIND_LABEL[kind], _fmt_local(conn, at)),
+        "%s %s 时间改为 %s" % (stu["name"], KIND_LABEL[kind], _fmt_local(conn, at)),
         actor,
     )
     return {"done_at": float(at)}
@@ -643,19 +645,19 @@ def snapshot(conn, cfg=None):
         m = marks.get(item["id"], {})
         t = tickets.get(item["id"], [])
         item["role"] = item.get("role") or "participant"
-        item["marks"] = {k: m.get(k) for k in db.KINDS}
+        item["marks"] = {k: m.get(k) for k in KINDS}
         item["tickets"] = t
         item["ticket_count"] = len(t)
         # next pending step, in the enforced chain order
         nxt = None
-        for kind in db.KINDS:
+        for kind in KINDS:
             if kind not in m:
                 nxt = kind
                 break
         if not is_participant(item) and "checkin" in m:
             nxt = None  # staff have nothing left to do after showing up
         item["next"] = nxt
-        item["progress"] = sum(1 for k in db.KINDS if k in m)
+        item["progress"] = sum(1 for k in KINDS if k in m)
         item["tasks"] = sum(1 for k in TASK_KINDS if k in m)
         students.append(item)
     return students

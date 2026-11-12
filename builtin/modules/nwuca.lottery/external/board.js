@@ -32,7 +32,7 @@
     $("#winners").innerHTML = list.map(function (w) {
       var tail = w.mode === "person"
         ? '<span class="code" style="font-family:inherit;font-size:.85em">到场均等</span>'
-        : '<span class="code">#' + LT.code(w.code) + "</span>";
+        : '<span class="code">#' + MODULE.lib.code(w.code) + "</span>";
       return '<div class="winner"><span class="prize">' + LT.esc(w.prize || "奖品") + "</span>" +
         '<span class="who">' + LT.esc(w.name || "?") + "</span>" +
         '<span style="color:var(--dim);font-size:.8em">' + (data.config.show_sid ? LT.esc(w.sid || "") : "") + "</span>" +
@@ -64,7 +64,7 @@
       var chips = codes.length
         ? codes.map(function (t) {
             return '<span class="tkt' + (t.kind === "bonus" ? " bonus" : "") + '">' +
-              LT.code(t.code) + "</span>";
+              MODULE.lib.code(t.code) + "</span>";
           }).join("")
         : '<span style="color:var(--dim);font-size:.78rem">暂无奖票</span>';
       var meta = [];

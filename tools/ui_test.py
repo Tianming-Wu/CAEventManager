@@ -187,7 +187,11 @@ def main():
         # ------------------------------------------------------- undo lock
         print("== 混合搜索：拼音片段 + #标签 ==")
         # 匹配器是纯函数，直接拿一份固定的名单量它（不依赖这台机器上的演示数据）
-        result = page.evaluate("""() => {
+        result = page.evaluate("""async () => {
+            // 词表由模块声明，平台不再自带默认标签：先从活动状态里取
+            const st = await fetch('api/admin/state',
+                {headers: {'X-Requested-With': 'lottery'}}).then(r => r.json());
+            const spec = (st.features && st.features.search) || null;
             const list = [
               {name: "曾萍静", sid: "2024001", py: "zengpingjing", pyi: "zpj",
                pys: ["zeng", "ping", "jing"], role: "participant",
@@ -199,7 +203,7 @@ def main():
                pys: ["gao", "yong"], role: "volunteer",
                marks: {checkin: 1}, tickets: [], tasks: 1}
             ];
-            const names = (q) => LT.queryStudents(list, q).map(s => s.name);
+            const names = (q) => LT.queryRecords(list, q, 999, spec).map(s => s.name);
             return {
               full: names("zengpingjing"),
               initials: names("zpj"),

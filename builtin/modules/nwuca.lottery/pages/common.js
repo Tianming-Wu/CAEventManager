@@ -9,6 +9,8 @@ window.MODULE.lib = (function () {
   var reload = null;
 
   var KINDS = ["checkin", "task1", "task2"];
+  // 这几个词是这套玩法自己的：平台不认识，放在模块里
+  var KIND_LABEL = { checkin: "签到", task1: "任务一", task2: "任务二", bonus: "速度奖励" };
   var PREV = { checkin: null, task1: "checkin", task2: "task1" };
   var ROLE_TAG = { staff: "工作人员", volunteer: "志愿者" };
 
@@ -76,7 +78,12 @@ window.MODULE.lib = (function () {
 
   function reloadState() { return reload ? reload() : null; }
 
-  function kindLabel(k) { return LT.KIND_LABEL[k] || k; }
+  function kindLabel(k) { return KIND_LABEL[k] || k; }
+
+  /* 奖票号码：四位，从 0001 起 */
+  function code(n) {
+    return n === null || n === undefined ? "---" : String(1000 + n).slice(1);
+  }
 
   function isParticipant(stu) { return (stu.role || "participant") === "participant"; }
 
@@ -95,7 +102,7 @@ window.MODULE.lib = (function () {
     var list = (stu.tickets || []).slice().sort(function (a, b) { return a.code - b.code; });
     return list.map(function (t) {
       return '<span class="tkt' + (t.kind === "bonus" ? " bonus" : "") + '" title="' +
-        (LT.KIND_LABEL[t.kind] || t.kind) + '">' + LT.code(t.code) + "</span>";
+        (KIND_LABEL[t.kind] || t.kind) + '">' + code(t.code) + "</span>";
     }).join(" ");
   }
 
@@ -239,7 +246,8 @@ window.MODULE.lib = (function () {
     bind: bind, ready: ready, state: state, reloadState: reloadState, byId: byId,
     $: $, $$: $$, ok: ok, fail: fail, bad: bad,
     KINDS: KINDS, PREV: PREV, ROLE_TAG: ROLE_TAG,
-    kindLabel: kindLabel, isParticipant: isParticipant, roleLabel: roleLabel,
+    kindLabel: kindLabel, code: code,
+    isParticipant: isParticipant, roleLabel: roleLabel,
     canMark: canMark, ticketChips: ticketChips, roleTag: roleTag, timeCell: timeCell,
     stepBadges: stepBadges, nextLabel: nextLabel, actionButtons: actionButtons,
     searchSpec: searchSpec, stats: stats, poolSize: poolSize

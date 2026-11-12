@@ -190,9 +190,6 @@ def event_id():
         raise RuntimeError("还没有选活动：先调用 db.set_event(seq)")
     return seq
 
-KINDS = ("checkin", "task1", "task2")
-KIND_LABEL = {"checkin": "签到", "task1": "任务一", "task2": "任务二", "bonus": "速度奖励"}
-
 # 平台自己的默认配置；玩法相关的默认值在模块的 defaults.json 里，建活动时一并写入
 DEFAULT_CONFIG = {
     "kind": "nwuca.lottery",      # 这个活动用的是哪个模块

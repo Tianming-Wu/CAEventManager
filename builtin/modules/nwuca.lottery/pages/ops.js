@@ -17,7 +17,7 @@ window.MODULE = window.MODULE || { pages: {} };
   function filtered() {
     var q = (S.q || "").trim();
     var all = S.students || [];
-    var list = q ? LT.queryStudents(all, q, 999, lib.searchSpec()) : all.slice();
+    var list = q ? LT.queryRecords(all, q, 999, lib.searchSpec()) : all.slice();
     return list.filter(function (s) {
       switch (S.filter) {
         case "in": return !!s.marks.checkin;
@@ -65,7 +65,7 @@ window.MODULE = window.MODULE || { pages: {} };
     }
     var parsed = LT.parseQuery(q);
     var known = parsed.unknown.length === 0;
-    var buttons = (LT.tagsFromSpec(lib.searchSpec()) || LT.TAGS).map(function (tag) {
+    var buttons = LT.tagsFromSpec(lib.searchSpec()).map(function (tag) {
       return '<button type="button" data-tag="' + LT.esc(tag.label.split(" ")[0]) + '">' +
         LT.esc(tag.label) + "</button>";
     }).join("");
@@ -98,7 +98,7 @@ window.MODULE = window.MODULE || { pages: {} };
   function refreshHits() {
     renderTagHint();
     if (!(S.q || "").trim()) { S.hits = []; return; }
-    S.hits = LT.queryStudents(S.students, S.q, 8, lib.searchSpec());
+    S.hits = LT.queryRecords(S.students, S.q, 8, lib.searchSpec());
     if (S.sel >= S.hits.length) S.sel = Math.max(0, S.hits.length - 1);
   }
 

@@ -251,38 +251,9 @@
        zengpingjing  zpg  zengpj  zenpj  zpj   ← 都命中
 
      这比"整串前缀"宽容得多，也比"随意子序列"严格：两个字母不能都从同一个音节里取。 */
-  var TAGS = [
-    { keys: ["w", "worker", "staff", "工作人员"], label: "#w 工作人员",
-      test: function (s) { return s.role === "staff"; } },
-    { keys: ["v", "volunteer", "志愿者"], label: "#v 志愿者",
-      test: function (s) { return s.role === "volunteer"; } },
-    { keys: ["p", "participant", "参加人员"], label: "#p 参加人员",
-      test: function (s) { return !s.role || s.role === "participant"; } },
-    { keys: ["已签到", "in"], label: "#已签到",
-      test: function (s) { return !!s.marks.checkin; } },
-    { keys: ["未签到", "out"], label: "#未签到",
-      test: function (s) { return !s.marks.checkin; } },
-    { keys: ["已完成", "done"], label: "#已完成",
-      test: function (s) { return (s.tasks || 0) >= 2; } },
-    { keys: ["未完成", "todo"], label: "#未完成",
-      test: function (s) { return (s.tasks || 0) < 2; } },
-    { keys: ["有票", "ticket"], label: "#有票",
-      test: function (s) { return ticketCount(s) > 0; } },
-    { keys: ["无票", "zeroticket"], label: "#无票",
-      test: function (s) { return ticketCount(s) === 0; } },
-    { keys: ["越序", "override"], label: "#越序",
-      test: function (s) { return !!s.override; } }
-  ];
-
-  function ticketCount(stu) {
-    var t = stu.tickets;
-    if (!t) return 0;
-    return typeof t.length === "number" ? t.length : Object.keys(t).length;
-  }
-
   function findTag(word, table) {
     var key = (word || "").toLowerCase();
-    var list = table || TAGS;
+    var list = table || [];
     for (var i = 0; i < list.length; i++) {
       if (list[i].keys.indexOf(key) >= 0 || list[i].keys.indexOf(word) >= 0) {
         return list[i];
@@ -381,8 +352,9 @@
   }
 
   /* 模块申请了 search 就按它声明的字段与词表来；没有就用内置的那张（抽奖模块的老样子） */
+  /* 模块没声明词表就没有标签可用：词表由 features.search.tags 提供，平台不再自带 */
   function tagsFromSpec(spec) {
-    if (!spec || !spec.tags || !spec.tags.length) return TAGS;
+    if (!spec || !spec.tags || !spec.tags.length) return [];
     return spec.tags.map(function (tag) {
       return {
         keys: (tag.keys || []).map(function (k) { return String(k).toLowerCase(); }),
@@ -425,7 +397,7 @@
   }
 
   /* 解析 + 求交：标签在本地过滤，词逐个匹配，取最弱的那一项当总分。 */
-  function queryStudents(list, text, limit, spec) {
+  function queryRecords(list, text, limit, spec) {
     var table = tagsFromSpec(spec);
     var parsed = parseQuery(text, table);
     var out = [];
@@ -501,14 +473,11 @@
     return "";
   }
 
-  var KIND_LABEL = { checkin: "签到", task1: "任务一", task2: "任务二", bonus: "速度奖励" };
-
   window.LT = {
     PREFIX: PREFIX,
     watch: watch,
     version: version,
     outdated: outdated,
-    revs: function () { return revs; },
     conflictMsg: conflictMsg,
     PANEL: PANEL,
     panelLoginUrl: panelLoginUrl,
@@ -516,21 +485,17 @@
     api: api,
     panelApi: panelApi,
     esc: esc,
-    pad: pad,
     code: code,
     fmtTime: fmtTime,
     fmtDateTime: fmtDateTime,
-    ago: ago,
     toast: toast,
     confirm: confirmBox,
     modal: modal,
-    search: search,
     score: score,
     parseQuery: parseQuery,
-    queryStudents: queryStudents,
+    queryRecords: queryRecords,
     tagsFromSpec: tagsFromSpec,
-    termScore: termScore,
-    TAGS: TAGS,
-    KIND_LABEL: KIND_LABEL
+    // code：四位编号，现在只有大屏还在用；上屏块做完也搬进模块
+    code: code
   };
 })();

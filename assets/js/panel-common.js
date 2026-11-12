@@ -327,7 +327,6 @@
     api: api,
     watch: watch,
     notice: notice,
-    revs: function () { return revs; },
     esc: esc,
     when: when,
     whenExact: whenExact,
@@ -336,7 +335,6 @@
     toast: toast,
     md: md,
     onUpdate: onUpdate,
-    afterApi: afterApi,
-    version: function () { return bootVersion; }
+    afterApi: afterApi
   };
 })();

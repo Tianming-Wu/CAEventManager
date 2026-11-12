@@ -3,7 +3,7 @@
  * Everything that is visible but not backed by a real endpoint is marked
  * UNWIRED(<feature>) so a later pass can grep for it:
  *
- *     grep -rn "UNWIRED" panel_static/ tpl/ app.py
+ *     grep -rn "UNWIRED" assets/ pages/ app.py
  *
  * The marker means "this is a placeholder on purpose, do not assume it works".
  */

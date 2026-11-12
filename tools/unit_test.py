@@ -387,7 +387,7 @@ def screen_packs():
           packs.remove("hall-screen-2", root=root)
           and not os.path.isdir(os.path.join(root, "hall-screen-2")))
     for bad, word in (("..", "不合法"), ("../etc", "不合法"),
-                      ("classic", "内置"), ("nope", "找不到")):
+                      ("classic", "随发布走"), ("nope", "找不到")):
         try:
             packs.remove(bad, root=root)
             check("不该删掉 %s" % bad, False)

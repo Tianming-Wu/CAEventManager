@@ -113,16 +113,16 @@ SQLite 开 WAL；写入统一走事务包装（`tx()`），一次写入成功之
 
 ## 前端
 
-- `panel_static/`：面板（`panel.js` 一个 IIFE，`panel.css` 一套变量表）
-- `static/`：活动的公示页、大屏、签到、操作台
-- `tpl/`：页面骨架，服务端只做 `{{VERSION}}`、`{{FOOTER}}` 这类替换
+- `assets/`：全部静态资源，按类型分（`css/`、`js/`、`img/`），面板与活动族共用同一份
+- `pages/`：页面骨架，服务端只做 `{{VERSION}}`、`{{FOOTER}}`、`{{SAFE_MODE}}` 这类替换
+- `theme/`：外观包（默认 `classic`），活动配置里挑一份
 - 没有框架：`PX` 提供 `api` / `toast` / `esc` / `md` / `when` 这几个常用件，其余按页面写
 - 版本号贯穿到底：每个回答都带着它，页面据此决定要不要换新脚本
 
 ## 可替换的部件
 
-- **展示屏幕**：`screen_packs/<标识>/screen.html`（实例目录优先，其次内置），
-  活动配置里写 `screen_pack` 就切换
+- **展示屏幕**：`theme/<标识>/screen.html`，活动配置里写 `screen_pack` 就切换；
+  随发布走的 `classic` 与实例导入的包放在同一个目录里
 - **活动模块**：`modules/<id>/module.json` + `schema.json`；创建表单由 schema 生成，
   兼容约束按版本号判定
 - **预设**：`templates/*.json`，模块之上的一份配置快照
@@ -149,7 +149,7 @@ SQLite 开 WAL；写入统一走事务包装（`tx()`），一次写入成功之
 }
 ```
 
-- **平台出算法，模块出词表**：搜索的解析、拼音音节匹配、条件求交都在 `static/common.js`；
+- **平台出算法，模块出词表**：搜索的解析、拼音音节匹配、条件求交都在 `assets/js/common.js`；
   哪些字段、哪些标签、叫什么名字，是模块自己的事
 - **没申请就不发**：`/api/admin/state` 里没有 `features.search` 时，学生记录连 `pys`
   （逐字音节）都不带——不给用不上的数据，也省得模块以为"这功能本来就有"

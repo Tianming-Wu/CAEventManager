@@ -29,8 +29,8 @@ from urllib.parse import urlparse
 import localconfig
 
 BASE_DIR = paths.APP_ROOT
-PANEL_TPL = os.path.join(BASE_DIR, "tpl")
-PANEL_STATIC = os.path.join(BASE_DIR, "panel_static")
+PANEL_TPL = os.path.join(BASE_DIR, "pages")
+PANEL_STATIC = os.path.join(BASE_DIR, "assets")
 
 ROLES = ("owner", "superadmin", "admin")
 ROLE_LABEL = {"owner": "站长", "superadmin": "超级管理员", "admin": "管理员"}
@@ -1088,7 +1088,7 @@ PANEL_PAGES = {"/": "panel_login.html", "/login": "panel_login.html",
 def _is_panel_route(path):
     return (path in PANEL_PAGES
             or path.startswith("/api/panel/")
-            or path.startswith("/panel_static/"))
+            or path.startswith("/assets/"))
 
 
 def event_seqs():

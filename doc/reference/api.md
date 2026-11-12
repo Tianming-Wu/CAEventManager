@@ -9,7 +9,7 @@
 /register          主面板注册
 /panel             主面板控制台
 /print             打印页：名单 / 报名单（?kind=roster|signup&id=，可选 mode=blank）
-/panel_static/*    面板静态资源
+/assets/*          静态资源（面板与活动族共用）
 /api/panel/*       面板接口
 
 /<token>/          活动公示页（只读，无鉴权）

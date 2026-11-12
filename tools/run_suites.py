@@ -33,7 +33,10 @@ def boot(tag):
     env = dict(os.environ)
     env["PYTHONIOENCODING"] = "utf-8"
     env["LOTTERY_DATA_DIR"] = os.path.join(data, "data")
-    env["LOTTERY_PACKS_DIR"] = os.path.join(data, "packs")
+    theme_dir = os.path.join(data, "theme")
+    # 随发布走的外观（classic）先拷进去，否则大屏没有兜底
+    shutil.copytree(os.path.join(ROOT, "theme"), theme_dir, dirs_exist_ok=True)
+    env["LOTTERY_THEME_DIR"] = theme_dir
     # 自己的 config.json：仓库那份写着生产的对外前缀，测试照着它跳会跳到线上
     base = "http://127.0.0.1:%d" % port
     config_path = os.path.join(data, "config.json")
@@ -98,7 +101,10 @@ def run(tag, commands, need_server=True):
             pw = password(data)
             # 有些套件会直接往数据目录里写通知，所以测试进程要看到同一份目录
             env["LOTTERY_DATA_DIR"] = os.path.join(data, "data")
-            env["LOTTERY_PACKS_DIR"] = os.path.join(data, "packs")
+            theme_dir = os.path.join(data, "theme")
+            # 随发布走的外观（classic）先拷进去，否则大屏没有兜底
+            shutil.copytree(os.path.join(ROOT, "theme"), theme_dir, dirs_exist_ok=True)
+            env["LOTTERY_THEME_DIR"] = theme_dir
         for tool, extra in commands:
             if need_server:
                 cmd = [PY, os.path.join("tools", tool), base, pw] + extra

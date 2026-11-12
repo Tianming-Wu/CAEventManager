@@ -5,7 +5,8 @@
 
 ## 文档
 
-- 根目录只有入口 `app.py`、文档与许可证；程序模块在 `core/`，脚本在 `bin/`，开发工具在 `tools/`
+- 根目录只有入口 `app.py`、文档与许可证；程序模块在 `core/`，脚本在 `bin/`，开发工具在 `tools/`，
+  静态资源在 `assets/`，页面外壳在 `pages/`，外观包在 `theme/`，内建模块与预设的模板在 `builtin/`
 - 使用者文档在 `doc/usage/`、`doc/reference/`，以及各模块的 `doc.md`。运维助手只读这三处
 - 开发与运维文档在 `doc/dev/`、`doc/ops/`
 - 一份文件只讲一件事；标题写成 `# 名称 - 一句话`；末节是「相关文档」
@@ -39,7 +40,7 @@ python tools/bump_version.py                                         # 推进版
 
 ## 不要动
 
-- `data/`、`config.json`、`screen_packs/`：运行时数据，已在 `.gitignore` 中排除
+- `data/`、`config.json`、`theme/<自己装的>`：运行时数据，已在 `.gitignore` 中排除
 - 已部署实例里的活动、名单与账号都在 `data/` 里，改动前先备份
 
 ## 本机运行

@@ -216,10 +216,10 @@ external/checkin.js
 ```
 
 - 页面在 `/<token>/` 下（公示页就是 `/<token>/`，签到页是 `/<token>/checkin`），
-  所以页面里写 `static/app.css`、`external/board.js` 都是相对地址
+  所以页面里写 `assets/css/app.css`、`external/board.js` 都是相对地址
 - `module.json` 的 `external` 声明了哪几页，平台就把哪几页指向模块；没带文件就是 404
-- 大屏走的还是「外部资源 › 展示屏幕」那套：`screen_packs/<标识>/`，活动设置里挑一份
-- 平台在这些页面上仍是那几件共用件：`static/common.js` 给的 `LT`、平台的那张样式表
+- 大屏走的还是「外部资源 › 展示屏幕」那套：`theme/<标识>/`，活动设置里挑一份
+- 平台在这些页面上仍是那几件共用件：`assets/js/common.js` 给的 `LT`、平台的那张样式表
 
 ## 数据
 
@@ -276,7 +276,7 @@ modules/hello/
 1. **（已完成）** 业务模型搬进模块，核心只留分发器
 2. 动作声明：`module.json` 的 `actions` + 平台侧统一的 `/api/do/<name>` 调度；
    抽奖模块先把自己的动作声明出来，平台里那 20 多个 `/api/admin/*` 收成调度与少数平台动作
-3. 页面资源：平台按 `pages/*.html|js` 注入，`tpl/admin.html` 里与奖票相关的段落搬进模块
+3. 页面资源：平台按 `pages/*.html|js` 注入，`pages/admin.html` 里与奖票相关的段落搬进模块
 4. 展示数据：公示页/大屏改吃 `present()`，平台只画壳
 5. 验收：装两个玩法完全不同的模块同时跑；`git grep` 一遍平台代码里没有玩法名词
 

@@ -29,7 +29,7 @@ $files = @(
     (Get-ChildItem -File -Filter *.md | Select-Object -ExpandProperty Name)
     "bin/run.sh", "bin/service.sh"
 )
-# Collected too: tpl / static / panel_static / tools - a hand-written list here
+# Collected too: pages / assets / theme / tools - a hand-written list here
 # silently skipped a new asset directory once already.
 $skip = @("data", "tmp", "__pycache__", ".git", ".vscode")
 $dirs = @(Get-ChildItem -Directory | Where-Object { $skip -notcontains $_.Name } |
@@ -74,7 +74,7 @@ cd ~/__DEST__
 tar -tzf __TAR__ | sed -e 's|^\./||' -e '/\/$/d' | sort > /tmp/lottery-incoming.txt
 find . -type f \
     -not -path './data/*' -not -path './modules/*' -not -path './templates/*' \
-    -not -path './screen_packs/*' -not -path './packs/*' -not -name 'config.json' \
+    -not -path './theme/*' -not -path './packs/*' -not -name 'config.json' \
     | sed 's|^\./||' | sort > /tmp/lottery-present.txt
 comm -23 /tmp/lottery-present.txt /tmp/lottery-incoming.txt > /tmp/lottery-stale.txt || true
 while IFS= read -r stale; do

@@ -30,9 +30,15 @@ import zipfile
 BASE_DIR = paths.APP_ROOT
 # 导入的屏幕放在实例目录里（内置的只读，随发布走）。测试用 LOTTERY_PACKS_DIR 另开
 # 一处，免得跑一遍测试就往工作区里塞东西。
-INSTANCE = (os.environ.get("LOTTERY_PACKS_DIR")
-            or os.path.join(BASE_DIR, "screen_packs"))
-BUILTIN = os.path.join(BASE_DIR, "builtin", "screen_packs")
+# 外观包都在 theme/ 下：随发布走的那几份（classic 等）与实例自己装的一起放，
+# 谁在盘上谁可用，不另做"内建/外部"的区分——静态资源不需要开关。
+THEME_DIR = (os.environ.get("LOTTERY_THEME_DIR")
+             or os.environ.get("LOTTERY_PACKS_DIR")
+             or os.path.join(BASE_DIR, "theme"))
+INSTANCE = THEME_DIR
+BUILTIN = THEME_DIR
+# 随发布走的那几份：名字固定，别的地方不再靠"在哪个目录"来区分
+SHIPPED = ("classic",)
 
 # 入口页固定；活动页按 /<token>/screen 取它
 PAGE = "screen.html"
@@ -173,15 +179,14 @@ def slug(text):
 
 
 def _taken(root):
-    """Ids already in use, built-in ones included: an upload never shadows them."""
-    out = set()
-    for base in (root, BUILTIN):
-        if os.path.isdir(base):
-            try:
-                out.update(os.listdir(base))
-            except OSError:
-                pass
-    return out
+    """Ids already in use: an upload never shadows an existing theme."""
+    root = root or INSTANCE
+    if not os.path.isdir(root):
+        return set()
+    try:
+        return set(os.listdir(root))
+    except OSError:
+        return set()
 
 
 def unique_id(hint, root=None):
@@ -239,10 +244,10 @@ def remove(pack_id, root=None):
     pack_id = str(pack_id or "").strip()
     if not pack_id or slug(pack_id) != pack_id:
         raise PackError("标识不合法")
+    if pack_id in SHIPPED:
+        raise PackError("随发布走的外观不能删除")
     full = os.path.join(root, pack_id)
     if not os.path.isdir(full):
-        if os.path.isdir(os.path.join(BUILTIN, pack_id)):
-            raise PackError("内置屏幕不能删除")
         raise PackError("找不到这一项")
     real_root = os.path.realpath(root)
     real_full = os.path.realpath(full)
@@ -269,24 +274,23 @@ def measure(folder):
 
 
 def listing(root=None):
-    """Usable packs: the instance directory first, built-ins filling the rest."""
+    """Usable packs: every folder under theme/ that has an entry page."""
     root = root or INSTANCE
-    seen, out = set(), []
-    for base, builtin in ((root, False), (BUILTIN, True)):
-        if not os.path.isdir(base):
+    out = []
+    if not os.path.isdir(root):
+        return out
+    try:
+        names = sorted(os.listdir(root))
+    except OSError:
+        return out
+    for name in names:
+        folder = os.path.join(root, name)
+        if not os.path.isfile(os.path.join(folder, PAGE)):
             continue
-        try:
-            names = sorted(os.listdir(base))
-        except OSError:
-            continue
-        for name in names:
-            folder = os.path.join(base, name)
-            if name in seen or not os.path.isfile(os.path.join(folder, PAGE)):
-                continue
-            seen.add(name)
-            info = measure(folder)
-            out.append({"id": name, "name": name, "builtin": builtin,
-                        "source": "内置" if builtin else "已导入",
-                        "files": info["files"], "size": info["size"],
-                        "sizeText": size_text(info["size"]), "at": info["at"]})
+        builtin = name in SHIPPED
+        info = measure(folder)
+        out.append({"id": name, "name": name, "builtin": builtin,
+                    "source": "随发布" if builtin else "已导入",
+                    "files": info["files"], "size": info["size"],
+                    "sizeText": size_text(info["size"]), "at": info["at"]})
     return out

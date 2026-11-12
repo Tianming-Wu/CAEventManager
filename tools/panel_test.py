@@ -181,7 +181,7 @@ def main():
     for page_name, script_name, wanted in (
             ("panel_login.html", "login.js", "/login"),
             ("panel_register.html", "register.js", "/register")):
-        script = open(os.path.join(HERE, "panel_static", script_name),
+        script = open(os.path.join(HERE, "assets", "js", script_name),
                       encoding="utf-8").read()
         calls = re.findall(r'PX\.api\(\s*"([^"]+)"', script)
         check("%s calls %s" % (script_name, wanted),

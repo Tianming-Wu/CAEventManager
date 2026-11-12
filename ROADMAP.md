@@ -7,8 +7,8 @@
 按建议顺序，每一条都能独立交付、独立上线：
 
 1. **十一 收尾**：两个玩法完全不同的模块同时跑一遍（验收标准：平台代码里 grep 不到玩法名词）；
-   `static/common.js` 里还剩 11 处玩法词（`LT.code`、`KIND_LABEL`、内置标签表、`queryStudents`
-   这个名字）；大屏仍在 `builtin/screen_packs/classic`，要不要也搬进模块等你定
+   `assets/js/common.js` 里还剩 11 处玩法词（`LT.code`、`KIND_LABEL`、内置标签表、
+   `queryStudents` 这个名字）；大屏归平台（`theme/classic`），内容走 `present()`
 2. **十五 收尾**：崩溃自检（连续三次起不来就自动进安全模式），看护进程的循环里留好了位置
 3. **十三b 账号彻底删除**：只在用户管理，站长 + sudo；只删不拥有任何活动的账号，级联会话、
    令牌、席位、助手存档与头像，审计保留
@@ -18,7 +18,7 @@
 
 等你给输入才能动的：
 
-- **404 页面**：`tpl/404.html` 目前是占位，等你的设计
+- **404 页面**：`pages/404.html` 目前是占位，等你的设计
 - **名单打印版式**：等你给参考文件
 - **xlsx**：等真机 Excel / WPS 上试一遍
 - **迁移到 10.15.0.108**：`ssh repair108` 已经通，等基础功能收得差不多再搬
@@ -295,7 +295,7 @@ zengpingjing   zpg   zengpj   zenpj   zpj
 审批统一收在「活跃审批」下面，不散在别的页面里：`注册申请` 是真数据（待审核 / 最近处理两张表），
 `活动申请` 是留好的位置 —— 现在**默认自动通过**，不设申请队列，要改策略时只加一个开关。
 
-未接的部分在代码里统一标 `UNWIRED(<feature>)`：`grep -rn "UNWIRED" panel_static/ tpl/ app.py`。
+未接的部分在代码里统一标 `UNWIRED(<feature>)`：`grep -rn "UNWIRED" assets/ pages/ app.py`。
 当前的清单：
 
 - `invites` —— 活动邀请与「我的活动」上的角标（结构已在，数据恒为空）

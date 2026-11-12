@@ -16,14 +16,15 @@ size() { curl -s "$1" | wc -c; }
 
 echo "=== pages under the secret id ({$SECRET:0:8}...) ==="
 for p in / /admin /login /screen /board /checkin \
-         /static/app.css /static/admin.js /static/screen.js /static/board.js \
-         /static/qrcode.js /static/favicon.png /static/apple-touch-icon.png; do
+         /assets/css/app.css /assets/js/admin.js /assets/js/screen.js \
+         /assets/js/qrcode.js /assets/img/favicon.png \
+         /assets/img/apple-touch-icon.png; do
     printf '%-30s %s  %s bytes\n' "$p" "$(code "$BASE$p")" "$(size "$BASE$p")"
 done
 
 echo
 echo "=== secret is mandatory (root paths must 404) ==="
-for p in / /admin /screen /login /api/board /static/app.css; do
+for p in / /admin /screen /login /api/board /assets/css/app.css; do
     c=$(code "http://127.0.0.1:$PORT$p")
     if [ "$c" = "404" ]; then printf '%-30s %s  ok\n' "$p" "$c"; else printf '%-30s %s  LEAK\n' "$p" "$c"; fi
 done

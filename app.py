@@ -64,11 +64,11 @@ import packs
 import panel
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-TPL_DIR = os.path.join(BASE_DIR, "tpl")
-STATIC_DIR = os.path.join(BASE_DIR, "static")
+PAGES_DIR = os.path.join(BASE_DIR, "pages")
+ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.0.70"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.0.71"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -169,7 +169,7 @@ def substitute_page(body, cfg):
 
 def not_found_page():
     """404 的页面：tpl/404.html 在就用它，没有就用一句白话。状态码始终是 404。"""
-    path = os.path.join(TPL_DIR, "404.html")
+    path = os.path.join(PAGES_DIR, "404.html")
     try:
         with open(path, "r", encoding="utf-8") as fh:
             html = fh.read()
@@ -339,22 +339,22 @@ FAVICON_TYPES = {
 
 
 def favicon_markup():
-    """<link rel="icon"> tags for whatever icon sits in static/.
+    """<link rel="icon"> tags for whatever icon sits in assets/img/.
 
-    Drop static/favicon.png (or .svg / .ico / .webp) and it is picked up on the
-    next page load - no code change, no rebuild.  With no icon present we emit
+    Drop assets/img/favicon.png (or .svg / .ico / .webp) and it is picked up on
+    the next page load - no code change, no rebuild.  With no icon present we emit
     the empty data URI so the browser stops asking for a root /favicon.ico,
     which this service deliberately does not serve.
     """
     links = []
     for name in FAVICON_CANDIDATES:
-        if not os.path.isfile(os.path.join(STATIC_DIR, name)):
+        if not os.path.isfile(os.path.join(ASSETS_DIR, "img", name)):
             continue
-        href = "static/" + name
+        href = "assets/img/" + name
         links.append('<link rel="icon" type="%s" href="%s">' % (FAVICON_TYPES[name], href))
         if name == "favicon.png":
-            touch = "static/apple-touch-icon.png"
-            if not os.path.isfile(os.path.join(STATIC_DIR, "apple-touch-icon.png")):
+            touch = "assets/img/apple-touch-icon.png"
+            if not os.path.isfile(os.path.join(ASSETS_DIR, "img", "apple-touch-icon.png")):
                 touch = href
             links.append('<link rel="apple-touch-icon" href="%s">' % touch)
     if not links:
@@ -1126,11 +1126,11 @@ class Handler(BaseHTTPRequestHandler):
         if row is None:
             return self._err("not found", 404)
 
-        if method == "GET" and route.startswith("/static/"):
-            rel = route[len("/static/"):]
+        if method == "GET" and route.startswith("/assets/"):
+            rel = route[len("/assets/"):]
             if ".." in rel:
                 return self._err("bad path", 400)
-            full = os.path.join(panel.PANEL_STATIC, rel)
+            full = os.path.join(ASSETS_DIR, rel)
             if not os.path.isfile(full):
                 return self._err("not found", 404)
             with open(full, "rb") as fh:
@@ -1141,7 +1141,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, body, ctype, [("Cache-Control", "public, max-age=60")])
 
         if method == "GET" and route in ("", "/"):
-            # 相对路径的 static/… 只有在地址以 / 结尾时才算得对
+            # 相对路径的 assets/… 只有在地址以 / 结尾时才算得对
             raw = (self.path or "").split("?")[0]
             if not raw.endswith("/"):
                 return self._redirect(raw + "/")
@@ -1176,14 +1176,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def _panel(self, method, route, raw_path, query):
         conn = panel.connect()
-        if method == "GET" and route.startswith("/panel_static/"):
-            rel = route[len("/panel_static/"):]
+        if method == "GET" and route.startswith("/assets/"):
+            # 面板与活动族共用同一份静态资源：没有第二份，也没有回退链
+            rel = route[len("/assets/"):]
             if ".." in rel:
                 return self._err("bad path", 400)
-            full = os.path.join(panel.PANEL_STATIC, rel)
-            if not os.path.isfile(full):
-                # 活动页那几件通用件（二维码库）借给面板用，避免同一份文件抄两遍
-                full = os.path.join(TPL_DIR, "..", "static", rel)
+            full = os.path.join(ASSETS_DIR, rel)
             if not os.path.isfile(full):
                 return self._err("not found", 404)
             with open(full, "rb") as fh:
@@ -1216,7 +1214,7 @@ class Handler(BaseHTTPRequestHandler):
         return self._panel_api(method, route, raw_path, query)
 
     def _serve_panel_page(self, name):
-        path = os.path.join(TPL_DIR, name)
+        path = os.path.join(PAGES_DIR, name)
         try:
             with open(path, "rb") as fh:
                 body = fh.read()
@@ -3293,11 +3291,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, b"/* this page has no script */",
                                   "application/javascript; charset=utf-8")
             return self._serve_file(full, "application/javascript; charset=utf-8", cache=True)
-        if path.startswith("/static/"):
-            rel = path[len("/static/"):]
+        if path.startswith("/assets/"):
+            rel = path[len("/assets/"):]
             if ".." in rel or rel.startswith("/"):
                 return self._err("bad path", 400)
-            full = os.path.join(STATIC_DIR, rel)
+            full = os.path.join(ASSETS_DIR, rel)
             if not os.path.isfile(full):
                 return self._err("not found", 404)
             return self._serve_file(full, None, cache=True)
@@ -3306,8 +3304,7 @@ class Handler(BaseHTTPRequestHandler):
     def _screen_pack(self, path):
         """展示屏幕是一个可替换的插接件：只需一份 screen.html（和它自己的 js/css）。
 
-        查找顺序：实例目录 screen_packs/<包>/ → 内置 builtin/screen_packs/<包>/。
-        包名放在活动配置的 screen_pack 里，缺省用 classic。
+        外观都在 theme/<包>/ 里，包名放在活动配置的 screen_pack 里，缺省用 classic。
         """
         conn = db.connect()
         # 活动自己没指定就用自己的内置屏幕；外部资源只被"引用"，不设平台默认值
@@ -3316,22 +3313,19 @@ class Handler(BaseHTTPRequestHandler):
         if ".." in tail or ".." in want:
             return self._err("bad path", 400)
         rel = tail or "screen.html"
-        roots = [os.path.join(packs.INSTANCE, want),
-                 os.path.join(packs.BUILTIN, want)]
-        for root in roots:
-            full = os.path.join(root, rel)
-            if os.path.isfile(full):
-                with open(full, "rb") as fh:
-                    body = fh.read()
-                ctype = mimetypes.guess_type(full)[0] or "application/octet-stream"
-                if ctype.startswith("text/") or ctype == "application/javascript":
-                    ctype += "; charset=utf-8"
-                if rel == "screen.html":
-                    body = body.replace(b"{{FOOTER}}", panel.FOOTER.encode("utf-8"))
-                    body = body.replace(b"{{VERSION}}", VERSION.encode("utf-8"))
-                return self._send(200, body, ctype, [("Cache-Control", "no-store")])
-        # 包不见了：退回内置的 classic，别让现场黑屏
-        with open(os.path.join(packs.BUILTIN, "classic", "screen.html"), "rb") as fh:
+        full = os.path.join(packs.THEME_DIR, want, rel)
+        if os.path.isfile(full):
+            with open(full, "rb") as fh:
+                body = fh.read()
+            ctype = mimetypes.guess_type(full)[0] or "application/octet-stream"
+            if ctype.startswith("text/") or ctype == "application/javascript":
+                ctype += "; charset=utf-8"
+            if rel == "screen.html":
+                body = body.replace(b"{{FOOTER}}", panel.FOOTER.encode("utf-8"))
+                body = body.replace(b"{{VERSION}}", VERSION.encode("utf-8"))
+            return self._send(200, body, ctype, [("Cache-Control", "no-store")])
+        # 包不见了：退回 classic，别让现场黑屏
+        with open(os.path.join(packs.THEME_DIR, "classic", "screen.html"), "rb") as fh:
             body = fh.read()
         body = body.replace(b"{{FOOTER}}", panel.FOOTER.encode("utf-8"))
         body = body.replace(b"{{VERSION}}", VERSION.encode("utf-8"))
@@ -3343,7 +3337,7 @@ class Handler(BaseHTTPRequestHandler):
             cfg = cfg if cfg is not None else db.all_config(db.connect())
         except Exception:
             cfg = {}
-        with open(os.path.join(TPL_DIR, "maintenance.html"), "rb") as fh:
+        with open(os.path.join(PAGES_DIR, "maintenance.html"), "rb") as fh:
             body = substitute_page(fh.read(), cfg)
         self.send_response(503)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -3362,7 +3356,7 @@ class Handler(BaseHTTPRequestHandler):
         if full:
             with open(full, "rb") as fh:
                 return fh.read()
-        platform = os.path.join(TPL_DIR, name)
+        platform = os.path.join(PAGES_DIR, name)
         if os.path.isfile(platform):
             with open(platform, "rb") as fh:
                 return fh.read()

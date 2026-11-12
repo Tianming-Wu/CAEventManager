@@ -1,7 +1,6 @@
 # 运行时数据与部署状态
 data/
 config.json
-/screen_packs/
 
 # 临时产物
 tmp/
@@ -17,3 +16,6 @@ __pycache__/
 # 内置模块与内置预设随仓库发布；实例自己装的东西不进版本库
 /modules/
 /templates/
+# 实例自己装的外观包：随发布走的那几份留在库里
+/theme/*
+!/theme/classic/

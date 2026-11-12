@@ -77,8 +77,8 @@ root = show("/", 200, "\u767b\u5f55")
 check("root is the login page", "<title>\u767b\u5f55" in root, root[:70])
 show("/register", 200, "\u53bb\u767b\u5f55")
 redirect("/panel")
-show("/panel_static/login.js", 200, "loginForm")
-show("/panel_static/panel.css", 200, "auth-card")
+show("/assets/js/login.js", 200, "loginForm")
+show("/assets/css/panel.css", 200, "auth-card")
 for page in ("", "/screen", "/checkin"):
     show("/" + TOKEN + page, 200)
 # 没有会话的活动后台与旧的登录页都交给主面板，所以这里是 302 而不是 200

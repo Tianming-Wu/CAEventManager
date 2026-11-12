@@ -1531,8 +1531,8 @@ def screens_page(page):
     check("the page lists the built-in pack",
           page.locator('.pack-card').count() >= 1,
           page.locator('.pack-card').count())
-    check("内置的那一份标着来源",
-          "内置" in page.inner_text("#screenPackList"),
+    check("随发布走的那一份标着来源",
+          "随发布" in page.inner_text("#screenPackList"),
           page.inner_text("#screenPackList"))
     check("内置的那一份删不掉",
           page.locator('.pack-card [data-pack-del="classic"]').count() == 0)

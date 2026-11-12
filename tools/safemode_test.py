@@ -70,7 +70,7 @@ def boot(safe):
     env = dict(os.environ)
     env["PYTHONIOENCODING"] = "utf-8"
     env["LOTTERY_DATA_DIR"] = os.path.join(DATA, "data")
-    env["LOTTERY_PACKS_DIR"] = os.path.join(DATA, "packs")
+    env["LOTTERY_THEME_DIR"] = os.path.join(DATA, "theme")
     # 这套会改静态设置：配置文件也放进自己的目录，别写到仓库里那份
     env["LOTTERY_CONFIG"] = os.path.join(DATA, "config.json")
     if safe:

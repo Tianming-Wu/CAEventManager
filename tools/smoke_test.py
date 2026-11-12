@@ -143,7 +143,8 @@ def main():
         body = res.read()
     check("service root now serves the panel",
           res.status == 200 and "参加抽奖并不需要注册账户".encode() in body, res.status)
-    for probe in ("/admin", "/screen", "/checkin", "/api/board", "/static/app.css"):
+    # 静态资源两个面共用，不在这条「必须带 token」的清单里
+    for probe in ("/admin", "/screen", "/checkin", "/api/board"):
         try:
             _ur.urlopen(root + probe, timeout=5)
             check("event route needs the token (%s)" % probe, False, "got 200")

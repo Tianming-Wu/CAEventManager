@@ -82,14 +82,16 @@
       ' placeholder="' + esc(opts.placeholder || "搜索用户") + '"' +
       ' aria-label="' + esc(opts.placeholder || "搜索用户") + '">' +
       '<div class="pp-list"></div>' +
-      (multi
-        ? '<div class="pp-foot"><button type="button" class="pp-done">完成</button></div>'
-        : "") +
+      '<div class="pp-foot">' +
+      '<button type="button" class="pp-cancel">取消</button>' +
+      '<button type="button" class="pp-done"' + (multi ? "" : " disabled") +
+      ">完成</button></div>" +
       "</div>";
     document.body.appendChild(back);
 
     var list = back.querySelector(".pp-list");
     var box = back.querySelector(".pp-find");
+    var doneBtn = back.querySelector(".pp-done");
     var self = { close: close };
     current = self;
 
@@ -100,10 +102,16 @@
       if (back.parentNode) back.parentNode.removeChild(back);
     }
 
+    // 单人选择时"没点人"就没有可交的东西，[完成] 先淡着
+    function syncDone() {
+      if (!doneBtn) return;
+      doneBtn.disabled = !multi && !Object.keys(chosen).length;
+    }
+
     function onKey(e) {
       if (e.key === "Escape") {
         e.stopPropagation();
-        close();
+        close();               // Esc 与 [取消] 一样：什么都不改
       }
     }
 
@@ -148,25 +156,34 @@
       }
       if (!person) return;
       if (!multi) {
-        apply([person]);                  // 单选：点谁就是谁
+        // 单选：点一个只是"选它"，先前那个自动让位；按 [完成] 才算数
+        chosen = {};
+        chosen[id] = person;
+        Array.prototype.forEach.call(
+          list.querySelectorAll("[data-pp-id]"), function (el) {
+            var on = el.getAttribute("data-pp-id") === id;
+            el.classList.toggle("on", on);
+            el.setAttribute("aria-pressed", on ? "true" : "false");
+          });
+        syncDone();
         return;
       }
       if (chosen[id]) delete chosen[id];
       else chosen[id] = person;
       btn.classList.toggle("on", !!chosen[id]);
       btn.setAttribute("aria-pressed", chosen[id] ? "true" : "false");
+      syncDone();
     });
 
     back.addEventListener("click", function (e) {
-      if (e.target === back) close();      // 点窗外：什么都没改，关掉即可
+      if (e.target === back) close();      // 点窗外：与 [取消] 一样，什么都不改
     });
     back.querySelector(".pp-x").addEventListener("click", close);
-    var done = back.querySelector(".pp-done");
-    if (done) {
-      done.addEventListener("click", function () {
-        apply(Object.keys(chosen).map(function (id) { return chosen[id]; }));
-      });
-    }
+    back.querySelector(".pp-cancel").addEventListener("click", close);
+    doneBtn.addEventListener("click", function () {
+      // 只有 [完成] 才把这一次的选择交出去；[取消]、Esc、点窗外都什么都不做
+      apply(Object.keys(chosen).map(function (id) { return chosen[id]; }));
+    });
 
     var timer = null;
     box.addEventListener("input", function () {
@@ -176,6 +193,7 @@
 
     document.addEventListener("keydown", onKey, true);
     document.body.classList.add("pp-open");
+    syncDone();
     search();
     box.focus();
     return self;

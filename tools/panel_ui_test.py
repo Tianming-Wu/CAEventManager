@@ -2180,15 +2180,42 @@ def leave_guard_page(browser):
             page.click('[data-detail-act="%s"]' % pick)
             page.wait_for_selector(".pp-back .pp-tile", timeout=8000)
             page.wait_for_timeout(400)
-            check("单选弹窗没有「完成」按钮", page.locator(".pp-done").count() == 0)
+            check("单选也有取消与完成两个键",
+                  page.locator(".pp-cancel").count() == 1
+                  and page.locator(".pp-done").count() == 1)
+            check("没点人时「完成」是灰的、点不动",
+                  page.locator(".pp-done").is_disabled())
             page.click(".pp-tile")
+            page.wait_for_timeout(250)
+            check("点一下只是选中，不会直接把事办了",
+                  page.locator(".pp-back").count() == 1
+                  and page.locator(".pp-tile.on").count() == 1)
+            check("选过人之后「完成」才亮",
+                  page.locator(".pp-done").is_enabled())
+            page.locator(".pp-tile").nth(1).click()
+            page.wait_for_timeout(250)
+            check("点另一个人就换过去，先前那个自动让位",
+                  page.locator(".pp-tile.on").count() == 1
+                  and "on" in (page.locator(".pp-tile").nth(1).get_attribute("class") or ""))
+            page.click(".pp-cancel")
+            page.wait_for_timeout(300)
+            check("取消之后既没换人，也没多问一句",
+                  page.locator(".pp-back").count() == 0
+                  and "换成" not in page.inner_text("#overlayBody"))
+            page.click('[data-detail-act="%s"]' % pick)
+            page.wait_for_selector(".pp-back .pp-tile", timeout=8000)
+            page.wait_for_timeout(300)
+            check("取消回来是干净的一张：没有残留的选人",
+                  page.locator(".pp-tile.on").count() == 0)
+            page.click(".pp-tile")
+            page.click(".pp-done")
             page.wait_for_timeout(400)
-            check("点一个人就回到确认", page.locator(".pp-back").count() == 0
+            check("按「完成」才问一句要不要换", page.locator(".pp-back").count() == 0
                   and "换成" in page.inner_text("#overlayBody"),
                   page.inner_text("#overlayBody")[:80])
             page.click('#overlayBody [data-close-overlay="1"]')
             page.wait_for_timeout(300)
-            check("取消之后什么都没变", page.locator("#overlay").is_hidden())
+            check("确认框里点取消也是一个字都没改", page.locator("#overlay").is_hidden())
 
         page.goto(BASE + "/panel#/new-event/nwuca.salon")
         page.wait_for_timeout(800)
@@ -2231,6 +2258,18 @@ def leave_guard_page(browser):
         page.click(".pp-tile")
         page.wait_for_timeout(200)
         check("点过是选中，不是直接关掉", page.locator(".pp-tile.on").count() == 1)
+        check("多选的「完成」一直是亮的", page.locator(".pp-done").is_enabled())
+        page.click(".pp-cancel")
+        page.wait_for_timeout(300)
+        check("取消之后什么都没应用", page.locator(".pp-back").count() == 0
+              and page.locator("#inviteChips .invite-chip").count() == 0)
+        page.click("#invitePick")
+        page.wait_for_selector(".pp-back .pp-tile", timeout=8000)
+        page.wait_for_timeout(500)
+        check("取消掉的那次选择也不留痕", page.locator(".pp-tile.on").count() == 0)
+        page.fill(".pp-find", "守卫")
+        page.wait_for_timeout(400)
+        page.click(".pp-tile")
         page.click(".pp-done")
         page.wait_for_timeout(300)
         check("按「完成」才回到表单", page.locator(".pp-back").count() == 0)

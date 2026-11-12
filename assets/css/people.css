@@ -158,21 +158,38 @@ body.pp-open { overflow: hidden; }
 .pp-foot {
   display: flex;
   justify-content: flex-end;
+  gap: 10px;
   margin-top: 14px;
 }
+.pp-cancel,
 .pp-done {
   appearance: none;
   min-width: 84px;
   padding: 8px 16px;
   font: inherit;
   font-size: .88rem;
-  color: var(--accent-ink, #fff);
-  background: var(--accent, #a0522d);
-  border: 1px solid var(--accent, #a0522d);
   border-radius: var(--radius-sm, 8px);
   cursor: pointer;
 }
-.pp-done:hover { filter: brightness(1.05); }
+.pp-cancel {
+  color: var(--text, #1c1917);
+  background: var(--surface, #fff);
+  border: 1px solid var(--line, #e3dcd3);
+}
+.pp-cancel:hover { background: var(--surface-2, #f5f1ec); }
+.pp-done {
+  color: var(--accent-ink, #fff);
+  background: var(--accent, #a0522d);
+  border: 1px solid var(--accent, #a0522d);
+}
+.pp-done:hover:not(:disabled) { filter: brightness(1.05); }
+/* 单选还没点人：没有可以交的东西，先淡着 */
+.pp-done:disabled {
+  color: var(--dim, #a8a29e);
+  background: var(--surface-2, #f5f1ec);
+  border-color: var(--line, #e3dcd3);
+  cursor: default;
+}
 
 /* 手机上占满一屏：名单吃掉余下的高度，「完成」钉在底部 */
 @media (max-width: 760px) {

@@ -212,14 +212,26 @@
     '<circle cx="10" cy="4.3" r="1.35" fill="currentColor" stroke="none"/>' +
     '<circle cx="10" cy="10" r="1.35" fill="currentColor" stroke="none"/>' +
     '<circle cx="10" cy="15.7" r="1.35" fill="currentColor" stroke="none"/></svg>';
+  /* 圆里一个感叹号：卡片标题旁的「不可用」用它（图标表里登记过的那一个） */
+  var ICON_ALERT = '<svg viewBox="0 0 20 20" aria-hidden="true">' +
+    '<circle cx="10" cy="10" r="7.1"/>' +
+    '<path d="M10 6.1v4.8M10 13.5v.2" stroke-linecap="round"/></svg>';
 
   function eventCard(e) {
     var meta = [];
     if (e.createdAt) meta.push("建于 " + PX.when(e.createdAt));
+    // 依赖的模块被停用：标题右边一枚红色胶囊，原因放在悬停/点击的提示里，
+    // 不进卡片正文——多一行字会把卡片撑高，三列排布就参差了
+    var badge = e.stopped
+      ? '<button class="badge-off" type="button" data-off-tip="1"' +
+        ' aria-label="不可用：依赖模块被禁用">' + ICON_ALERT + "不可用</button>"
+      : "";
     return '<div class="event-card">' +
       '<div class="event-card-head">' +
       '<div class="event-titlewrap">' +
-      '<div class="event-title">' + PX.esc(eventTitle(e)) + "</div>" +
+      '<div class="event-title-row">' +
+      '<div class="event-title">' + PX.esc(eventTitle(e)) + "</div>" + badge +
+      "</div>" +
       '<div class="event-id">#' + PX.esc(String(e.seq)) + "</div></div>" +
       '<button class="card-menu-btn" type="button" data-menu="' + PX.esc(e.id) + '" ' +
       'aria-haspopup="menu" aria-label="更多操作">' + ICON_DOTS + "</button>" +
@@ -229,13 +241,42 @@
       PX.esc(shortToken(e.id)) + "</code>" +
       '<button class="copy-btn" type="button" data-copy="' + PX.esc(e.id) + '" ' +
       'aria-label="复制活动 token">' + ICON_COPY + "</button></div>" +
-      // 模块被停用时说清为什么打不开：数据还在，启用即恢复
-      (e.stopped ? '<div class="event-off">模块已停用，页面暂时打不开</div>' : "") +
       '<div class="event-meta">' + PX.esc(meta.join(" · ")) + "</div>" +
       '<div class="event-actions">' +
       // 模块停着的时候这颗按钮必然打不开：不做成主按钮，别催人点
       '<a class="btn' + (e.stopped ? "" : " primary") + '" href="' + PX.esc(e.admin) +
       '" target="_blank" rel="noopener">管理面板</a></div></div>';
+  }
+
+  /* 小提示：鼠标悬停就出现，触屏点一下也能看；点别处、按 Esc 就收 */
+  var cardTipEl = null;
+  var cardTipAnchor = null;
+  var cardTipPinned = false;
+
+  function closeCardTip() {
+    if (!cardTipEl) return;
+    if (cardTipEl.parentNode) cardTipEl.parentNode.removeChild(cardTipEl);
+    cardTipEl = null;
+    cardTipAnchor = null;
+    cardTipPinned = false;
+  }
+
+  function showCardTip(anchor, text) {
+    closeCardTip();
+    var tip = document.createElement("div");
+    tip.className = "card-tip";
+    tip.setAttribute("role", "tooltip");
+    tip.textContent = text;
+    document.body.appendChild(tip);
+    var r = anchor.getBoundingClientRect();
+    var left = Math.min(Math.max(8, r.left + r.width / 2 - tip.offsetWidth / 2),
+                        window.innerWidth - tip.offsetWidth - 8);
+    var top = r.top - tip.offsetHeight - 8;
+    if (top < 8) top = r.bottom + 8;
+    tip.style.left = Math.round(left) + "px";
+    tip.style.top = Math.round(top) + "px";
+    cardTipEl = tip;
+    cardTipAnchor = anchor;
   }
 
   function emptyRow(cols, text) {
@@ -3167,40 +3208,35 @@
     return PX.api("/modules").then(function (d) {
       S.modules = d.modules || [];
       $("#moduleTable tbody").innerHTML = S.modules.map(function (m) {
-        var used = m.events || 0;
         return "<tr" + (m.enabled ? "" : ' class="muted-row"') + ">" +
           "<td><b>" + PX.esc(m.name) + "</b> " +
           (m.enabled ? "" : '<span class="tag">已停用</span>') + "<br>" +
-          '<span class="mono">' + PX.esc(m.id) + "</span>" +
-          (used ? ' <span class="note">' + used + " 个活动在用</span>" : "") +
-          "</td>" +
+          '<span class="mono">' + PX.esc(m.id) + "</span></td>" +
           '<td class="mono">' + PX.esc(m.version) + "</td>" +
           "<td>" + PX.esc(m.author || "—") + "</td>" +
+          '<td class="mono">' + (m.events || 0) + "</td>" +
           '<td class="actions">' +
           '<button class="btn sm' + (m.enabled ? " danger" : "") +
           '" type="button" data-module-toggle="' + PX.esc(m.id) +
           '" data-on="' + (m.enabled ? "0" : "1") + '">' +
           (m.enabled ? "停用" : "启用") + "</button></td></tr>";
-      }).join("") || emptyRow(4, "没有已安装的模块");
+      }).join("") || emptyRow(5, "没有已安装的模块");
     }).catch(function (e) {
       if (e.status === 403) return showDenied("modules");
       PX.toast(PX.esc(e.message), true);
     });
   }
 
-  /* 停用一个模块会连带停掉正在用它的活动（数据不动，启用即恢复），
-     所以照别的破坏性动作来：先提权，进过 sudo 之后再问一句 */
+  /* 停用会连带影响使用这个模块的活动，所以照别的破坏性动作来：
+     先提权；确认框里只写一句确认，不铺开说明（见 ui-naming 的二次确认写法） */
   function toggleModule(id, on) {
-    var m = (S.modules || []).filter(function (x) { return x.id === id; })[0] || {};
-    var used = m.events || 0;
     var label = on ? "启用模块" : "停用模块";
     var note = on
-      ? (used ? "启用之后，用这个模块的 " + used + " 个活动恢复正常。" : "启用之后可以再用它创建活动。")
-      : (used
-          ? "正在用它的 " + used + " 个活动会一并停摆（页面与接口都不再提供），数据一条不动，启用即恢复。"
-          : "停用之后不能再用它创建活动或预设；正在用它的活动会一并停摆。");
-    confirmHighRisk(label, note, on ? "启用" : "停用", !on, function () {
-      apiSudo("/module/toggle", { method: "POST", body: { id: id, enabled: on } }, label)
+      ? "启用后，使用该模块的活动恢复可用。"
+      : "停用后，使用该模块的活动一并不可用。确认继续？";
+    confirmHighRisk(label, note, on ? "启用" : "停用", !on, function (why) {
+      apiSudo("/module/toggle", { method: "POST", body: { id: id, enabled: on } },
+              label, why)
         .then(function () {
           PX.toast(on ? "已启用" : "已停用");
           return loadTemplates(true).then(drawModules);
@@ -5252,6 +5288,16 @@
                           modToggle.getAttribute("data-on") === "1");
     }
 
+    var offTip = t.closest("[data-off-tip]");
+    if (offTip) {
+      // 悬停看过的那一次不算数：点一下先"钉住"（触屏没有悬停，全靠这一下），
+      // 再点一下才收
+      if (cardTipEl && cardTipAnchor === offTip && cardTipPinned) return closeCardTip();
+      showCardTip(offTip, "依赖模块被禁用");
+      cardTipPinned = true;
+      return;
+    }
+
     var wantPreset = t.closest("[data-save-preset]");
     if (wantPreset) {
       return saveAsPreset(wantPreset.getAttribute("data-save-preset"));
@@ -5353,10 +5399,29 @@
                          e.target.closest("[data-menu]")))) {
       closeCardMenu();
     }
+    // 卡片上的小提示也是同一个规矩：点别处就收，别让它停在屏幕上
+    if (cardTipEl && !(e.target.closest &&
+                       (e.target.closest("[data-off-tip]") ||
+                        e.target.closest(".card-tip")))) {
+      closeCardTip();
+    }
     if (SUDO.pop && e.target.closest &&
         !e.target.closest(".sudo-pop") && !e.target.closest("#sudoChip")) {
       closeSudoPop();
     }
+  });
+
+  /* 悬停看原因；触屏没有悬停，所以在点击里再给一次机会 */
+  document.addEventListener("mouseover", function (e) {
+    var badge = e.target.closest && e.target.closest("[data-off-tip]");
+    if (!badge) return;
+    if (cardTipEl && cardTipAnchor === badge) return;
+    showCardTip(badge, "依赖模块被禁用");
+  });
+  document.addEventListener("mouseout", function (e) {
+    var badge = e.target.closest && e.target.closest("[data-off-tip]");
+    if (!badge || cardTipPinned) return;
+    if (cardTipAnchor === badge) closeCardTip();
   });
 
   function logout(returnRoute) {
@@ -6225,6 +6290,7 @@
       }
     }
     if (e.key === "Escape") {
+      if (cardTipEl) return closeCardTip();
       if (qrMenuEl) return closeQrMenu();
       if (cardMenuEl) return closeCardMenu();
       if (!$("#overlay").hidden) {

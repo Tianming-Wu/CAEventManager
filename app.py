@@ -68,7 +68,7 @@ PAGES_DIR = os.path.join(BASE_DIR, "pages")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.0.83"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.0.84"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -492,8 +492,8 @@ def _modules_by_id(conn):
             modules.all_modules(VERSION, disabled=panel.disabled_modules(conn))}
 
 
-# 模块被停用时，活动接口与页面统一用这一句话说明白
-MODULE_OFF_MSG = "这个活动所用的模块已被管理员停用"
+# 模块被停用时，活动接口与页面统一用这一句话说明白（与 pages/module-off.html 同一句）
+MODULE_OFF_MSG = "此活动必需的资源已被管理员停用"
 
 
 def _with_stopped(view, stopped):
@@ -638,10 +638,14 @@ def host_stats_cached(ttl=None):
 
 
 def _scope_of(revs, scope):
-    """The part of a revision map one stream cares about (all of it by default)."""
+    """The part of a revision map one stream cares about (all of it by default).
+
+    ``modules`` 是站级的开关（模块停用/启用）：任何一个流都得转发，页面才能
+    立刻知道自己这一场已经不可用，不必等下一次轮询。
+    """
     if not scope:
         return revs
-    return {k: v for k, v in revs.items() if k == scope}
+    return {k: v for k, v in revs.items() if k == scope or k == "modules"}
 
 
 # 令牌能碰的边界。分三档比给每个接口写一遍判断靠谱：默认就是"读写按方法分"，
@@ -936,12 +940,34 @@ class Handler(BaseHTTPRequestHandler):
                 if mine == sent:
                     continue  # somebody else's activity moved
                 sent = mine
+                if self._module_gone(revs):
+                    # 这一场刚被停用：告诉页面收工，它落地就是那张说明页
+                    self._sse({"revs": mine, "version": VERSION, "off": True})
+                    self.wfile.flush()
+                    return
                 self._sse({"revs": mine, "version": VERSION})
                 self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError, OSError):
             pass
         finally:
             bus.watch_leave()
+
+    def _module_gone(self, revs):
+        """模块开关动过、而且这一场正被停用：流可以收尾了。
+
+        只在站级的 ``modules`` 键动过时才查一次库，平时一毛钱开销都没有。
+        活动族的两个流（公示/大屏的 ``/api/stream``、后台的 ``/api/admin/stream``）
+        都走这里；面板的流没有当前活动，自然不成立。
+        """
+        if not revs.get("modules"):
+            return False
+        seq = db.event_id()
+        if not seq:
+            return False
+        try:
+            return bool(panel.stopped_module(panel.connect(), seq))
+        except Exception:
+            return False
 
     def _sse(self, payload):
         data = json.dumps(payload, ensure_ascii=False)
@@ -1999,7 +2025,9 @@ class Handler(BaseHTTPRequestHandler):
                 panel.set_module_enabled(tx, module_id, on, acc["username"])
                 panel.audit(tx, acc["username"],
                             "module_enable" if on else "module_disable", module_id,
-                            "%d 个活动" % affected if affected else None)
+                            "affected: %d" % affected)
+            # 站级的开关变了：让所有活动的流都醒一次，页面据此立刻换成"不可用"
+            bus.bump("modules")
             return self._json({"ok": True, "enabled": on, "affected": affected})
 
         if path == "/preset/import" and method == "POST":
@@ -2935,7 +2963,7 @@ class Handler(BaseHTTPRequestHandler):
             names = "、".join(panel.public_name(t["name"], t["uid"]) for t in targets)
             with panel.tx() as tx:
                 panel.audit(tx, acc["username"], "roster_grant", str(rid),
-                            "邀请 %s 写入" % names)
+                            "granted: %d" % len(targets))
             return self._json({"ok": True, "granted": len(targets), "who": names})
 
         if path == "/roster/grant/decide" and method == "POST":

@@ -57,11 +57,15 @@ def shot(page, name, full=False):
 # Requests that are *meant* to fail (negative tests) still show up as console
 # errors, because browsers log every failed fetch.  Ignore only those exact URLs.
 EXPECTED_4XX = ("/api/checkin/submit",)
+# 模块停用的那一段里，被中断的流与 503 都是预期的回答；pageerror 照样算错
+ALLOW_OFF_WINDOW = {"on": False}
 
 
 def wire(page, label):
     def on_console(msg):
         if msg.type == "error":
+            if ALLOW_OFF_WINDOW["on"]:
+                return
             text = msg.text
             if "401 (Unauthorized)" in text:
                 return
@@ -804,6 +808,95 @@ def main():
         check("audit log filled", page.locator("#logTable tbody tr").count() > 5,
               page.locator("#logTable tbody tr").count())
         shot(page, "21-log")
+
+        # --------------------------------------- the module switched off -----
+        print("== 模块被停用：活动页自己换成不可用 ==")
+        ALLOW_OFF_WINDOW["on"] = True
+        kind = page.evaluate("""async () => {
+            const st = await fetch('api/admin/state',
+                {headers: {'X-Requested-With': 'CAEventManager'}}).then(r => r.json());
+            return (st.config && st.config.kind) || '';
+        }""")
+        check("活动记得自己用的是哪个模块", bool(kind), kind)
+        off = page.evaluate("""async ([pw, kind]) => {
+            const post = (p, b) => fetch(p, {method: 'POST',
+              headers: {'X-Requested-With': 'CAEventManager',
+                        'Content-Type': 'application/json'},
+              body: JSON.stringify(b)}).then(r => r.json());
+            await post('/api/panel/sudo', {password: pw});
+            return post('/api/panel/module/toggle', {id: kind, enabled: false});
+        }""", [PASSWORD, kind])
+        check("停用成功，并说出牵连几个活动",
+              off.get("enabled") is False and off.get("affected") >= 1, off)
+        page.wait_for_function(
+            "() => document.body.innerText.indexOf('此活动不可用') >= 0", timeout=15000)
+        shut = page.inner_text("body")
+        check("活动页自己换成了说明页", "此活动不可用" in shut, shut[:120])
+        check("说明页写清是谁停的、该找谁",
+              "此活动必需的资源已被管理员停用" in shut and "请联系超级管理员" in shut,
+              shut[:200])
+        shot(page, "22-module-off")
+
+        print("== 活动卡片：标题旁的红色胶囊 ==")
+        panel_root = BASE.rsplit("/", 1)[0]
+        card_tab = ctx.new_page()
+        card_tab.goto(panel_root + "/panel#/events", wait_until="networkidle")
+        card_tab.wait_for_selector("#ownedEvents .event-card", timeout=20000)
+        card_tab.wait_for_timeout(700)
+        badge = card_tab.locator("#ownedEvents .badge-off").first
+        check("标题右边有一枚「不可用」胶囊", badge.count() == 1, badge.count())
+        check("胶囊里是红圈感叹号加「不可用」", badge.inner_text().strip() == "不可用",
+              badge.inner_text())
+        check("胶囊用的是警示色", card_tab.evaluate("""() => {
+            const el = document.querySelector('#ownedEvents .badge-off');
+            const probe = document.createElement('span');
+            probe.style.color = 'var(--danger)';
+            document.body.appendChild(probe);
+            const want = getComputedStyle(probe).color;
+            probe.remove();
+            return getComputedStyle(el).color === want;
+        }"""))
+        off_h = card_tab.evaluate("""() => Math.round(
+            document.querySelector('#ownedEvents .event-card').getBoundingClientRect().height)""")
+        badge.hover()
+        card_tab.wait_for_timeout(300)
+        check("悬停看得到原因",
+              "依赖模块被禁用" in card_tab.inner_text(".card-tip"),
+              card_tab.inner_text(".card-tip"))
+        shot(card_tab, "23-card-unavailable")
+        card_tab.mouse.click(700, 860)
+        card_tab.wait_for_timeout(300)
+        check("点别处就收起来", card_tab.locator(".card-tip").count() == 0)
+        badge.click()
+        card_tab.wait_for_timeout(300)
+        check("触屏点一下也能看",
+              card_tab.locator(".card-tip").count() == 1
+              and "依赖模块被禁用" in card_tab.inner_text(".card-tip"))
+        card_tab.mouse.click(700, 860)
+        card_tab.wait_for_timeout(300)
+
+        print("== 重新启用：活动立刻恢复 ==")
+        back = page.evaluate("""async ([pw, kind]) => {
+            const post = (p, b) => fetch(p, {method: 'POST',
+              headers: {'X-Requested-With': 'CAEventManager',
+                        'Content-Type': 'application/json'},
+              body: JSON.stringify(b)}).then(r => r.json());
+            await post('/api/panel/sudo', {password: pw});
+            return post('/api/panel/module/toggle', {id: kind, enabled: true});
+        }""", [PASSWORD, kind])
+        check("启用成功", back.get("enabled") is True, back)
+        page.goto(BASE + "/admin", wait_until="networkidle")
+        page.wait_for_selector("#tabs button[data-tab]", timeout=20000)
+        check("再打开又是正常的管理页", page.locator("#tabs button[data-tab]").count() >= 5)
+        card_tab.reload(wait_until="networkidle")
+        card_tab.wait_for_timeout(800)
+        check("卡片上的胶囊跟着消失",
+              card_tab.locator("#ownedEvents .badge-off").count() == 0)
+        on_h = card_tab.evaluate("""() => Math.round(
+            document.querySelector('#ownedEvents .event-card').getBoundingClientRect().height)""")
+        check("胶囊没有把卡片撑高", off_h == on_h, (off_h, on_h))
+        card_tab.close()
+        ALLOW_OFF_WINDOW["on"] = False
 
         # -------------------------------------------------- dark scheme -----
         print("== dark scheme ==")

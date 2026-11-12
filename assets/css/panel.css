@@ -836,15 +836,46 @@ a.stat:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .event-meta { font-size: .78rem; color: var(--dim); }
 /* 建于 <time> hugs the token line above it */
 .event-token + .event-meta { margin-top: -4px; }
-/* 模块被停用：说清为什么打不开（数据还在，启用即恢复），别让人以为是坏了 */
-.event-off {
-  align-self: flex-start;
-  padding: 3px 9px;
-  border: 1px solid var(--line);
+/* 标题与「不可用」在同一行：胶囊不进正文，卡片高度不变。
+   标题照旧可以折行，胶囊贴着第一行顶端 */
+.event-title-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+.event-title-row .event-title { flex: 1 1 auto; padding-top: 1px; }
+.badge-off {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  padding: 0 8px 0 6px;
+  border: 1px solid var(--danger-line);
   border-radius: 999px;
-  background: var(--surface-2);
-  color: var(--muted);
-  font-size: .76rem;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font: inherit;
+  font-size: .74rem;
+  line-height: 1.7;
+  cursor: pointer;
+}
+.badge-off svg { width: 13px; height: 13px; stroke-width: 1.7; flex: 0 0 auto; }
+.badge-off:focus-visible { outline: 2px solid var(--danger); outline-offset: 1px; }
+/* 原因提示：浮在上面，不占版面 */
+.card-tip {
+  position: fixed;
+  z-index: 90;
+  max-width: 240px;
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--text);
+  color: var(--surface);
+  font-size: .78rem;
+  line-height: 1.45;
+  box-shadow: var(--shadow);
+  pointer-events: none;
 }
 
 /* the token is for recognising a card, not for copying by hand */

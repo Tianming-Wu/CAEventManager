@@ -403,13 +403,18 @@ def main():
                {"id": "nwuca.lottery", "enabled": False})
     check("提权之后可以停用，并说出牵连几个活动",
           off and off["enabled"] is False and off["affected"] >= 1, off)
+    trail = [a for a in call(owner, "/api/panel/audit?limit=10")["audit"]
+             if a["action"] == "module_disable"]
+    check("审计里记了这次停用", bool(trail), trail)
+    check("说明写英文键值，不写中文句子",
+          trail and trail[0]["detail"].startswith("affected:"), trail[:1])
     stopped_page = call(owner, "/" + ev["token"] + "/admin", expect=503)
     check("正在用它的活动页面变成一张说明页",
           isinstance(stopped_page, bytes)
-          and "模块" in stopped_page.decode("utf-8", "replace"), stopped_page[:120])
+          and "此活动不可用" in stopped_page.decode("utf-8", "replace"), stopped_page[:120])
     stopped_api = call(owner, "/" + ev["token"] + "/api/admin/state", expect=503)
     check("活动接口也不再提供",
-          stopped_api and "模块" in (stopped_api.get("error") or ""), stopped_api)
+          stopped_api and "已被管理员停用" in (stopped_api.get("error") or ""), stopped_api)
     listed = call(owner, "/api/panel/events")["events"]
     check("活动列表上标着它停着",
           all(e["stopped"] for e in listed if e["seq"] == ev["seq"]), listed)

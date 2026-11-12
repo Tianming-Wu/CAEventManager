@@ -2451,13 +2451,23 @@ def sudo_page(page):
     print("== 模块的停用/启用也要先提权 ==")
     page.goto(BASE + "/panel#/modules")
     page.wait_for_timeout(800)
-    check("表里写着有几个活动在用",
-          "个活动在用" in page.inner_text("#moduleTable"), page.inner_text("#moduleTable")[:120])
+    heads = page.eval_on_selector_all(
+        "#moduleTable thead th", "els => els.map(e => e.textContent.trim())")
+    check("表头是 模块 / 版本 / 作者 / 引用计数 / 操作",
+          heads == ["模块", "版本", "作者", "引用计数", "操作"], heads)
+    counts = page.eval_on_selector_all(
+        "#moduleTable tbody tr td:nth-child(4)",
+        "els => els.map(e => e.textContent.trim())")
+    check("引用计数是单独一列，写的是数字",
+          counts and all(v.isdigit() for v in counts), counts)
     page.click("#moduleTable [data-module-toggle]")
     page.wait_for_timeout(600)
     check("点停用先要一次密码", page.locator("#sudoPass").count() == 1)
     check("并且说清是哪个动作",
           "停用模块" in page.inner_text("#overlayBody"), page.inner_text("#overlayBody")[:120])
+    check("确认框里只有一句确认，不铺陈说明",
+          "。确认继续？" in page.inner_text("#overlayBody"),
+          page.inner_text("#overlayBody")[:160])
     page.click("#sudoCancel")
     page.wait_for_timeout(400)
     check("取消之后模块照旧是开着的",

@@ -468,6 +468,11 @@
       source.onmessage = function (event) {
         var data;
         try { data = JSON.parse(event.data); } catch (e) { return; }
+        if (data && data.off) {
+          // 这一场的模块刚被停用：服务端现在只会给一张说明页，落地去看它
+          location.reload();
+          return;
+        }
         if (!data || !data.revs) return;
         if (data.version) version(data.version);
         var before = revs;

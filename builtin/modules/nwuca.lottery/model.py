@@ -1315,14 +1315,102 @@ def _public_student(stu, cfg):
     return out
 
 
+def _code4(n):
+    """奖票号码的四位写法（0001 起）。"""
+    return "----" if n is None else str(1000 + int(n))[1:]
+
+
+def _screen_block(cfg, st, students, last, batch, winners):
+    """大屏要画的东西：平台只认块，里面的词都是这套玩法的。
+
+    块的结构见 doc/dev/module-interface.md 的「展示数据」：banner / strip /
+    wall / cards / reveal，给哪块画哪块。
+    """
+    show_sid = bool(cfg.get("show_sid", False))
+    people = [s for s in students if s.get("progress")]
+    live_codes = [_code4(t["code"]) for s in students for t in (s.get("tickets") or [])]
+    total = st["participants"] or st["total"]
+
+    banner = [
+        {"tone": "green", "phase": "signin", "value": str(st["checkin"]),
+         "of": "/%d" % total, "label": "已签到"},
+        {"tone": "green", "phase": "draw", "value": str(st["checkin"]),
+         "of": "/%d" % total, "label": "到场"},
+        {"tone": "gold", "phase": "draw", "value": str(st["live_tickets"]),
+         "of": "/%s" % st["pool_size"], "label": "奖票"},
+    ]
+
+    strip = {"label": "中奖名单", "items": [
+        {"title": w.get("prize") or "奖品",
+         "name": w.get("name") or "?",
+         "note": "到场均等" if w.get("mode") == "person" else "#" + _code4(w.get("code")),
+         "kind": "person" if w.get("mode") == "person" else ""}
+        for w in winners
+    ]}
+
+    def wall_note(s):
+        codes = " ".join(_code4(t["code"]) for t in (s.get("tickets") or []))
+        if codes:
+            return codes
+        if s.get("progress"):
+            return "已签到"
+        return s.get("sid") if show_sid else "—"
+
+    wall = {"on": bool(cfg.get("screen_show_wall")),
+            "items": [{"name": s["name"], "note": wall_note(s),
+                       "level": s.get("progress") or 0} for s in students]}
+
+    reveal = None
+    batch_winners = (batch or {}).get("winners") or []
+    if len(batch_winners) > 1:
+        ordered = sorted(batch_winners, key=lambda w: (w.get("code") or 0))
+        reveal = {
+            "key": "batch:%s" % batch.get("batch"),
+            "title": "%s · %d 人" % (batch.get("prize") or "", len(ordered)),
+            "candidates": live_codes or ["----"],
+            "hint": "请上台领奖 · 点击任意处关闭",
+            "items": [{"value": "" if w.get("mode") == "person" else _code4(w.get("code")),
+                       "name": w.get("name") or "?",
+                       "note": (w.get("sid") or "") if show_sid else ""}
+                      for w in ordered],
+        }
+    elif last:
+        person = last.get("mode") == "person"
+        reveal = {
+            "key": "draw:%s" % last["seq"],
+            "title": last.get("prize") or "",
+            "value": (last.get("name") or "") if person else _code4(last.get("code")),
+            "note": (last.get("prize") or "") if person else (last.get("name") or ""),
+            "sub": (last.get("sid") or "") if show_sid else "",
+            "names": person,
+            "candidates": ([s["name"] for s in people] or ["…"]) if person
+                          else (live_codes or ["----"]),
+            "hint": "请上台领奖 · 点击任意处关闭",
+        }
+
+    return {
+        "subtitle": "扫码查看实时奖票公示",
+        "qr": {"signin": "扫码签到 · 每 10 秒刷新", "draw": "扫码查看奖票"},
+        "banner": banner,
+        "strip": strip,
+        "wall": wall,
+        "reveal": reveal,
+    }
+
+
 def present(conn, cfg=None):
     """公示页与大屏要的东西，形状由模块自己定，平台原样转发、不认识里面的字段。"""
     cfg = cfg or db.all_config(conn)
     students = snapshot(conn, cfg)
+    st = stats(conn, cfg, students)
+    last = last_draw(conn)
+    batch = last_batch(conn)
+    winners = [d for d in draw_history(conn, 100) if not d["voided_at"]]
     return {
-        "stats": stats(conn, cfg, students),
+        "stats": st,
         "students": [_public_student(s, cfg) for s in students],
-        "lastDraw": last_draw(conn),
-        "lastBatch": last_batch(conn),
-        "winners": [d for d in draw_history(conn, 100) if not d["voided_at"]],
+        "lastDraw": last,
+        "lastBatch": batch,
+        "winners": winners,
+        "screen": _screen_block(cfg, st, students, last, batch, winners),
     }

@@ -67,7 +67,7 @@ window.MODULE = window.MODULE || { pages: {} };
           ? '<span class="chip" style="padding:1px 7px;font-size:.75rem">人级均等</span>'
           : '<span class="chip" style="padding:1px 7px;font-size:.75rem">按票</span>') + "</td>" +
         '<td class="num">' + (person ? '<span style="color:var(--dim)">—</span>'
-          : '<span class="tkt">' + LT.code(d.code) + "</span>") + "</td>" +
+          : '<span class="tkt">' + lib.code(d.code) + "</span>") + "</td>" +
         "<td><b>" + LT.esc(d.name || "?") + "</b> <span style='color:var(--dim)'>" + LT.esc(d.sid || "") + "</span></td>" +
         '<td class="num">' + LT.fmtDateTime(d.ts) + "</td>" +
         '<td class="right">' + (voided
@@ -101,7 +101,7 @@ window.MODULE = window.MODULE || { pages: {} };
   function winnerRow(w) {
     var tail = w.mode === "person"
       ? '<span class="code" style="font-family:inherit">均等</span>'
-      : '<span class="code">#' + LT.code(w.code) + "</span>";
+      : '<span class="code">#' + lib.code(w.code) + "</span>";
     return '<div class="winner"><span class="prize">' + LT.esc(w.prize) + "</span>" +
       '<span class="who">' + LT.esc(w.name) +
       " <span style='color:var(--dim)'>" + LT.esc(w.sid) + "</span></span>" + tail + "</div>";
@@ -115,7 +115,7 @@ window.MODULE = window.MODULE || { pages: {} };
       html = '<div class="winner-head">本次抽出 ' + list.length + " 人</div>" +
         '<div class="winner-grid">' + list.map(function (w) {
           return '<span class="winner-cell">' + LT.esc(w.name) +
-            (w.mode === "person" ? "" : ' <span class="tkt">' + LT.code(w.code) + "</span>") +
+            (w.mode === "person" ? "" : ' <span class="tkt">' + lib.code(w.code) + "</span>") +
             "</span>";
         }).join("") + "</div>";
     } else {

@@ -1049,3 +1049,14 @@ textarea { resize: vertical; min-height: 120px; font-family: var(--mono); font-s
 }
 .maint-wrap h1 { font-size: 1.6rem; margin-bottom: 12px; }
 .maint-wrap p { color: var(--muted); margin: 6px 0; }
+
+/* 大屏中区卡片：模块给标题与正文，平台只管排版 */
+.screen-cards { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; margin: 10px 0; }
+.screen-cards:empty { display: none; }
+.screen-cards .scard {
+  min-width: 180px; padding: 10px 18px; border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06); border: 1px solid var(--line);
+  text-align: center;
+}
+.screen-cards .scard .t { font-size: 0.85rem; color: var(--muted); }
+.screen-cards .scard .b { font-size: 1.1rem; font-weight: 600; }

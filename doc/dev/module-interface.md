@@ -244,6 +244,39 @@ def present(conn, cfg):
 公开页的公共字段（活动名、副标题、公示页地址、「显示学号」「显示完成时间」这些开关）在
 `config` 里，模块给的数据只要跟它对得上就行。
 
+### 大屏要画什么（`present().screen`）
+
+大屏是平台画的：外壳、二维码、阶段版式、揭示动画都在 `assets/js/screen.js` 里，模块只填数据。
+给哪块画哪块，一块都不给就只显示标题与二维码——所以换一个模块，大屏照样能用。
+
+```python
+"screen": {
+    "subtitle": "扫码查看实时奖票公示",          # 副标题的默认说法
+    "qr": {"signin": "扫码签到 · 每 10 秒刷新", "draw": "扫码查看"},
+    "banner": [{"label": "已签到", "value": "47", "of": "/63",
+                "tone": "green", "phase": "signin"}],      # 数字条，phase 可选
+    "strip":  {"label": "中奖名单",
+               "items": [{"title": "一等奖", "name": "高勇",
+                          "note": "#0061", "kind": "person"}]},
+    "wall":   {"on": True,
+               "items": [{"name": "高勇", "note": "0001 0002", "level": 2}]},
+    "cards":  [{"title": "当前场次", "body": "第三轮 · 剩 4 份"}],
+    "reveal": {"key": "draw:12",                 # 变了就播一次揭示动画
+               "title": "一等奖", "value": "0061", "note": "高勇", "sub": "2024001",
+               "candidates": ["0001", "0002"],   # 滚动时闪过的字
+               "hint": "请上台领奖 · 点击任意处关闭",
+               "items": [{"value": "0061", "name": "高勇", "note": ""}]},
+}
+```
+
+- `banner` 的 `tone` 是样式名（外观包自己定义配色），`of` 拼在数字后面当分母
+- `strip.items` 新的在前；`kind` 会变成额外的样式类
+- `reveal.items` 有两个以上时按"一次抽完"的样子画成网格；`names` 为真时大字按人名排
+- 平台不认识这些字段的业务含义，只按上面的形状排版
+
+`present()` 里其余的字段（例如这个模块给公示页的 `stats` / `students` / `winners`）是模块
+自己的事，平台原样转发，页面上怎么用也由模块决定。
+
 ## 错误、审计、并发
 
 - 出错抛 `errors.ApiError("一句话", 状态码)`；平台翻成 `{ok: false, error}`，

@@ -124,7 +124,7 @@ window.MODULE = window.MODULE || { pages: {} };
         var code = d.result && d.result.code;
         var suffix = d.result && d.result.already
           ? "（之前已完成）"
-          : ' · 奖票 <b>#' + LT.code(code) + "</b>";
+          : ' · 奖票 <b>#' + lib.code(code) + "</b>";
         lib.ok("<b>" + LT.esc(stu.name) + "</b> " + lib.kindLabel(kind) + " 完成" + suffix);
         var p = lib.reloadState();
         if (p && p.then) p.then(refocus, function () {});

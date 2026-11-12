@@ -114,7 +114,7 @@
   }
 
   function pad(n) { return n < 10 ? "0" + n : "" + n; }
-  function code(n) { return n === null || n === undefined ? "---" : String(1000 + n).slice(1); }
+
 
   function fmtTime(ts) {
     if (!ts) return "";
@@ -485,7 +485,6 @@
     api: api,
     panelApi: panelApi,
     esc: esc,
-    code: code,
     fmtTime: fmtTime,
     fmtDateTime: fmtDateTime,
     toast: toast,
@@ -494,8 +493,6 @@
     score: score,
     parseQuery: parseQuery,
     queryRecords: queryRecords,
-    tagsFromSpec: tagsFromSpec,
-    // code：四位编号，现在只有大屏还在用；上屏块做完也搬进模块
-    code: code
+    tagsFromSpec: tagsFromSpec
   };
 })();

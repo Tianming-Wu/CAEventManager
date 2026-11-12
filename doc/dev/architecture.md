@@ -92,6 +92,18 @@ SQLite 开 WAL；写入统一走事务包装（`tx()`），一次写入成功之
   席位状态是「待确认 / 在册 / 已移出」
 - 名单的**可见**与**可写**是两件事：可见性三档（私有 / 公开 / 组织公开），写权限单独授予
 - 敏感操作要重新输一次密码（sudo 模式），记在会话上，换设备不继承
+
+### 审计写什么
+
+审计行是五列：`ts / actor / action / target / detail`，规矩只有三条：
+
+- `actor` 存**编号**，不存登录名（登录名可以改，编号不会）：账号用它的 `uid`，
+  系统与没有登录的请求（注册申请、公开报名页）写 `0`；`panel.audit()` 负责归一化
+  （`panel.actor_key`），界面显示时才转回「名字 (编号)」（`panel.with_actor_labels`）
+- `detail` 如果存在，必须是 `key: value, key2: value2`（`panel.audit_note`）：
+  键用英文小写，值可以是中文（人名、活动名这类必须照原样放进去的），但不写整句话
+- 例：`sudo_on` → `ip: 127.0.0.1`，`sudo_off` → `reason: manual` / `reason: timeout`，
+  `event_member_cancel` → `event_id: 9`，`roster_grant` → `granted: 2`
 - 账号对外只有一个标识：**uid**（`panel.next_uid`，站长 10000 起，uint32）。编号一次发放、
   不再回收，`settings.uid_seq` 记账；`id` 是进程内部的自增主键，`username` 只是可以改的登录名，
   两者都不进对外载荷。`panel.public_name()` 是"给别人看的名字"的唯一出口：称呼优先，其次编号

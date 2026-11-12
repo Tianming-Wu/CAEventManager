@@ -1426,10 +1426,25 @@ def main():
     check("要重新输密码的动作令牌做不到", True)
 
     entries = call(owner, "/api/panel/audit?limit=40")
-    rows = json.dumps(entries.get("audit") or [], ensure_ascii=False)
-    check("审计里写明经过哪张令牌", "令牌「写入脚本」" in rows, rows[:200])
-    check("操作人仍是本人", "owner" in rows, rows[:200])
+    items = entries.get("audit") or []
+    rows = json.dumps(items, ensure_ascii=False)
+    check("审计里写明经过哪张令牌", "via: token 写入脚本" in rows, rows[:200])
+    check("操作人存的是编号，显示时才转回名字",
+          all(a["actor"].isdigit() for a in items)
+          and any("(" in a["actorLabel"] and ")" in a["actorLabel"] for a in items),
+          [(a["actor"], a["actorLabel"]) for a in items[:3]])
+    check("操作人那一列写「名字 (编号)」",
+          any(a["actorLabel"].endswith("(10000)") for a in items),
+          [a["actorLabel"] for a in items[:3]])
     check("创建令牌本身也留痕", "token_create" in rows, rows[:400])
+    check("说明都写成 key: value",
+          all(not a["detail"] or ":" in a["detail"] for a in items),
+          [a["detail"] for a in items if a["detail"]][:3])
+    check("sudo 的进出都带原因与来源",
+          any(a["action"] == "sudo_on" and (a["detail"] or "").startswith("ip: ")
+              for a in (call(owner, "/api/panel/audit?q=sudo&limit=40")["audit"]))
+          and any(a["action"] == "sudo_off" and "reason: " in (a["detail"] or "")
+                  for a in (call(owner, "/api/panel/audit?q=sudo_off&limit=40")["audit"])))
 
     post(owner, "/api/panel/token/revoke", {"id": writer["item"]["id"]})
     bearer("/api/panel/events", plain2, expect=401)

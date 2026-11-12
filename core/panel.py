@@ -403,7 +403,7 @@ def _migrate_events(conn):
     conn.execute("DROP TABLE events_old")
     conn.execute(
         "INSERT INTO audit (ts, actor, action, detail) VALUES (?,?,?,?)",
-        (time.time(), "system", "events_migrated", "id/token split"))
+        (time.time(), "0", "events_migrated", "note: id/token split"))
     return True
 
 
@@ -459,7 +459,7 @@ def init_db():
     ensure_uids(conn)
     conn.execute(
         "INSERT INTO audit (ts, actor, action, detail) VALUES (?,?,?,?)",
-        (time.time(), "system", "panel_init", None),
+        (time.time(), "0", "panel_init", None),
     )
 
 
@@ -750,15 +750,80 @@ def owners_of(conn, seq):
     return int(row["n"] or 0)
 
 
+def actor_key(conn, actor):
+    """审计里的操作人只存编号，不存登录名：登录名可以改，编号不会。
+
+    ``0`` 是系统与匿名（注册申请这类没有登录的人）。查不到的历史值原样留着，
+    免得把旧行改坏。显示的时候用 ``with_actor_labels`` 转回「名字 (编号)」。
+    """
+    if isinstance(actor, int):
+        return str(actor)
+    text = str(actor or "").strip()
+    if not text:
+        return "0"
+    if text.isdigit():
+        return text
+    if text.lower() in ("system", "anon", "anonymous", "console", "signup"):
+        return "0"
+    row = conn.execute("SELECT uid FROM accounts WHERE lower(username)=lower(?)",
+                       (text,)).fetchone()
+    return str(row["uid"]) if row is not None else text
+
+
+def audit_note(**fields):
+    """审计说明的写法：``key: value, key2: value2``。
+
+    键一律用英文小写；值可以是中文（人名、活动名这类必须照原样放进去的），
+    但不要写整句话——说明是给日志检索看的，不是给人读的句子。
+    """
+    parts = []
+    for key in fields:
+        value = fields[key]
+        if value is None or value == "":
+            continue
+        parts.append("%s: %s" % (key, value))
+    return ", ".join(parts)
+
+
 def audit(conn, actor, action, target=None, detail=None):
     extra = getattr(_local, "via", "")
     if extra:
         # 同一个人可以既用面板也用令牌：审计里分开写，事后才分得清是谁的手
-        detail = ("%s（%s）" % (detail, extra)) if detail else extra
+        detail = (detail + ", " if detail else "") + "via: " + extra
     conn.execute(
         "INSERT INTO audit (ts, actor, action, target, detail) VALUES (?,?,?,?,?)",
-        (time.time(), actor, action, target, detail),
+        (time.time(), actor_key(conn, actor), action, target, detail),
     )
+
+
+def with_actor_labels(conn, rows):
+    """给审计行补一列 ``actorLabel``：名字 (编号)，编号 0 写作 system。
+
+    存的是编号，显示的时候才转回来；账号已经不在了就写 ``账号 #编号``。
+    """
+    uids = sorted({int(r["actor"]) for r in rows if str(r["actor"] or "").isdigit()})
+    names = {}
+    if uids:
+        marks = ",".join("?" * len(uids))
+        for a in conn.execute(
+                "SELECT uid, name FROM accounts WHERE uid IN (" + marks + ")",   # sql-ok 只拼占位符个数，值都走 ?
+                uids).fetchall():
+            names[int(a["uid"])] = (a["name"] or "").strip()
+    out = []
+    for r in rows:
+        item = dict(r)
+        text = str(r["actor"] or "")
+        if text.isdigit():
+            uid = int(text)
+            if uid == 0:
+                item["actorLabel"] = "system (0)"
+            else:
+                who = names.get(uid) or ("账号 #%d" % uid)
+                item["actorLabel"] = "%s (%d)" % (who, uid)
+        else:
+            item["actorLabel"] = text      # 历史行：当时存的就是登录名
+        out.append(item)
+    return out
 
 
 def via(text=""):

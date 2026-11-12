@@ -68,7 +68,7 @@ PAGES_DIR = os.path.join(BASE_DIR, "pages")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.0.84"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.0.85"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -907,7 +907,7 @@ class Handler(BaseHTTPRequestHandler):
         except (TypeError, ValueError):
             return None
 
-    def _stream(self, scope=None):
+    def _stream(self, scope=None, of_event=False):
         """Server-sent events: the panel says when something changed.
 
         A stream that drops only delays the notice - the next event carries the
@@ -916,6 +916,10 @@ class Handler(BaseHTTPRequestHandler):
         ``scope`` narrows what is worth sending: a projector watching one
         activity should not be woken by another activity's writes, so those
         changes are noticed and dropped instead of forwarded.
+
+        ``of_event`` says this stream belongs to one activity's pages: only they
+        care that the activity's module was just switched off, and only they may
+        ask (``db.event_id()`` needs a selected activity).
         """
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
@@ -940,7 +944,7 @@ class Handler(BaseHTTPRequestHandler):
                 if mine == sent:
                     continue  # somebody else's activity moved
                 sent = mine
-                if self._module_gone(revs):
+                if of_event and self._module_gone(revs):
                     # 这一场刚被停用：告诉页面收工，它落地就是那张说明页
                     self._sse({"revs": mine, "version": VERSION, "off": True})
                     self.wfile.flush()
@@ -956,15 +960,11 @@ class Handler(BaseHTTPRequestHandler):
         """模块开关动过、而且这一场正被停用：流可以收尾了。
 
         只在站级的 ``modules`` 键动过时才查一次库，平时一毛钱开销都没有。
-        活动族的两个流（公示/大屏的 ``/api/stream``、后台的 ``/api/admin/stream``）
-        都走这里；面板的流没有当前活动，自然不成立。
         """
         if not revs.get("modules"):
             return False
-        seq = db.event_id()
-        if not seq:
-            return False
         try:
+            seq = db.event_id()
             return bool(panel.stopped_module(panel.connect(), seq))
         except Exception:
             return False
@@ -1251,7 +1251,8 @@ class Handler(BaseHTTPRequestHandler):
                 res = lists.submit_signup(tx, row, data, self.client_address[0])
             with panel.tx() as px:
                 panel.audit(px, "signup", "signup_submit", str(row["id"]),
-                            "%s %s" % (data.get("sid"), data.get("name")))
+                            panel.audit_note(sid=data.get("sid"),
+                                             name=data.get("name")))
             return self._json(res)
 
         return self._err("not found", 404)
@@ -1428,7 +1429,8 @@ class Handler(BaseHTTPRequestHandler):
                     "VALUES (?,?,?,?,?,?,?,?)",
                     (panel.next_uid(tx), username, name, "admin", "pending",
                      panel.hash_password(password), note, time.time()))
-                panel.audit(tx, "anon", "register", username, note)
+                panel.audit(tx, "anon", "register", username,
+                            panel.audit_note(note=note))
             return self._json({"ok": True, "status": "pending"})
 
         if path == "/login" and method == "POST":
@@ -1465,7 +1467,8 @@ class Handler(BaseHTTPRequestHandler):
                 token = panel.create_session(tx, row["id"], ip)
                 tx.execute("UPDATE accounts SET last_login=? WHERE id=?",
                            (time.time(), row["id"]))
-                panel.audit(tx, row["username"], "login", None, ip)
+                panel.audit(tx, row["username"], "login", None,
+                            panel.audit_note(ip=ip))
             cookie = "%s=%s; Path=%s; HttpOnly; SameSite=Lax; Max-Age=%d" % (
                 panel.COOKIE, token, panel.cookie_path_for(raw_path, route), panel.SESSION_TTL)
             return self._json({"ok": True, "me": panel.view(row)},
@@ -1498,7 +1501,7 @@ class Handler(BaseHTTPRequestHandler):
                     raise model.ApiError("令牌无效或已吊销", 401)
                 panel.touch_token(conn, token_row["id"])
                 self._via_token = token_row
-                panel.via("令牌「%s」" % token_row["name"])
+                panel.via("token %s" % token_row["name"])
         if acc is None:
             raise model.ApiError("未登录或登录已过期", 401)
 
@@ -1506,7 +1509,7 @@ class Handler(BaseHTTPRequestHandler):
             _check_token_scope(path, method, token_row)
         elif (self.headers.get("X-Via") or "").lower() == "assistant":
             # 助手替这个人做的写操作，审计里要能看出来（读操作本来就不进审计）
-            panel.via("经助手")
+            panel.via("assistant")
 
         # A conflict is only ever about the object this write touches: a change
         # to the same thing that the client has not seen yet.  Everything else
@@ -1546,7 +1549,14 @@ class Handler(BaseHTTPRequestHandler):
             if getattr(self, "_via_token", None) is not None:
                 # 提权靠的是"人再输一次密码"，令牌背后没有人可以问
                 raise model.ApiError("这个操作需要重新输入密码，令牌做不到", 403)
-            if panel.session_sudo(conn, sess) <= time.time():
+            until = panel.session_sudo(conn, sess)
+            if until <= time.time():
+                if until:
+                    # 提权已经过期：清掉并记一次，reason 与手动退出分开写
+                    with panel.tx() as tx:
+                        panel.set_sudo(tx, sess, 0)
+                        panel.audit(tx, acc["username"], "sudo_off", None,
+                                    panel.audit_note(reason="timeout"))
                 raise SudoRequired()
 
         if path == "/sudo" and method == "POST":
@@ -1565,7 +1575,8 @@ class Handler(BaseHTTPRequestHandler):
             _PANEL_FAILS.pop(ip + ":n", None)
             with panel.tx() as tx:
                 until = panel.set_sudo(tx, sess, panel.SUDO_TTL)
-                panel.audit(tx, acc["username"], "sudo_on", None, ip)
+                panel.audit(tx, acc["username"], "sudo_on", None,
+                            panel.audit_note(ip=ip))
             return self._json({"ok": True, "sudoUntil": until,
                                "sudoTtl": panel.SUDO_TTL,
                                "now": time.time()})
@@ -1574,7 +1585,8 @@ class Handler(BaseHTTPRequestHandler):
             body()
             with panel.tx() as tx:
                 panel.set_sudo(tx, sess, 0)
-                panel.audit(tx, acc["username"], "sudo_off")
+                panel.audit(tx, acc["username"], "sudo_off", None,
+                            panel.audit_note(reason="manual"))
             return self._json({"ok": True, "sudoUntil": 0})
 
         if path == "/invite" and method == "POST":
@@ -1596,7 +1608,8 @@ class Handler(BaseHTTPRequestHandler):
                     (state, time.time(), seq, acc["id"]))
                 panel.audit(tx, acc["username"],
                             "event_member_accept" if action == "accept"
-                            else "event_member_decline", str(seq))
+                            else "event_member_decline", str(acc["uid"]),
+                            panel.audit_note(event_id=seq))
             return self._json({"ok": True, "state": state})
 
         if path == "/password" and method == "POST":
@@ -1835,8 +1848,8 @@ class Handler(BaseHTTPRequestHandler):
                            " ban_reason=? WHERE id=?",
                            (status, time.time(), acc["username"],
                             reason if action == "ban" else "", target["id"]))
-                panel.audit(tx, acc["username"], action, target["username"],
-                            reason or None)
+                panel.audit(tx, acc["username"], action, str(target["uid"]),
+                            panel.audit_note(reason=reason))
             return self._json({"ok": True, "status": status})
 
         if path == "/account/role" and method == "POST":
@@ -1854,7 +1867,8 @@ class Handler(BaseHTTPRequestHandler):
                 raise model.ApiError("站长的角色不可更改", 403)
             with panel.tx() as tx:
                 tx.execute("UPDATE accounts SET role=? WHERE id=?", (role, target["id"]))
-                panel.audit(tx, acc["username"], "role_change", target["username"], role)
+                panel.audit(tx, acc["username"], "role_change", str(target["uid"]),
+                            panel.audit_note(role=role))
             return self._json({"ok": True, "role": role})
 
         if path == "/templates" and method == "GET":
@@ -1908,14 +1922,16 @@ class Handler(BaseHTTPRequestHandler):
                         (slug, acc["id"], name, note, module_id,
                          json.dumps(params, ensure_ascii=False), title, visibility,
                          0, 0, now, now, description))
-                    panel.audit(tx, acc["username"], "preset_create", slug, name)
+                    panel.audit(tx, acc["username"], "preset_create", slug,
+                                panel.audit_note(name=name))
                 else:
                     tx.execute(
                         "UPDATE presets SET name=?, note=?, params=?, title=?,"
                         " visibility=?, updated_at=?, description=? WHERE id=?",
                         (name, note, json.dumps(params, ensure_ascii=False), title,
                          visibility, now, description, row["id"]))
-                    panel.audit(tx, acc["username"], "preset_update", slug, name)
+                    panel.audit(tx, acc["username"], "preset_update", slug,
+                                panel.audit_note(name=name))
             return self._json({"ok": True, "id": slug})
 
         if path == "/preset/favorite" and method == "POST":
@@ -1949,7 +1965,8 @@ class Handler(BaseHTTPRequestHandler):
                 tx.execute("DELETE FROM presets WHERE id=?", (row["id"],))
                 tx.execute("DELETE FROM preset_favorites WHERE preset_id=?",
                            (row["id"],))
-                panel.audit(tx, acc["username"], "preset_delete", slug, row["name"])
+                panel.audit(tx, acc["username"], "preset_delete", slug,
+                            panel.audit_note(name=row["name"]))
             return self._json({"ok": True})
 
         if path == "/event/preset" and method == "POST":
@@ -1992,7 +2009,7 @@ class Handler(BaseHTTPRequestHandler):
                      row["title"] or cfg.get("title") or "", visibility, 0, 0,
                      now, now, description))
                 panel.audit(tx, acc["username"], "preset_from_event", slug,
-                            str(seq))
+                            panel.audit_note(event_id=seq))
             return self._json({"ok": True, "id": slug, "name": name})
 
         if path == "/modules" and method == "GET":
@@ -2025,7 +2042,7 @@ class Handler(BaseHTTPRequestHandler):
                 panel.set_module_enabled(tx, module_id, on, acc["username"])
                 panel.audit(tx, acc["username"],
                             "module_enable" if on else "module_disable", module_id,
-                            "affected: %d" % affected)
+                            panel.audit_note(affected=affected))
             # 站级的开关变了：让所有活动的流都醒一次，页面据此立刻换成"不可用"
             bus.bump("modules")
             return self._json({"ok": True, "enabled": on, "affected": affected})
@@ -2096,7 +2113,8 @@ class Handler(BaseHTTPRequestHandler):
                         (name, note, module_id,
                          json.dumps(params, ensure_ascii=False), title, visibility,
                          now, module_id, base, row["id"]))
-                panel.audit(tx, acc["username"], "preset_import", slug, module_id)
+                panel.audit(tx, acc["username"], "preset_import", slug,
+                            panel.audit_note(module=module_id))
             return self._json({"ok": True, "id": slug, "missing": missing})
 
         if path == "/draft" and method == "GET":
@@ -2174,7 +2192,8 @@ class Handler(BaseHTTPRequestHandler):
                         "INSERT OR IGNORE INTO event_members"
                         " (seq, account_id, role, state, added_at) VALUES (?,?,?,?,?)",
                         (seq, who, "member", "pending", now))
-                panel.audit(tx, acc["username"], "event_create", str(seq), title)
+                panel.audit(tx, acc["username"], "event_create", str(seq),
+                            panel.audit_note(title=title))
 
             # the activity gets its own database: 平台表 + 这个模块声明的表
             db.set_event(seq)
@@ -2225,7 +2244,8 @@ class Handler(BaseHTTPRequestHandler):
             token = localconfig.new_secret()
             with panel.tx() as tx:
                 tx.execute("UPDATE events SET token=? WHERE seq=?", (token, seq))
-                panel.audit(tx, acc["username"], "event_rotate", str(seq), row["title"])
+                panel.audit(tx, acc["username"], "event_rotate", str(seq),
+                            panel.audit_note(title=row["title"]))
             db.set_event(seq)
             prefix = (LOCAL_CFG.get("public_base_prefix") or "").rstrip("/")
             event_conn = db.connect()
@@ -2261,7 +2281,7 @@ class Handler(BaseHTTPRequestHandler):
                 shortlinks.purge_event(tx, seq)
                 panel.audit(tx, acc["username"],
                             "event_force_archive" if forced_by else "event_archive",
-                            str(seq), title)
+                            str(seq), panel.audit_note(title=title))
             return size
 
         if path == "/event/archive" and method == "POST":
@@ -2324,7 +2344,7 @@ class Handler(BaseHTTPRequestHandler):
                     " WHERE seq=? AND account_id=? AND account_id<>?",
                     (seq, row["owner_id"] or 0, target["id"]))
                 panel.audit(tx, acc["username"], "event_transfer", str(seq),
-                            "%s -> %s" % (row["title"] or seq, label))
+                            panel.audit_note(title=row["title"], to=label))
             return self._json({"ok": True, "seq": seq, "owner": label})
 
         if path == "/event/reclaim" and method == "POST":
@@ -2338,7 +2358,7 @@ class Handler(BaseHTTPRequestHandler):
             with panel.tx() as tx:
                 shortlinks.purge_event(tx, seq)
                 panel.audit(tx, acc["username"], "event_reclaim", str(seq),
-                            "%d 条短链" % before)
+                            panel.audit_note(shortlinks=before))
             return self._json({"ok": True, "seq": seq, "shortlinks": before})
 
         if path == "/event/force_archive" and method == "POST":
@@ -2369,7 +2389,7 @@ class Handler(BaseHTTPRequestHandler):
             with panel.tx() as tx:
                 tx.execute("UPDATE events SET archived_at=0 WHERE seq=?", (seq,))
                 panel.audit(tx, acc["username"], "event_unarchive", str(seq),
-                            row["title"])
+                            panel.audit_note(title=row["title"]))
             if restored:
                 db.set_event(seq)
                 db.init_db()
@@ -2390,7 +2410,7 @@ class Handler(BaseHTTPRequestHandler):
                 tx.execute("DELETE FROM event_members WHERE seq=?", (seq,))
                 tx.execute("DELETE FROM events WHERE seq=?", (seq,))
                 panel.audit(tx, acc["username"], "event_delete", str(seq),
-                            row["title"])
+                            panel.audit_note(title=row["title"]))
             return self._json({"ok": True, "seq": seq, "removed": removed})
 
         if path == "/event/download" and method == "GET":
@@ -2416,7 +2436,8 @@ class Handler(BaseHTTPRequestHandler):
             disposition = "attachment; filename=\"%s\"; filename*=UTF-8''%s" % (
                 name, utf8_name)
             with panel.tx() as tx:
-                panel.audit(tx, acc["username"], "event_download", str(seq), name)
+                panel.audit(tx, acc["username"], "event_download", str(seq),
+                            panel.audit_note(file=name))
             return self._send(200, blob, "application/zip",
                               headers=[("Content-Disposition", disposition)])
 
@@ -2439,7 +2460,8 @@ class Handler(BaseHTTPRequestHandler):
                 raise model.ApiError("\u6d3b\u52a8\u4e0d\u5b58\u5728", 404)
             with panel.tx() as tx:
                 tx.execute("UPDATE events SET title=? WHERE seq=?", (title, seq))
-                panel.audit(tx, acc["username"], "event_title", str(seq), title)
+                panel.audit(tx, acc["username"], "event_title", str(seq),
+                            panel.audit_note(title=title))
             # the event pages read their heading from the event database
             db.set_event(seq)
             event_conn = db.connect()
@@ -2474,10 +2496,12 @@ class Handler(BaseHTTPRequestHandler):
                 tx.execute("UPDATE accounts SET name=?, username=? WHERE id=?",
                            (name, username, acc["id"]))
                 if username != acc["username"]:
-                    panel.audit(tx, acc["username"], "rename", username,
-                                "%s -> %s" % (acc["username"], username))
+                    panel.audit(tx, acc["username"], "rename", str(acc["uid"]),
+                                panel.audit_note(**{"from": acc["username"],
+                                                    "to": username}))
                 if name != acc["name"]:
-                    panel.audit(tx, username, "profile_name", None, name)
+                    panel.audit(tx, acc["username"], "profile_name",
+                                str(acc["uid"]), panel.audit_note(name=name))
             row = conn.execute("SELECT * FROM accounts WHERE id=?", (acc["id"],)).fetchone()
             return self._json({"ok": True, "me": panel.view(row)})
 
@@ -2503,7 +2527,8 @@ class Handler(BaseHTTPRequestHandler):
                 with panel.tx() as tx:
                     tx.execute("UPDATE accounts SET avatar=?, avatar_at=? WHERE id=?",
                                (cleaned, stamp, acc["id"]))
-                    panel.audit(tx, acc["username"], "avatar_url", None, cleaned[:120])
+                    panel.audit(tx, acc["username"], "avatar_url", None,
+                                panel.audit_note(url=cleaned[:120]))
                 panel.drop_avatar(acc["id"])
                 row = conn.execute("SELECT * FROM accounts WHERE id=?",
                                    (acc["id"],)).fetchone()
@@ -2528,7 +2553,8 @@ class Handler(BaseHTTPRequestHandler):
             with panel.tx() as tx:
                 tx.execute("UPDATE accounts SET avatar=?, avatar_at=? WHERE id=?",
                            (stored, stamp, acc["id"]))
-                panel.audit(tx, acc["username"], "avatar_set", None, stored)
+                panel.audit(tx, acc["username"], "avatar_set", None,
+                            panel.audit_note(file=stored))
             row = conn.execute("SELECT * FROM accounts WHERE id=?",
                                (acc["id"],)).fetchone()
             return self._json({"ok": True, "me": panel.view(row)})
@@ -2580,7 +2606,8 @@ class Handler(BaseHTTPRequestHandler):
                 raise model.ApiError(str(exc), 400)
             with panel.tx() as tx:
                 panel.audit(tx, acc["username"], "screen_pack_add", got["id"],
-                            "%d 个文件，%s" % (got["files"], packs.size_text(got["size"])))
+                            panel.audit_note(files=got["files"],
+                                             size=packs.size_text(got["size"])))
             item = None
             for row in _screen_packs():
                 if row["id"] == got["id"]:
@@ -2625,7 +2652,7 @@ class Handler(BaseHTTPRequestHandler):
             localconfig.set_static("safe_mode", want)
             with panel.tx() as tx:
                 panel.audit(tx, acc["username"],
-                            "safemode_on" if want else "safemode_off", None, "")
+                            "safemode_on" if want else "safemode_off", None)
             can_restart = supervised()
             if can_restart:
                 restart_after_response()
@@ -2636,7 +2663,7 @@ class Handler(BaseHTTPRequestHandler):
             need("owner")
             need_sudo()
             with panel.tx() as tx:
-                panel.audit(tx, acc["username"], "service_restart", None, "")
+                panel.audit(tx, acc["username"], "service_restart", None)
             can_restart = supervised()
             if can_restart:
                 restart_after_response()
@@ -2679,7 +2706,7 @@ class Handler(BaseHTTPRequestHandler):
                                       clear=bool(data.get("clear")),
                                       resume=None if resume is None else bool(resume))
                 panel.audit(tx, acc["username"], "assistant_config", None,
-                            "%s / %s" % (base or "—", (data.get("model") or "—")))
+                            panel.audit_note(base=base, model=data.get("model")))
             row = conn.execute("SELECT * FROM accounts WHERE id=?",
                                (acc["id"],)).fetchone()
             return self._json({"ok": True, "config": assistant.config_of(row)})
@@ -2820,8 +2847,8 @@ class Handler(BaseHTTPRequestHandler):
             with panel.tx() as tx:
                 tx.execute("UPDATE accounts SET chat_quota=? WHERE id=?",
                            (quota, target["id"]))
-                panel.audit(tx, acc["username"], "account_quota", target["username"],
-                            "%d -> %d（字节）" % (before, quota))
+                panel.audit(tx, acc["username"], "account_quota", str(target["uid"]),
+                            panel.audit_note(bytes="%d -> %d" % (before, quota)))
             row = conn.execute("SELECT * FROM accounts WHERE id=?",
                                (target["id"],)).fetchone()
             return self._json({"ok": True, "account": panel.view(row)})
@@ -2864,8 +2891,7 @@ class Handler(BaseHTTPRequestHandler):
                     # 没有 WebCrypto（比如用 http 从局域网访问）时退回服务端生成
                     plain, tid = panel.create_token(tx, acc["id"], name, scopes, days)
                 panel.audit(tx, acc["username"], "token_create", str(tid),
-                            "%s / %s" % (name, "、".join(
-                                panel.TOKEN_SCOPE_LABEL.get(s, s) for s in scopes)))
+                            panel.audit_note(name=name, scopes=",".join(scopes)))
             item = [t for t in panel.tokens_of(conn, acc["id"]) if t["id"] == tid]
             return self._json({"ok": True, "token": plain,
                                "item": item[0] if item else None})
@@ -2876,7 +2902,7 @@ class Handler(BaseHTTPRequestHandler):
                 with panel.tx() as tx:
                     row = panel.revoke_token(tx, acc["id"], data.get("id"))
                     panel.audit(tx, acc["username"], "token_revoke", str(row["id"]),
-                                row["name"])
+                                panel.audit_note(name=row["name"]))
             except LookupError as exc:
                 raise model.ApiError(str(exc), 404)
             return self._json({"ok": True, "tokens": panel.tokens_of(conn, acc["id"])})
@@ -2920,7 +2946,7 @@ class Handler(BaseHTTPRequestHandler):
             with panel.tx() as tx:
                 panel.audit(tx, acc["username"],
                             "roster_ask" if level == "pending" else "roster_grant",
-                            str(rid), long_row["name"])
+                            str(rid), panel.audit_note(name=long_row["name"]))
                 if level == "pending":
                     panel.notice(
                         tx, "important", "有人申请写入名单「%s」" % long_row["name"],
@@ -2963,7 +2989,7 @@ class Handler(BaseHTTPRequestHandler):
             names = "、".join(panel.public_name(t["name"], t["uid"]) for t in targets)
             with panel.tx() as tx:
                 panel.audit(tx, acc["username"], "roster_grant", str(rid),
-                            "granted: %d" % len(targets))
+                            panel.audit_note(granted=len(targets)))
             return self._json({"ok": True, "granted": len(targets), "who": names})
 
         if path == "/roster/grant/decide" and method == "POST":
@@ -2985,7 +3011,8 @@ class Handler(BaseHTTPRequestHandler):
             with panel.tx() as tx:
                 panel.audit(tx, acc["username"],
                             "roster_ask_approve" if action == "approve"
-                            else "roster_ask_reject", str(rid), str(who))
+                            else "roster_ask_reject", str(rid),
+                            panel.audit_note(account_id=who))
                 panel.notice(
                     tx, "info",
                     "写入名单「%s」的申请%s" % (row["name"],
@@ -3005,7 +3032,7 @@ class Handler(BaseHTTPRequestHandler):
                 lists.revoke_grant(lx, "roster", rid, who)
             with panel.tx() as tx:
                 panel.audit(tx, acc["username"], "roster_grant_revoke", str(rid),
-                            str(who))
+                            panel.audit_note(account_id=who))
             return self._json({"ok": True})
 
         if path == "/rosters" and method == "GET":
@@ -3055,7 +3082,7 @@ class Handler(BaseHTTPRequestHandler):
                     data.get("approve_mode") or "owner")
             with panel.tx() as tx:
                 panel.audit(tx, acc["username"], "roster_create", str(rid),
-                            (data.get("name") or "").strip())
+                            panel.audit_note(name=(data.get("name") or "").strip()))
             return self._json({"ok": True, "id": rid})
 
         if path == "/roster/update" and method == "POST":
@@ -3072,10 +3099,10 @@ class Handler(BaseHTTPRequestHandler):
             if changed:
                 with panel.tx() as tx:
                     panel.audit(tx, acc["username"], "roster_update", str(rid),
-                                json.dumps({k: data.get(k) for k in
-                                            ("name", "visibility", "grant_mode",
-                                             "approve_mode")
-                                            if k in data}, ensure_ascii=False))
+                                panel.audit_note(updated=",".join(sorted(
+                                    k for k in ("name", "visibility", "grant_mode",
+                                                "approve_mode")
+                                    if k in data))))
             return self._json({"ok": True, "changed": bool(changed)})
 
         if path == "/roster/delete" and method == "POST":
@@ -3086,7 +3113,7 @@ class Handler(BaseHTTPRequestHandler):
                 lists.delete_roster(lx, rid)
             with panel.tx() as tx:
                 panel.audit(tx, acc["username"], "roster_delete", str(rid),
-                            row["name"])
+                            panel.audit_note(name=row["name"]))
             return self._json({"ok": True})
 
         if path == "/roster/entry" and method == "POST":
@@ -3101,8 +3128,9 @@ class Handler(BaseHTTPRequestHandler):
                                 data.get("note"), "manual")
             with panel.tx() as tx:
                 panel.audit(tx, acc["username"], "roster_entry", str(rid),
-                            "%s %s%s" % (data.get("sid"), data.get("name"),
-                                         "" if created else "（已有人员记录）"))
+                            panel.audit_note(sid=data.get("sid"),
+                                             name=data.get("name"),
+                                             person="new" if created else "existing"))
             return self._json({"ok": True, "personId": person_id})
 
         if path == "/roster/entry/drop" and method == "POST":
@@ -3117,7 +3145,7 @@ class Handler(BaseHTTPRequestHandler):
                 lists.drop_entry(lx, rid, pid)
             with panel.tx() as tx:
                 panel.audit(tx, acc["username"], "roster_entry_drop", str(rid),
-                            "%s %s" % (row["sid"], row["name"]))
+                            panel.audit_note(sid=row["sid"], name=row["name"]))
             return self._json({"ok": True})
 
         if path == "/roster/entry/state" and method == "POST":
@@ -3155,9 +3183,10 @@ class Handler(BaseHTTPRequestHandler):
                 res = lists.import_text(lx, rid, text)
             with panel.tx() as tx:
                 panel.audit(tx, acc["username"], "roster_import", str(rid),
-                            "新增 %d 人，名单内已有 %d 人，新增人员记录 %d 条，无法读取 %d 行"
-                            % (res["added"], res["unchanged"], res["newPeople"],
-                               res["failed"]))
+                            panel.audit_note(added=res["added"],
+                                             unchanged=res["unchanged"],
+                                             people=res["newPeople"],
+                                             unreadable=res["failed"]))
             return self._json({"ok": True, "id": rid, "created": created_new, **res})
 
         if path == "/roster/export.csv" and method == "GET":
@@ -3212,9 +3241,10 @@ class Handler(BaseHTTPRequestHandler):
                 res = lists.import_rows(lx, rid, rows)
             with panel.tx() as tx:
                 panel.audit(tx, acc["username"], "roster_import", str(rid),
-                            "新增 %d 人，名单内已有 %d 人，新增人员记录 %d 条，无法读取 %d 行"
-                            % (res["added"], res["unchanged"], res["newPeople"],
-                               res["failed"]))
+                            panel.audit_note(added=res["added"],
+                                             unchanged=res["unchanged"],
+                                             people=res["newPeople"],
+                                             unreadable=res["failed"]))
             return self._json({"ok": True, "id": rid, "created": created_new, **res})
 
         if path == "/list_approvals" and method == "GET":
@@ -3283,7 +3313,7 @@ class Handler(BaseHTTPRequestHandler):
                 sid = lists.create_signup(lx, acc["id"], data)
             with panel.tx() as tx:
                 panel.audit(tx, acc["username"], "signup_create", str(sid),
-                            (data.get("title") or "").strip())
+                            panel.audit_note(title=(data.get("title") or "").strip()))
             return self._json({"ok": True, "id": sid})
 
         if path == "/signup/update" and method == "POST":
@@ -3295,9 +3325,9 @@ class Handler(BaseHTTPRequestHandler):
             if changed:
                 with panel.tx() as tx:
                     panel.audit(tx, acc["username"], "signup_update", str(sid),
-                                json.dumps({k: data.get(k) for k in
-                                            ("title", "state", "capacity")
-                                            if k in data}, ensure_ascii=False))
+                                panel.audit_note(updated=",".join(sorted(
+                                    k for k in ("title", "state", "capacity")
+                                    if k in data))))
             return self._json({"ok": True, "changed": bool(changed)})
 
         if path == "/signup/delete" and method == "POST":
@@ -3307,7 +3337,8 @@ class Handler(BaseHTTPRequestHandler):
             with lists.tx() as lx:
                 lists.delete_signup(lx, sid)
             with panel.tx() as tx:
-                panel.audit(tx, acc["username"], "signup_delete", str(sid), row["title"])
+                panel.audit(tx, acc["username"], "signup_delete", str(sid),
+                            panel.audit_note(title=row["title"]))
             return self._json({"ok": True})
 
         if path == "/signup/entries" and method == "GET":
@@ -3353,9 +3384,12 @@ class Handler(BaseHTTPRequestHandler):
             limit = _int_arg(query, "limit", 60, 1, 200)
             where, args = [], []
             if q:
+                # 操作人存的是编号：拿名字搜也能搜到，所以再按账号名对一次
                 where.append("(actor LIKE ? OR action LIKE ? OR target LIKE ?"
-                             " OR detail LIKE ?)")
-                args += ["%" + q + "%"] * 4
+                             " OR detail LIKE ?"
+                             " OR actor IN (SELECT CAST(uid AS TEXT) FROM accounts"
+                             "              WHERE name LIKE ? OR username LIKE ?))")
+                args += ["%" + q + "%"] * 6
             clause = (" WHERE " + " AND ".join(where)) if where else ""
             total = conn.execute("SELECT COUNT(*) AS n FROM audit" + clause,   # sql-ok 只拼列名/表名/SET 片段，值都走 ?
                                  args).fetchone()["n"]
@@ -3363,7 +3397,8 @@ class Handler(BaseHTTPRequestHandler):
                 "SELECT * FROM audit" + clause + " ORDER BY id DESC LIMIT ? OFFSET ?",   # sql-ok 只拼列名/表名/SET 片段，值都走 ?
                 args + [limit, offset]).fetchall()
             return self._json({"ok": True, "total": int(total or 0), "offset": offset,
-                               "limit": limit, "audit": [dict(r) for r in rows]})
+                               "limit": limit,
+                               "audit": panel.with_actor_labels(conn, rows)})
 
         return self._err("not found", 404)
 
@@ -3668,7 +3703,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/stream" and method == "GET":
             # Public like the board: a projector and a phone showing the same
             # activity hear about changes instead of polling for them.
-            return self._stream(scope="event:%s" % db.event_id())
+            return self._stream(scope="event:%s" % db.event_id(), of_event=True)
 
         if path == "/api/screen/token" and method == "GET":
             # Public on purpose: the projector machine should not need a login.
@@ -3753,7 +3788,7 @@ class Handler(BaseHTTPRequestHandler):
             if token:
                 with panel.tx() as tx:
                     panel.destroy_session(tx, token)
-                    panel.audit(tx, "console", "logout")
+                    panel.audit(tx, me.acc["username"], "logout")
             cookie = "%s=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0" % panel.COOKIE
             return self._json({"ok": True}, headers=[("Set-Cookie", cookie)])
 
@@ -3789,7 +3824,8 @@ class Handler(BaseHTTPRequestHandler):
             seq = db.event_id()
             with panel.tx() as tx:
                 tx.execute("UPDATE events SET title=? WHERE seq=?", (title, seq))
-                panel.audit(tx, me.acc["username"], "event_title", str(seq), title)
+                panel.audit(tx, me.acc["username"], "event_title", str(seq),
+                            panel.audit_note(title=title))
             with db.tx(conn):
                 db.set_config_raw(conn, "title", title)
                 db.audit(conn, "event_title", detail=title, actor=me.name)
@@ -3859,7 +3895,8 @@ class Handler(BaseHTTPRequestHandler):
                     panel.audit(tx, me.acc["username"],
                                 "event_member_invite" if seat is None
                                 else "event_member_reinvite",
-                                target["username"], str(seq))
+                                str(target["uid"]),
+                                panel.audit_note(event_id=seq))
                 return self._json({"ok": True, "state": "pending"})
             if action == "cancel":
                 if seat is None or seat["state"] != "pending":
@@ -3868,7 +3905,8 @@ class Handler(BaseHTTPRequestHandler):
                     tx.execute("DELETE FROM event_members WHERE seq=? AND account_id=?",
                                (seq, account_id))
                     panel.audit(tx, me.acc["username"], "event_member_cancel",
-                                target["username"] if target else str(account_id), str(seq))
+                                str(target["uid"] if target else account_id),
+                                panel.audit_note(event_id=seq))
                 return self._json({"ok": True, "state": "none"})
             if action == "revoke":
                 if seat is None or seat["state"] != "active":
@@ -3884,12 +3922,13 @@ class Handler(BaseHTTPRequestHandler):
                         "UPDATE event_members SET state='revoked', state_at=?"
                         " WHERE seq=? AND account_id=?", (now, seq, account_id))
                     panel.audit(tx, me.acc["username"], "event_member_revoke",
-                                target["username"] if target else str(account_id), str(seq))
+                                str(target["uid"] if target else account_id),
+                                panel.audit_note(event_id=seq))
                 return self._json({"ok": True, "state": "revoked"})
             raise model.ApiError("未知操作")
 
         if path == "/api/admin/stream" and method == "GET":
-            return self._stream()
+            return self._stream(of_event=True)
 
         if path == "/api/admin/console" and method == "GET":
             cfg = db.all_config(conn)

@@ -4122,10 +4122,11 @@
     if (more) more.hidden = S.audit.length >= (S.auditTotal || 0);
     $("#auditTable tbody").innerHTML = S.audit.length ? S.audit.map(function (r) {
       return '<tr><td class="mono">' + PX.whenExact(r.ts) + "</td>" +
-        "<td>" + PX.esc(r.actor || "") + "</td>" +
+        // 操作人：库里存编号，这里显示「名字 (编号)」
+        "<td>" + PX.esc(r.actorLabel || r.actor || "") + "</td>" +
         "<td>" + PX.esc(r.action) + "</td>" +
         "<td>" + PX.esc(r.target || "") + "</td>" +
-        '<td class="wrap">' + PX.esc(r.detail || "") + "</td></tr>";
+        '<td class="wrap mono">' + PX.esc(r.detail || "") + "</td></tr>";
     }).join("") : emptyRow(5, S.auditFilter ? "没有匹配的记录" : "还没有记录");
   }
 

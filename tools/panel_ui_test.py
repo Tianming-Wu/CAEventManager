@@ -15,6 +15,7 @@ exercised.  Run that against a development instance, not production.
 import json
 import os
 import random
+import re
 import sys
 import urllib.request
 
@@ -2628,6 +2629,16 @@ def audit_page(page):
     check("the log has rows", bool(stamps), stamps)
     check("times are precise to the second",
           bool(stamps) and all(t.count(":") == 2 for t in stamps), stamps[:3])
+    actors = page.evaluate("""() => Array.from(
+        document.querySelectorAll('#auditTable tbody tr td:nth-child(2)'))
+        .map(td => td.textContent.trim()).filter(Boolean)""")
+    check("操作人写成「名字 (编号)」",
+          bool(actors) and all(re.search(r"\(\d+\)$", a) for a in actors), actors[:3])
+    details = page.evaluate("""() => Array.from(
+        document.querySelectorAll('#auditTable tbody tr td:nth-child(5)'))
+        .map(td => td.textContent.trim()).filter(Boolean)""")
+    check("说明是 key: value 的写法",
+          all(":" in d for d in details), details[:3])
 
 
 def theme_page(page):

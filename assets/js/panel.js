@@ -229,10 +229,13 @@
       PX.esc(shortToken(e.id)) + "</code>" +
       '<button class="copy-btn" type="button" data-copy="' + PX.esc(e.id) + '" ' +
       'aria-label="复制活动 token">' + ICON_COPY + "</button></div>" +
+      // 模块被停用时说清为什么打不开：数据还在，启用即恢复
+      (e.stopped ? '<div class="event-off">模块已停用，页面暂时打不开</div>' : "") +
       '<div class="event-meta">' + PX.esc(meta.join(" · ")) + "</div>" +
       '<div class="event-actions">' +
-      '<a class="btn primary" href="' + PX.esc(e.admin) + '" target="_blank" ' +
-      'rel="noopener">管理面板</a></div></div>';
+      // 模块停着的时候这颗按钮必然打不开：不做成主按钮，别催人点
+      '<a class="btn' + (e.stopped ? "" : " primary") + '" href="' + PX.esc(e.admin) +
+      '" target="_blank" rel="noopener">管理面板</a></div></div>';
   }
 
   function emptyRow(cols, text) {
@@ -3164,16 +3167,20 @@
     return PX.api("/modules").then(function (d) {
       S.modules = d.modules || [];
       $("#moduleTable tbody").innerHTML = S.modules.map(function (m) {
+        var used = m.events || 0;
         return "<tr" + (m.enabled ? "" : ' class="muted-row"') + ">" +
-          "<td><b>" + PX.esc(m.name) + "</b><br>" +
-          '<span class="mono">' + PX.esc(m.id) + "</span></td>" +
+          "<td><b>" + PX.esc(m.name) + "</b> " +
+          (m.enabled ? "" : '<span class="tag">已停用</span>') + "<br>" +
+          '<span class="mono">' + PX.esc(m.id) + "</span>" +
+          (used ? ' <span class="note">' + used + " 个活动在用</span>" : "") +
+          "</td>" +
           '<td class="mono">' + PX.esc(m.version) + "</td>" +
           "<td>" + PX.esc(m.author || "—") + "</td>" +
           '<td class="actions">' +
           '<button class="btn sm' + (m.enabled ? " danger" : "") +
           '" type="button" data-module-toggle="' + PX.esc(m.id) +
           '" data-on="' + (m.enabled ? "0" : "1") + '">' +
-          (m.enabled ? "禁用" : "启用") + "</button></td></tr>";
+          (m.enabled ? "停用" : "启用") + "</button></td></tr>";
       }).join("") || emptyRow(4, "没有已安装的模块");
     }).catch(function (e) {
       if (e.status === 403) return showDenied("modules");
@@ -3181,13 +3188,25 @@
     });
   }
 
+  /* 停用一个模块会连带停掉正在用它的活动（数据不动，启用即恢复），
+     所以照别的破坏性动作来：先提权，进过 sudo 之后再问一句 */
   function toggleModule(id, on) {
-    PX.api("/module/toggle", { method: "POST", body: { id: id, enabled: on } })
-      .then(function () {
-        PX.toast(on ? "已启用" : "已禁用");
-        return loadTemplates(true).then(drawModules);
-      })
-      .catch(function (e) { PX.toast(PX.esc(e.message), true); });
+    var m = (S.modules || []).filter(function (x) { return x.id === id; })[0] || {};
+    var used = m.events || 0;
+    var label = on ? "启用模块" : "停用模块";
+    var note = on
+      ? (used ? "启用之后，用这个模块的 " + used + " 个活动恢复正常。" : "启用之后可以再用它创建活动。")
+      : (used
+          ? "正在用它的 " + used + " 个活动会一并停摆（页面与接口都不再提供），数据一条不动，启用即恢复。"
+          : "停用之后不能再用它创建活动或预设；正在用它的活动会一并停摆。");
+    confirmHighRisk(label, note, on ? "启用" : "停用", !on, function () {
+      apiSudo("/module/toggle", { method: "POST", body: { id: id, enabled: on } }, label)
+        .then(function () {
+          PX.toast(on ? "已启用" : "已停用");
+          return loadTemplates(true).then(drawModules);
+        })
+        .catch(fail);
+    });
   }
 
   function loadTemplates(force) {

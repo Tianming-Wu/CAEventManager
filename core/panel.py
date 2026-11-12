@@ -700,6 +700,27 @@ def set_module_enabled(conn, module_id, on, actor=""):
     return bool(on)
 
 
+def stopped_module(conn, seq):
+    """这个活动的模块被管理员停用了吗：是就返回模块 id，否则空串。
+
+    一条查询就够：活动用哪个模块记在 `events.kind`，开关在 `module_state`，
+    两张表都在面板库里，不必打开活动自己的库。
+    """
+    row = conn.execute(
+        "SELECT e.kind FROM events e"
+        " JOIN module_state m ON m.module_id = e.kind"
+        " WHERE e.seq=? AND m.enabled=0", (int(seq or 0),)).fetchone()
+    return (row["kind"] or "") if row is not None else ""
+
+
+def events_on_module(conn, module_id):
+    """还在用的（未归档的）活动里，有几个用的是这个模块。"""
+    row = conn.execute(
+        "SELECT COUNT(*) AS n FROM events WHERE archived_at=0 AND kind=?",
+        (module_id,)).fetchone()
+    return int(row["n"] or 0)
+
+
 def draft_get(conn, account_id, key):
     row = conn.execute(
         "SELECT payload, updated_at FROM drafts WHERE account_id=? AND key=?",

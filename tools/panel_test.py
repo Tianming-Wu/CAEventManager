@@ -387,7 +387,32 @@ def main():
     check("a module knows where it came from", mod["builtin"] is True, mod)
     check("and whether it is switched on", mod["enabled"] is True, mod)
     check("a module ships its own presets", "salon" in mod["templates"], mod)
-    post(owner, "/api/panel/module/toggle", {"id": "nwuca.lottery", "enabled": False})
+    check("and says how many activities live on it",
+          isinstance(mod.get("events"), int) and mod["events"] >= 1, mod)
+
+    print("== 停用模块：要提权，而且真的停住正在用的活动 ==")
+    post(owner, "/api/panel/sudo/exit")
+    refused = post(owner, "/api/panel/module/toggle",
+                   {"id": "nwuca.lottery", "enabled": False}, expect=403)
+    check("停用模块要进 sudo",
+          refused and refused.get("sudoRequired") is True, refused)
+    check("没提权时什么都没变",
+          call(owner, "/api/panel/modules")["modules"][0]["enabled"] is True)
+    post(owner, "/api/panel/sudo", {"password": owner_password()})
+    off = post(owner, "/api/panel/module/toggle",
+               {"id": "nwuca.lottery", "enabled": False})
+    check("提权之后可以停用，并说出牵连几个活动",
+          off and off["enabled"] is False and off["affected"] >= 1, off)
+    stopped_page = call(owner, "/" + ev["token"] + "/admin", expect=503)
+    check("正在用它的活动页面变成一张说明页",
+          isinstance(stopped_page, bytes)
+          and "模块" in stopped_page.decode("utf-8", "replace"), stopped_page[:120])
+    stopped_api = call(owner, "/" + ev["token"] + "/api/admin/state", expect=503)
+    check("活动接口也不再提供",
+          stopped_api and "模块" in (stopped_api.get("error") or ""), stopped_api)
+    listed = call(owner, "/api/panel/events")["events"]
+    check("活动列表上标着它停着",
+          all(e["stopped"] for e in listed if e["seq"] == ev["seq"]), listed)
     shelf = call(owner, "/api/panel/templates")["presets"]
     check("a switched-off module takes its presets out of use",
           all(not p["ok"] for p in shelf if p["module"] == "nwuca.lottery"), shelf)
@@ -400,6 +425,11 @@ def main():
     shelf = call(owner, "/api/panel/templates")["presets"]
     check("switching it back on restores them",
           all(p["ok"] for p in shelf if p["module"] == "nwuca.lottery"), shelf)
+    check("启用之后活动立刻回来",
+          call(owner, "/" + ev["token"] + "/api/admin/state") is not None)
+    listed = call(owner, "/api/panel/events")["events"]
+    check("列表上的标记也跟着去掉",
+          not any(e["stopped"] for e in listed if e["seq"] == ev["seq"]), listed)
 
     print("== a preset that arrives from outside ==")
     orphan = {"id": "demo.orphan", "name": "外部预设",

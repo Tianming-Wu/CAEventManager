@@ -68,7 +68,7 @@ PAGES_DIR = os.path.join(BASE_DIR, "pages")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.0.82"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.0.83"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -490,6 +490,16 @@ def _modules_by_id(conn):
     """Every installed module, by id, with the administrator's switch applied."""
     return {m["id"]: m for m in
             modules.all_modules(VERSION, disabled=panel.disabled_modules(conn))}
+
+
+# 模块被停用时，活动接口与页面统一用这一句话说明白
+MODULE_OFF_MSG = "这个活动所用的模块已被管理员停用"
+
+
+def _with_stopped(view, stopped):
+    """活动列表上标一笔：它用的模块现在停着（页面打不开，数据一条没动）。"""
+    view["stopped"] = bool(view.get("kind")) and view["kind"] in (stopped or set())
+    return view
 
 
 def presets_ok_slug(slug):
@@ -1128,12 +1138,22 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(404, not_found_page(), "text/html; charset=utf-8")
             db.set_event(seq)
             self._token = token
-            if safemode.enabled():
+            # 静态资源不算活动内容：安全模式与模块停用都照给，不然说明页自己没样式
+            static_ok = path.startswith("/assets/") or path == "/favicon.ico"
+            if safemode.enabled() and not static_ok:
                 # 安全模式：活动页与活动接口一律不提供。数据原样留着，不兜底、不改写
                 if not path.startswith("/api/"):
                     # 页面给一张维护页，地址不动：服务恢复后刷新就回到原来那页
                     return self._maintenance_page(cfg=None)
                 raise safemode.refuse()
+            # 模块被管理员停用：这一场的页面与接口一律不提供（数据一条不动，
+            # 启用之后刷新即恢复）。停用是全站级的，见 panel.stopped_module
+            stopped_kind = None if static_ok else panel.stopped_module(
+                panel.connect(), seq)
+            if stopped_kind:
+                if not path.startswith("/api/"):
+                    return self._module_off_page(stopped_kind)
+                raise model.ApiError(MODULE_OFF_MSG, 503)
             if path.startswith("/api/"):
                 self._scope = "event:%s" % seq
                 self._api(method, path, query)
@@ -1724,12 +1744,14 @@ class Handler(BaseHTTPRequestHandler):
                     " ORDER BY e.archived_at DESC LIMIT ? OFFSET ?",
                     (limit, offset)).fetchall()
                 base = (LOCAL_CFG.get("public_base_prefix") or "").rstrip("/")
+                stopped = panel.disabled_modules(conn)
                 return self._json({
                     "ok": True,
                     "total": int(total or 0),
                     "offset": offset,
                     "limit": limit,
-                    "events": [panel.event_view(r, base, None) for r in rows],
+                    "events": [_with_stopped(panel.event_view(r, base, None), stopped)
+                               for r in rows],
                 })
             rows = conn.execute(
                 "SELECT e.*, m.role AS my_role, o.name AS owner_name"
@@ -1742,7 +1764,9 @@ class Handler(BaseHTTPRequestHandler):
             # links come from the configured prefix plus each row's own token -
             # reading a per-event URL would point every row at one activity
             base = (LOCAL_CFG.get("public_base_prefix") or "").rstrip("/")
-            events = [panel.event_view(r, base, r["my_role"]) for r in rows]
+            stopped = panel.disabled_modules(conn)
+            events = [_with_stopped(panel.event_view(r, base, r["my_role"]), stopped)
+                      for r in rows]
             # 活动名在每个活动自己的库里：缺名字的按它自己的活动号去补
             for row, view in zip(rows, events):
                 if view["title"]:
@@ -1947,14 +1971,18 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/modules" and method == "GET":
             need("superadmin", "owner")
-            return self._json({"ok": True, "version": VERSION,
-                               "modules": modules.all_modules(
-                                   VERSION, disabled=panel.disabled_modules(conn))})
+            stopped = panel.disabled_modules(conn)
+            mods = modules.all_modules(VERSION, disabled=stopped)
+            for m in mods:
+                # 有几个活动正在用：停用之前先让人看见代价
+                m["events"] = panel.events_on_module(conn, m["id"])
+            return self._json({"ok": True, "version": VERSION, "modules": mods})
 
         if path == "/module/toggle" and method == "POST":
-            # switching a module off keeps every reference to it; it only stops
-            # new activities and presets from being started on it
+            # 停用一个模块是站级动作：正在用它的活动会一并停摆（数据不动，启用即恢复），
+            # 新活动与预设也建不了。所以照别的破坏性动作来：先提权，再记审计
             need("superadmin", "owner")
+            need_sudo()
             data = body()
             module_id = (data.get("id") or "").strip()
             known = {m["id"] for m in modules.all_modules(VERSION)}
@@ -1962,14 +1990,17 @@ class Handler(BaseHTTPRequestHandler):
                 raise model.ApiError("没有这个模块", 404)
             on = bool(data.get("enabled", True))
             current = module_id not in panel.disabled_modules(conn)
+            affected = panel.events_on_module(conn, module_id)
             if current == on:
-                return self._json({"ok": True, "enabled": on, "already": True})
+                return self._json({"ok": True, "enabled": on, "already": True,
+                                   "affected": affected})
             refuse_stale()
             with panel.tx() as tx:
                 panel.set_module_enabled(tx, module_id, on, acc["username"])
                 panel.audit(tx, acc["username"],
-                            "module_enable" if on else "module_disable", module_id)
-            return self._json({"ok": True, "enabled": on})
+                            "module_enable" if on else "module_disable", module_id,
+                            "%d 个活动" % affected if affected else None)
+            return self._json({"ok": True, "enabled": on, "affected": affected})
 
         if path == "/preset/import" and method == "POST":
             # a preset file from somewhere else.  If it needs a module this
@@ -3445,6 +3476,28 @@ class Handler(BaseHTTPRequestHandler):
             body = fh.read()
         body = self._screen_fill(body, conn)
         return self._send(200, body, "text/html; charset=utf-8")
+
+    def _module_off_page(self, module_id):
+        """模块被停用：活动页换成一张说明页，地址不动，启用之后刷新即回来。"""
+        try:
+            cfg = db.all_config(db.connect())
+        except Exception:
+            cfg = {}
+        name = module_id
+        for m in modules.all_modules(VERSION):
+            if m["id"] == module_id:
+                name = m.get("name") or module_id
+        with open(os.path.join(PAGES_DIR, "module-off.html"), "rb") as fh:
+            body = substitute_page(fh.read(), cfg)
+        body = body.replace(b"{{MODULE}}", str(name).encode("utf-8"))
+        self.send_response(503)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(body)
 
     def _maintenance_page(self, cfg=None):
         """安全模式下活动页的替身：503、地址不变、自己重试。"""

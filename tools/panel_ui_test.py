@@ -2448,6 +2448,23 @@ def sudo_page(page):
     check("cancelling does not elevate", not page.locator("#sudoChip").is_visible())
     check("and the name has not moved", brand_left(page) == rest_left)
 
+    print("== 模块的停用/启用也要先提权 ==")
+    page.goto(BASE + "/panel#/modules")
+    page.wait_for_timeout(800)
+    check("表里写着有几个活动在用",
+          "个活动在用" in page.inner_text("#moduleTable"), page.inner_text("#moduleTable")[:120])
+    page.click("#moduleTable [data-module-toggle]")
+    page.wait_for_timeout(600)
+    check("点停用先要一次密码", page.locator("#sudoPass").count() == 1)
+    check("并且说清是哪个动作",
+          "停用模块" in page.inner_text("#overlayBody"), page.inner_text("#overlayBody")[:120])
+    page.click("#sudoCancel")
+    page.wait_for_timeout(400)
+    check("取消之后模块照旧是开着的",
+          page.locator("#moduleTable [data-on='0']").count() >= 1)
+    page.goto(BASE + "/panel#/events")
+    page.wait_for_timeout(500)
+
     page.click(card)
     page.wait_for_timeout(250)
     page.click(".card-menu [data-rotate]")

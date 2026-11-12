@@ -615,6 +615,19 @@ def public_name(name, uid):
     return ("账号 #%d" % int(uid or 0)) if uid else "账号"
 
 
+def person_view(row):
+    """选人弹窗要的全部字段：编号、称呼、头像。登录名不进这里，永远。"""
+    uid = int(row["uid"] or 0) if "uid" in row.keys() else 0
+    return {
+        "id": row["id"],
+        "uid": uid,
+        "name": row["name"],
+        "label": public_name(row["name"], uid),
+        "avatar": (row["avatar"] or "") if "avatar" in row.keys() else "",
+        "avatarAt": float(row["avatar_at"] or 0) if "avatar_at" in row.keys() else 0,
+    }
+
+
 def event_members(conn, seq):
     """Every seat on one event: those in place first, then pending, then history.
 

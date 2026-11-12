@@ -747,13 +747,13 @@ def main():
         check("the activity card names the activity",
               page.inner_text("#eventInfo").strip() != "", page.inner_text("#eventInfo"))
         page.click("#memberInviteBtn")
-        page.wait_for_selector("#invQ", timeout=8000)
-        page.fill("#invQ", "no-such-account")
-        page.wait_for_timeout(600)
+        page.wait_for_selector(".pp-find", timeout=8000)
+        page.fill(".pp-find", "no-such-account")
+        page.wait_for_timeout(700)
         check("a search with no match says so",
-              "没有匹配的账号" in page.inner_text("#invHits"),
-              page.inner_text("#invHits"))
-        page.click("#invDone")
+              "没有匹配的账号" in page.inner_text(".pp-list"),
+              page.inner_text(".pp-list"))
+        page.click(".pp-x")
         page.wait_for_timeout(300)
         shot(page, "20-settings", full=True)
 

@@ -66,6 +66,8 @@
     templateId: null,
     templateFilter: "",
     invited: [],
+    // 选进来的人：id -> {id, uid, label, avatar, avatarAt}（/people 的形状）
+    people: {},
     // 名单：列表与当前打开的那一份
     rosters: [],
     rosterTotal: null,
@@ -148,14 +150,6 @@
   function initialOf(me) {
     var s = displayName(me) || "?";
     return s.trim().charAt(0);
-  }
-
-  /* 给别人看的名字：登录名是登录用的凭据，不进界面；没有称呼就退到账号编号。
-     编号（uid）在实例内一次性发放、不再回收，改登录名不会动它。 */
-  function accountLabel(acc) {
-    if (!acc) return "";
-    if (acc.name) return acc.name;
-    return acc.uid ? "\u8d26\u53f7 #" + acc.uid : "\u8d26\u53f7";
   }
 
   // The avatar endpoint is session-guarded, so a plain <img> is enough - the
@@ -273,8 +267,6 @@
       // the password prompt is its own thing: narrow, and with the title
       // inside the body under the mark instead of a header bar with an x
       card.classList.toggle("narrow", kind === "sudo");
-      // 邀请成员也是一类：窄一点，标题下面直接接搜索框，中间不画线
-      card.classList.toggle("invite", kind === "invite");
       if (kind === "sudo") card.setAttribute("aria-label", title);
       else card.removeAttribute("aria-label");
     }
@@ -816,30 +808,38 @@
     });
   }
 
-  /* 转移负责人：负责人自己能做；负责人不在时由超管提权代做 */
+  /* 转移负责人：负责人自己能做；负责人不在时由超管提权代做。
+     这里选人是单选——点谁就是谁，再问一句才真的换过去。 */
   function transferOwner(seq) {
     var e = S.events.filter(function (x) { return String(x.seq) === String(seq); })[0];
-    var html = '<p class="page-sub">把这场的负责人换成另一个账号（按登录名）。</p>'
-      + '<div class="field"><label for="transferTo">新负责人的登录名</label>'
-      + '<input id="transferTo" type="text" autocomplete="off" spellcheck="false"></div>'
-      + '<div class="row" style="margin-top:16px;justify-content:flex-end">'
-      + '<button class="btn" data-close-overlay="1" type="button">取消</button>'
-      + '<button class="btn primary" id="transferGo" type="button">转移</button></div>';
-    openOverlay("event-transfer", "转移负责人" + (e ? "：" + eventTitle(e) : ""), html,
-      function (card) {
-        card.querySelector("#transferGo").addEventListener("click", function () {
-          var who = (card.querySelector("#transferTo").value || "").trim();
-          if (!who) return;
-          closeOverlay();
+    pickPeople({
+      title: "转移负责人" + (e ? "：" + eventTitle(e) : ""),
+      mode: "single",
+      scene: "transfer",
+      seq: Number(seq),
+      exclude: [S.me && S.me.id],
+      empty: "没有匹配的账号",
+      apply: function (people) {
+        var who = people[0];
+        if (!who) return;
+        openOverlay("event-transfer", "转移负责人" + (e ? "：" + eventTitle(e) : ""),
+          '<p class="page-sub">把这场的负责人换成 ' + PX.esc(who.label) + "？" +
+          "换过之后你不再是它的负责人。</p>" +
+          '<div class="row" style="margin-top:18px;justify-content:flex-end">' +
+          '<button class="btn" type="button" data-close-overlay="1">取消</button>' +
+          '<button class="btn danger" type="button" id="transferGo">转移</button></div>');
+        $("#transferGo").addEventListener("click", function () {
+          closeAllOverlays();
           apiSudo("/event/transfer",
-            { method: "POST", body: { seq: Number(seq), username: who } }, "转移负责人")
+            { method: "POST", body: { seq: Number(seq), uid: who.uid } }, "转移负责人")
             .then(function () {
-              PX.toast("已转移给 " + who);
+              PX.toast("已转移给 " + who.label);
               return reloadAll();
             })
             .catch(fail);
         });
-      });
+      }
+    });
   }
 
   /* 别人的活动：强制归档也是破坏性操作，只在活动管理页出现 */
@@ -1468,9 +1468,7 @@
     if (r.editable) {
       html += '<div class="row" style="gap:8px">' +
         (r.owner
-          ? '<input class="search" id="rosterGrantWho" type="text" ' +
-            'placeholder="登录名" autocomplete="off" style="max-width:220px">' +
-            '<button class="btn sm" type="button" id="rosterGrantBtn">授予写入权限</button>'
+          ? '<button class="btn sm" type="button" id="rosterGrantBtn">授予写入权限</button>'
           : "") +
         '<a class="btn sm" href="#/write-approvals?back=' +
         encodeURIComponent("/roster/" + r.id) + '">写入审批</a></div>';
@@ -1498,14 +1496,31 @@
     box.innerHTML = html;
   }
 
-  function rosterGrant(who) {
-    PX.api("/roster/grant", { method: "POST",
-      body: { id: S.roster.id, username: who } })
+  function rosterGrant(people) {
+    if (!people || !people.length) return;
+    PX.api("/roster/grant", {
+      method: "POST",
+      body: { id: S.roster.id, uids: people.map(function (p) { return p.uid; }) }
+    })
       .then(function () {
         PX.toast("已授予写入权限");
         return loadRoster(S.roster.id).then(drawRoster);
       })
       .catch(function (e) { PX.toast(PX.esc(e.message), true); });
+  }
+
+  /* 授予写入权限：与邀请成员同一个弹窗，多选，一次给几个人都行 */
+  function rosterGrantPicker() {
+    var r = S.roster || {};
+    pickPeople({
+      title: "授予写入权限" + (r.name ? "：" + r.name : ""),
+      mode: "multi",
+      scene: "roster",
+      rosterId: r.id,
+      exclude: [S.me && S.me.id],
+      empty: "没有匹配的账号",
+      apply: rosterGrant
+    });
   }
 
   function rosterAsk() {
@@ -3193,6 +3208,7 @@
      已经存成草稿的内容不走这里——回来时 restoreDraft 会把它填回去。 */
   function forgetKindForm() {
     S.invited = [];
+    S.people = {};
     S.currentFields = [];
     var title = $("#neTitle");
     var note = $("#neNote");
@@ -3248,17 +3264,18 @@
           if (el.type === "checkbox") el.checked = !!payload.params[key];
           else el.value = payload.params[key];
         });
-        S.invited = (payload.members || []).filter(function (id) {
-          return S.accounts.some(function (a) { return a.id === id; });
+        return loadPeople(payload.members || []).then(function (map) {
+          S.people = map;
+          S.invited = Object.keys(map).map(Number);
+          renderInviteChips();
+          var rows = $$("[data-show-when]", $("#kindFields"));
+          rows.forEach(function (row) {
+            var driver = $('[data-kind-field="' + row.getAttribute("data-show-when") + '"]');
+            row.hidden = !driver || String(driver.value) !== row.getAttribute("data-show-is");
+          });
+          PX.toast("已恢复上次的草稿");
+          return true;
         });
-        renderInviteChips();
-        var rows = $$("[data-show-when]", $("#kindFields"));
-        rows.forEach(function (row) {
-          var driver = $('[data-kind-field="' + row.getAttribute("data-show-when") + '"]');
-          row.hidden = !driver || String(driver.value) !== row.getAttribute("data-show-is");
-        });
-        PX.toast("已恢复上次的草稿");
-        return true;
       })
       .catch(function () { return false; });
   }
@@ -3541,14 +3558,13 @@
   /* 选过的人排成一行：圆头像在上一行，名字在下面，不加底色 */
   function renderInviteChips() {
     var html = S.invited.map(function (id) {
-      var a = S.accounts.filter(function (x) { return x.id === id; })[0];
+      var a = S.people[id];
       if (!a) return "";
-      var url = avatarUrl(a);
       return '<span class="invite-chip">' +
-        '<span class="avatar">' + (url
-          ? '<img alt="" src="' + PX.esc(url) + '">'
-          : PX.esc(accountLabel(a).charAt(0))) + "</span>" +
-        '<span class="nm">' + PX.esc(accountLabel(a)) + "</span>" +
+        '<span class="avatar">' + (a.avatar
+          ? '<img alt="" src="' + PX.esc(a.avatar) + '">'
+          : PX.esc((a.label || "").charAt(0))) + "</span>" +
+        '<span class="nm">' + PX.esc(a.label || "") + "</span>" +
         '<button type="button" data-uninvite="' + a.id + '" aria-label="移出">×</button>' +
         "</span>";
     }).join("");
@@ -3557,82 +3573,71 @@
     $("#inviteHint").textContent = S.invited.length ? "创建后发出邀请" : "";
   }
 
-  function inviteTiles(query) {
-    var q = (query || "").trim().toLowerCase();
-    var rows = S.accounts.filter(function (a) {
-      if (a.id === (S.me && S.me.id)) return false;
-      if (!q) return true;
-      return (accountLabel(a) || "").toLowerCase().indexOf(q) >= 0
-        || (a.username || "").toLowerCase().indexOf(q) >= 0;
+  /* 选人：面板这边只把接口接上，弹窗本身是 assets/js/people.js（活动后台共用同一份）。
+     scene 决定服务端怎么判"能不能查人"：转移负责人、名单授权、邀请成员各有一套。 */
+  function pickPeople(opts) {
+    var fixed = [];
+    if (opts.scene) fixed.push("scene=" + encodeURIComponent(opts.scene));
+    if (opts.seq) fixed.push("seq=" + encodeURIComponent(opts.seq));
+    if (opts.rosterId) fixed.push("id=" + encodeURIComponent(opts.rosterId));
+    return window.PeoplePicker.open({
+      title: opts.title,
+      mode: opts.mode || "multi",
+      chosen: opts.chosen || [],
+      exclude: opts.exclude || [],
+      empty: opts.empty || "没有匹配的账号",
+      avatarUrl: function (p) {
+        return p.avatar && !/^https?:\/\//i.test(p.avatar)
+          ? PX.PREFIX + "/api/panel/avatar/" + p.id + "?v=" + Math.round(p.avatarAt || 0)
+          : "";
+      },
+      apply: opts.apply,
+      search: function (q) {
+        var qs = fixed.slice();
+        if (q) qs.push("q=" + encodeURIComponent(q));
+        return PX.api("/people" + (qs.length ? "?" + qs.join("&") : ""))
+          .then(function (d) { return d.people || []; });
+      }
     });
-    if (!rows.length) {
-      return '<div class="empty">' + (q
-        ? "没有匹配的账号"
-        : "除了你自己，还没有别的账号") + "</div>";
-    }
-    return '<div class="pick-grid">' + rows.map(function (a) {
-      var on = S.invited.indexOf(a.id) >= 0;
-      var url = avatarUrl(a);
-      return '<button type="button" class="pick-tile' + (on ? " on" : "") +
-        '" data-invite="' + a.id + '">' +
-        '<span class="avatar">' + (url
-          ? '<img alt="" src="' + PX.esc(url) + '">'
-          : PX.esc(accountLabel(a).charAt(0))) + "</span>" +
-        '<span class="pick-name">' + PX.esc(accountLabel(a)) + "</span></button>";
-    }).join("") + "</div>";
-  }
-
-  /* 账号清单是按页拉的，创建页上可能一次都没拉过：开窗口前先拉一页 */
-  function ensureInviteAccounts() {
-    if (S.accounts && S.accounts.length) return Promise.resolve(S.accounts);
-    if (S.accounts === null || S.accounts === undefined) S.accounts = [];
-    return PX.api("/accounts?offset=0&limit=200")
-      .then(function (d) {
-        S.me = d.me || S.me;
-        S.accounts = d.accounts || [];
-        S.accountsTotal = d.total || S.accounts.length;
-        if (d.quotaDefault) S.quotaDefault = d.quotaDefault;
-        if (d.quotaMax) S.quotaMax = d.quotaMax;
-        return S.accounts;
-      })
-      .catch(function (e) {
-        // 拉不到（权限不够）就让窗口自己说清楚，不装作没人可邀
-        S.accounts = [];
-        PX.toast(PX.esc(e.message || "读不到账号清单"), true);
-        return S.accounts;
-      });
   }
 
   function openInvitePicker() {
-    ensureInviteAccounts().then(showInvitePicker);
-  }
-
-  function showInvitePicker() {
-    // 与「活动设置 › 邀请成员」同一套做法：先看人再点，点错了再点一次取消。
-    // 标题下面直接是搜索框，不写标签也不写"输入一部分即可"这种话
-    openOverlay("invite", "邀请成员",
-      '<input type="search" id="inviteFind" autocomplete="off" placeholder="搜索用户"' +
-      ' aria-label="搜索用户">' +
-      '<div class="invite-pick" id="inviteTiles">' + inviteTiles("") + "</div>" +
-      '<div class="invite-foot">' +
-      '<button class="btn" type="button" data-close-overlay="1">完成</button></div>');
-    var box = $("#inviteFind");
-    // 点选交给文档上那一处统一处理（面板里所有 data-invite 都走它），这里只管筛
-    box.addEventListener("input", function () {
-      $("#inviteTiles").innerHTML = inviteTiles(box.value);
+    // 与「活动设置 › 邀请成员」是同一个弹窗：先看人再点，点错了再点一次取消。
+    // 选过谁留在页面上的人像行里；这里只管这一次的勾选。
+    pickPeople({
+      title: "邀请成员",
+      mode: "multi",
+      chosen: S.invited.map(function (id) { return S.people[id]; }).filter(Boolean),
+      exclude: [S.me && S.me.id],
+      apply: function (people) {
+        S.invited = people.map(function (p) { return p.id; });
+        S.people = {};
+        people.forEach(function (p) { S.people[p.id] = p; });
+        // 选人发生在弹窗里，表单收不到 input 事件：脏标记要在这里单独记一笔
+        markDirty();
+        renderInviteChips();
+      }
     });
-    box.focus();
   }
 
-  function toggleInvite(id) {
-    var at = S.invited.indexOf(id);
-    if (at >= 0) S.invited.splice(at, 1);
-    else S.invited.push(id);
-    // 选人发生在弹窗里，表单收不到 input 事件：脏标记要在这里单独记一笔
+  function removeInvite(id) {
+    S.invited = S.invited.filter(function (x) { return x !== id; });
+    delete S.people[id];
     markDirty();
     renderInviteChips();
-    var tile = $('[data-invite="' + id + '"]');
-    if (tile) tile.classList.toggle("on", at < 0);
+  }
+
+  /* 草稿里只存了账号 id：拿回来时把称呼与头像补上（/people 给的就是这些） */
+  function loadPeople(ids) {
+    var keep = (ids || []).filter(function (x) { return x; });
+    if (!keep.length) return Promise.resolve({});
+    return PX.api("/people?ids=" + keep.join(","))
+      .then(function (d) {
+        var map = {};
+        (d.people || []).forEach(function (p) { map[p.id] = p; });
+        return map;
+      })
+      .catch(function () { return {}; });
   }
 
   function createEvent() {
@@ -5180,11 +5185,8 @@
     var tplTile = t.closest("[data-template]");
     if (tplTile) return go("new-event/" + tplTile.getAttribute("data-template"));
 
-    var invite = t.closest("[data-invite]");
-    if (invite) return toggleInvite(Number(invite.getAttribute("data-invite")));
-
     var uninvite = t.closest("[data-uninvite]");
-    if (uninvite) return toggleInvite(Number(uninvite.getAttribute("data-uninvite")));
+    if (uninvite) return removeInvite(Number(uninvite.getAttribute("data-uninvite")));
 
     var banBtn = t.closest("[data-ban]");
     if (banBtn) return confirmBan(Number(banBtn.getAttribute("data-ban")));
@@ -6094,12 +6096,7 @@
       e.target.closest("[data-revoke],[data-ask-ok],[data-ask-no],#rosterAskBtn,#rosterGrantBtn") : null;
     if (!t) return;
     if (t.id === "rosterAskBtn") { rosterAsk(); return; }
-    if (t.id === "rosterGrantBtn") {
-      var who = $("#rosterGrantWho").value.trim();
-      if (!who) { PX.toast("请填写登录名", true); return; }
-      rosterGrant(who);
-      return;
-    }
+    if (t.id === "rosterGrantBtn") { rosterGrantPicker(); return; }
     var ok = t.getAttribute("data-ask-ok");
     if (ok) { rosterDecide(Number(ok), "approve"); return; }
     var no = t.getAttribute("data-ask-no");

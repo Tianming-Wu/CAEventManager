@@ -1,0 +1,190 @@
+/* 选人弹窗（assets/js/people.js 的样子）。
+ *
+ * 面板与活动后台共用这一份：两边的设计令牌同名（--surface / --line / --accent …），
+ * 所以不需要各写一套，也不会两边慢慢长歪。宽度按"一屏六列、三行高"算：
+ * 三行是常看的那一屏人，行数固定下来，搜索时弹窗不再忽高忽低。
+ */
+body.pp-open { overflow: hidden; }
+
+.pp-back {
+  position: fixed;
+  inset: 0;
+  z-index: 240;              /* 压在面板遮罩(60)与活动弹窗(200)之上 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  background: rgba(28, 25, 23, .45);
+  backdrop-filter: blur(2px);
+}
+
+.pp-card {
+  display: flex;
+  flex-direction: column;
+  width: min(720px, 100%);
+  max-height: min(86vh, 760px);
+  padding: 18px 20px 18px;
+  background: var(--surface, #fff);
+  border: 1px solid var(--line, #e3dcd3);
+  border-radius: var(--radius, 12px);
+  box-shadow: var(--shadow, 0 18px 48px rgba(0, 0, 0, .2));
+}
+
+/* 标题与关闭：没有分隔线，搜索框紧接着标题 */
+.pp-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.pp-head h2 {
+  flex: 1 1 auto;
+  margin: 0;
+  font-size: 1.02rem;
+  font-weight: 600;
+  color: var(--text, #1c1917);
+}
+.pp-x {
+  appearance: none;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted, #78716c);
+  cursor: pointer;
+}
+.pp-x:hover { background: var(--surface-2, #f5f1ec); color: var(--text, #1c1917); }
+.pp-x svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+}
+
+.pp-find {
+  width: 100%;
+  margin: 0 0 12px;          /* ← 搜索框与名单之间的间距，两边都一样 */
+  padding: 8px 11px;
+  min-height: 36px;
+  font-family: inherit;
+  font-size: .9rem;
+  color: var(--text, #1c1917);
+  background: var(--surface, #fff);
+  border: 1px solid var(--line, #e3dcd3);
+  border-radius: var(--radius-sm, 8px);
+  outline: none;
+}
+.pp-find:focus {
+  border-color: var(--accent, #a0522d);
+  box-shadow: 0 0 0 3px var(--accent-soft, rgba(160, 82, 45, .12));
+}
+.pp-find::-webkit-search-cancel-button,
+.pp-find::-webkit-search-decoration {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+/* 三行高：一屏十八个人，搜与不搜弹窗都一样大 */
+.pp-list {
+  height: 265px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.pp-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 8px;
+}
+
+.pp-tile {
+  appearance: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 10px 8px;
+  border: 1px solid var(--line, #e3dcd3);
+  border-radius: var(--radius, 12px);
+  background: var(--surface, #fff);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.pp-tile:hover { background: var(--surface-2, #f5f1ec); }
+.pp-tile.on {
+  border-color: var(--accent, #a0522d);
+  background: var(--accent-soft, rgba(160, 82, 45, .1));
+}
+
+.pp-avatar {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  overflow: hidden;
+  border: 1px solid var(--accent-line, rgba(160, 82, 45, .3));
+  border-radius: 999px;
+  background: var(--accent-soft, rgba(160, 82, 45, .1));
+  color: var(--accent-strong, #8a451f);
+  font-size: .95rem;
+  font-weight: 700;
+}
+.pp-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+.pp-name {
+  max-width: 100%;
+  font-size: .8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pp-empty {
+  margin: 0;
+  padding: 14px 4px;
+  color: var(--dim, #a8a29e);
+  font-size: .85rem;
+  text-align: center;
+}
+
+.pp-foot {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 14px;
+}
+.pp-done {
+  appearance: none;
+  min-width: 84px;
+  padding: 8px 16px;
+  font: inherit;
+  font-size: .88rem;
+  color: var(--accent-ink, #fff);
+  background: var(--accent, #a0522d);
+  border: 1px solid var(--accent, #a0522d);
+  border-radius: var(--radius-sm, 8px);
+  cursor: pointer;
+}
+.pp-done:hover { filter: brightness(1.05); }
+
+/* 手机上占满一屏：名单吃掉余下的高度，「完成」钉在底部 */
+@media (max-width: 760px) {
+  .pp-back { padding: 0; align-items: stretch; }
+  .pp-card {
+    width: 100%;
+    height: 100%;
+    max-height: none;
+    border: 0;
+    border-radius: 0;
+    padding: 16px max(16px, env(safe-area-inset-left)) 16px;
+  }
+  .pp-list { height: auto; flex: 1 1 auto; min-height: 0; }
+  .pp-foot { padding-bottom: env(safe-area-inset-bottom); }
+}

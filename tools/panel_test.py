@@ -136,10 +136,12 @@ def keepalive_desync():
         sock.close()
     text = raw.decode("utf-8", "replace")
     first = text.split("HTTP/1.1 ", 2)[1][:3] if "HTTP/1.1 " in text else "???"
+    # 只看状态行：「501」这三个字符在 JSON 正文里也可能出现（时间戳就撞过），
+    # 拿整段文本找会误报
     check("rejected login + follow-up request keep the socket in sync",
-          "Unsupported method" not in text and "501" not in text
+          "Unsupported method" not in text and "HTTP/1.1 501" not in text
           and text.count("HTTP/1.1 ") >= 2,
-          text[:160])
+          "responses=%d %r" % (text.count("HTTP/1.1 "), text[:120]))
     return first
 
 
@@ -542,11 +544,11 @@ def main():
     check("the owner can read the roster", roster and roster["members"], roster)
     check("it starts with just the owner",
           [m["name"] for m in roster["members"]] == ["站长"], roster["members"])
-    found = call(owner, base + "/api/admin/members/search?q=teach")
+    found = call(owner, base + "/api/admin/people?q=teach")
     check("a search finds an account that is not in yet",
-          found and [a["name"] for a in found["accounts"]] == ["张老师"], found)
+          found and [a["label"] for a in found["people"]] == ["张老师"], found)
     check("and never hands out a login name",
-          found and all("username" not in a for a in found["accounts"]), found)
+          found and all("username" not in a for a in found["people"]), found)
     post(owner, base + "/api/admin/member",
          {"accountId": teacher_id, "action": "invite"}, marker="CAEventManager")
     check("the invitation is waiting for them", True)
@@ -955,6 +957,31 @@ def main():
     post(owner, "/api/panel/roster/grant",
          {"id": roster_id, "username": "no-such-user"}, expect=404)
     check("inviting an unknown account is refused", True)
+    # 选人弹窗走的是编号（多选一次给几个人）
+    post(owner, "/api/panel/roster/grant/revoke",
+         {"id": roster_id, "accountId": alice_id})
+    alice_uid = [a["uid"] for a in call(owner, "/api/panel/accounts")["accounts"]
+                 if a["id"] == alice_id][0]
+    by_uid = post(owner, "/api/panel/roster/grant",
+                  {"id": roster_id, "uids": [alice_uid]})
+    check("a grant by account number works too",
+          by_uid and by_uid["ok"] and by_uid["granted"] == 1, by_uid)
+    post(owner, "/api/panel/roster/grant", {"id": roster_id, "uids": [999999]}, expect=404)
+    check("an unknown account number is refused", True)
+    people = call(owner, "/api/panel/people?scene=roster&id=%d" % roster_id)
+    check("the picker can list people for this roster",
+          people and any(p["id"] == alice_id for p in people["people"]), people)
+    check("the picker payload carries no login name",
+          all("username" not in p for p in people["people"]), people["people"])
+    picked = call(owner, "/api/panel/people?ids=%d" % alice_id)
+    check("it can also resolve ids, so a draft shows names again",
+          picked and [p["label"] for p in picked["people"]] == ["王同学"], picked)
+    # 场景决定谁能查人：不在这一场里的账号没法用"转移负责人"去翻人名
+    call(helper, "/api/panel/people?scene=roster&id=%d" % roster_id, expect=403)
+    check("a roster's people list is the owner's alone", True)
+    post(helper, "/api/panel/event/transfer",
+         {"seq": ev["seq"], "uid": alice_uid}, expect=403)
+    check("a plain account cannot hand an activity over", True)
     private_cannot_ask = post(owner, "/api/panel/roster/update",
                               {"id": other_id, "visibility": "private"})
     post(helper, "/api/panel/roster/ask", {"id": other_id}, expect=403)

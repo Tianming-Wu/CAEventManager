@@ -640,65 +640,51 @@
       });
   }
 
-  /* 给别人看的名字：登录名是登录用的凭据，界面上一律不出现；
-     没有称呼就退到账号编号（uid 一次性发放、不回收，改登录名也不动它） */
-  function accountLabel(acc) {
-    if (!acc) return "";
-    return acc.name || (acc.uid ? "账号 #" + acc.uid : "账号");
-  }
-
-  function avatarUrl(acc) {
-    if (!acc || !acc.avatar) return "";
-    if (/^https?:\/\//i.test(acc.avatar)) return acc.avatar;
-    return (LT.PANEL || "") + "/api/panel/avatar/" + acc.id +
-      "?v=" + Math.round(acc.avatarAt || 0);
-  }
-
-  function inviteTiles(hits) {
-    if (!hits.length) return '<p class="note">没有匹配的账号</p>';
-    return '<div class="pick-grid">' + hits.map(function (a) {
-      var label = accountLabel(a);
-      var url = avatarUrl(a);
-      return '<button class="pick-tile" type="button" data-pick="' + a.id +
-        '" data-who="' + LT.esc(label) + '">' +
-        '<span class="avatar">' + (url
-          ? '<img alt="" src="' + LT.esc(url) + '">'
-          : LT.esc(label.charAt(0))) + "</span>" +
-        '<span class="pick-name">' + LT.esc(label) + "</span></button>";
-    }).join("") + "</div>";
-  }
-
-  /* 邀请成员：和面板里那个邀请弹窗同一套——先看人再点，输入只是筛 */
+  /* 邀请成员：弹窗是平台共用的一份（assets/js/people.js），与主站「创建活动 › 成员」
+     完全同一个东西。这里只接接口：他还没在这个活动里，才列得出来。 */
   function openInviteSearch() {
-    var back = LT.modal(
-      '<h2>邀请成员</h2>' +
-      '<input id="invQ" type="search" autocomplete="off" placeholder="搜索用户"' +
-      ' aria-label="搜索用户" autofocus>' +
-      '<div id="invHits" class="invite-pick"><p class="note">正在读取账号</p></div>' +
-      '<div class="invite-foot"><button class="btn" id="invDone">完成</button></div>');
-    var card = back.querySelector(".modal");
-    if (card) card.classList.add("invite");
-    $("#invDone").addEventListener("click", back.close);
-    var box = $("#invQ");
-    var timer = null;
-    var load = function () {
-      var q = box.value.trim();
-      LT.api("/api/admin/members/search" + (q ? "?q=" + encodeURIComponent(q) : ""))
-        .then(function (d) { $("#invHits").innerHTML = inviteTiles(d.accounts || []); })
-        .catch(bad);
-    };
-    box.addEventListener("input", function () {
-      clearTimeout(timer);
-      timer = setTimeout(load, 180);
-    });
-    load();
-    box.focus();
-    $("#invHits").addEventListener("click", function (e) {
-      var btn = e.target.closest("[data-pick]");
-      if (!btn) return;
-      back.close();
-      memberAction(Number(btn.getAttribute("data-pick")), "invite",
-                   btn.getAttribute("data-who") || "");
+    window.PeoplePicker.open({
+      title: "邀请成员",
+      mode: "multi",
+      empty: "没有匹配的账号",
+      avatarUrl: function (p) {
+        return p.avatar && !/^https?:\/\//i.test(p.avatar)
+          ? (LT.PANEL || "") + "/api/panel/avatar/" + p.id +
+            "?v=" + Math.round(p.avatarAt || 0)
+          : "";
+      },
+      search: function (q) {
+        return LT.api("/api/admin/people" + (q ? "?q=" + encodeURIComponent(q) : ""))
+          .then(function (d) { return d.people || []; });
+      },
+      apply: function (people) {
+        if (!people.length) return;
+        var names = people.map(function (p) { return p.label; }).join("、");
+        LT.confirm({
+          title: "发出邀请？",
+          html: "会邀请 " + LT.esc(names) + "。对方各自确认之后才能进这个活动后台。",
+          okText: "邀请"
+        }).then(function (yes) {
+          if (!yes) return;
+          var left = people.slice();
+          var invited = 0;
+          var step = function () {
+            if (!left.length) {
+              ok("已发出 " + invited + " 个邀请");
+              loadMembers();
+              return;
+            }
+            var p = left.shift();
+            LT.api("/api/admin/member", {
+              method: "POST", body: { accountId: p.id, action: "invite" }
+            }).then(function () {
+              invited += 1;
+              step();
+            }).catch(bad);
+          };
+          step();
+        });
+      }
     });
   }
 

@@ -68,7 +68,7 @@ PAGES_DIR = os.path.join(BASE_DIR, "pages")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.0.79"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.0.80"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -1595,6 +1595,49 @@ class Handler(BaseHTTPRequestHandler):
                                "quotaMax": panel.CHAT_QUOTA_MAX,
                                "accounts": _accounts_with_usage(conn, rows)})
 
+        if path == "/people" and method == "GET":
+            # 「选人」的唯一数据源：只回编号、称呼与头像。登录名是凭据，一个都不给。
+            # scene 决定"谁能查谁"——转移负责人、名单授权、邀请成员各有各的门槛，
+            # 界面那边是同一份弹窗（assets/js/people.js）。
+            scene = (query.get("scene") or [""])[0].strip()
+            if scene == "transfer":
+                seq = _int_arg(query, "seq", 0, 0, 1 << 30)
+                seat = conn.execute(
+                    "SELECT role, state FROM event_members WHERE seq=? AND account_id=?",
+                    (seq, acc["id"])).fetchone()
+                mine = seat is not None and seat["role"] == "owner" \
+                    and seat["state"] == "active"
+                if not mine:
+                    # 负责人登不进来时由超管代做，与转移那个动作同一套规矩
+                    need("superadmin", "owner")
+            elif scene == "roster":
+                rid = _int_arg(query, "id", 0, 0, 1 << 30)
+                roster_row = lists.roster(lists.connect(), rid)
+                if roster_row is None:
+                    raise model.ApiError("名单不存在", 404)
+                if roster_row["owner_id"] != acc["id"]:
+                    raise model.ApiError("仅名单拥有者可以选人", 403)
+            else:
+                # 没有场景就是"全站可邀的人"，仍按账号清单的规矩
+                need("superadmin", "owner")
+            q = (query.get("q") or [""])[0].strip()
+            ids = [int(x) for x in ((query.get("ids") or [""])[0] or "").split(",")
+                   if x.strip().isdigit()]
+            where = ["status='active'"]
+            args = []
+            if ids:
+                where.append("id IN (%s)" % ",".join("?" * len(ids)))   # sql-ok 只拼占位符个数，值都走 ?
+                args += ids
+            if q:
+                where.append("(username LIKE ? OR name LIKE ?)")
+                args += ["%" + q + "%", "%" + q + "%"]
+            sql = ("SELECT id, uid, name, avatar, avatar_at FROM accounts WHERE "
+                   + " AND ".join(where) +    # sql-ok 只拼 WHERE 片段，值都走 ?
+                   " ORDER BY CASE role WHEN 'owner' THEN 0 WHEN 'superadmin' THEN 1 ELSE 2 END,"
+                   " name, id LIMIT 48")
+            return self._json({"ok": True, "people": [
+                panel.person_view(r) for r in conn.execute(sql, args).fetchall()]})
+
         # ---- 短链：活动的平台资产；模块申请 features.shortlink 之后才能生成 ----
         def event_seat(seq):
             seat = panel.member_of(conn, seq, acc["id"])
@@ -2185,6 +2228,7 @@ class Handler(BaseHTTPRequestHandler):
             # 否则这一场就卡死在没人能管的状态
             data = body()
             seq = int(data.get("seq") or 0)
+            uid = int(data.get("uid") or 0)
             who = str(data.get("username") or "").strip()
             seat = seat_of(seq)
             mine = seat is not None and seat["role"] == "owner" and seat["state"] == "active"
@@ -2192,15 +2236,22 @@ class Handler(BaseHTTPRequestHandler):
                 need("superadmin", "owner")
                 need_sudo()
             row = event_row(seq)
-            target = conn.execute(
-                "SELECT id, username, name, status FROM accounts"
-                " WHERE lower(username)=lower(?)", (who,)).fetchone()
+            # 选人弹窗给的是编号；登录名这条路留着，脚本里还在用
+            if uid:
+                target = conn.execute(
+                    "SELECT id, uid, name, status FROM accounts WHERE uid=?",
+                    (uid,)).fetchone()
+            else:
+                target = conn.execute(
+                    "SELECT id, uid, name, status FROM accounts"
+                    " WHERE lower(username)=lower(?)", (who,)).fetchone()
             if target is None:
                 raise model.ApiError("没有这个账号", 404)
             if target["status"] != "active":
                 raise model.ApiError("这个账号不是正常状态，不能当负责人", 409)
+            label = panel.public_name(target["name"], target["uid"])
             if target["id"] == row["owner_id"]:
-                return self._json({"ok": True, "seq": seq, "owner": who, "already": True})
+                return self._json({"ok": True, "seq": seq, "owner": label, "already": True})
             now = time.time()
             with panel.tx() as tx:
                 tx.execute("UPDATE events SET owner_id=? WHERE seq=?", (target["id"], seq))
@@ -2214,8 +2265,8 @@ class Handler(BaseHTTPRequestHandler):
                     " WHERE seq=? AND account_id=? AND account_id<>?",
                     (seq, row["owner_id"] or 0, target["id"]))
                 panel.audit(tx, acc["username"], "event_transfer", str(seq),
-                            "%s -> %s" % (row["title"] or seq, who))
-            return self._json({"ok": True, "seq": seq, "owner": target["name"] or who})
+                            "%s -> %s" % (row["title"] or seq, label))
+            return self._json({"ok": True, "seq": seq, "owner": label})
 
         if path == "/event/reclaim" and method == "POST":
             # 站内资源回收：超管显式把这场活动占着的东西收回来（目前是短链）
@@ -2821,24 +2872,40 @@ class Handler(BaseHTTPRequestHandler):
                                "levelLabel": lists.LEVEL_LABEL[level]})
 
         if path == "/roster/grant" and method == "POST":
-            # 拥有者直接把人加进写入名单：私有名单只有这一条路
+            # 拥有者直接把人加进写入名单：私有名单只有这一条路。
+            # 一次可以给多个人（选人弹窗是多选）；uids 优先，username 留给脚本。
             data = body()
             rid = int(data.get("id") or 0)
             row = need_roster_owner(open_roster(rid, write=True))
+            uids = data.get("uids")
             who = (data.get("username") or "").strip()
-            target = conn.execute(
-                "SELECT * FROM accounts WHERE lower(username)=lower(?)",
-                (who,)).fetchone()
-            if target is None:
+            targets = []
+            if isinstance(uids, list) and uids:
+                marks = ",".join("?" * len(uids))
+                targets = conn.execute(
+                    "SELECT id, uid, name, username FROM accounts"
+                    " WHERE status='active' AND uid IN (" + marks + ")",   # sql-ok 只拼占位符个数，值都走 ?
+                    [int(u) for u in uids]).fetchall()
+            elif who:
+                one = conn.execute(
+                    "SELECT id, uid, name, username FROM accounts"
+                    " WHERE lower(username)=lower(?)", (who,)).fetchone()
+                if one is not None:
+                    targets = [one]
+            if not targets:
                 raise model.ApiError("账号不存在", 404)
-            if target["id"] == row["owner_id"]:
+            # 拥有者本来就能写，不算"授予"
+            targets = [t for t in targets if t["id"] != row["owner_id"]]
+            if not targets:
                 raise model.ApiError("你已是该名单的拥有者")
             with lists.tx() as lx:
-                lists.set_grant(lx, "roster", rid, target["id"], "write", "invite")
+                for t in targets:
+                    lists.set_grant(lx, "roster", rid, t["id"], "write", "invite")
+            names = "、".join(panel.public_name(t["name"], t["uid"]) for t in targets)
             with panel.tx() as tx:
                 panel.audit(tx, acc["username"], "roster_grant", str(rid),
-                            "邀请 %s 写入" % target["username"])
-            return self._json({"ok": True})
+                            "邀请 %s 写入" % names)
+            return self._json({"ok": True, "granted": len(targets), "who": names})
 
         if path == "/roster/grant/decide" and method == "POST":
             data = body()
@@ -3660,26 +3727,22 @@ class Handler(BaseHTTPRequestHandler):
                 "seats": panel.open_seats(me.conn, seq),
             })
 
-        if path == "/api/admin/members/search" and method == "GET":
+        if path == "/api/admin/people" and method == "GET":
+            # 邀请成员用的人名单：还没在这个活动里的人才列出来。
+            # 与面板的 /people 是同一份载荷（panel.person_view），界面也是同一个弹窗。
             need_owner()
-            # 不搜也给一屏候选：邀请成员先看人再点，和面板那边一样。
-            # 登录名是登录用的凭据，这里不往外给（回的是 uid 与称呼）。
             q = (query.get("q") or [""])[0].strip()
-            sql = ("SELECT uid, id, name, avatar, avatar_at, role FROM accounts"
-                   " WHERE status='active'"
-                   "   AND id NOT IN (SELECT account_id FROM event_members WHERE seq=?)")
+            sql = ("SELECT a.id, a.uid, a.name, a.avatar, a.avatar_at FROM accounts a"
+                   " WHERE a.status='active'"
+                   "   AND a.id NOT IN (SELECT account_id FROM event_members WHERE seq=?)")
             args = [db.event_id()]
             if q:
-                sql += " AND (username LIKE ? OR name LIKE ?)"
+                sql += " AND (a.username LIKE ? OR a.name LIKE ?)"
                 args += ["%" + q + "%", "%" + q + "%"]
-            sql += (" ORDER BY CASE role WHEN 'owner' THEN 0 WHEN 'superadmin' THEN 1 ELSE 2 END,"
-                    "          name, id LIMIT 24")
-            rows = me.conn.execute(sql, args).fetchall()
-            return self._json({"ok": True, "accounts": [
-                {"id": r["id"], "uid": int(r["uid"] or 0), "name": r["name"],
-                 "avatar": r["avatar"] or "", "avatarAt": r["avatar_at"] or 0,
-                 "role": r["role"], "roleLabel": panel.ROLE_LABEL.get(r["role"], r["role"])}
-                for r in rows]})
+            sql += (" ORDER BY CASE a.role WHEN 'owner' THEN 0 WHEN 'superadmin' THEN 1 ELSE 2 END,"
+                    "          a.name, a.id LIMIT 48")
+            return self._json({"ok": True, "people": [
+                panel.person_view(r) for r in me.conn.execute(sql, args).fetchall()]})
 
         if path == "/api/admin/member" and method == "POST":
             self._check_csrf()

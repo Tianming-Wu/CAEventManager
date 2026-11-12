@@ -1197,7 +1197,6 @@ table.tbl tr.is-muted td { color: var(--dim); }
 }
 .kind-tile:hover { border-color: var(--accent-line); background: var(--surface-2); }
 .kind-tile:active { background: var(--surface-3); }
-.pick-tile:active { background: var(--surface-3); }
 .btn:active:not(:disabled) { background: var(--surface-3); }
 .nav-item:active { background: var(--surface-3); }
 .kind-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
@@ -1349,61 +1348,6 @@ select:invalid { color: var(--dim); }
 }
 .invite-chip button:hover { background: #8c2f2f; border-color: #8c2f2f; color: #fff; }
 .invite-slot .cap { font-size: .78rem; color: var(--dim); line-height: 1.2; }
-
-.pick-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
-  gap: 8px;
-}
-.pick-tile {
-  appearance: none;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 5px;
-  padding: 12px 8px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--surface);
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-  min-height: 44px;
-}
-.pick-tile:hover { background: var(--surface-2); }
-.pick-tile.on { border-color: var(--accent); background: var(--accent-soft); }
-.pick-tile .avatar { width: 40px; height: 40px; font-size: 1rem; }
-.pick-name {
-  font-size: .8rem;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* 邀请成员：标题下面直接接搜索框，中间不画分隔线；名单留三行高度，
-   搜与不搜弹窗都一样大，不会跟着结果跳 */
-.overlay-card.invite { width: min(432px, 100%); }
-.overlay-card.invite .overlay-head { padding: 16px 12px 2px 20px; border-bottom: 0; }
-.overlay-card.invite .overlay-head h2 { font-size: 1.02rem; }
-.overlay-card.invite .overlay-body {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  padding: 10px 20px 18px;
-}
-.overlay-card.invite #inviteFind { margin-bottom: 12px; }
-.overlay-card.invite .invite-pick {
-  flex: 0 0 auto;
-  height: 265px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
-.overlay-card.invite .invite-foot {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 14px;
-}
 
 /* ---------- segmented control ---------- */
 .seg {
@@ -2321,9 +2265,6 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   }
   .overlay-head { padding-left: max(14px, env(safe-area-inset-left)); }
   .overlay-body { padding-bottom: calc(18px + env(safe-area-inset-bottom)); }
-  /* 手机上弹窗本来就占满一屏：名单跟着余下的高度走，"完成"钉在底部 */
-  .overlay-card.invite .overlay-body { flex: 1 1 auto; }
-  .overlay-card.invite .invite-pick { flex: 1 1 auto; height: auto; min-height: 0; }
 
   /* ---------- 手机上的表格 ----------
      竖屏放不下五六列：与其把每列压成省略号，不如让表格横向滚动。

@@ -95,6 +95,11 @@ SQLite 开 WAL；写入统一走事务包装（`tx()`），一次写入成功之
 - 账号对外只有一个标识：**uid**（`panel.next_uid`，站长 10000 起，uint32）。编号一次发放、
   不再回收，`settings.uid_seq` 记账；`id` 是进程内部的自增主键，`username` 只是可以改的登录名，
   两者都不进对外载荷。`panel.public_name()` 是"给别人看的名字"的唯一出口：称呼优先，其次编号
+- **选人**只有一份实现：`assets/js/people.js`（弹窗）配 `assets/css/people.css`（样子），
+  面板与活动后台都加载它，单选多选由 `mode` 决定。数据来自 `panel.person_view()` 的载荷
+  （`id / uid / name / label / avatar`），面板走 `/api/panel/people`、活动后台走
+  `/api/admin/people`。面板那个接口用 `scene` 分权限：`transfer`（这场活动的负责人或超管）、
+  `roster`（名单拥有者）、不带 `scene`（账号清单那套口令）。载荷里没有登录名，永远没有
 
 ## 实时同步
 

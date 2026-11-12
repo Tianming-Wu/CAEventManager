@@ -6,9 +6,9 @@
 
 两件事：
 
-1. **共用件里谁在用哪个导出**。`assets/js/common.js`（活动族）与
-   `assets/js/panel-common.js`（面板）是运行时库：只有模块在用的，说明它是玩法的东西，
-   该搬进模块；谁都不用的，是死代码。
+1. **共用件里谁在用哪个导出**。`assets/js/common.js`（主站）与 `assets/js/event.js`
+   （活动族）是运行时库：只有模块在用的，说明它是玩法的东西，该搬进模块；谁都不用的，
+   **只作提示**——很可能是刚写下还没接上的 WIP 或给模块预留的钩子，要不要删由人判断。
 2. **平台代码里的玩法词**。`app.py`、`core/`、`assets/js/`、`pages/` 里出现奖票、签到、
    抽奖、学生这类词，就是模块化还没收干净的地方。模块自己的目录不在扫描范围内。
 
@@ -22,8 +22,8 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 LIBS = {
-    "LT": "assets/js/common.js",
-    "PX": "assets/js/panel-common.js",
+    "LT": "assets/js/event.js",
+    "PX": "assets/js/common.js",
 }
 
 PLATFORM_JS = ("admin.js", "panel.js", "login.js", "register.js",
@@ -123,8 +123,9 @@ def audit_symbols():
                 print("       %-14s %s" % (name, ", ".join(sorted(files)[:2])))
             leftover += len(only_module)
         if unused:
-            print("     没人用（死代码）：%s" % "、".join(unused))
-            leftover += len(unused)
+            # 没人用不等于死：可能是刚写下还没接上的 WIP，所以只提示、不算"待收"
+            print("     暂时没有引用（可能是 WIP 或给模块预留，需人工判断）：%s"
+                  % "、".join(unused))
         if not only_module and not unused:
             print("     干净")
     return leftover
@@ -170,6 +171,7 @@ def main():
     words = audit_words()
     total = left + words
     print("\n结论：共用件 %d 处、玩法词 %d 处，共 %d 处待收" % (left, words, total))
+    print("       暂时没有引用的导出不计入：那是给人看的提示，不是待办")
     if strict and total:
         return 1
     return 0

@@ -32,7 +32,7 @@ failures = []
 def call(path, body=None, method=None, expect=200):
     url = BASE + path
     data = None
-    headers = {"X-Requested-With": "lottery"}
+    headers = {"X-Requested-With": "CAEventManager"}
     if body is not None:
         data = json.dumps(body).encode("utf-8")
         headers["Content-Type"] = "application/json"

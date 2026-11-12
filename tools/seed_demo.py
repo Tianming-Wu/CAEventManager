@@ -34,7 +34,7 @@ PANEL = BASE.rsplit("/", 1)[0]
 
 def call(path, body=None, method=None, panel=False):
     data = json.dumps(body).encode() if body is not None else None
-    headers = {"X-Requested-With": "CAEventManager" if panel else "lottery"}
+    headers = {"X-Requested-With": "CAEventManager"}
     if data:
         headers["Content-Type"] = "application/json"
     req = urllib.request.Request(

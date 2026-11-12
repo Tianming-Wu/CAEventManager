@@ -219,7 +219,7 @@ external/checkin.js
   所以页面里写 `assets/css/app.css`、`external/board.js` 都是相对地址
 - `module.json` 的 `external` 声明了哪几页，平台就把哪几页指向模块；没带文件就是 404
 - 大屏走的还是「外部资源 › 展示屏幕」那套：`theme/<标识>/`，活动设置里挑一份
-- 平台在这些页面上仍是那几件共用件：`assets/js/common.js` 给的 `LT`、平台的那张样式表
+- 平台在这些页面上仍是那几件共用件：`assets/js/event.js` 给的 `LT`、平台的那张样式表
 
 ## 数据
 

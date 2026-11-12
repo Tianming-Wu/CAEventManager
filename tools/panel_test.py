@@ -495,7 +495,7 @@ def main():
     print("== the console rides on the panel session ==")
     console_req = urllib.request.Request(
         ROOT + "/" + ev2["token"] + "/api/admin/console",
-        headers={"X-Requested-With": "lottery"})
+        headers={"X-Requested-With": "CAEventManager"})
     try:
         anon.open(console_req, timeout=20)
         check("the console needs a panel session", False, "served without one")
@@ -510,7 +510,7 @@ def main():
               exc.code)
     mine = urllib.request.Request(
         ROOT + "/" + ev["token"] + "/api/admin/console",
-        headers={"X-Requested-With": "lottery"})
+        headers={"X-Requested-With": "CAEventManager"})
     with owner.open(mine, timeout=20) as res:
         pages = json.loads(res.read())
         check("the activity the owner runs answers", res.status == 200 and pages["ok"],
@@ -540,7 +540,7 @@ def main():
     check("a search finds an account that is not in yet",
           found and [a["username"] for a in found["accounts"]] == ["teacher"], found)
     post(owner, base + "/api/admin/member",
-         {"accountId": teacher_id, "action": "invite"}, marker="lottery")
+         {"accountId": teacher_id, "action": "invite"}, marker="CAEventManager")
     check("the invitation is waiting for them", True)
     roster = call(owner, base + "/api/admin/members")
     seat = [m for m in roster["members"] if m["username"] == "teacher"][0]
@@ -560,10 +560,10 @@ def main():
           call(teacher, base + "/api/admin/state") is not None)
     post(teacher, base + "/api/admin/member",
          {"accountId": teacher_id, "action": "revoke"}, expect=403,
-         marker="lottery")
+         marker="CAEventManager")
     check("a plain member cannot manage members", True)
     post(owner, base + "/api/admin/member",
-         {"accountId": teacher_id, "action": "revoke"}, marker="lottery")
+         {"accountId": teacher_id, "action": "revoke"}, marker="CAEventManager")
     roster = call(owner, base + "/api/admin/members")
     seat = [m for m in roster["members"] if m["username"] == "teacher"][0]
     check("a revoked seat stays on the record", seat["state"] == "revoked", seat)
@@ -573,7 +573,7 @@ def main():
     check("and the activity leaves their list",
           all(e["seq"] != ev["seq"] for e in call(teacher, "/api/panel/events")["events"]))
     post(owner, base + "/api/admin/member",
-         {"accountId": teacher_id, "action": "invite"}, marker="lottery")
+         {"accountId": teacher_id, "action": "invite"}, marker="CAEventManager")
     check("a revoked seat can be invited again",
           call(teacher, "/api/panel/invites")["invites"][0]["seq"] == ev["seq"])
     post(teacher, "/api/panel/invite", {"seq": ev["seq"], "action": "decline"})
@@ -582,7 +582,7 @@ def main():
     check("a decline is recorded too", seat["state"] == "declined", seat)
     post(owner, base + "/api/admin/member",
          {"accountId": owner_id, "action": "revoke"}, expect=400,
-         marker="lottery")
+         marker="CAEventManager")
     check("the owner cannot remove themselves", True)
 
     print("== archiving an activity ==")
@@ -1175,22 +1175,22 @@ def main():
     check("a roster to bind exists", bool(club_id), club)
     token = events[0]["id"]
     base = "/%s/api/admin" % token
-    listed = call(owner, base + "/rosters", marker="lottery")
+    listed = call(owner, base + "/rosters", marker="CAEventManager")
     check("the console lists the rosters this account may write",
           any(r["id"] == club_id for r in listed["rosters"]), listed)
-    post(owner, base + "/roster_bind", {"roster_id": club_id}, marker="lottery")
-    state = call(owner, base + "/state", marker="lottery")
+    post(owner, base + "/roster_bind", {"roster_id": club_id}, marker="CAEventManager")
+    state = call(owner, base + "/state", marker="CAEventManager")
     check("the binding is stored", state["roster"]["id"] == club_id, state.get("roster"))
-    synced = post(owner, base + "/roster_sync", {}, marker="lottery")
+    synced = post(owner, base + "/roster_sync", {}, marker="CAEventManager")
     check("the first sync brings everybody in",
           synced and synced["result"]["added"] == 3, synced)
-    state = call(owner, base + "/state", marker="lottery")
+    state = call(owner, base + "/state", marker="CAEventManager")
     sids = {x["sid"] for x in state["students"]}
     check("the people are on the activity roster",
           {"20250001", "20250002", "20250003"} <= sids, sorted(sids)[:6])
     check("the sync is remembered", bool(state["roster"]["syncedAt"]))
 
-    again = post(owner, base + "/roster_sync", {}, marker="lottery")
+    again = post(owner, base + "/roster_sync", {}, marker="CAEventManager")
     check("a second sync changes nothing",
           again["result"]["added"] == 0 and again["result"]["same"] == 3, again["result"])
 
@@ -1198,19 +1198,19 @@ def main():
               if e["sid"] == "20250003"][0]
     post(owner, "/api/panel/roster/entry/drop",
          {"id": club_id, "personId": target["personId"]})
-    third = post(owner, base + "/roster_sync", {}, marker="lottery")
+    third = post(owner, base + "/roster_sync", {}, marker="CAEventManager")
     check("someone who left the roster is reported, not deleted",
           [m["sid"] for m in third["result"]["missing"]] == ["20250003"], third["result"])
-    state = call(owner, base + "/state", marker="lottery")
+    state = call(owner, base + "/state", marker="CAEventManager")
     check("but is still on the activity roster",
           "20250003" in {x["sid"] for x in state["students"]})
     check("and is counted as detached", state["roster"]["detached"] == 1,
           state["roster"])
 
-    post(owner, base + "/roster_bind", {"roster_id": 0}, marker="lottery")
-    state = call(owner, base + "/state", marker="lottery")
+    post(owner, base + "/roster_bind", {"roster_id": 0}, marker="CAEventManager")
+    state = call(owner, base + "/state", marker="CAEventManager")
     check("the binding can be cleared", state["roster"]["id"] == 0, state["roster"])
-    post(owner, base + "/roster_sync", {}, expect=409, marker="lottery")
+    post(owner, base + "/roster_sync", {}, expect=409, marker="CAEventManager")
     check("syncing without a binding is refused", True)
 
     print("== 展示屏幕：导入、引用、删除 ==")
@@ -1249,20 +1249,20 @@ def main():
           pack_id in [p["id"] for p in call(owner, "/api/panel/screen_packs")["packs"]])
 
     base = "/%s/api/admin" % events[0]["id"]
-    post(owner, base + "/settings", {"screen_pack": pack_id}, marker="lottery")
+    post(owner, base + "/settings", {"screen_pack": pack_id}, marker="CAEventManager")
     page = call(anon, "/%s/screen" % events[0]["id"])
     check("活动引用后大屏换成这一份",
           isinstance(page, bytes) and marker.encode() in page, (page or b"")[:80])
     sheet = call(anon, "/%s/screen/pack.css" % events[0]["id"])
     check("包内其它文件按 screen/ 取",
           isinstance(sheet, bytes) and b"margin:0" in sheet, (sheet or b"")[:80])
-    post(owner, base + "/settings", {"screen_pack": ""}, marker="lottery")
+    post(owner, base + "/settings", {"screen_pack": ""}, marker="CAEventManager")
     page = call(anon, "/%s/screen" % events[0]["id"])
     check("不引用时回到活动自带的展示页",
           isinstance(page, bytes) and marker.encode() not in page
           and "大屏".encode() in page, (page or b"")[:80])
     post(owner, base + "/settings", {"screen_pack": "no-such-pack"}, expect=400,
-         marker="lottery")
+         marker="CAEventManager")
     check("不存在的那一份引用不了", True)
 
     mixed = post(owner, "/api/panel/screen_pack/upload", {

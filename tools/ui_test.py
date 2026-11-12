@@ -82,7 +82,7 @@ def wire(page, label):
 
 def state(page):
     return page.evaluate(
-        "fetch('api/admin/state',{headers:{'X-Requested-With':'lottery'},cache:'no-store'})"
+        "fetch('api/admin/state',{headers:{'X-Requested-With':'CAEventManager'},cache:'no-store'})"
         ".then(r=>r.json())"
     )
 
@@ -190,7 +190,7 @@ def main():
         result = page.evaluate("""async () => {
             // 词表由模块声明，平台不再自带默认标签：先从活动状态里取
             const st = await fetch('api/admin/state',
-                {headers: {'X-Requested-With': 'lottery'}}).then(r => r.json());
+                {headers: {'X-Requested-With': 'CAEventManager'}}).then(r => r.json());
             const spec = (st.features && st.features.search) || null;
             const list = [
               {name: "曾萍静", sid: "2024001", py: "zengpingjing", pyi: "zpj",
@@ -769,10 +769,10 @@ def main():
           await post('/api/panel/roster/import',
                      {id: made.id, text: '学号,姓名\\n20260001,绑定甲\\n20260002,绑定乙\\n'});
           const r = await fetch('api/admin/roster_bind', {method: 'POST',
-            headers: {'X-Requested-With': 'lottery', 'Content-Type': 'application/json'},
+            headers: {'X-Requested-With': 'CAEventManager', 'Content-Type': 'application/json'},
             body: JSON.stringify({roster_id: made.id})}).then(x => x.json());
           const s = await fetch('api/admin/roster_sync', {method: 'POST',
-            headers: {'X-Requested-With': 'lottery'}}).then(x => x.json());
+            headers: {'X-Requested-With': 'CAEventManager'}}).then(x => x.json());
           return {id: made.id, bind: r, sync: s};
         }""")
         check("the binding and the sync go through",

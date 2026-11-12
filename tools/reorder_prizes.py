@@ -34,7 +34,7 @@ def call(path, body=None):
     data = json.dumps(body, ensure_ascii=False).encode() if body is not None else None
     req = urllib.request.Request(
         base + path, data=data, method="POST" if data else "GET",
-        headers={"Content-Type": "application/json", "X-Requested-With": "lottery"},
+        headers={"Content-Type": "application/json", "X-Requested-With": "CAEventManager"},
     )
     with opener.open(req, timeout=30) as res:
         return json.loads(res.read().decode("utf-8"))

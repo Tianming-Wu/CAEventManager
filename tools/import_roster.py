@@ -187,7 +187,7 @@ def clean(body):
 
 def post(base, path, body, opener, headers=None):
     data = json.dumps(body, ensure_ascii=False).encode("utf-8")
-    hdrs = {"Content-Type": "application/json", "X-Requested-With": "lottery"}
+    hdrs = {"Content-Type": "application/json", "X-Requested-With": "CAEventManager"}
     hdrs.update(headers or {})
     req = urllib.request.Request(base + path, data=data, headers=hdrs, method="POST")
     with opener.open(req, timeout=60) as res:

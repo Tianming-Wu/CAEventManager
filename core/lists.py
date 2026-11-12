@@ -222,9 +222,9 @@ def init_db():
         conn = connect()
         conn.executescript(SCHEMA)
         for table, column, decl in LATE_COLUMNS:
-            cols = {row["name"] for row in conn.execute("PRAGMA table_info(%s)" % table)}
+            cols = {row["name"] for row in conn.execute("PRAGMA table_info(%s)" % table)}   # sql-ok 只拼列名/表名/SET 片段，值都走 ?
             if column not in cols:
-                conn.execute("ALTER TABLE %s ADD COLUMN %s %s" % (table, column, decl))
+                conn.execute("ALTER TABLE %s ADD COLUMN %s %s" % (table, column, decl))   # sql-ok 只拼列名/表名/SET 片段，值都走 ?
         _initialized = True
 
 
@@ -328,7 +328,7 @@ def update_roster(conn, roster_id, **fields):
         return False
     sets.append("updated_at=?")
     vals.append(time.time())
-    conn.execute("UPDATE rosters SET %s WHERE id=?" % ",".join(sets), vals + [roster_id])
+    conn.execute("UPDATE rosters SET %s WHERE id=?" % ",".join(sets), vals + [roster_id])   # sql-ok 只拼列名/表名/SET 片段，值都走 ?
     return True
 
 
@@ -497,9 +497,9 @@ def list_rosters(conn, acc, q="", scope="joined", offset=0, limit=50):
         args += ["%" + q + "%"] * 2
     clause = (" WHERE " + " AND ".join(where)) if where else ""
     total = conn.execute(
-        "SELECT COUNT(*) AS n FROM rosters r" + clause, args).fetchone()["n"]
+        "SELECT COUNT(*) AS n FROM rosters r" + clause, args).fetchone()["n"]   # sql-ok 只拼列名/表名/SET 片段，值都走 ?
     rows = conn.execute(
-        "SELECT r.* FROM rosters r" + clause +
+        "SELECT r.* FROM rosters r" + clause +   # sql-ok 只拼列名/表名/SET 片段，值都走 ?
         " ORDER BY r.updated_at DESC LIMIT ? OFFSET ?",
         args + [limit, offset]).fetchall()
     counts = roster_counts(conn, [r["id"] for r in rows])
@@ -955,7 +955,7 @@ def update_signup(conn, signup_id, data):
     if not sets:
         return False
     put("updated_at", time.time())
-    conn.execute("UPDATE signups SET %s WHERE id=?" % ",".join(sets),
+    conn.execute("UPDATE signups SET %s WHERE id=?" % ",".join(sets),   # sql-ok 只拼列名/表名/SET 片段，值都走 ?
                  vals + [signup_id])
     return True
 
@@ -1052,9 +1052,9 @@ def list_signups(conn, acc, q="", scope="joined", offset=0, limit=30):
         args += ["%" + q + "%"] * 2
     clause = (" WHERE " + " AND ".join(where)) if where else ""
     total = conn.execute(
-        "SELECT COUNT(*) AS n FROM signups s" + clause, args).fetchone()["n"]
+        "SELECT COUNT(*) AS n FROM signups s" + clause, args).fetchone()["n"]   # sql-ok 只拼列名/表名/SET 片段，值都走 ?
     rows = conn.execute(
-        "SELECT s.* FROM signups s" + clause +
+        "SELECT s.* FROM signups s" + clause +   # sql-ok 只拼列名/表名/SET 片段，值都走 ?
         " ORDER BY s.updated_at DESC LIMIT ? OFFSET ?",
         args + [limit, offset]).fetchall()
     counts = signup_counts(conn, [r["id"] for r in rows])
@@ -1070,10 +1070,10 @@ def signup_entries_page(conn, signup_id, q="", offset=0, limit=100):
         where.append("(lower(sid) LIKE ? OR name LIKE ?)")
         args += [like, like]
     clause = " AND ".join(where)
-    total = conn.execute("SELECT COUNT(*) AS n FROM signup_entries WHERE " + clause,
+    total = conn.execute("SELECT COUNT(*) AS n FROM signup_entries WHERE " + clause,   # sql-ok 只拼列名/表名/SET 片段，值都走 ?
                          args).fetchone()["n"]
     rows = conn.execute(
-        "SELECT * FROM signup_entries WHERE " + clause +
+        "SELECT * FROM signup_entries WHERE " + clause +   # sql-ok 只拼列名/表名/SET 片段，值都走 ?
         " ORDER BY ts LIMIT ? OFFSET ?", args + [limit, offset]).fetchall()
     return {"total": int(total or 0), "offset": offset, "limit": limit,
             "entries": [signup_entry_view(r) for r in rows]}

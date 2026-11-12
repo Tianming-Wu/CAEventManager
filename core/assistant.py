@@ -94,7 +94,7 @@ def save_config(conn, account_id, base, model, key, clear=False, resume=None):
     if not sets:
         return False
     args.append(int(account_id))
-    conn.execute("UPDATE accounts SET %s WHERE id=?" % ", ".join(sets), args)
+    conn.execute("UPDATE accounts SET %s WHERE id=?" % ", ".join(sets), args)   # sql-ok 只拼列名/表名/SET 片段，值都走 ?
     return True
 
 

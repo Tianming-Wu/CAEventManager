@@ -518,7 +518,7 @@ def update_student(conn, student_id, actor="admin", **fields):
         vals += [py, pyi]
     if not sets:
         return dict(stu)
-    conn.execute("UPDATE students SET %s WHERE id=?" % ",".join(sets), vals + [student_id])
+    conn.execute("UPDATE students SET %s WHERE id=?" % ",".join(sets), vals + [student_id])   # sql-ok 只拼列名/表名/SET 片段，值都走 ?
     # Turning someone into staff/volunteer must take back the tickets they were
     # given while they still counted as a participant, otherwise they stay in the
     # ticket draw and the pool no longer adds up.
@@ -1011,7 +1011,7 @@ def _winners(conn, where, args):
     return {
         r["student_id"]
         for r in conn.execute(
-            "SELECT student_id FROM draws WHERE voided_at IS NULL AND " + where, args)
+            "SELECT student_id FROM draws WHERE voided_at IS NULL AND " + where, args)   # sql-ok 只拼列名/表名/SET 片段，值都走 ?
     }
 
 

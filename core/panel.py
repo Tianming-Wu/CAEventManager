@@ -410,9 +410,9 @@ def init_db():
     if _migrate_events(conn):
         conn.executescript(SCHEMA)
     for table, column, spec in LATE_COLUMNS:
-        have = {row["name"] for row in conn.execute("PRAGMA table_info(%s)" % table)}
+        have = {row["name"] for row in conn.execute("PRAGMA table_info(%s)" % table)}   # sql-ok 只拼列名/表名/SET 片段，值都走 ?
         if column not in have:
-            conn.execute("ALTER TABLE %s ADD COLUMN %s %s" % (table, column, spec))
+            conn.execute("ALTER TABLE %s ADD COLUMN %s %s" % (table, column, spec))   # sql-ok 只拼列名/表名/SET 片段，值都走 ?
     conn.execute(
         "INSERT INTO audit (ts, actor, action, detail) VALUES (?,?,?,?)",
         (time.time(), "system", "panel_init", None),

@@ -58,6 +58,7 @@
     }
   ],
   "features": {
+    "roster": {},
     "search": {
       "records": "students",
       "name": "name",

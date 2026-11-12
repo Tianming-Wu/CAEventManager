@@ -21,8 +21,8 @@
       <span class="track"></span>
       <span id="unlockLabel">解锁修改</span>
     </label>
-    <a class="btn sm ghost" href="screen" target="_blank" rel="noopener">大屏 ↗</a>
-    <a class="btn sm ghost" href="./" target="_blank" rel="noopener">公示 ↗</a>
+    <a class="btn sm ghost" data-ext="screen" href="screen" target="_blank" rel="noopener">大屏 ↗</a>
+    <a class="btn sm ghost" data-ext="board" href="./" target="_blank" rel="noopener">公示 ↗</a>
     <span class="who" id="whoami"></span>
     <button class="btn sm ghost" id="logoutBtn">退出</button>
   </div>
@@ -58,7 +58,7 @@
       </div>
     </div>
 
-    <div class="panel">
+    <div class="panel" id="rosterSourceCard">
       <h2>名单来源</h2>
       <p class="panel-hint">
         绑定一份名单后，名单里的人在同步时并入本场活动的名单；只增不删，

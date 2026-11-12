@@ -3510,39 +3510,105 @@
     return out;
   }
 
+  /* 选过的人排成一行：圆头像在上一行，名字在下面，不加底色 */
   function renderInviteChips() {
-    $("#inviteChips").innerHTML = S.invited.map(function (id) {
+    var html = S.invited.map(function (id) {
       var a = S.accounts.filter(function (x) { return x.id === id; })[0];
       if (!a) return "";
-      return '<span class="invite-chip">' + PX.esc(displayName(a)) +
-        '<button type="button" data-uninvite="' + a.id + '" aria-label="\u79fb\u9664">' +
-        "\u00d7</button></span>";
+      var url = avatarUrl(a);
+      return '<span class="invite-chip">' +
+        '<span class="avatar">' + (url
+          ? '<img alt="" src="' + PX.esc(url) + '">'
+          : PX.esc(initialOf(a))) + "</span>" +
+        '<span class="nm">' + PX.esc(displayName(a)) + "</span>" +
+        '<button type="button" data-uninvite="' + a.id + '" aria-label="移出">×</button>' +
+        "</span>";
     }).join("");
+    $("#inviteChips").innerHTML = html;
     $("#inviteHint").textContent = S.invited.length
       ? "\u5df2\u9009 " + S.invited.length + " \u4eba\uff0c\u521b\u5efa\u540e\u53d1\u51fa\u9080\u8bf7"
       : "";
   }
 
+  function inviteTiles(query) {
+    var q = (query || "").trim().toLowerCase();
+    var rows = S.accounts.filter(function (a) {
+      if (a.id === (S.me && S.me.id)) return false;
+      if (!q) return true;
+      return (displayName(a) || "").toLowerCase().indexOf(q) >= 0
+        || (a.username || "").toLowerCase().indexOf(q) >= 0
+        || (a.name || "").toLowerCase().indexOf(q) >= 0;
+    });
+    if (!rows.length) {
+      return '<div class="empty">' + (q
+        ? "没有匹配的账号"
+        : "除了你自己，还没有别的账号") + "</div>";
+    }
+    return '<div class="pick-grid">' + rows.map(function (a) {
+      var on = S.invited.indexOf(a.id) >= 0;
+      var url = avatarUrl(a);
+      return '<button type="button" class="pick-tile' + (on ? " on" : "") +
+        '" data-invite="' + a.id + '">' +
+        '<span class="avatar">' + (url
+          ? '<img alt="" src="' + PX.esc(url) + '">'
+          : PX.esc(initialOf(a))) + "</span>" +
+        '<span class="pick-name">' + PX.esc(displayName(a)) + "</span>" +
+        '<span class="tag">' + PX.esc(a.roleLabel) + "</span></button>";
+    }).join("") + "</div>";
+  }
+
+  /* 账号清单是按页拉的，创建页上可能一次都没拉过：开窗口前先拉一页 */
+  function ensureInviteAccounts() {
+    if (S.accounts && S.accounts.length) return Promise.resolve(S.accounts);
+    if (S.accounts === null || S.accounts === undefined) S.accounts = [];
+    return PX.api("/accounts?offset=0&limit=200")
+      .then(function (d) {
+        S.me = d.me || S.me;
+        S.accounts = d.accounts || [];
+        S.accountsTotal = d.total || S.accounts.length;
+        if (d.quotaDefault) S.quotaDefault = d.quotaDefault;
+        if (d.quotaMax) S.quotaMax = d.quotaMax;
+        return S.accounts;
+      })
+      .catch(function (e) {
+        // 拉不到（权限不够）就让窗口自己说清楚，不装作没人可邀
+        S.accounts = [];
+        PX.toast(PX.esc(e.message || "读不到账号清单"), true);
+        return S.accounts;
+      });
+  }
+
   function openInvitePicker() {
-    var rows = S.accounts.filter(function (a) { return a.id !== (S.me && S.me.id); });
-    var html = rows.length
-      ? '<div class="pick-grid">' + rows.map(function (a) {
-        var on = S.invited.indexOf(a.id) >= 0;
-        var url = avatarUrl(a);
-        return '<button type="button" class="pick-tile' + (on ? " on" : "") +
-          '" data-invite="' + a.id + '">' +
-          '<span class="avatar">' + (url
-            ? '<img alt="" src="' + PX.esc(url) + '">'
-            : PX.esc(initialOf(a))) + "</span>" +
-          '<span class="pick-name">' + PX.esc(displayName(a)) + "</span>" +
-          '<span class="tag">' + PX.esc(a.roleLabel) + "</span></button>";
-      }).join("") + "</div>"
-      : '<div class="empty">\u9664\u4e86\u4f60\u81ea\u5df1\uff0c\u8fd8\u6ca1\u6709\u522b\u7684\u8d26\u53f7</div>';
-    // UNWIRED(groups): 分组一键邀请要等用户分组做出来
-    openOverlay("invite", "\u5feb\u901f\u9080\u8bf7", html +
-      '<div class="row" style="margin-top:16px;justify-content:flex-end">' +
-      '<button class="btn primary" type="button" data-close-overlay="1">\u5b8c\u6210</button>' +
+    ensureInviteAccounts().then(showInvitePicker);
+  }
+
+  function showInvitePicker() {
+    // 与「活动设置 › 邀请成员」同一个逻辑：先搜再点，选多了也能取消
+    openOverlay("invite", "邀请成员",
+      '<div class="field"><label for="inviteFind">按名字或登录名搜索</label>' +
+      '<input id="inviteFind" type="search" autocomplete="off" placeholder="输入一部分即可">' +
+      "</div>" +
+      '<div id="inviteTiles">' + inviteTiles("") + "</div>" +
+      '<div class="row" style="margin-top:16px;justify-content:space-between">' +
+      '<span class="note" id="inviteCount"></span>' +
+      '<button class="btn primary" type="button" data-close-overlay="1">完成</button>' +
       "</div>");
+    var box = $("#inviteFind");
+    var paint = function () {
+      $("#inviteTiles").innerHTML = inviteTiles(box.value);
+      paintInviteCount();
+    };
+    // 点选交给文档上那一处统一处理（面板里所有 data-invite 都走它），这里只管筛
+    box.addEventListener("input", paint);
+    paint();
+    box.focus();
+  }
+
+  function paintInviteCount() {
+    var el = $("#inviteCount");
+    if (el) {
+      el.textContent = S.invited.length ? "已选 " + S.invited.length + " 人" : "";
+    }
   }
 
   function toggleInvite(id) {
@@ -3550,6 +3616,7 @@
     if (at >= 0) S.invited.splice(at, 1);
     else S.invited.push(id);
     renderInviteChips();
+    paintInviteCount();
     var tile = $('[data-invite="' + id + '"]');
     if (tile) tile.classList.toggle("on", at < 0);
   }
@@ -3572,13 +3639,22 @@
     }
     var btn = $("#kindCreate");
     btn.disabled = true;
+    // 新标签页要在这个点击里同步开出来：等接口回来再开会被浏览器当成弹窗拦掉
+    var tab = window.open("about:blank", "_blank");
     PX.api("/events/create", { method: "POST", body: body })
       .then(function (d) {
         dropDraft();          // the draft became an activity
-        PX.toast("\u5df2\u521b\u5efa");
-        location.href = d.event.admin;
+        if (tab && !tab.closed) {
+          tab.location.href = d.event.admin;
+        } else {
+          // 被拦了也要让人进得去，至少别丢地址
+          PX.toast("活动已创建，新标签页被拦了：去「我的活动」里打开它");
+        }
+        PX.toast("已创建，活动后台在新标签页打开了");
+        go("events");          // 主站回到「我的活动」
       })
       .catch(function (e) {
+        if (tab && !tab.closed) tab.close();
         err.textContent = e.message;
         btn.disabled = false;
       });

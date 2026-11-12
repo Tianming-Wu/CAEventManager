@@ -70,7 +70,7 @@
 | `scripts` | 平台 | 页签脚本之前先载入的共用脚本，写文件名去掉 `.js`（如 `common`） |
 | `settings` | 平台 | 哪些配置项可以从界面改；类型取自 `defaults.json` 里那个默认值 |
 | `external` | 平台 | 要哪些公开页面：`board` / `screen` / `checkin` / `admin`；声明了就自带那一页 |
-| `features` | 平台 | 能力声明（`search` / `shortlink` / 将来的 `super.*`） |
+| `features` | 平台 | 能力声明（`roster` / `search` / `shortlink` / 将来的 `super.*`） |
 | `actions` | 平台 | 写操作声明，平台据此生成接口、鉴权、审计与版本号 |
 | `board` | 平台 | 公示页/大屏要哪些块，见「展示数据」 |
 

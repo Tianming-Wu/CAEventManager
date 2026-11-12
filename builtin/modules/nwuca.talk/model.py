@@ -91,14 +91,16 @@ def _elapsed(sec, now=None):
 
 
 def present(conn, cfg=None):
-    """公示页与大屏要的东西。"""
+    """大屏要的东西：正在讲哪一节、还剩多少提问。
+
+    这个模块没有给参会者看的公示页（`external` 里只申请了 screen），所以这里只出大屏块。
+    """
     cfg = cfg or db.all_config(conn)
     secs = sections(conn)
     qs = questions(conn)
     cur = current_section(conn)
     st = stats(conn, cfg)
     now = time.time()
-    show_questions = bool(cfg.get("talk_show_questions", True))
 
     agenda = []
     for s in secs:
@@ -109,24 +111,20 @@ def present(conn, cfg=None):
             "elapsed": _elapsed(s["started_at"], now) if state == "now" else 0,
         })
 
-    shown = [q for q in qs if show_questions]
     return {
         "agenda": agenda,
-        "questions": [{"id": q["id"], "who": q["who"], "text": q["text"],
-                       "answered": bool(q["answered_at"])} for q in shown],
         "current": ({"title": cur["title"], "minutes": cur["minutes"],
                      "elapsed": _elapsed(cur["started_at"], now)} if cur else None),
         "stats": st,
         "screen": {
             "subtitle": "议程与提问",
-            "qr": {"signin": "扫码打开公示页", "draw": "扫码查看议程"},
             "banner": [
                 {"tone": "green", "value": str(st["done"]), "of": "/%d" % st["sections"],
                  "label": "已完成"},
                 {"tone": "gold", "value": str(st["open_questions"]), "label": "待回答"},
             ],
             "strip": {"label": "提问", "items": [
-                {"title": "", "name": q["who"], "note": q["text"][:24],
+                {"title": "", "name": q["who"] or "匿名", "note": q["text"][:24],
                  "kind": "person" if q["answered_at"] else ""}
                 for q in qs[-14:]
             ]},

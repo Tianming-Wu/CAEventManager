@@ -536,6 +536,13 @@ def main():
     check("记录整包透传，平台不改形状",
           app.module_record(rec, spec, with_pinyin=False)["tickets"] == [])
 
+    print("== SQL 拼接审计 ==")
+    import subprocess as _sp
+    lint = _sp.run([sys.executable, os.path.join("tools", "sql_lint.py"), "--strict"],
+                   cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                   capture_output=True, text=True, encoding="utf-8")
+    check("没有未标记的 SQL 拼接", lint.returncode == 0, (lint.stdout or "")[:400])
+
     print("== 提示词里的变量 ==")
     acc = {"id": 7, "username": "laffey", "name": "吴天明", "role": "owner"}
     vals = app.assistant.prompt_values(acc, ["list_events", "host_stats"], "9.9.9.9")

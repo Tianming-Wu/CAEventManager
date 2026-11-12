@@ -1271,44 +1271,84 @@ select:invalid { color: var(--dim); }
 .invite-request { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .invite-slot {
   flex: 0 0 auto;
-  width: 52px;
-  height: 52px;
   display: grid;
-  place-items: center;
-  padding: 0;
-  border: 1px dashed var(--line);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--dim);
-  cursor: pointer;
-}
-.invite-slot:hover { border-color: var(--accent); color: var(--accent-strong); }
-.invite-slot:active { border-color: var(--accent-line); color: var(--accent-strong); }
-.invite-slot svg { width: 18px; height: 18px; stroke-width: 1.8; }
-.invite-chips { display: flex; gap: 6px; flex-wrap: wrap; min-width: 0; }
-.invite-chip {
-  display: inline-flex;
-  align-items: center;
+  grid-template-columns: 44px;
+  justify-items: center;
+  align-content: start;
   gap: 4px;
-  padding: 3px 4px 3px 10px;
-  border-radius: 999px;
-  border: 1px solid var(--line);
-  background: var(--surface-2);
-  font-size: .82rem;
-}
-.invite-chip button {
-  appearance: none;
+  width: 56px;
+  padding: 0;
   border: 0;
   background: transparent;
   color: var(--dim);
-  width: 20px;
-  height: 20px;
-  border-radius: 999px;
   cursor: pointer;
-  font-size: .9rem;
-  line-height: 1;
 }
-.invite-chip button:hover { background: var(--surface-3); color: var(--text); }
+/* 虚线圆和加号叠在同一格里，下面的说明再占一行 */
+.invite-slot::before {
+  content: "";
+  grid-area: 1 / 1;
+  width: 44px;
+  height: 44px;
+  border: 1px dashed var(--line);
+  border-radius: 999px;
+}
+.invite-slot svg {
+  grid-area: 1 / 1;
+  align-self: center;
+  width: 18px;
+  height: 18px;
+  stroke-width: 1.8;
+}
+.invite-slot .cap {
+  grid-area: 2 / 1;
+  font-size: .78rem;
+  color: var(--dim);
+  line-height: 1.2;
+}
+.invite-slot:hover::before { border-color: var(--accent); }
+.invite-slot:hover { color: var(--accent-strong); }
+/* 邀请那一行：一排人头像，名字在头像下面；加号排在最后一个位置 */
+.invite-row { display: flex; align-items: flex-start; gap: 14px; flex-wrap: wrap; min-width: 0; }
+.invite-chips { display: flex; gap: 14px; flex-wrap: wrap; min-width: 0; }
+.invite-chip {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 56px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-size: .78rem;
+}
+.invite-chip .avatar { width: 44px; height: 44px; font-size: .95rem; }
+.invite-chip .nm {
+  max-width: 100%;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.invite-chip button {
+  position: absolute;
+  top: -5px;
+  right: 2px;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+.invite-chip button:hover { background: #8c2f2f; border-color: #8c2f2f; color: #fff; }
+.invite-slot .cap { font-size: .78rem; color: var(--dim); line-height: 1.2; }
 
 .pick-grid {
   display: grid;

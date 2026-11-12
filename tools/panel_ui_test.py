@@ -2090,11 +2090,16 @@ def create_page(browser):
         print("== a real creation ==")
         page.fill("#neTitle", "界面创建的活动")
         page.select_option("#kf_pool_mode", "auto")
-        page.click("#kindCreate")
-        page.wait_for_url("**/admin", timeout=25000)
-        check("it opens the new activity's console", "/admin" in page.url, page.url)
-        made = page.url
+        with page.context.expect_page() as opened:
+            page.click("#kindCreate")
+        tab = opened.value
+        tab.wait_for_url("**/admin", timeout=25000)
+        check("新活动在另一个标签页打开", "/admin" in tab.url, tab.url)
+        made = tab.url
         print("   created:", made)
+        page.wait_for_timeout(700)
+        check("主站留在「我的活动」", page.url.endswith("#/events"), page.url)
+        tab.close()
 
         print("== the menu archives it again ==")
         page.goto(BASE + "/panel#/events")

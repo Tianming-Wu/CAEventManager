@@ -197,7 +197,18 @@ def normalize_external(raw):
 # 不需要申请的东西（版本号热更新、事件流、导出打包这类跟玩法无关的）平台一直给，
 # 也就不必写进来。名字不认识的申请一律丢掉，并按模块记一条原因——
 # 模块自己的错不该让整个活动起不来。
+# 能力之间可以互相依赖：声明的依赖没申请，这个能力就不给（并记一条原因）。
+CAPABILITY_NEEDS = {
+    # 名单同步要先把名单接过来
+    "roster_sync": ("roster",),
+}
+
 CAPABILITIES = {
+    # 名单：申请之后这个活动的后台才有「名单来源」，可以从平台的名单库里绑定一份、
+    # 按学号增量同步。没有名单的玩法（例如讲座）不申请，界面上也就不会出现这一段。
+    "roster": {
+        "sync": bool,       # 是否要"立即同步"这个动作
+    },
     # 短链：申请之后，平台替这个模块负责的活动生成短链。指向哪里由模块自己决定
     # （活动地址下任意路径，模块也可以把自己的一套 token 拼在后面），平台只管
     # 跳转、归属、上限与回收。所以这里没有可声明的字段。
@@ -242,6 +253,11 @@ def resolve_features(raw, errors=None):
         if not isinstance(declared, dict):
             _note(errors, "能力 %s 的声明应该是一个对象" % name)
             continue
+        needs = CAPABILITY_NEEDS.get(name) or ()
+        missing = [n for n in needs if n not in raw]
+        if missing:
+            _note(errors, "能力 %s 需要先申请：%s" % (name, "、".join(missing)))
+            continue
         defaults = FEATURE_DEFAULTS.get(name) or {}
         clean = {}
         for field, kind in spec.items():
@@ -264,6 +280,7 @@ def resolve_features(raw, errors=None):
 
 FEATURE_DEFAULTS = {
     "search": DEFAULT_SEARCH,
+    "roster": {"sync": True},
 }
 
 

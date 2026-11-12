@@ -10,7 +10,7 @@
   "requires": ">=1.4",
   "description": "按议程推进的讲座与分享会：小节计时、观众提问与当场回答",
   "external": [
-    "board",
+    "screen",
     "admin"
   ],
   "scripts": [

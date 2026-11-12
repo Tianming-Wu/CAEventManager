@@ -312,6 +312,7 @@
     renderLog();
     refreshPages();
     renderPageCounts();
+    applyFeatureVisibility();
     applyLanding();
   }
 
@@ -403,6 +404,7 @@
     var nav = $("#tabs");
     LT.api("/api/admin/console").then(function (d) {
       S.pages = d.pages || [];
+      S.external = d.external || [];
       // 模块页面的脚本：载入之后调 mount，平台这边只留页签条与调度
       loadModuleScripts(d.scripts, S.pages);
       nav.innerHTML = S.pages.map(function (page) {
@@ -432,7 +434,24 @@
   }
 
   // ------------------------------------------------------------ 活动设置
+  /* 名单是模块申请了才有的能力：没申请就连「名单来源」这张卡都不出现 */
+  function rosterEnabled() {
+    return !!(S.features && S.features.roster);
+  }
+
+  function applyFeatureVisibility() {
+    var card = $("#rosterSourceCard");
+    if (card) card.classList.toggle("hidden", !rosterEnabled());
+    // 页头那两颗入口跟着模块申请的公开页走：没申请的页面点进去也是 404
+    var ext = S.external || [];
+    var screen = $('[data-ext="screen"]');
+    var board = $('[data-ext="board"]');
+    if (screen) screen.classList.toggle("hidden", ext.indexOf("screen") < 0);
+    if (board) board.classList.toggle("hidden", ext.indexOf("board") < 0);
+  }
+
   function loadRosterSource() {
+    if (!rosterEnabled()) return Promise.resolve();
     return LT.api("/api/admin/rosters")
       .then(function (d) {
         S.rosterChoices = d.rosters || [];

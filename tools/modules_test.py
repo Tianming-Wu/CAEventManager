@@ -155,17 +155,28 @@ try:
     check("标记了已回答", len(answered) == 1, state["data"]["questions"])
     check("待回答数量对得上", state["stats"]["open_questions"] == 1, state["stats"])
 
-    print("== 公示页：模块自带的那一张 ==")
-    page = call(base + "/", expect=200)
-    text = page.decode("utf-8") if isinstance(page, bytes) else str(page)
-    check("公示页来自讲座模块", "external/board.js" in text, text[:120])
+    print("== 公开页：只申请了大屏 ==")
+    call(base + "/", expect=404)          # 没申请 board：这一页不该存在
+    check("没申请的公示页不存在", True)
+    call(base + "/checkin", expect=404)
+    check("没申请的登记页也不存在", True)
+    screen = call(base + "/screen", expect=200)
+    text = screen.decode("utf-8") if isinstance(screen, bytes) else str(screen)
+    check("大屏能打开", "screen.css" in text or "screen.html" in text or "大屏" in text,
+          text[:80])
     board = call(base + "/api/board")
-    check("公示数据有议程与提问",
-          isinstance(board["present"].get("agenda"), list)
-          and isinstance(board["present"].get("questions"), list),
-          sorted(board["present"].keys()))
-    check("大屏块也给了", isinstance(board["present"].get("screen"), dict),
+    check("大屏块由模块给", isinstance(board["present"].get("screen"), dict),
           sorted((board["present"].get("screen") or {}).keys()))
+    check("横幅里有已完成的节数",
+          isinstance((board["present"]["screen"] or {}).get("banner"), list),
+          (board["present"]["screen"] or {}).get("banner"))
+    con = call(base + "/api/admin/console")
+    check("控制台知道这个模块只申请了哪些公开页",
+          con.get("external") == ["admin", "screen"], con.get("external"))
+
+    print("== 名单是模块申请了才有的能力 ==")
+    call(base + "/api/admin/rosters", expect=404)
+    check("没申请的模块没有名单接口", True)
 
     print("== 导出：模块说有几张表 ==")
     blob = call(base + "/api/admin/export.zip", expect=200)
@@ -183,6 +194,10 @@ try:
     check("抽奖活动仍然有 students 键", isinstance(loto.get("students"), list),
           sorted(loto.keys())[:8])
     check("抽奖的奖票表还在", isinstance(loto.get("prizes"), list))
+    check("抽奖模块申请了名单，接口在",
+          isinstance(call("/" + loto_token + "/api/admin/rosters").get("rosters"), list))
+    check("抽奖模块申请了名单能力",
+          "roster" in (loto.get("features") or {}), loto.get("features"))
     check("抽奖的控制台页签没变",
           [p["id"] for p in call("/" + loto_token + "/api/admin/console")["pages"]
            if not p.get("platform")] ==

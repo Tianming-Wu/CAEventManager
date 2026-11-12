@@ -68,7 +68,7 @@ PAGES_DIR = os.path.join(BASE_DIR, "pages")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.0.76"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.0.77"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -984,6 +984,18 @@ class Handler(BaseHTTPRequestHandler):
                 return panel.mount_prefix(raw, seg) + "/" + seg + "/admin"
         return ""
 
+    def _feature(self, name):
+        """这个活动的模块申没申请某个能力。"""
+        try:
+            cfg = db.all_config(db.connect())
+        except Exception:
+            return False
+        kind = str(cfg.get("kind") or "").strip()
+        if not kind:
+            return False
+        feats = (modules.get(kind, VERSION) or {}).get("features") or {}
+        return name in feats
+
     def _panel_login_url(self, back=None):
         """Where this request should sign in, and where to come back to."""
         token = None
@@ -1570,10 +1582,10 @@ class Handler(BaseHTTPRequestHandler):
             if decided:
                 where.append("status <> 'pending' AND decided_at > 0")
             clause = (" WHERE " + " AND ".join(where)) if where else ""
-            total = conn.execute("SELECT COUNT(*) AS n FROM accounts" + clause,
+            total = conn.execute("SELECT COUNT(*) AS n FROM accounts" + clause,   # sql-ok 只拼列名/表名/SET 片段，值都走 ?
                                  args).fetchone()["n"]
             rows = conn.execute(
-                "SELECT * FROM accounts" + clause +
+                "SELECT * FROM accounts" + clause +   # sql-ok 只拼列名/表名/SET 片段，值都走 ?
                 " ORDER BY CASE role WHEN 'owner' THEN 0 WHEN 'superadmin' THEN 1 ELSE 2 END,"
                 " CASE status WHEN 'pending' THEN 0 WHEN 'active' THEN 1 ELSE 2 END,"
                 " created_at LIMIT ? OFFSET ?", args + [limit, offset]).fetchall()
@@ -3219,10 +3231,10 @@ class Handler(BaseHTTPRequestHandler):
                              " OR detail LIKE ?)")
                 args += ["%" + q + "%"] * 4
             clause = (" WHERE " + " AND ".join(where)) if where else ""
-            total = conn.execute("SELECT COUNT(*) AS n FROM audit" + clause,
+            total = conn.execute("SELECT COUNT(*) AS n FROM audit" + clause,   # sql-ok 只拼列名/表名/SET 片段，值都走 ?
                                  args).fetchone()["n"]
             rows = conn.execute(
-                "SELECT * FROM audit" + clause + " ORDER BY id DESC LIMIT ? OFFSET ?",
+                "SELECT * FROM audit" + clause + " ORDER BY id DESC LIMIT ? OFFSET ?",   # sql-ok 只拼列名/表名/SET 片段，值都走 ?
                 args + [limit, offset]).fetchall()
             return self._json({"ok": True, "total": int(total or 0), "offset": offset,
                                "limit": limit, "audit": [dict(r) for r in rows]})
@@ -3731,6 +3743,8 @@ class Handler(BaseHTTPRequestHandler):
             kind_id = cfg.get("module") or cfg.get("kind") or ""
             disabled = panel.disabled_modules(panel.connect())
             return self._json({"ok": True,
+                               "external": sorted(modules.external_routes(
+                                   kind_id, VERSION) or []),
                                "pages": modules.console_pages(kind_id, VERSION,
                                                               disabled=disabled),
                                "scripts": modules.console_scripts(kind_id, VERSION,
@@ -3975,6 +3989,10 @@ class Handler(BaseHTTPRequestHandler):
                 res = model.reset_tickets(conn)
                 me.touch_unlock()
             return self._json({"ok": True, "result": res})
+
+        if path.startswith("/api/admin/roster") and not self._feature("roster"):
+            # 名单是模块申请了才有的能力：没申请的玩法不该看到这几个接口
+            return self._err("这个活动没有启用名单", 404)
 
         if path == "/api/admin/rosters" and method == "GET":
             # 活动能绑哪些名单：只看自己看得见、并且有写入权的

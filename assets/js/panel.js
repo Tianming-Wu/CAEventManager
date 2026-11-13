@@ -2855,19 +2855,31 @@
     loadService();
     syncSudo();
     if (wanted === "server" || wanted === "overview") refreshHost();
-    // 活动列表进页就问一次服务端：模块开关、归档、别人新建的活动都在这里体现。
-    // 只靠实时通知不够——一条断掉的流会让人以为活动还坏着，非要整页刷新
-    if (wanted === "events" || wanted === "all-events" || wanted === "overview") {
-      loadEvents().then(draw);
-    }
-    if (wanted === "audit" && canAudit() && !S.audit.length) loadAudit().then(draw);
-    if (wanted === "rosters") {
-      S.rosterScope = S.rosterScope || "joined";
-      loadRosters(false).then(drawRosters);
-    }
-    if (wanted === "signups") {
-      loadSignups(false).then(drawSignups);
-    }
+    /* 进页就问一次服务端。实时通知只负责"快"，长连接的可靠性不足以当真相：
+       流要是断过一段，页面上的数字与列表就会停在旧的那一版，而人看不出来。
+       所以每一页进来都重新取一遍自己要显示的东西——代价是一次小请求。 */
+    var onEnter = {
+      overview: function () {
+        return Promise.all([loadEvents(), loadInvites(), loadOverviewCounts()])
+          .then(draw);
+      },
+      events: function () { return loadEvents().then(draw); },
+      "all-events": function () {
+        return Promise.all([loadEvents(), loadArchived(true)]).then(draw);
+      },
+      users: function () { return loadAccounts().then(draw); },
+      "approval-users": function () { return loadAccounts().then(draw); },
+      audit: function () { return loadAudit().then(draw); },
+      templates: function () { return loadTemplates(true).then(draw); },
+      rosters: function () {
+        S.rosterScope = S.rosterScope || "joined";
+        return loadRosters(false).then(drawRosters);
+      },
+      signups: function () { return loadSignups(false).then(drawSignups); },
+      screens: function () { return loadScreenPacks().then(drawScreens); },
+      account: function () { return loadTokens().then(drawTokens); }
+    };
+    if (onEnter[wanted]) onEnter[wanted]();
     if (wanted === "signup") {
       if (!S.signupId) {
         location.hash = "#/signups";
@@ -2877,8 +2889,6 @@
         .then(function () { return loadSignupEntries(false); })
         .then(drawSignup);
     }
-    if (wanted === "screens") loadScreenPacks().then(drawScreens);
-    if (wanted === "account") loadTokens().then(drawTokens);
     if (wanted === "assistant") {
       loadAssistant();
       resumeAssistant(prevRoute);
@@ -3894,21 +3904,32 @@
       });
   }
 
+  /* 活动管理两张表共用的首列：名字点开详情，模块停着的在旁边挂「不可用」胶囊 */
+  function eventNameCell(e) {
+    return '<span class="event-name">' +
+      '<button class="link-btn" type="button" data-event-detail="' + e.seq + '">' +
+      "<b>" + PX.esc(eventTitle(e)) + "</b></button>" +
+      (e.stopped
+        ? '<button class="badge-off" type="button" data-off-tip="1"' +
+          ' aria-label="不可用：依赖模块被禁用">' + ICON_ALERT + "不可用</button>"
+        : "") +
+      "</span>";
+  }
+
   function drawArchived() {
     var body = $("#archivedTable tbody");
     if (!body) return;
     body.innerHTML = S.archived.length ? S.archived.map(function (e) {
       // 已归档的活动已经归平台管：下载、取消归档、彻底删除都在这一行的操作列里
       return "<tr>" +
-        '<td><button class="link-btn" type="button" data-event-detail="' + e.seq + '">' +
-        "<b>" + PX.esc(eventTitle(e)) + "</b></button></td>" +
+        "<td>" + eventNameCell(e) + "</td>" +
         '<td class="num mono">' + e.seq + "</td>" +
         "<td>" + PX.esc(e.ownerName || "—") + "</td>" +
         '<td class="mono">' + PX.whenExact(e.archivedAt) + "</td>" +
         '<td class="mono">' + PX.esc(shortToken(e.id)) + "</td>" +
         '<td class="actions"><button class="detail-btn" type="button" ' +
         'data-event-detail="' + e.seq + '">详情</button></td>' + "</tr>";
-    }).join("") : emptyRow(5, S.archivedTotal === 0
+    }).join("") : emptyRow(6, S.archivedTotal === 0
       ? "还没有归档的活动"
       : "正在读取…");
     var more = $("#archivedMore");
@@ -3931,16 +3952,15 @@
     $("#allEventsTable tbody").innerHTML = S.events.length ? S.events.map(function (e) {
       // 首列点开详情；高权限动作都在详情里，表里不塞按钮
       return "<tr>" +
-        '<td><button class="link-btn" type="button" data-event-detail="' + e.seq + '">' +
-        "<b>" + PX.esc(eventTitle(e)) + "</b></button></td>" +
+        "<td>" + eventNameCell(e) + "</td>" +
         '<td class="num mono">' + e.seq + "</td>" +
-        '<td class="mono" style="font-size:.78rem" title="' + PX.esc(e.id) + '">' +
-        PX.esc(shortToken(e.id)) + "</td>" +
         "<td>" + PX.esc(e.ownerName || "—") + "</td>" +
         '<td class="mono">' + PX.when(e.createdAt) + "</td>" +
+        '<td class="mono" style="font-size:.78rem" title="' + PX.esc(e.id) + '">' +
+        PX.esc(shortToken(e.id)) + "</td>" +
         '<td class="actions"><button class="detail-btn" type="button" ' +
         'data-event-detail="' + e.seq + '">详情</button></td>' + "</tr>";
-    }).join("") : emptyRow(5, "还没有活动");
+    }).join("") : emptyRow(6, "还没有活动");
   }
 
   function drawApprovalUsers() {
@@ -4133,9 +4153,11 @@
         "<td>" + PX.esc(r.actorName || r.actorLabel || r.actor || "") +
         (r.actorId ? ' <span class="dim">(' + PX.esc(r.actorId) + ")</span>" : "") +
         "</td>" +
-        "<td>" + PX.esc(r.action) + "</td>" +
+        // 动作名可以很长（event_member_reinvite）：装不下时靠悬停看全
+        '<td title="' + PX.esc(r.action || "") + '">' + PX.esc(r.action) + "</td>" +
         "<td>" + PX.esc(r.target || "") + "</td>" +
-        '<td class="wrap mono">' + PX.esc(r.detail || "") + "</td></tr>";
+        '<td class="wrap mono" title="' + PX.esc(r.detail || "") + '">' +
+        PX.esc(r.detail || "") + "</td></tr>";
     }).join("") : emptyRow(5, S.auditFilter ? "没有匹配的记录" : "还没有记录");
   }
 

@@ -2702,6 +2702,20 @@ def audit_page(page):
     }""")
     check("日期不贴着操作人", gap >= 8, gap)
 
+    print("== 离开再回来：日志是新取的 ==")
+    made = call(owner_opener(), "/api/panel/roster/create", {"name": "审计刷新测试"})
+    check("另开一场会话写了一条", bool(made and made.get("id")), made)
+    page.click('[data-nav="overview"]')
+    page.wait_for_timeout(500)
+    page.click('[data-nav="audit"]')
+    page.wait_for_timeout(900)
+    first = page.evaluate("""() => {
+        const tr = document.querySelector('#auditTable tbody tr');
+        return tr ? tr.innerText.replace(/\\s+/g, ' ').trim() : '';
+    }""")
+    check("不用刷新页面，新写的那条就在最上面",
+          "roster_create" in first and "审计刷新测试" in first, first)
+
 
 def theme_page(page):
     print("== theme ==")

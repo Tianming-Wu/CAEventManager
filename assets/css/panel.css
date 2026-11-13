@@ -1068,19 +1068,24 @@ table.tbl.fixed td { overflow: hidden; text-overflow: ellipsis; }
 #decidedTable th:nth-child(3) { width: 16%; }
 #decidedTable th:nth-child(4) { width: 20%; }
 #decidedTable th:nth-child(5) { width: 26%; }
-/* 活动管理两张表：活动 / 活动号 / token / 负责人 / 时间 / 操作 */
-#allEventsTable th:nth-child(1) { width: 26%; }
-#allEventsTable th:nth-child(2) { width: 9%; }
-#allEventsTable th:nth-child(3) { width: 20%; }
-#allEventsTable th:nth-child(4) { width: 16%; }
-#allEventsTable th:nth-child(5) { width: 17%; }
-#allEventsTable th:nth-child(6) { width: 12%; }
+/* 活动管理两张表同一套列：活动 / 活动号 / 负责人 / 时间 / token / 操作。
+   两张表列的顺序与宽度都对齐，只有时间那一列的含义不同（创建 / 归档） */
+#allEventsTable th:nth-child(1),
 #archivedTable th:nth-child(1) { width: 26%; }
+#allEventsTable th:nth-child(2),
 #archivedTable th:nth-child(2) { width: 9%; }
+#allEventsTable th:nth-child(3),
 #archivedTable th:nth-child(3) { width: 16%; }
+#allEventsTable th:nth-child(4),
 #archivedTable th:nth-child(4) { width: 17%; }
+#allEventsTable th:nth-child(5),
 #archivedTable th:nth-child(5) { width: 20%; }
+#allEventsTable th:nth-child(6),
 #archivedTable th:nth-child(6) { width: 12%; }
+/* 活动名与「不可用」胶囊同一行：名字长了先省略，胶囊不许被切 */
+td .event-name { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; }
+td .event-name .link-btn { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+td .event-name .badge-off { flex: 0 0 auto; }
 table.tbl tbody tr:hover { background: var(--surface-2); }
 table.tbl td.actions { text-align: right; }
 table.tbl td.actions .btn + .btn { margin-left: 6px; }
@@ -1949,12 +1954,12 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
 #rosterTable th:nth-child(4), #rosterTable td:nth-child(4) { width: 24%; }
 #rosterTable th:nth-child(5), #rosterTable td:nth-child(5) { width: 14%; }
 /* 审计日志：时间那一列只给够放一个时间戳，多出来的宽度让给操作人；
-   动作/对象/说明的起点因此原地不动，说明吃掉剩下的宽度（它也是唯一会折行的列） */
+   动作名（event_member_reinvite 这类）比原来那一档要宽，从说明那里匀过来。
+   说明是唯一会折行的列，剩下的宽度都给它 */
 #auditTable th:nth-child(1), #auditTable td:nth-child(1) { width: 140px; }
 #auditTable th:nth-child(2), #auditTable td:nth-child(2) { width: calc(29% - 140px); }
-#auditTable th:nth-child(3), #auditTable td:nth-child(3) { width: 13%; }
-#auditTable th:nth-child(4), #auditTable td:nth-child(4) { width: 14%; }
-#auditTable th:nth-child(5), #auditTable td:nth-child(5) { width: 44%; }
+#auditTable th:nth-child(3), #auditTable td:nth-child(3) { width: 182px; }
+#auditTable th:nth-child(4), #auditTable td:nth-child(4) { width: 152px; }
 
 /* 搜索框里的占位文字不能被裁：给足内边距与最小宽度 */
 .searchbox { min-width: 200px; }

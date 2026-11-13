@@ -303,7 +303,8 @@
 
   // 允许点遮罩关闭的弹窗（都是没有输入、关掉不丢东西的）
   var OVERLAY_OUTSIDE_CLOSE = { presets: true, info: true, "event-detail": true,
-                                "event-transfer": true };
+                                "event-transfer": true, "admin-roster": true,
+                                "admin-signup": true };
 
   /* 叠放：sudo 提示这类"盖在当前弹窗上的小窗"关掉之后要回到原来那一层，
      不能把下面的详情一起关掉 */
@@ -765,9 +766,10 @@
   // While not elevated the password prompt is that confirmation, so this is
   // skipped - typing it is already deliberate, and cancelling it leaves no
   // trace because nothing ever reached the server.
+  // opts.always：这一次一定要问一句。动作可能压根不需要密码（拥有者删自己建的名单），
+  // 那样就没有密码提示可以充当确认，只剩这一下点击。
   function confirmHighRisk(title, note, label, danger, run, opts) {
-    // 没进 sudo：这一步本身就是确认，把说明交给它的弹窗，别让这句话丢掉
-    if (!sudoActive()) return run(note);
+    if (!sudoActive() && !(opts && opts.always)) return run(note);
     openOverlay("confirm", title,
       '<p class="page-sub">' + note + "</p>"
       + '<div class="row" style="margin-top:18px;justify-content:flex-end">'
@@ -795,6 +797,7 @@
         apiSudo("/event/reclaim", { method: "POST", body: { seq: Number(seq) } },
           "回收站内资源", note)
           .then(function (d) {
+            closeAllOverlays();
             PX.toast("已回收 " + ((d && d.shortlinks) || 0) + " 条短链");
             return reloadAll();
           })
@@ -824,10 +827,8 @@
     }
     if (archived) {
       acts.push({ text: "下载完整数据", kind: "", run: function () { archivedDownload(seq); } });
-      acts.push({ text: "取消归档", kind: "", leaves: true,
-                  run: function () { archivedRestore(seq); } });
-      acts.push({ text: "彻底删除", kind: "danger", leaves: true,
-                  run: function () { archivedDelete(seq); } });
+      acts.push({ text: "取消归档", kind: "", run: function () { archivedRestore(seq); } });
+      acts.push({ text: "彻底删除", kind: "danger", run: function () { archivedDelete(seq); } });
     } else {
       acts.push({ text: "下载数据", kind: "", run: function () { archivedDownload(seq); } });
       acts.push({ text: "转移负责人", kind: "", run: function () { transferOwner(seq); } });
@@ -853,13 +854,9 @@
       card.querySelectorAll("[data-detail-act]").forEach(function (btn) {
         btn.addEventListener("click", function () {
           var act = acts[Number(btn.getAttribute("data-detail-act"))];
-          if (!act) return;
-          // 取消归档、彻底删除会让这场活动整个变样：那两步离开详情。
-          // 下载、转移、回收、强制归档留在详情里，取消也不至于把页面跳走
-          var out = act.run();
-          if (act.leaves && out && out.then) {
-            out.then(function () { closeAllOverlays(); }, function () {});
-          }
+          // 改动对象的动作成功后自己收掉弹窗（详情里的数据已经过期）；
+          // 下载、打开这类不改动对象的动作留在详情里
+          if (act) act.run();
         });
       });
     });
@@ -905,6 +902,7 @@
       apiSudo("/event/force_archive", { method: "POST", body: { seq: Number(seq) } },
         "强制归档活动", note)
         .then(function () {
+          closeAllOverlays();
           PX.toast("已归档");
           return reloadAll();
         })
@@ -925,47 +923,42 @@
     if (e.ownerMissing) {
       // 负责人账号已经被彻底删了：取消归档要顺带指定一个新的负责人。
       // 归档的活动不拦着删人，所以这种活动一定存在，得有个说法
-      return new Promise(function (resolve) {
-        pickPeople({
-          title: "取消归档：先指定负责人",
-          mode: "single",
-          apply: function (people) {
-            var who = people[0];
-            if (!who) return resolve(false);
-            confirmHighRisk("取消归档",
-              "这场活动的负责人账号已不存在。取消归档并交给 " + PX.esc(who.label) + "？",
-              "取消归档", false, function (note) {
-                apiSudo("/event/unarchive",
-                  { method: "POST", body: { seq: Number(seq), owner: who.uid } },
-                  "取消归档", note)
-                  .then(function () {
-                    PX.toast("已取消归档，负责人是 " + who.label);
-                    resolve(true);
-                    return reloadAll();
-                  })
-                  .catch(function (err) { resolve(false); fail(err); });
-              }, { keepUnder: true });
-          }
-        });
+      return pickPeople({
+        title: "取消归档：先指定负责人",
+        mode: "single",
+        apply: function (people) {
+          var who = people[0];
+          if (!who) return;
+          confirmHighRisk("取消归档",
+            "这场活动的负责人账号已不存在。取消归档并交给 " + PX.esc(who.label) + "？",
+            "取消归档", false, function (note) {
+              apiSudo("/event/unarchive",
+                { method: "POST", body: { seq: Number(seq), owner: who.uid } },
+                "取消归档", note)
+                .then(function () {
+                  closeAllOverlays();
+                  PX.toast("已取消归档，负责人是 " + who.label);
+                  return reloadAll();
+                })
+                .catch(fail);
+            }, { keepUnder: true });
+        }
       });
     }
-    return new Promise(function (resolve) {
-      confirmHighRisk("取消归档", "确认取消归档？",
-        "取消归档", false, function (note) {
-          apiSudo("/event/unarchive", { method: "POST", body: { seq: Number(seq) } },
-            "取消归档", note)
-            .then(function () {
-              PX.toast("已取消归档");
-              resolve(true);
-              return reloadAll();
-            })
-            .catch(function (e) { resolve(false); fail(e); });
-        }, { keepUnder: true });
-    });
+    confirmHighRisk("取消归档", "确认取消归档？",
+      "取消归档", false, function (note) {
+        apiSudo("/event/unarchive", { method: "POST", body: { seq: Number(seq) } },
+          "取消归档", note)
+          .then(function () {
+            closeAllOverlays();
+            PX.toast("已取消归档");
+            return reloadAll();
+          })
+          .catch(fail);
+      }, { keepUnder: true });
   }
 
   function archivedDelete(seq) {
-    return new Promise(function (resolve) {
     confirmHighRisk("彻底删除归档的活动",
       "删除后不可恢复。确认继续？",
       "彻底删除", true,
@@ -973,23 +966,20 @@
         apiSudo("/event/delete", { method: "POST", body: { seq: Number(seq) } },
           "彻底删除归档的活动", note)
           .then(function () {
+            closeAllOverlays();
             PX.toast("已删除");
-            resolve(true);
             return loadArchived(true);
           })
           .catch(function (e) {
             if (e && e.status === 404) {
-              // 别处已经删掉了：刷新一遍列表，别让人对着一条已经不存在的记录再点
-              PX.toast("这场活动已经不在了", true);
-              loadArchived(true);
-              resolve(true);
-              return;
+              // 别处已经删掉了：收掉详情、刷新列表，别让人对着一条不存在的记录再点
+              closeAllOverlays();
+              PX.toast("这场活动已被删除", true);
+              return loadArchived(true);
             }
-            resolve(false);
             fail(e);
           });
       }, { keepUnder: true });
-    });
   }
 
   function rotateEvent(seq) {
@@ -2604,15 +2594,20 @@
     var del = $("#rosterDelete");
     if (del) {
       del.addEventListener("click", function () {
-        if (!window.confirm("删除「" + r.name + "」？名单里的人会一起删掉，人员记录保留。")) return;
-        PX.api("/roster/delete", { method: "POST", body: { id: r.id } })
-          .then(function () {
-            closeOverlay();
-            PX.toast("已删除");
-            S.roster = null;
-            location.hash = "#/rosters";
-          })
-          .catch(function (e) { PX.toast(PX.esc(e.message), true); });
+        // 删自己建的名单不需要密码，所以这一步的确认只能由弹窗自己给
+        confirmHighRisk("删除名单",
+          "名单里的人会一起删掉，人员记录保留。确认继续？", "删除", true,
+          function (note) {
+            apiSudo("/roster/delete", { method: "POST", body: { id: r.id } },
+                    "删除名单", note)
+              .then(function () {
+                closeAllOverlays();
+                PX.toast("已删除");
+                S.roster = null;
+                location.hash = "#/rosters";
+              })
+              .catch(function (e) { PX.toast(PX.esc(e.message), true); });
+          }, { always: true });
       });
     }
   }
@@ -4120,6 +4115,7 @@
             apiSudo("/" + kind + "/transfer",
               { method: "POST", body: { id: row.id, uid: who.uid } }, "转移拥有者", note)
               .then(function () {
+                closeAllOverlays();
                 PX.toast("已交给 " + who.label);
                 return loadAdminLists().then(drawRosterAdmin);
               })
@@ -4130,17 +4126,17 @@
   }
 
   function deleteAdminList(kind, row) {
-    var title = kind === "roster" ? row.name : row.title;
     confirmHighRisk("彻底删除" + (kind === "roster" ? "名单" : "报名"),
       "删除后无法恢复。确认继续？", "删除", true, function (note) {
         apiSudo("/" + kind + "/delete", { method: "POST", body: { id: row.id } },
                 "删除" + (kind === "roster" ? "名单" : "报名"), note)
           .then(function () {
+            closeAllOverlays();
             PX.toast("已删除");
             return loadAdminLists().then(drawRosterAdmin);
           })
           .catch(fail);
-      });
+      }, { always: true });
   }
 
   function drawApprovalUsers() {

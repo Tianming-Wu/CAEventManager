@@ -2461,12 +2461,80 @@ def roster_admin_page(browser):
         check("详情里有转移与删除",
               "转移拥有者" in body and "彻底删除" in body, body[:140])
         check("也说得出拥有者是谁", "拥有者" in body, body[:80])
+        # 点遮罩关掉：和活动详情一样，这类只读弹窗关掉不丢东西
+        page.click("#overlay", position={"x": 20, "y": 20})
+        page.wait_for_timeout(300)
+        check("点外面能关掉详情", page.locator("#overlay").is_hidden())
+        # 彻底删除：先问一句，删完弹窗收掉、列表刷新
+        page.click("[data-admin-roster]")
+        page.wait_for_timeout(400)
+        idx = page.evaluate("""() => {
+            const btns = Array.from(
+                document.querySelectorAll('#overlayBody [data-list-act]'));
+            const hit = btns.find(b => b.textContent.trim() === '彻底删除');
+            return hit ? hit.getAttribute('data-list-act') : null;
+        }""")
+        check("详情里有彻底删除", idx is not None, idx)
+        page.click('[data-list-act="%s"]' % idx)
+        page.wait_for_timeout(500)
+        check("删之前先问一句",
+              page.inner_text("#overlayTitle").strip() == "彻底删除名单",
+              page.inner_text("#overlayTitle"))
+        page.click("#confirmGo")
+        page.wait_for_timeout(1600)
+        check("删完之后弹窗收掉了", page.locator("#overlay").is_hidden())
+        check("列表里也没有了",
+              "名单管理测试" not in page.inner_text("#adminRosterTable tbody"),
+              page.inner_text("#adminRosterTable tbody")[:120])
     finally:
         ctx.close()
         for row in call(owner, "/api/panel/rosters?scope=all&limit=100")["rosters"]:
             if row["name"] == "名单管理测试":
                 call(owner, "/api/panel/sudo", {"password": PASSWORD})
                 call(owner, "/api/panel/roster/delete", {"id": row["id"]})
+
+
+def archived_delete_page(browser):
+    """归档活动的详情：彻底删除之后弹窗收掉，列表也刷新。"""
+    print("== 归档活动：彻底删除之后弹窗收掉 ==")
+    owner = owner_opener()
+    made = call(owner, "/api/panel/events/create",
+                {"template": "nwuca.salon", "title": "要彻底删掉的活动", "params": {}})
+    seq = made["event"]["seq"]
+    call(owner, "/api/panel/sudo", {"password": PASSWORD})
+    archived = call(owner, "/api/panel/event/force_archive", {"seq": seq})
+    check("先把它归档", bool(archived and archived.get("archived")), archived)
+    ctx, page = new_page(browser, 1440, 900)
+    try:
+        ui_login(page)
+        page.goto(BASE + "/panel#/all-events")
+        page.wait_for_timeout(1200)
+        page.click('#archivedTable [data-event-detail="%d"]' % seq)
+        page.wait_for_timeout(400)
+        check("归档表的详情打得开", not page.locator("#overlay").is_hidden())
+        idx = page.evaluate("""() => {
+            const btns = Array.from(
+                document.querySelectorAll('#overlayBody [data-detail-act]'));
+            const hit = btns.find(b => b.textContent.trim() === '彻底删除');
+            return hit ? hit.getAttribute('data-detail-act') : null;
+        }""")
+        check("详情里有彻底删除", idx is not None, idx)
+        page.click('[data-detail-act="%s"]' % idx)
+        page.wait_for_timeout(600)
+        # 这一页的动作都要提权：没进 sudo 时，密码提示本身就当确认用
+        check("删之前先要一次密码", page.locator("#sudoPass").count() == 1)
+        check("提示里说清是哪个动作",
+              "彻底删除归档的活动" in page.inner_text("#overlayBody"),
+              page.inner_text("#overlayBody")[:120])
+        page.fill("#sudoPass", PASSWORD)
+        page.click("#sudoEnter")
+        page.wait_for_timeout(1800)
+        check("删完之后详情收掉了", page.locator("#overlay").is_hidden())
+        check("归档表里也没有了",
+              "要彻底删掉的活动" not in page.inner_text("#archivedTable tbody"),
+              page.inner_text("#archivedTable tbody")[:120])
+    finally:
+        ctx.close()
 
 
 def account_delete_page(browser):
@@ -3429,6 +3497,7 @@ def main():
                 leave_guard_page(browser)
                 module_refresh_page(browser)
                 roster_admin_page(browser)
+                archived_delete_page(browser)
                 account_delete_page(browser)
                 # profile_page edits the signed-in account, so it only runs on a
                 # throw-away instance

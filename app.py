@@ -68,7 +68,7 @@ PAGES_DIR = os.path.join(BASE_DIR, "pages")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.0.92"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.0.93"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -4507,8 +4507,12 @@ def main():
     panel.init_db()
     panel.bootstrap(LOCAL_CFG, log=log)
     lists.init_db()
-    # 每个活动有自己的库：启动时逐个建表、补默认配置、给公示页写好地址
+    # 每个活动有自己的库：启动时逐个建表、补默认配置、给公示页写好地址。
+    # 已归档的活动业务库被压进包里了，不能在这里凭空再造一个空的出来——
+    # 那样它既没有模块也没有配置，取消归档之前就一直是坏的
     for seq in panel.event_seqs():
+        if not eventfs.has_data(seq):
+            continue
         db.set_event(seq)
         db.init_db()
         conn = db.connect()

@@ -12,6 +12,7 @@ import io
 import json
 import os
 import re
+import shutil
 import socket
 import sys
 import time
@@ -25,6 +26,11 @@ HEADER = {"X-Requested-With": "CAEventManager"}
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # 服务实例的数据目录：跑套件时会传进来，平台提示词就写在它下面
 DATA = os.environ.get("LOTTERY_DATA_DIR") or os.path.join(HERE, "data")
+
+
+def modules_dir():
+    """这个实例装模块的目录：套件往里放临时模块，跑完就删。"""
+    return os.environ.get("LOTTERY_MODULES_DIR") or os.path.join(HERE, "modules")
 
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "core"))
@@ -435,6 +441,66 @@ def main():
     listed = call(owner, "/api/panel/events")["events"]
     check("列表上的标记也跟着去掉",
           not any(e["stopped"] for e in listed if e["seq"] == ev["seq"]), listed)
+
+    print("== 高危能力（super.*）：声明了也要站长逐条点头 ==")
+    # 临时装一个申请了 super.anyshortlink 的模块：它归这个实例的 modules 目录，
+    # 跑完之后删掉（不给别的用例留尾巴）
+    probe_dir = os.path.join(modules_dir(), "nwuca.superprobe")
+    try:
+        os.makedirs(probe_dir, exist_ok=True)
+        with open(os.path.join(probe_dir, "module.json"), "w", encoding="utf-8") as fh:
+            json.dump({"id": "nwuca.superprobe", "name": "高危能力测试模块",
+                       "version": "1.0", "author": "panel_test",
+                       "features": {"shortlink": {}, "super.anyshortlink": True}}, fh)
+        probe = [m for m in call(owner, "/api/panel/modules")["modules"]
+                 if m["id"] == "nwuca.superprobe"]
+        check("装上的模块会自己出现在列表里", bool(probe), probe)
+        probe = probe[0] if probe else {}
+        check("它声明的高危能力能列出来",
+              [f["name"] for f in (probe.get("superFeatures") or [])]
+              == ["super.anyshortlink"], probe.get("superFeatures"))
+        check("声明了也不自动生效", "super.anyshortlink" not in (probe.get("features") or {}),
+              list(probe.get("features") or {}))
+        check("并且说清需要平台单独授权",
+              any("单独授权" in n for n in (probe.get("notes") or [])), probe.get("notes"))
+        check("超管不能授予",
+              post(teacher, "/api/panel/module/super",
+                   {"id": "nwuca.superprobe", "feature": "super.anyshortlink"},
+                   expect=403) is not None)
+        post(owner, "/api/panel/sudo/exit")
+        refused = post(owner, "/api/panel/module/super",
+                       {"id": "nwuca.superprobe", "feature": "super.anyshortlink"},
+                       expect=403)
+        check("站长授予也要先进 sudo",
+              refused and refused.get("sudoRequired") is True, refused)
+        post(owner, "/api/panel/sudo", {"password": owner_password()})
+        check("没申请的能力不能乱授",
+              post(owner, "/api/panel/module/super",
+                   {"id": "nwuca.superprobe", "feature": "super.whatever"},
+                   expect=400) is not None)
+        granted = post(owner, "/api/panel/module/super",
+                       {"id": "nwuca.superprobe", "feature": "super.anyshortlink"})
+        check("站长提权之后可以授予", granted and granted.get("granted") is True, granted)
+        after = [m for m in call(owner, "/api/panel/modules")["modules"]
+                 if m["id"] == "nwuca.superprobe"][0]
+        check("授予之后能力真的生效",
+              "super.anyshortlink" in (after.get("features") or {}), after.get("features"))
+        check("也标着已经授予",
+              after.get("superGranted") == ["super.anyshortlink"], after.get("superGranted"))
+        trail = [a for a in call(owner, "/api/panel/audit?limit=10")["audit"]
+                 if a["action"] == "super_grant"]
+        check("审计里记了给了哪个模块哪一条能力",
+              trail and trail[0]["target"] == "nwuca.superprobe"
+              and "feature: super.anyshortlink" in (trail[0]["detail"] or ""), trail[:1])
+        post(owner, "/api/panel/module/super",
+             {"id": "nwuca.superprobe", "feature": "super.anyshortlink", "on": False})
+        revoked = [m for m in call(owner, "/api/panel/modules")["modules"]
+                   if m["id"] == "nwuca.superprobe"][0]
+        check("收回之后又不生效了",
+              "super.anyshortlink" not in (revoked.get("features") or {}),
+              revoked.get("features"))
+    finally:
+        shutil.rmtree(probe_dir, ignore_errors=True)
 
     print("== a preset that arrives from outside ==")
     orphan = {"id": "demo.orphan", "name": "外部预设",

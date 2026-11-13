@@ -19,6 +19,8 @@ CODE_LEN = 7
 PER_EVENT_LIMIT = 5          # 单个活动同时持有的上限，见 localconfig.STATIC_DEFAULTS
 TTL_MAX_MIN = 60 * 24 * 30   # 有效期上限一个月；0 表示不设过期
 TARGET_MAX = 200             # 目标路径长度上限
+# 拿到 super.anyshortlink 的模块可以指向外面去，绝对地址比相对路径长得多
+RELAXED_TARGET_MAX = 2000
 
 
 class ShortlinkError(Exception):
@@ -52,16 +54,21 @@ def _view(row, now=None):
     }
 
 
-def clean_target(raw):
+def clean_target(raw, relaxed=False):
     """目标是一个活动内的相对路径：模块想指哪儿就指哪儿，模块自己的 token 也可以跟在后面。
 
     平台只拦三件事：带协议的绝对地址、跳出活动目录的 `..`、再套一层 `/s/`。
+    ``relaxed`` 是拿到了 `super.anyshortlink` 的模块才有的待遇：这三条全部放开，
+    目标可以指向活动地址之外的地方——所以那条能力要站长逐条授予，见模块管理。
     """
     target = (raw or "").strip()
+    limit = RELAXED_TARGET_MAX if relaxed else TARGET_MAX
+    if len(target) > limit:
+        raise ShortlinkError("目标地址太长")
+    if relaxed:
+        return target
     while target.startswith("/"):
         target = target[1:]
-    if len(target) > TARGET_MAX:
-        raise ShortlinkError("目标地址太长")
     low = target.lower()
     if "://" in low or low.startswith("//"):
         raise ShortlinkError("目标要写活动内的相对路径，不要带协议")
@@ -72,9 +79,10 @@ def clean_target(raw):
     return target
 
 
-def create(conn, seq, target, created_by="", minutes=0, max_hits=0, limit=PER_EVENT_LIMIT):
+def create(conn, seq, target, created_by="", minutes=0, max_hits=0, limit=PER_EVENT_LIMIT,
+           relaxed=False):
     """给一个活动生成一条短链。超出上限、目标不合规都拒绝。"""
-    target = clean_target(target)
+    target = clean_target(target, relaxed)
     minutes = int(minutes or 0)
     if minutes < 0 or minutes > TTL_MAX_MIN:
         raise ShortlinkError("有效期最多 30 天；不设过期请留空")

@@ -37,6 +37,10 @@ def boot(tag):
     # 随发布走的外观（classic）先拷进去，否则大屏没有兜底
     shutil.copytree(os.path.join(ROOT, "theme"), theme_dir, dirs_exist_ok=True)
     env["LOTTERY_THEME_DIR"] = theme_dir
+    # 这个实例自己装的模块也放进自己的目录：套件要装临时模块时不弄脏仓库的 modules/
+    modules_dir = os.path.join(data, "modules")
+    os.makedirs(modules_dir, exist_ok=True)
+    env["LOTTERY_MODULES_DIR"] = modules_dir
     # 自己的 config.json：仓库那份写着生产的对外前缀，测试照着它跳会跳到线上
     base = "http://127.0.0.1:%d" % port
     config_path = os.path.join(data, "config.json")
@@ -105,6 +109,8 @@ def run(tag, commands, need_server=True):
             # 随发布走的外观（classic）先拷进去，否则大屏没有兜底
             shutil.copytree(os.path.join(ROOT, "theme"), theme_dir, dirs_exist_ok=True)
             env["LOTTERY_THEME_DIR"] = theme_dir
+            # 套件往这里装临时模块（高危能力的用例要一个声明了 super.* 的模块）
+            env["LOTTERY_MODULES_DIR"] = os.path.join(data, "modules")
         for tool, extra in commands:
             if need_server:
                 cmd = [PY, os.path.join("tools", tool), base, pw] + extra

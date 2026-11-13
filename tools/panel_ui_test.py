@@ -16,6 +16,7 @@ import json
 import os
 import random
 import re
+import shutil
 import sys
 import urllib.request
 
@@ -2613,6 +2614,72 @@ def roster_admin_page(browser):
                     drop_roster(owner, row["id"])
 
 
+def super_grant_page(browser):
+    """模块管理：申请了高危能力的模块挂胶囊，授予前要看得到一条条后果。"""
+    print("== 高危能力：声明了也要站长点头 ==")
+    root = os.environ.get("LOTTERY_MODULES_DIR")
+    if not root:
+        check("装得下临时模块（跳过：没有 LOTTERY_MODULES_DIR）", True)
+        return
+    probe = os.path.join(root, "nwuca.uiprobe")
+    owner = owner_opener()
+    ctx = page = None
+    try:
+        os.makedirs(probe, exist_ok=True)
+        with open(os.path.join(probe, "module.json"), "w", encoding="utf-8") as fh:
+            json.dump({"id": "nwuca.uiprobe", "name": "高危能力界面测试",
+                       "version": "1.0", "author": "panel_ui_test",
+                       "features": {"super.anyshortlink": True}}, fh)
+        ctx, page = new_page(browser, 1440, 900)
+        ui_login(page)
+        page.goto(BASE + "/panel#/modules")
+        page.wait_for_timeout(900)
+        row = '#moduleTable tr:has([data-module-super="nwuca.uiprobe"])'
+        check("申请了高危能力的模块挂着胶囊",
+              page.locator(row + " .badge-off").count() == 1,
+              page.inner_text("#moduleTable tbody")[:160])
+        check("站长看得到授予按钮",
+              page.locator('[data-module-super="nwuca.uiprobe"]').count() == 1)
+        page.click('[data-module-super="nwuca.uiprobe"]')
+        page.wait_for_timeout(500)
+        body = page.inner_text("#overlayBody")
+        check("弹窗先用红字点题", "模块申请以下高危权限" in body, body[:120])
+        check("再逐条列出能力与后果",
+              "super.anyshortlink" in body and "短链接" in body, body[:200])
+        check("说清只有站长能给", "只有站长能授予" in body, body[:200])
+        page.click('[data-close-overlay="1"]')
+        page.wait_for_timeout(300)
+        check("取消之后什么都授予不了",
+              not (call(owner, "/api/panel/modules")["modules"]
+                   and [m for m in call(owner, "/api/panel/modules")["modules"]
+                        if m["id"] == "nwuca.uiprobe"][0].get("superGranted")),
+              None)
+        # 真授予：没提权时先要密码
+        page.click('[data-module-super="nwuca.uiprobe"]')
+        page.wait_for_timeout(400)
+        page.click("#superGo")
+        page.wait_for_timeout(700)
+        check("授予要再输一次密码", page.locator("#sudoPass").count() == 1)
+        page.fill("#sudoPass", PASSWORD)
+        page.click("#sudoEnter")
+        page.wait_for_timeout(1800)
+        granted = [m for m in call(owner, "/api/panel/modules")["modules"]
+                   if m["id"] == "nwuca.uiprobe"][0]
+        check("授予之后能力生效", "super.anyshortlink" in (granted.get("features") or {}),
+              granted.get("features"))
+        check("胶囊也变成已授予",
+              "已授予" in page.inner_text("#moduleTable tbody"),
+              page.inner_text("#moduleTable tbody")[:160])
+        # 收回去：留着会让后面的用例看到一条多余的能力
+        call(owner, "/api/panel/sudo", {"password": PASSWORD})
+        call(owner, "/api/panel/module/super",
+             {"id": "nwuca.uiprobe", "feature": "super.anyshortlink", "on": False})
+    finally:
+        if ctx is not None:
+            ctx.close()
+        shutil.rmtree(probe, ignore_errors=True)
+
+
 def archived_delete_page(browser):
     """归档活动的详情：彻底删除之后弹窗收掉，列表也刷新。"""
     print("== 归档活动：彻底删除之后弹窗收掉 ==")
@@ -3625,6 +3692,7 @@ def main():
                 leave_guard_page(browser)
                 module_refresh_page(browser)
                 roster_admin_page(browser)
+                super_grant_page(browser)
                 archived_delete_page(browser)
                 account_delete_page(browser)
                 # profile_page edits the signed-in account, so it only runs on a

@@ -536,6 +536,36 @@ def main():
     check("记录整包透传，平台不改形状",
           app.module_record(rec, spec, with_pinyin=False)["tickets"] == [])
 
+    print("== 高危能力（super.*）：声明了也只是申请 ==")
+    errs = []
+    got = app.modules.resolve_features(["super.anyshortlink"], errs)
+    check("没授予的高危能力不给，并说清原因",
+          got == {} and any("单独授权" in e for e in errs), (got, errs))
+    granted = app.modules.resolve_features(["super.anyshortlink"], [],
+                                          super_grants={"super.anyshortlink"})
+    check("点了头才给", list(granted) == ["super.anyshortlink"], granted)
+    check("它只是开关，不带字段", granted["super.anyshortlink"] == {}, granted)
+    listed = app.modules.super_features(["shortlink", "super.anyshortlink"])
+    check("模块管理页要列的那一份带说明",
+          [f["name"] for f in listed] == ["super.anyshortlink"] and listed[0]["note"],
+          listed)
+    check("模块 id 不能用这个命名空间",
+          app.modules.is_super_feature("super.evil") is True)
+
+    def target(raw, relaxed=False):
+        try:
+            return app.shortlinks.clean_target(raw, relaxed)
+        except app.shortlinks.ShortlinkError:
+            return None
+
+    check("普通模块的短链目标不能带协议", target("https://example.com/x") is None)
+    check("也不许跳出活动目录", target("../other/x") is None)
+    check("还不许套短链", target("s/ABCDEFG") is None)
+    check("相对路径照旧", target("/board") == "board")
+    check("拿到 super.anyshortlink 之后三道拦截全放开",
+          target("https://example.com/x", True) == "https://example.com/x"
+          and target("../other/x", True) == "../other/x", None)
+
     print("== SQL 拼接审计 ==")
     import subprocess as _sp
     lint = _sp.run([sys.executable, os.path.join("tools", "sql_lint.py"), "--strict"],

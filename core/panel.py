@@ -152,6 +152,16 @@ CREATE TABLE IF NOT EXISTS module_state (
     updated_by TEXT    NOT NULL DEFAULT ''
 );
 
+-- 高危能力（super.*）的授予记录：一条 = 站长给某个模块放开了某条能力。
+-- 与 module_state 分开：普通开关谁都能改，这个只有站长能授予，且要提权
+CREATE TABLE IF NOT EXISTS super_grants (
+    module_id  TEXT    NOT NULL,
+    feature    TEXT    NOT NULL,
+    granted_at REAL    NOT NULL,
+    actor      TEXT    NOT NULL DEFAULT '',
+    PRIMARY KEY (module_id, feature)
+);
+
 CREATE TABLE IF NOT EXISTS drafts (
     account_id INTEGER NOT NULL,
     key        TEXT    NOT NULL,
@@ -698,6 +708,42 @@ def set_module_enabled(conn, module_id, on, actor=""):
         "   enabled=excluded.enabled, updated_at=excluded.updated_at,"
         "   updated_by=excluded.updated_by",
         (module_id, 1 if on else 0, time.time(), actor))
+    return bool(on)
+
+
+def super_grants(conn):
+    """高危能力的授予表：``{模块 id: {能力名, …}}``。
+
+    模块声明里写 `super.*` 只是申请，平台还得逐条点头——这张表就是那些点头记录。
+    载入模块时把结果传进去，没点头的能力照样丢掉。
+    """
+    out = {}
+    for row in conn.execute("SELECT module_id, feature FROM super_grants"):
+        out.setdefault(row["module_id"], set()).add(row["feature"])
+    return out
+
+
+def granted_super(conn, module_id):
+    """这个模块拿到了哪几条高危能力。"""
+    return {
+        r["feature"] for r in
+        conn.execute("SELECT feature FROM super_grants WHERE module_id=?",
+                     (str(module_id or ""),))
+    }
+
+
+def set_super_grant(conn, module_id, feature, on, actor=""):
+    """授予或收回一条高危能力。"""
+    if on:
+        conn.execute(
+            "INSERT INTO super_grants (module_id, feature, granted_at, actor)"
+            " VALUES (?,?,?,?)"
+            " ON CONFLICT(module_id, feature) DO UPDATE SET"
+            "   granted_at=excluded.granted_at, actor=excluded.actor",
+            (str(module_id), str(feature), time.time(), actor or ""))
+    else:
+        conn.execute("DELETE FROM super_grants WHERE module_id=? AND feature=?",
+                     (str(module_id), str(feature)))
     return bool(on)
 
 

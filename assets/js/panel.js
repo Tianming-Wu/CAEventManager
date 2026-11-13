@@ -3309,14 +3309,30 @@
     return PX.api("/modules").then(function (d) {
       S.modules = d.modules || [];
       $("#moduleTable tbody").innerHTML = S.modules.map(function (m) {
+        var risky = (m.superFeatures || []).length;
+        var granted = (m.superGranted || []).length;
+        var tag = "";
+        if (risky) {
+          // 申请了平台保留的高危能力：胶囊带原因，只有站长能授予
+          var names = (m.superFeatures || []).map(function (f) { return f.name; }).join("、");
+          tag = '<button class="badge-off" type="button" data-tip="申请了高危权限：' +
+            PX.esc(names) + '" aria-label="申请了高危权限">' + ICON_ALERT +
+            (granted ? "高危 · 已授予" : "高危") + "</button>";
+        }
+        var superBtn = "";
+        if (risky && isOwner()) {
+          superBtn = '<button class="btn sm' + (granted ? "" : " danger") +
+            '" type="button" data-module-super="' + PX.esc(m.id) + '">' +
+            (granted ? "收回授权" : "授予权限") + "</button> ";
+        }
         return "<tr" + (m.enabled ? "" : ' class="muted-row"') + ">" +
           "<td><b>" + PX.esc(m.name) + "</b> " +
-          (m.enabled ? "" : '<span class="tag">已停用</span>') + "<br>" +
+          (m.enabled ? "" : '<span class="tag">已停用</span>') + tag + "<br>" +
           '<span class="mono">' + PX.esc(m.id) + "</span></td>" +
           '<td class="mono">' + PX.esc(m.version) + "</td>" +
           "<td>" + PX.esc(m.author || "—") + "</td>" +
           '<td class="mono">' + (m.events || 0) + "</td>" +
-          '<td class="actions">' +
+          '<td class="actions">' + superBtn +
           '<button class="btn sm' + (m.enabled ? " danger" : "") +
           '" type="button" data-module-toggle="' + PX.esc(m.id) +
           '" data-on="' + (m.enabled ? "0" : "1") + '">' +
@@ -3325,6 +3341,47 @@
     }).catch(function (e) {
       if (e.status === 403) return showDenied("modules");
       PX.toast(PX.esc(e.message), true);
+    });
+  }
+
+  /* 高危能力（super.*）：给出去就收不回来，所以只有站长能授予，还要再输一次密码。
+     弹窗里红字只做提示（「申请以下高危权限」这一句），下面逐条列能力与后果，用正常字色 */
+  function superGrantDialog(moduleId) {
+    var m = (S.modules || []).filter(function (x) { return x.id === moduleId; })[0];
+    if (!m) return;
+    var feats = m.superFeatures || [];
+    var grantedAll = feats.length && feats.every(function (f) {
+      return (m.superGranted || []).indexOf(f.name) >= 0;
+    });
+    var rows = feats.map(function (f) {
+      var on = (m.superGranted || []).indexOf(f.name) >= 0;
+      return '<li><b class="mono">' + PX.esc(f.name) + "</b>" +
+        (on ? ' <span class="tag">已授予</span>' : "") +
+        "<br>" + PX.esc(f.note) + "</li>";
+    }).join("");
+    openOverlay("super-grant", m.name,
+      '<p class="super-risk">模块申请以下高危权限</p>' +
+      '<ul class="super-list">' + rows + "</ul>" +
+      '<p class="hint">这些能力让模块能碰到平台管的东西之外（别的活动、别的账号，' +
+      "或者把用户带到别的地方去）。只有站长能授予，授予之后收回来需要再点一次。" + "</p>" +
+      '<div class="row" style="margin-top:18px;justify-content:flex-end">' +
+      '<button class="btn" type="button" data-close-overlay="1">取消</button>' +
+      '<button class="btn ' + (grantedAll ? "" : "danger") + '" type="button" ' +
+      'id="superGo">' + (grantedAll ? "收回授权" : "授予权限") + "</button></div>");
+    $("#superGo").addEventListener("click", function () {
+      var on = !grantedAll;
+      closeOverlay();
+      var jobs = feats.map(function (f) {
+        return apiSudo("/module/super", {
+          method: "POST", body: { id: m.id, feature: f.name, on: on }
+        }, (on ? "授予" : "收回") + "高危权限");
+      });
+      Promise.all(jobs)
+        .then(function () {
+          PX.toast(on ? "已授予" : "已收回");
+          return drawModules();
+        })
+        .catch(fail);
     });
   }
 
@@ -5657,6 +5714,9 @@
       return toggleModule(modToggle.getAttribute("data-module-toggle"),
                           modToggle.getAttribute("data-on") === "1");
     }
+
+    var modSuper = t.closest("[data-module-super]");
+    if (modSuper) return superGrantDialog(modSuper.getAttribute("data-module-super"));
 
     var offTip = t.closest("[data-tip]");
     if (offTip) {

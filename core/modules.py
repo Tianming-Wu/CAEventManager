@@ -34,7 +34,9 @@ BASE_DIR = paths.APP_ROOT
 # shipped with the release, then whatever this instance installed itself
 BUILTIN_DIR = os.path.join(BASE_DIR, "builtin")
 BUILTIN_MODULES_DIR = os.path.join(BUILTIN_DIR, "modules")
-INSTANCE_MODULES_DIR = os.path.join(BASE_DIR, "modules")
+# 这个实例自己装的模块。默认在仓库根的 modules/（已在 .gitignore 里）；
+# LOTTERY_MODULES_DIR 给测试与多实例部署用
+INSTANCE_MODULES_DIR = os.environ.get("LOTTERY_MODULES_DIR") or os.path.join(BASE_DIR, "modules")
 
 ID_RE = re.compile(r"^[a-z0-9]+(\.[a-z0-9_-]+)+$")
 # `super.` 是平台保留给高危功能的命名空间（见 RESERVED_PREFIX），模块 id 与功能名都不能用
@@ -232,9 +234,14 @@ DEFAULT_SEARCH = {
 }
 
 
-def resolve_features(raw, errors=None):
-    """把模块申请的权限解析成"平台认的那几个"，不认识的丢掉并记下原因。"""
+def resolve_features(raw, errors=None, super_grants=()):
+    """把模块申请的权限解析成"平台认的那几个"，不认识的丢掉并记下原因。
+
+    ``super_grants`` 是平台已经点头授予的高危能力（`panel.super_grants()` 的那一份）：
+    声明了但没被授予的仍然丢掉，只记一条「需要平台单独授权」。
+    """
     out = {}
+    granted = set(super_grants or ())
     if isinstance(raw, (list, tuple)):
         raw = {str(name): {} for name in raw}
     if not isinstance(raw, dict):
@@ -244,7 +251,11 @@ def resolve_features(raw, errors=None):
         spec = CAPABILITIES.get(name)
         if spec is None:
             if is_super_feature(name):
-                _note(errors, "高危能力 %s 还没有启用，需要平台单独授权" % name)
+                if name in granted:
+                    # 站长逐条放开的：声明的字段一律不收，它拿到的就是一个开关
+                    out[name] = {}
+                else:
+                    _note(errors, "高危能力 %s 还没有启用，需要平台单独授权" % name)
             else:
                 _note(errors, "没有这个能力：%s" % name)
             continue
@@ -515,7 +526,7 @@ def load_kind_model(kind_id):
 _MODELS = {}
 
 
-def load_module(folder, version, builtin=False, enabled=True):
+def load_module(folder, version, builtin=False, enabled=True, super_grants=()):
     """Read one module directory; raises KindError when it is unusable."""
     meta_path = os.path.join(folder, "module.json")
     if not os.path.isfile(meta_path):
@@ -583,7 +594,10 @@ def load_module(folder, version, builtin=False, enabled=True):
         templates = sorted(n[:-5] for n in os.listdir(tpl_dir) if n.endswith(".json"))
 
     notes = []
-    features = resolve_features(meta.get("features"), notes)
+    features = resolve_features(meta.get("features"), notes, super_grants)
+    # 声明了哪些高危能力、站长已经点头了哪几条：模块管理页照这两份画提示
+    declared_super = super_features(meta.get("features"))
+    granted_super = [f["name"] for f in declared_super if f["name"] in features]
 
     return {
         "id": kind_id,
@@ -600,6 +614,8 @@ def load_module(folder, version, builtin=False, enabled=True):
         "settings": normalize_settings(meta.get("settings")),
         "external": normalize_external(meta.get("external")),
         "features": features,
+        "superFeatures": declared_super,
+        "superGranted": granted_super,
         "api": api,
         "actions": normalize_actions(meta.get("actions"), notes),
         "notes": notes,
@@ -679,23 +695,26 @@ def module_dirs():
     return found
 
 
-def all_modules(version, include_broken=False, disabled=()):
+def all_modules(version, include_broken=False, disabled=(), super_grants=None):
     """Every module on disk, in a stable order, with a usability verdict.
 
     ``disabled`` is the set of ids an administrator switched off.  A disabled
     module is still listed and still referenced by the activities and presets
     that use it - it just cannot be used to start anything new.
+    ``super_grants`` 是站长已经放开的高危能力（``{模块 id: {能力名}}``）。
     """
     out = []
     seen = set()
     disabled = {(str(x)).strip() for x in (disabled or ())}
+    grants = super_grants or {}
     if safemode.enabled():
         # 安全模式：外部资源一律不加载，内置模块也算外部资源
         return out
     for folder, builtin in module_dirs():
         name = os.path.basename(folder)
         try:
-            kind = load_module(folder, version, builtin, name not in disabled)
+            kind = load_module(folder, version, builtin, name not in disabled,
+                               grants.get(name) or grants.get(name.strip()) or ())
         except KindError as exc:
             if include_broken:
                 out.append({"id": name, "name": name, "ok": False,
@@ -709,8 +728,8 @@ def all_modules(version, include_broken=False, disabled=()):
     return out
 
 
-def get(kind_id, version, disabled=()):
-    for kind in all_modules(version, disabled=disabled):
+def get(kind_id, version, disabled=(), super_grants=None):
+    for kind in all_modules(version, disabled=disabled, super_grants=super_grants):
         if kind["id"] == kind_id:
             return kind
     return None

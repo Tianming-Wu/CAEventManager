@@ -863,6 +863,20 @@ a.stat:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 }
 .badge-off svg { width: 13px; height: 13px; stroke-width: 1.7; flex: 0 0 auto; }
 .badge-off:focus-visible { outline: 2px solid var(--danger); outline-offset: 1px; }
+/* 高危权限的确认弹窗：红字只用来点题，能力与后果用正常字色，通篇红反而没人看 */
+.super-risk {
+  margin: 0 0 10px;
+  color: var(--danger);
+  font-weight: 600;
+}
+.super-list {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 8px;
+}
+.super-list li { line-height: 1.5; }
+.super-list .mono { font-family: var(--mono); font-size: .82rem; }
 /* 原因提示：浮在上面，不占版面 */
 .card-tip {
   position: fixed;

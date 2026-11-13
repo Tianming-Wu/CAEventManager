@@ -69,7 +69,7 @@ PAGES_DIR = os.path.join(BASE_DIR, "pages")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.0.98"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.0.99"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -490,7 +490,8 @@ def host_stats(root="/proc", sleep=0.12):
 def _modules_by_id(conn):
     """Every installed module, by id, with the administrator's switch applied."""
     return {m["id"]: m for m in
-            modules.all_modules(VERSION, disabled=panel.disabled_modules(conn))}
+            modules.all_modules(VERSION, disabled=panel.disabled_modules(conn),
+                                super_grants=panel.super_grants(conn))}
 
 
 # 模块被停用时，活动接口与页面统一用这一句话说明白（与 pages/module-off.html 同一句）
@@ -1726,10 +1727,13 @@ class Handler(BaseHTTPRequestHandler):
 
         def shortlink_ok(seq):
             """模块申请了 features.shortlink，这个活动才有短链能力。"""
-            row = conn.execute("SELECT kind FROM events WHERE seq=?", (seq,)).fetchone()
-            mod = _modules_by_id(conn).get(row["kind"] if row else "") or {}
-            if "shortlink" not in (mod.get("features") or {}):
+            if "shortlink" not in (_event_module(seq).get("features") or {}):
                 raise model.ApiError("这个活动的模块没有申请短链能力", 403)
+
+        def _event_module(seq):
+            """这场活动用的模块（带着站长已经授予的高危能力）。"""
+            row = conn.execute("SELECT kind FROM events WHERE seq=?", (seq,)).fetchone()
+            return _modules_by_id(conn).get(row["kind"] if row else "") or {}
 
         if path == "/shortlink" and method == "GET":
             seq = int((query.get("seq") or ["0"])[0] or 0)
@@ -1748,13 +1752,16 @@ class Handler(BaseHTTPRequestHandler):
             seq = int(data.get("seq") or 0)
             event_seat(seq)
             shortlink_ok(seq)
+            # 拿到 super.anyshortlink 的模块可以指向活动之外的地方（平台的三道拦截全放开）
+            relaxed = "super.anyshortlink" in (_event_module(seq).get("features") or {})
             try:
                 with panel.tx() as tx:
                     link = shortlinks.create(
                         tx, seq, str(data.get("target") or ""), acc["username"],
                         minutes=int(data.get("minutes") or 0),
                         max_hits=int(data.get("max_hits") or 0),
-                        limit=localconfig.static_limit(LOCAL_CFG, "shortlink_per_event"))
+                        limit=localconfig.static_limit(LOCAL_CFG, "shortlink_per_event"),
+                        relaxed=relaxed)
             except shortlinks.ShortlinkError as exc:
                 raise model.ApiError(str(exc))
             prefix = (LOCAL_CFG.get("public_base_prefix") or "").rstrip("/")
@@ -2080,11 +2087,38 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/modules" and method == "GET":
             need("superadmin", "owner")
             stopped = panel.disabled_modules(conn)
-            mods = modules.all_modules(VERSION, disabled=stopped)
+            mods = modules.all_modules(VERSION, disabled=stopped,
+                                       super_grants=panel.super_grants(conn))
             for m in mods:
                 # 有几个活动正在用：停用之前先让人看见代价
                 m["events"] = panel.events_on_module(conn, m["id"])
             return self._json({"ok": True, "version": VERSION, "modules": mods})
+
+        if path == "/module/super" and method == "POST":
+            # 给一个模块放开一条高危能力（super.*）。给出去就收不回来这件事由人来判断：
+            # 只有站长能授予，要重输一次密码，并逐条记进审计
+            need("owner")
+            need_sudo()
+            data = body()
+            module_id = (data.get("id") or "").strip()
+            feature = (data.get("feature") or "").strip()
+            on = bool(data.get("on", True))
+            mod = _modules_by_id(conn).get(module_id)
+            if mod is None:
+                raise model.ApiError("没有这个模块", 404)
+            declared = {f["name"] for f in (mod.get("superFeatures") or [])}
+            if feature not in declared:
+                raise model.ApiError("这个模块没有申请 %s" % (feature or "该权限"), 400)
+            refuse_stale()
+            with panel.tx() as tx:
+                panel.set_super_grant(tx, module_id, feature, on, acc["username"])
+                panel.audit(tx, acc["username"],
+                            "super_grant" if on else "super_revoke", module_id,
+                            panel.audit_note(feature=feature))
+            # 能力变了：让活动页重新取一次模块信息
+            bus.bump("modules")
+            return self._json({"ok": True, "id": module_id, "feature": feature,
+                               "granted": on})
 
         if path == "/module/toggle" and method == "POST":
             # 停用一个模块是站级动作：正在用它的活动会一并停摆（数据不动，启用即恢复），

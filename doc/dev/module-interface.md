@@ -37,6 +37,21 @@
 
 模块自己不需要为此写任何代码：它拿到的请求里已经不含停用的活动了。数据一条不动。
 
+### 高危能力（`super.*`）
+
+有些能力给出去就收不回来：模块能碰到「平台管的东西之外」——别的活动、别的账号、服务器，
+或者把用户带到别的地方去。这批能力放在保留命名空间 `super.` 下，声明了**也只是一份申请**：
+
+- `module.json` 里照常写，例如 `"features": {"shortlink": {}, "super.anyshortlink": true}`
+- 平台只在**站长逐条授予**之后才把它加到 `features` 里（`panel.super_grants` /
+  `super_grants` 表），没授予的时候照样丢掉，并在 `notes` 里写一句「需要平台单独授权」
+- 授予的动作：面板「模块管理」里点 [授予权限]，站长 + sudo，审计记
+  `super_grant` → `feature: super.anyshortlink`；收回记 `super_revoke`
+- 现有的一条：**`super.anyshortlink`**——短链目标的三道拦截（带协议的地址、`..`、再套 `/s/`）
+  全部放开，可以指向活动地址之外的地方，长度上限也从 200 放宽到 2000
+
+写模块的人要明白：申请了就一定要在 `doc.md` 里说清为什么需要它，站长是照着那句话判断的。
+
 ## 接口版本与兼容政策
 
 `module.json` 的 `"api"` 是接口版本（整数，缺省按 1 算）。平台声明自己支持的版本
@@ -84,7 +99,7 @@
 | `scripts` | 平台 | 页签脚本之前先载入的共用脚本，写文件名去掉 `.js`（如 `common`） |
 | `settings` | 平台 | 哪些配置项可以从界面改；类型取自 `defaults.json` 里那个默认值 |
 | `external` | 平台 | 要哪些公开页面：`board` / `screen` / `checkin` / `admin`；声明了就自带那一页 |
-| `features` | 平台 | 能力声明（`roster` / `search` / `shortlink` / 将来的 `super.*`） |
+| `features` | 平台 | 能力声明（`roster` / `search` / `shortlink`，以及要单独授权的 `super.*`） |
 | `actions` | 平台 | 写操作声明，平台据此生成接口、鉴权、审计与版本号 |
 | `board` | 平台 | 公示页/大屏要哪些块，见「展示数据」 |
 

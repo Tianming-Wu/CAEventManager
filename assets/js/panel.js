@@ -37,7 +37,8 @@
     "approval-users": { min: "superadmin", group: "approvals" },
     "approval-events": { min: "superadmin", group: "approvals" },
     "new-event": { min: "admin" },
-    "modules": { min: "superadmin" },
+    // 模块管理是站长自己的页面：装模块、停模块都是整台机器的事
+    "modules": { min: "owner" },
     "server": { min: "owner" },
     "audit": { min: "owner" },
     "account": { min: "admin" },
@@ -3309,30 +3310,26 @@
     return PX.api("/modules").then(function (d) {
       S.modules = d.modules || [];
       $("#moduleTable tbody").innerHTML = S.modules.map(function (m) {
-        var risky = (m.superFeatures || []).length;
-        var granted = (m.superGranted || []).length;
+        // 申请了平台保留的高危能力：挂一枚胶囊，悬停/点一下能看到申请了哪几条。
+        // 模块只有装与没装两种状态，装的时候说清楚，不在装好之后做逐条授权
         var tag = "";
-        if (risky) {
-          // 申请了平台保留的高危能力：胶囊带原因，只有站长能授予
-          var names = (m.superFeatures || []).map(function (f) { return f.name; }).join("、");
+        if ((m.superFeatures || []).length) {
+          var names = m.superFeatures.map(function (f) { return f.name; }).join("、");
           tag = '<button class="badge-off" type="button" data-tip="申请了高危权限：' +
-            PX.esc(names) + '" aria-label="申请了高危权限">' + ICON_ALERT +
-            (granted ? "高危 · 已授予" : "高危") + "</button>";
+            PX.esc(names) + '" aria-label="申请了高危权限">' + ICON_ALERT + "高危</button>";
         }
-        var superBtn = "";
-        if (risky && isOwner()) {
-          superBtn = '<button class="btn sm' + (granted ? "" : " danger") +
-            '" type="button" data-module-super="' + PX.esc(m.id) + '">' +
-            (granted ? "收回授权" : "授予权限") + "</button> ";
-        }
+        var removeBtn = m.builtin ? "" :
+          '<button class="btn sm" type="button" data-module-remove="' +
+          PX.esc(m.id) + '">卸载</button> ';
         return "<tr" + (m.enabled ? "" : ' class="muted-row"') + ">" +
           "<td><b>" + PX.esc(m.name) + "</b> " +
           (m.enabled ? "" : '<span class="tag">已停用</span>') + tag + "<br>" +
-          '<span class="mono">' + PX.esc(m.id) + "</span></td>" +
+          '<span class="mono">' + PX.esc(m.id) + "</span>" +
+          (m.builtin ? "" : ' <span class="tag">已导入</span>') + "</td>" +
           '<td class="mono">' + PX.esc(m.version) + "</td>" +
           "<td>" + PX.esc(m.author || "—") + "</td>" +
           '<td class="mono">' + (m.events || 0) + "</td>" +
-          '<td class="actions">' + superBtn +
+          '<td class="actions">' + removeBtn +
           '<button class="btn sm' + (m.enabled ? " danger" : "") +
           '" type="button" data-module-toggle="' + PX.esc(m.id) +
           '" data-on="' + (m.enabled ? "0" : "1") + '">' +
@@ -3344,45 +3341,82 @@
     });
   }
 
-  /* 高危能力（super.*）：给出去就收不回来，所以只有站长能授予，还要再输一次密码。
-     弹窗里红字只做提示（「申请以下高危权限」这一句），下面逐条列能力与后果，用正常字色 */
-  function superGrantDialog(moduleId) {
-    var m = (S.modules || []).filter(function (x) { return x.id === moduleId; })[0];
-    if (!m) return;
-    var feats = m.superFeatures || [];
-    var grantedAll = feats.length && feats.every(function (f) {
-      return (m.superGranted || []).indexOf(f.name) >= 0;
+  /* 导入模块：先把文件送到服务端校验并解到暂存目录，**装之前**把模块申请的能力摆出来
+     （高危的那几条另起一句红字），点 [安装] 才真的落盘。装模块等于让一段别人写的代码
+     在这个进程里跑，所以这一步要把话说清楚 */
+  function uploadModule(file) {
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      PX.api("/module/upload", {
+        method: "POST",
+        body: { filename: file.name, data: String(reader.result || "") }
+      }).then(installModuleDialog).catch(function (e) {
+        PX.toast(PX.esc(e.message), true);
+      });
+    };
+    reader.onerror = function () { PX.toast("无法读取该文件", true); };
+    reader.readAsDataURL(file);
+  }
+
+  function installModuleDialog(info) {
+    if (!info) return;
+    var feats = info.features || [];
+    var risky = info.superFeatures || [];
+    var rows = function (list, withNote) {
+      return '<ul class="cap-list">' + list.map(function (f) {
+        var name = withNote ? f.name : f;
+        return "<li><b class=\"mono\">" + PX.esc(name) + "</b>" +
+          (withNote && f.note ? "<br>" + PX.esc(f.note) : "") + "</li>";
+      }).join("") + "</ul>";
+    };
+    var plain = feats.filter(function (n) {
+      return !(info.superFeatures || []).some(function (f) { return f.name === n; });
     });
-    var rows = feats.map(function (f) {
-      var on = (m.superGranted || []).indexOf(f.name) >= 0;
-      return '<li><b class="mono">' + PX.esc(f.name) + "</b>" +
-        (on ? ' <span class="tag">已授予</span>' : "") +
-        "<br>" + PX.esc(f.note) + "</li>";
-    }).join("");
-    openOverlay("super-grant", m.name,
-      '<p class="super-risk">模块申请以下高危权限</p>' +
-      '<ul class="super-list">' + rows + "</ul>" +
-      '<p class="hint">这些能力让模块能碰到平台管的东西之外（别的活动、别的账号，' +
-      "或者把用户带到别的地方去）。只有站长能授予，授予之后收回来需要再点一次。" + "</p>" +
+    openOverlay("module-install", "导入模块",
+      '<dl class="kv">' +
+      "<dt>模块</dt><dd><b>" + PX.esc(info.name) + "</b></dd>" +
+      '<dt>标识</dt><dd class="mono">' + PX.esc(info.id) + "</dd>" +
+      '<dt>版本</dt><dd class="mono">' + PX.esc(info.version) + "</dd>" +
+      "<dt>作者</dt><dd>" + PX.esc(info.author || "—") + "</dd>" +
+      "<dt>体积</dt><dd>" + PX.esc(info.files + " 个文件 · " + info.sizeText) + "</dd>" +
+      "</dl>" +
+      (plain.length ? "<p class=\"page-sub\" style=\"margin-top:14px\">申请的能力</p>" +
+        rows(plain, false) : "") +
+      (risky.length
+        ? '<p class="super-risk" style="margin-top:14px">模块申请以下高危权限</p>' +
+          rows(risky, true)
+        : "") +
+      '<p class="hint" style="margin-top:14px">模块的代码会在服务进程里运行。' +
+      (risky.length ? "上面那几条能力让它能碰到平台管的东西之外。" : "") +
+      "装好之后随时可以停用或卸载。</p>" +
       '<div class="row" style="margin-top:18px;justify-content:flex-end">' +
       '<button class="btn" type="button" data-close-overlay="1">取消</button>' +
-      '<button class="btn ' + (grantedAll ? "" : "danger") + '" type="button" ' +
-      'id="superGo">' + (grantedAll ? "收回授权" : "授予权限") + "</button></div>");
-    $("#superGo").addEventListener("click", function () {
-      var on = !grantedAll;
+      '<button class="btn primary" type="button" id="moduleInstallGo">安装</button></div>');
+    $("#moduleInstallGo").addEventListener("click", function () {
       closeOverlay();
-      var jobs = feats.map(function (f) {
-        return apiSudo("/module/super", {
-          method: "POST", body: { id: m.id, feature: f.name, on: on }
-        }, (on ? "授予" : "收回") + "高危权限");
-      });
-      Promise.all(jobs)
-        .then(function () {
-          PX.toast(on ? "已授予" : "已收回");
+      apiSudo("/module/install",
+              { method: "POST", body: { stage: info.stage, version: info.version } },
+              "导入模块")
+        .then(function (d) {
+          PX.toast("已装上 " + ((d && d.id) || info.id));
           return drawModules();
         })
         .catch(fail);
     });
+  }
+
+  function removeModule(id, name) {
+    confirmHighRisk("卸载 " + (name || id),
+      "模块的目录会被删掉，用它建的活动不会自动清理。确认继续？", "卸载", true,
+      function () {
+        apiSudo("/module/remove", { method: "POST", body: { id: id } }, "卸载模块")
+          .then(function () {
+            PX.toast("已卸载");
+            return drawModules();
+          })
+          .catch(fail);
+      });
   }
 
   /* 停用会连带影响使用这个模块的活动，所以照别的破坏性动作来：
@@ -5715,8 +5749,12 @@
                           modToggle.getAttribute("data-on") === "1");
     }
 
-    var modSuper = t.closest("[data-module-super]");
-    if (modSuper) return superGrantDialog(modSuper.getAttribute("data-module-super"));
+    var modRemove = t.closest("[data-module-remove]");
+    if (modRemove) {
+      var rid = modRemove.getAttribute("data-module-remove");
+      var row = (S.modules || []).filter(function (x) { return x.id === rid; })[0] || {};
+      return removeModule(rid, row.name);
+    }
 
     var offTip = t.closest("[data-tip]");
     if (offTip) {
@@ -6022,6 +6060,14 @@
     var file = e.target.files && e.target.files[0];
     e.target.value = "";
     if (file) uploadScreenPack(file);
+  });
+  $("#moduleInstallBtn").addEventListener("click", function () {
+    $("#moduleFile").click();
+  });
+  $("#moduleFile").addEventListener("change", function (e) {
+    var file = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (file) uploadModule(file);
   });
   $("#screenPackList").addEventListener("click", function (e) {
     var btn = e.target.closest("[data-pack-del]");

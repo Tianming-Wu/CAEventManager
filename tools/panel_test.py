@@ -32,6 +32,25 @@ def modules_dir():
     """这个实例装模块的目录：套件往里放临时模块，跑完就删。"""
     return os.environ.get("LOTTERY_MODULES_DIR") or os.path.join(HERE, "modules")
 
+
+def _bare_zip():
+    """一个没有 module.json 的压缩包：用来试「这玩意儿不是模块」。"""
+    import zipfile as _zip
+    buf = io.BytesIO()
+    with _zip.ZipFile(buf, "w") as zf:
+        zf.writestr("readme.md", "not a module")
+    return buf.getvalue()
+
+
+def _module_zip(module_id):
+    """一个 id 与平台自带撞车的模块包。"""
+    import zipfile as _zip
+    buf = io.BytesIO()
+    with _zip.ZipFile(buf, "w") as zf:
+        zf.writestr("module.json", json.dumps({
+            "id": module_id, "name": "冒名模块", "version": "9.9"}))
+    return buf.getvalue()
+
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "core"))
 import xlsx  # noqa: E402  读写自测要用同一份实现
@@ -386,8 +405,8 @@ def main():
     mods = call(owner, "/api/panel/modules")
     check("the owner can list modules",
           mods and mods["modules"] and mods["modules"][0]["id"], mods)
-    check("a superadmin can read the module list too",
-          call(teacher, "/api/panel/modules") is not None)
+    check("模块管理是站长的页面：超管看不到",
+          call(teacher, "/api/panel/modules", expect=403) is not None)
     mods = call(owner, "/api/panel/modules")["modules"]
     mod = mods[0]
     check("a module knows where it came from", mod["builtin"] is True, mod)
@@ -442,65 +461,72 @@ def main():
     check("列表上的标记也跟着去掉",
           not any(e["stopped"] for e in listed if e["seq"] == ev["seq"]), listed)
 
-    print("== 高危能力（super.*）：声明了也要站长逐条点头 ==")
-    # 临时装一个申请了 super.anyshortlink 的模块：它归这个实例的 modules 目录，
-    # 跑完之后删掉（不给别的用例留尾巴）
-    probe_dir = os.path.join(modules_dir(), "nwuca.superprobe")
+    print("== 导入模块：上传 → 看清能力 → 提权安装 ==")
+    import zipfile as _zip
+    probe_id = "nwuca.superprobe"
+    probe_zip = io.BytesIO()
+    with _zip.ZipFile(probe_zip, "w") as zf:
+        # 压缩包里多包一层目录也算数（顶层那个目录会被去掉）
+        zf.writestr("superprobe/module.json", json.dumps({
+            "id": probe_id, "name": "导入测试模块", "version": "1.2.0",
+            "author": "panel_test",
+            "features": {"shortlink": {}, "super.anyshortlink": True}}))
+        zf.writestr("superprobe/doc.md", "# 导入测试模块\n")
     try:
-        os.makedirs(probe_dir, exist_ok=True)
-        with open(os.path.join(probe_dir, "module.json"), "w", encoding="utf-8") as fh:
-            json.dump({"id": "nwuca.superprobe", "name": "高危能力测试模块",
-                       "version": "1.0", "author": "panel_test",
-                       "features": {"shortlink": {}, "super.anyshortlink": True}}, fh)
-        probe = [m for m in call(owner, "/api/panel/modules")["modules"]
-                 if m["id"] == "nwuca.superprobe"]
-        check("装上的模块会自己出现在列表里", bool(probe), probe)
-        probe = probe[0] if probe else {}
-        check("它声明的高危能力能列出来",
-              [f["name"] for f in (probe.get("superFeatures") or [])]
-              == ["super.anyshortlink"], probe.get("superFeatures"))
-        check("声明了也不自动生效", "super.anyshortlink" not in (probe.get("features") or {}),
-              list(probe.get("features") or {}))
-        check("并且说清需要平台单独授权",
-              any("单独授权" in n for n in (probe.get("notes") or [])), probe.get("notes"))
-        check("超管不能授予",
-              post(teacher, "/api/panel/module/super",
-                   {"id": "nwuca.superprobe", "feature": "super.anyshortlink"},
-                   expect=403) is not None)
-        post(owner, "/api/panel/sudo/exit")
-        refused = post(owner, "/api/panel/module/super",
-                       {"id": "nwuca.superprobe", "feature": "super.anyshortlink"},
-                       expect=403)
-        check("站长授予也要先进 sudo",
+        uploaded = post(owner, "/api/panel/module/upload",
+                        {"filename": "superprobe.zip",
+                         "data": base64.b64encode(probe_zip.getvalue()).decode()})
+        check("上传之后先只做检查，不落盘",
+              uploaded and uploaded.get("stage") and uploaded.get("id") == probe_id,
+              uploaded)
+        check("检查结果里带着它申请的能力",
+              [f["name"] for f in (uploaded.get("superFeatures") or [])]
+              == ["super.anyshortlink"]
+              and "shortlink" in (uploaded.get("features") or []),
+              (uploaded.get("features"), uploaded.get("superFeatures")))
+        check("高危能力带着一句后果",
+              "短链接" in ((uploaded.get("superFeatures") or [{}])[0].get("note") or ""),
+              uploaded.get("superFeatures"))
+        check("还没装的时候列表里没有它",
+              probe_id not in [m["id"] for m in call(owner, "/api/panel/modules")["modules"]])
+        post(owner, "/api/panel/sudo/exit", {})
+        refused = post(owner, "/api/panel/module/install",
+                       {"stage": uploaded["stage"]}, expect=403)
+        check("装模块要先进 sudo",
               refused and refused.get("sudoRequired") is True, refused)
         post(owner, "/api/panel/sudo", {"password": owner_password()})
-        check("没申请的能力不能乱授",
-              post(owner, "/api/panel/module/super",
-                   {"id": "nwuca.superprobe", "feature": "super.whatever"},
-                   expect=400) is not None)
-        granted = post(owner, "/api/panel/module/super",
-                       {"id": "nwuca.superprobe", "feature": "super.anyshortlink"})
-        check("站长提权之后可以授予", granted and granted.get("granted") is True, granted)
-        after = [m for m in call(owner, "/api/panel/modules")["modules"]
-                 if m["id"] == "nwuca.superprobe"][0]
-        check("授予之后能力真的生效",
-              "super.anyshortlink" in (after.get("features") or {}), after.get("features"))
-        check("也标着已经授予",
-              after.get("superGranted") == ["super.anyshortlink"], after.get("superGranted"))
+        installed = post(owner, "/api/panel/module/install",
+                         {"stage": uploaded["stage"], "version": uploaded["version"]})
+        check("提权之后装上了", installed and installed.get("id") == probe_id, installed)
+        mods = call(owner, "/api/panel/modules")["modules"]
+        got = [m for m in mods if m["id"] == probe_id]
+        check("列表里出现，并且标着不是自带的",
+              got and got[0]["builtin"] is False, got)
+        check("声明的高危能力直接生效",
+              got and "super.anyshortlink" in (got[0].get("features") or {}),
+              got[0].get("features") if got else None)
         trail = [a for a in call(owner, "/api/panel/audit?limit=10")["audit"]
-                 if a["action"] == "super_grant"]
-        check("审计里记了给了哪个模块哪一条能力",
-              trail and trail[0]["target"] == "nwuca.superprobe"
-              and "feature: super.anyshortlink" in (trail[0]["detail"] or ""), trail[:1])
-        post(owner, "/api/panel/module/super",
-             {"id": "nwuca.superprobe", "feature": "super.anyshortlink", "on": False})
-        revoked = [m for m in call(owner, "/api/panel/modules")["modules"]
-                   if m["id"] == "nwuca.superprobe"][0]
-        check("收回之后又不生效了",
-              "super.anyshortlink" not in (revoked.get("features") or {}),
-              revoked.get("features"))
+                 if a["action"] == "module_install"]
+        check("审计里记了装的是什么", trail and trail[0]["target"] == probe_id,
+              trail[:1])
+        check("压缩包里没有 module.json 就说清楚",
+              post(owner, "/api/panel/module/upload",
+                   {"filename": "x.zip",
+                    "data": base64.b64encode(_bare_zip()).decode()}, expect=400) is not None)
+        check("不能用同名的模块顶掉平台自带的",
+              post(owner, "/api/panel/module/upload",
+                   {"filename": "dup.zip",
+                    "data": base64.b64encode(_module_zip("nwuca.lottery")).decode()},
+                   expect=400) is not None)
+        # 卸载：模块上没有活动就删得掉
+        post(owner, "/api/panel/module/remove", {"id": probe_id})
+        check("卸载之后列表里没有它",
+              probe_id not in [m["id"] for m in call(owner, "/api/panel/modules")["modules"]])
+        check("平台自带的模块不给卸载",
+              post(owner, "/api/panel/module/remove", {"id": "nwuca.lottery"},
+                   expect=409) is not None)
     finally:
-        shutil.rmtree(probe_dir, ignore_errors=True)
+        shutil.rmtree(os.path.join(modules_dir(), probe_id), ignore_errors=True)
 
     print("== a preset that arrives from outside ==")
     orphan = {"id": "demo.orphan", "name": "外部预设",

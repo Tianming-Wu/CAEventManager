@@ -19,6 +19,7 @@ import re
 import shutil
 import sys
 import urllib.request
+import zipfile
 
 from playwright.sync_api import sync_playwright
 
@@ -2614,70 +2615,73 @@ def roster_admin_page(browser):
                     drop_roster(owner, row["id"])
 
 
-def super_grant_page(browser):
-    """模块管理：申请了高危能力的模块挂胶囊，授予前要看得到一条条后果。"""
-    print("== 高危能力：声明了也要站长点头 ==")
-    root = os.environ.get("LOTTERY_MODULES_DIR")
-    if not root:
-        check("装得下临时模块（跳过：没有 LOTTERY_MODULES_DIR）", True)
-        return
-    probe = os.path.join(root, "nwuca.uiprobe")
-    owner = owner_opener()
+def module_install_page(browser):
+    """模块管理：导入一个申请了高危能力的模块，装之前先把话说清楚。"""
+    print("== 导入模块：高危提示在装之前 ==")
+    probe_id = "nwuca.uiprobe"
+    box = os.path.join(ROOT_DIR, "tmp", "t-module-import")
+    shutil.rmtree(box, ignore_errors=True)
+    os.makedirs(box, exist_ok=True)
+    zip_path = os.path.join(box, "uiprobe.zip")
     ctx = page = None
+    owner = owner_opener()
     try:
-        os.makedirs(probe, exist_ok=True)
-        with open(os.path.join(probe, "module.json"), "w", encoding="utf-8") as fh:
-            json.dump({"id": "nwuca.uiprobe", "name": "高危能力界面测试",
-                       "version": "1.0", "author": "panel_ui_test",
-                       "features": {"super.anyshortlink": True}}, fh)
+        with zipfile.ZipFile(zip_path, "w") as zf:
+            # 压缩包里多包一层目录也算数
+            zf.writestr("uiprobe/module.json", json.dumps({
+                "id": probe_id, "name": "界面导入测试", "version": "2.0",
+                "author": "panel_ui_test",
+                "features": {"shortlink": {}, "super.anyshortlink": True}}))
+            zf.writestr("uiprobe/doc.md", "# 界面导入测试\n")
         ctx, page = new_page(browser, 1440, 900)
         ui_login(page)
         page.goto(BASE + "/panel#/modules")
         page.wait_for_timeout(900)
-        row = '#moduleTable tr:has([data-module-super="nwuca.uiprobe"])'
-        check("申请了高危能力的模块挂着胶囊",
-              page.locator(row + " .badge-off").count() == 1,
-              page.inner_text("#moduleTable tbody")[:160])
-        check("站长看得到授予按钮",
-              page.locator('[data-module-super="nwuca.uiprobe"]').count() == 1)
-        page.click('[data-module-super="nwuca.uiprobe"]')
-        page.wait_for_timeout(500)
+        check("模块管理页上有导入模块",
+              page.inner_text("#moduleInstallBtn").strip() == "导入模块")
+        page.set_input_files("#moduleFile", zip_path)
+        page.wait_for_timeout(1200)
         body = page.inner_text("#overlayBody")
-        check("弹窗先用红字点题", "模块申请以下高危权限" in body, body[:120])
-        check("再逐条列出能力与后果",
-              "super.anyshortlink" in body and "短链接" in body, body[:200])
-        check("说清只有站长能给", "只有站长能授予" in body, body[:200])
+        check("装之前先把模块说清楚",
+              "界面导入测试" in body and probe_id in body and "2.0" in body, body[:160])
+        check("高危那句单独用红字点题", "模块申请以下高危权限" in body, body[:200])
+        check("高危能力带着一句后果",
+              "super.anyshortlink" in body and "短链接" in body, body[:260])
+        check("普通能力也一并列出来", "申请的能力" in body and "shortlink" in body,
+              body[:200])
         page.click('[data-close-overlay="1"]')
         page.wait_for_timeout(300)
-        check("取消之后什么都授予不了",
-              not (call(owner, "/api/panel/modules")["modules"]
-                   and [m for m in call(owner, "/api/panel/modules")["modules"]
-                        if m["id"] == "nwuca.uiprobe"][0].get("superGranted")),
-              None)
-        # 真授予：没提权时先要密码
-        page.click('[data-module-super="nwuca.uiprobe"]')
-        page.wait_for_timeout(400)
-        page.click("#superGo")
+        check("取消就什么都不装",
+              probe_id not in page.inner_text("#moduleTable tbody"),
+              page.inner_text("#moduleTable tbody")[:120])
+        # 再来一次，这次真装：没提权时先要密码
+        page.set_input_files("#moduleFile", zip_path)
+        page.wait_for_timeout(1200)
+        page.click("#moduleInstallGo")
         page.wait_for_timeout(700)
-        check("授予要再输一次密码", page.locator("#sudoPass").count() == 1)
+        check("装模块要再输一次密码", page.locator("#sudoPass").count() == 1)
         page.fill("#sudoPass", PASSWORD)
         page.click("#sudoEnter")
         page.wait_for_timeout(1800)
-        granted = [m for m in call(owner, "/api/panel/modules")["modules"]
-                   if m["id"] == "nwuca.uiprobe"][0]
-        check("授予之后能力生效", "super.anyshortlink" in (granted.get("features") or {}),
-              granted.get("features"))
-        check("胶囊也变成已授予",
-              "已授予" in page.inner_text("#moduleTable tbody"),
-              page.inner_text("#moduleTable tbody")[:160])
-        # 收回去：留着会让后面的用例看到一条多余的能力
-        call(owner, "/api/panel/sudo", {"password": PASSWORD})
-        call(owner, "/api/panel/module/super",
-             {"id": "nwuca.uiprobe", "feature": "super.anyshortlink", "on": False})
+        row = '#moduleTable tbody'
+        text = page.inner_text(row)
+        check("装好之后列表里有它", probe_id in text, text[:200])
+        check("标着已导入，也带着高危胶囊",
+              "已导入" in text and page.locator("#moduleTable .badge-off").count() >= 1,
+              text[:200])
+        check("自己装的模块有卸载按钮",
+              page.locator('[data-module-remove="%s"]' % probe_id).count() == 1)
+        check("平台自带的模块没有卸载按钮",
+              page.locator('[data-module-remove="nwuca.lottery"]').count() == 0)
     finally:
         if ctx is not None:
             ctx.close()
-        shutil.rmtree(probe, ignore_errors=True)
+        call(owner, "/api/panel/sudo", {"password": PASSWORD})
+        try:
+            call(owner, "/api/panel/module/remove", {"id": probe_id})
+        except Exception:
+            pass
+        shutil.rmtree(box, ignore_errors=True)
 
 
 def archived_delete_page(browser):
@@ -3692,7 +3696,7 @@ def main():
                 leave_guard_page(browser)
                 module_refresh_page(browser)
                 roster_admin_page(browser)
-                super_grant_page(browser)
+                module_install_page(browser)
                 archived_delete_page(browser)
                 account_delete_page(browser)
                 # profile_page edits the signed-in account, so it only runs on a

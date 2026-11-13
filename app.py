@@ -69,7 +69,7 @@ PAGES_DIR = os.path.join(BASE_DIR, "pages")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.0.99"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.0.100"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -490,8 +490,7 @@ def host_stats(root="/proc", sleep=0.12):
 def _modules_by_id(conn):
     """Every installed module, by id, with the administrator's switch applied."""
     return {m["id"]: m for m in
-            modules.all_modules(VERSION, disabled=panel.disabled_modules(conn),
-                                super_grants=panel.super_grants(conn))}
+            modules.all_modules(VERSION, disabled=panel.disabled_modules(conn))}
 
 
 # 模块被停用时，活动接口与页面统一用这一句话说明白（与 pages/module-off.html 同一句）
@@ -1731,7 +1730,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise model.ApiError("这个活动的模块没有申请短链能力", 403)
 
         def _event_module(seq):
-            """这场活动用的模块（带着站长已经授予的高危能力）。"""
+            """这场活动用的模块。"""
             row = conn.execute("SELECT kind FROM events WHERE seq=?", (seq,)).fetchone()
             return _modules_by_id(conn).get(row["kind"] if row else "") or {}
 
@@ -2085,45 +2084,19 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True, "id": slug, "name": name})
 
         if path == "/modules" and method == "GET":
-            need("superadmin", "owner")
+            # 模块管理是站长页面：装了什么、停没停是整台机器的事
+            need("owner")
             stopped = panel.disabled_modules(conn)
-            mods = modules.all_modules(VERSION, disabled=stopped,
-                                       super_grants=panel.super_grants(conn))
+            mods = modules.all_modules(VERSION, disabled=stopped)
             for m in mods:
                 # 有几个活动正在用：停用之前先让人看见代价
                 m["events"] = panel.events_on_module(conn, m["id"])
             return self._json({"ok": True, "version": VERSION, "modules": mods})
 
-        if path == "/module/super" and method == "POST":
-            # 给一个模块放开一条高危能力（super.*）。给出去就收不回来这件事由人来判断：
-            # 只有站长能授予，要重输一次密码，并逐条记进审计
-            need("owner")
-            need_sudo()
-            data = body()
-            module_id = (data.get("id") or "").strip()
-            feature = (data.get("feature") or "").strip()
-            on = bool(data.get("on", True))
-            mod = _modules_by_id(conn).get(module_id)
-            if mod is None:
-                raise model.ApiError("没有这个模块", 404)
-            declared = {f["name"] for f in (mod.get("superFeatures") or [])}
-            if feature not in declared:
-                raise model.ApiError("这个模块没有申请 %s" % (feature or "该权限"), 400)
-            refuse_stale()
-            with panel.tx() as tx:
-                panel.set_super_grant(tx, module_id, feature, on, acc["username"])
-                panel.audit(tx, acc["username"],
-                            "super_grant" if on else "super_revoke", module_id,
-                            panel.audit_note(feature=feature))
-            # 能力变了：让活动页重新取一次模块信息
-            bus.bump("modules")
-            return self._json({"ok": True, "id": module_id, "feature": feature,
-                               "granted": on})
-
         if path == "/module/toggle" and method == "POST":
             # 停用一个模块是站级动作：正在用它的活动会一并停摆（数据不动，启用即恢复），
             # 新活动与预设也建不了。所以照别的破坏性动作来：先提权，再记审计
-            need("superadmin", "owner")
+            need("owner")
             need_sudo()
             data = body()
             module_id = (data.get("id") or "").strip()
@@ -2145,6 +2118,65 @@ class Handler(BaseHTTPRequestHandler):
             # 站级的开关变了：让所有活动的流都醒一次，页面据此立刻换成"不可用"
             bus.bump("modules")
             return self._json({"ok": True, "enabled": on, "affected": affected})
+
+        if path == "/module/upload" and method == "POST":
+            # 导入模块：上传 zip → 服务端校验、解到暂存目录、把模块申请的能力解析出来。
+            # 这一步**不装**，只回答「装上会发生什么」，界面据此摆出高危提示
+            need("owner")
+            data = body()
+            raw = data.get("data") or ""
+            if not isinstance(raw, str):
+                raise model.ApiError("文件内容无法识别", 400)
+            if "," in raw and raw.strip().lower().startswith("data:"):
+                raw = raw.split(",", 1)[1]
+            try:
+                blob = base64.b64decode(raw, validate=True)
+            except Exception:
+                raise model.ApiError("文件内容无法识别", 400)
+            try:
+                info = modules.inspect_zip(blob)
+            except modules.InstallError as exc:
+                raise model.ApiError(str(exc))
+            return self._json({"ok": True, "limits": modules.install_limits(), **info})
+
+        if path == "/module/install" and method == "POST":
+            # 真的装：站长 + 提权。模块的代码会在这个进程里跑，所以照破坏性动作来
+            need("owner")
+            need_sudo()
+            data = body()
+            try:
+                module_id = modules.install_staged(data.get("stage"))
+            except modules.InstallError as exc:
+                raise model.ApiError(str(exc))
+            with panel.tx() as tx:
+                panel.audit(tx, acc["username"], "module_install", module_id,
+                            panel.audit_note(version=str(data.get("version") or "")))
+            bus.bump("modules")
+            return self._json({"ok": True, "id": module_id})
+
+        if path == "/module/remove" and method == "POST":
+            # 卸载：只对自己装的模块，而且它手上不能还挂着活动
+            need("owner")
+            need_sudo()
+            data = body()
+            module_id = str(data.get("id") or "").strip()
+            known = {m["id"]: m for m in modules.all_modules(VERSION)}
+            if module_id not in known:
+                raise model.ApiError("没有这个模块", 404)
+            if known[module_id].get("builtin"):
+                raise model.ApiError("平台自带的模块不能卸载", 409)
+            affected = panel.events_on_module(conn, module_id)
+            if affected:
+                raise model.ApiError(
+                    "还有 %d 个活动在用它，先归档或转移那些活动" % affected, 409)
+            try:
+                modules.remove_installed(module_id)
+            except modules.InstallError as exc:
+                raise model.ApiError(str(exc))
+            with panel.tx() as tx:
+                panel.audit(tx, acc["username"], "module_remove", module_id)
+            bus.bump("modules")
+            return self._json({"ok": True, "id": module_id})
 
         if path == "/preset/import" and method == "POST":
             # a preset file from somewhere else.  If it needs a module this

@@ -536,15 +536,12 @@ def main():
     check("记录整包透传，平台不改形状",
           app.module_record(rec, spec, with_pinyin=False)["tickets"] == [])
 
-    print("== 高危能力（super.*）：声明了也只是申请 ==")
+    print("== 高危能力（super.*）：声明即生效，只做提示 ==")
     errs = []
     got = app.modules.resolve_features(["super.anyshortlink"], errs)
-    check("没授予的高危能力不给，并说清原因",
-          got == {} and any("单独授权" in e for e in errs), (got, errs))
-    granted = app.modules.resolve_features(["super.anyshortlink"], [],
-                                          super_grants={"super.anyshortlink"})
-    check("点了头才给", list(granted) == ["super.anyshortlink"], granted)
-    check("它只是开关，不带字段", granted["super.anyshortlink"] == {}, granted)
+    check("声明了就生效，不当成不认识的能力",
+          list(got) == ["super.anyshortlink"] and not errs, (got, errs))
+    check("它只是开关，不带字段", got["super.anyshortlink"] == {}, got)
     listed = app.modules.super_features(["shortlink", "super.anyshortlink"])
     check("模块管理页要列的那一份带说明",
           [f["name"] for f in listed] == ["super.anyshortlink"] and listed[0]["note"],

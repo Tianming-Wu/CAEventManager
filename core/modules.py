@@ -23,12 +23,18 @@ Only the metadata is read here.  ``module.py`` is loaded later, after a syntax
 check, and only for modules whose ``requires`` matches this build.
 """
 import importlib.util
+import io
 import json
 import os
 import paths
 import safemode
+import shutil
+import stat
 import sys
 import re
+import tempfile
+import time
+import zipfile
 
 BASE_DIR = paths.APP_ROOT
 # shipped with the release, then whatever this instance installed itself
@@ -234,14 +240,13 @@ DEFAULT_SEARCH = {
 }
 
 
-def resolve_features(raw, errors=None, super_grants=()):
+def resolve_features(raw, errors=None):
     """把模块申请的权限解析成"平台认的那几个"，不认识的丢掉并记下原因。
 
-    ``super_grants`` 是平台已经点头授予的高危能力（`panel.super_grants()` 的那一份）：
-    声明了但没被授予的仍然丢掉，只记一条「需要平台单独授权」。
+    `super.*` 那批高危能力也一样按声明给：模块只有装与没装两种状态，不做逐条授权开关
+    （见 doc/dev/module-interface.md 的「高危能力」）。
     """
     out = {}
-    granted = set(super_grants or ())
     if isinstance(raw, (list, tuple)):
         raw = {str(name): {} for name in raw}
     if not isinstance(raw, dict):
@@ -251,11 +256,8 @@ def resolve_features(raw, errors=None, super_grants=()):
         spec = CAPABILITIES.get(name)
         if spec is None:
             if is_super_feature(name):
-                if name in granted:
-                    # 站长逐条放开的：声明的字段一律不收，它拿到的就是一个开关
-                    out[name] = {}
-                else:
-                    _note(errors, "高危能力 %s 还没有启用，需要平台单独授权" % name)
+                # 声明即生效：声明里写的东西一律不收，它拿到的是一个开关
+                out[name] = {}
             else:
                 _note(errors, "没有这个能力：%s" % name)
             continue
@@ -526,7 +528,7 @@ def load_kind_model(kind_id):
 _MODELS = {}
 
 
-def load_module(folder, version, builtin=False, enabled=True, super_grants=()):
+def load_module(folder, version, builtin=False, enabled=True):
     """Read one module directory; raises KindError when it is unusable."""
     meta_path = os.path.join(folder, "module.json")
     if not os.path.isfile(meta_path):
@@ -594,10 +596,9 @@ def load_module(folder, version, builtin=False, enabled=True, super_grants=()):
         templates = sorted(n[:-5] for n in os.listdir(tpl_dir) if n.endswith(".json"))
 
     notes = []
-    features = resolve_features(meta.get("features"), notes, super_grants)
-    # 声明了哪些高危能力、站长已经点头了哪几条：模块管理页照这两份画提示
+    features = resolve_features(meta.get("features"), notes)
+    # 声明了哪些高危能力：模块管理页据此挂胶囊，让人在装的时候就看见
     declared_super = super_features(meta.get("features"))
-    granted_super = [f["name"] for f in declared_super if f["name"] in features]
 
     return {
         "id": kind_id,
@@ -615,7 +616,6 @@ def load_module(folder, version, builtin=False, enabled=True, super_grants=()):
         "external": normalize_external(meta.get("external")),
         "features": features,
         "superFeatures": declared_super,
-        "superGranted": granted_super,
         "api": api,
         "actions": normalize_actions(meta.get("actions"), notes),
         "notes": notes,
@@ -689,32 +689,31 @@ def module_dirs():
         if not os.path.isdir(root):
             continue
         for name in sorted(os.listdir(root)):
+            if name.startswith("."):
+                continue          # 正在导入的暂存目录（.incoming-*）不是模块
             folder = os.path.join(root, name)
             if os.path.isdir(folder):
                 found.append((folder, builtin))
     return found
 
 
-def all_modules(version, include_broken=False, disabled=(), super_grants=None):
+def all_modules(version, include_broken=False, disabled=()):
     """Every module on disk, in a stable order, with a usability verdict.
 
     ``disabled`` is the set of ids an administrator switched off.  A disabled
     module is still listed and still referenced by the activities and presets
     that use it - it just cannot be used to start anything new.
-    ``super_grants`` 是站长已经放开的高危能力（``{模块 id: {能力名}}``）。
     """
     out = []
     seen = set()
     disabled = {(str(x)).strip() for x in (disabled or ())}
-    grants = super_grants or {}
     if safemode.enabled():
         # 安全模式：外部资源一律不加载，内置模块也算外部资源
         return out
     for folder, builtin in module_dirs():
         name = os.path.basename(folder)
         try:
-            kind = load_module(folder, version, builtin, name not in disabled,
-                               grants.get(name) or grants.get(name.strip()) or ())
+            kind = load_module(folder, version, builtin, name not in disabled)
         except KindError as exc:
             if include_broken:
                 out.append({"id": name, "name": name, "ok": False,
@@ -728,8 +727,262 @@ def all_modules(version, include_broken=False, disabled=(), super_grants=None):
     return out
 
 
-def get(kind_id, version, disabled=(), super_grants=None):
-    for kind in all_modules(version, disabled=disabled, super_grants=super_grants):
+def get(kind_id, version, disabled=()):
+    for kind in all_modules(version, disabled=disabled):
         if kind["id"] == kind_id:
             return kind
     return None
+
+
+# --------------------------------------------------------------------------- #
+# 导入：把上传的 zip 变成一个装好的模块
+# --------------------------------------------------------------------------- #
+# 装模块等于让一段别人写的代码在这个进程里跑，所以这一段的规矩和屏幕包一样严：
+# **先让 zip 变成"一串相对路径 + 字节"，再由我们自己建目录写盘**，绝不让解压器决定
+# 磁盘上出现什么。装只在站长手里，界面上装之前要把模块申请的能力（尤其 super.*）
+# 一条条摆出来——那不是"能不能装"的开关，是"装之前你知不知道"。
+ZIP_MAX = 2 * 1024 * 1024
+FILE_MAX = 1 * 1024 * 1024
+TOTAL_MAX = 8 * 1024 * 1024
+COUNT_MAX = 400
+RATIO_MAX = 200
+DEPTH_MAX = 6
+SEG_MAX = 60
+PATH_MAX = 200
+STAGE_PREFIX = ".incoming-"
+STAGE_TTL = 3600                 # 一个小时还没确认的暂存目录当垃圾清掉
+
+# 模块目录里允许出现的文件：代码、数据、文档、页面资源。可执行文件一律不收
+EXT_ALLOWED = (".py", ".json", ".md", ".txt", ".js", ".css", ".html", ".svg",
+               ".png", ".jpg", ".jpeg", ".webp", ".gif", ".woff", ".woff2", ".csv")
+
+_SEGMENT = re.compile(r"^[A-Za-z0-9._-]+$")
+
+
+class InstallError(ValueError):
+    """这次导入不行；消息可以直接给用户看。"""
+
+
+def _size_text(num):
+    num = int(num or 0)
+    if num >= 1024 * 1024:
+        return "%.1f MB" % (num / 1024.0 / 1024.0)
+    if num >= 1024:
+        return "%.0f KB" % (num / 1024.0)
+    return "%d B" % num
+
+
+def install_limits():
+    """两个界面（前端提示与服务端判定）共用的一份数字。"""
+    return {"zipMax": ZIP_MAX, "zipText": _size_text(ZIP_MAX),
+            "fileText": _size_text(FILE_MAX), "totalText": _size_text(TOTAL_MAX),
+            "countMax": COUNT_MAX, "ext": list(EXT_ALLOWED)}
+
+
+def _segments(raw):
+    """一个 zip 条目名拆成的路径段；不许写就返回 None。"""
+    if not raw or "\\" in raw or "\x00" in raw or ":" in raw:
+        return None
+    if raw.startswith("/") or raw.startswith("."):
+        return None
+    parts = [p for p in raw.split("/") if p not in ("", ".")]
+    if not parts or len(parts) > DEPTH_MAX:
+        return None
+    for part in parts:
+        if part == ".." or part.startswith(".") or len(part) > SEG_MAX:
+            return None
+        if not _SEGMENT.match(part) or part.strip(".") == "":
+            return None
+    if len("/".join(parts)) > PATH_MAX:
+        return None
+    return parts
+
+
+def read_zip(blob):
+    """把上传的 zip 读成 ``{相对路径: 字节}``，并把不接受的东西挡在这里。
+
+    压缩包里可以整个模块目录打个包（顶层是那个目录），也可以是模块目录的内容本身。
+    """
+    if not blob:
+        raise InstallError("上传的文件为空")
+    if len(blob) > ZIP_MAX:
+        raise InstallError("压缩包超过 %s" % _size_text(ZIP_MAX))
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(blob))
+    except (zipfile.BadZipFile, OSError):
+        raise InstallError("这不是一个可以读取的 zip 压缩包")
+
+    files, total = {}, 0
+    try:
+        members = archive.infolist()
+        if len(members) > COUNT_MAX * 4:
+            raise InstallError("压缩包内条目过多")
+        for info in members:
+            name = info.filename or ""
+            if info.is_dir() or name.endswith("/"):
+                continue
+            if stat.S_ISLNK(info.external_attr >> 16):
+                raise InstallError("%s 是符号链接，模块里不允许" % name)
+            parts = _segments(name)
+            if parts is None:
+                raise InstallError("压缩包里有不能用的路径：%s" % name)
+            rel = "/".join(parts)
+            if os.path.splitext(parts[-1])[1].lower() not in EXT_ALLOWED:
+                raise InstallError("%s 这种文件模块里用不到" % rel)
+            if rel in files:
+                raise InstallError("压缩包内有重名文件：%s" % rel)
+            if len(files) >= COUNT_MAX:
+                raise InstallError("文件数超过 %d 个" % COUNT_MAX)
+            if info.file_size > FILE_MAX:
+                raise InstallError("%s 超过单文件上限 %s" % (rel, _size_text(FILE_MAX)))
+            if (info.compress_size and info.file_size > 65536
+                    and info.file_size / float(info.compress_size) > RATIO_MAX):
+                raise InstallError("%s 的压缩比异常，已拒绝解压" % rel)
+            try:
+                with archive.open(info) as handle:
+                    data = handle.read(FILE_MAX + 1)
+            except (zipfile.BadZipFile, OSError, RuntimeError, ValueError):
+                raise InstallError("%s 无法解开" % rel)
+            if len(data) > FILE_MAX:
+                raise InstallError("%s 超过单文件上限 %s" % (rel, _size_text(FILE_MAX)))
+            total += len(data)
+            if total > TOTAL_MAX:
+                raise InstallError("解压后总量超过 %s" % _size_text(TOTAL_MAX))
+            files[rel] = data
+    finally:
+        archive.close()
+    return files
+
+
+def _strip_root(files):
+    """压缩包里多包了一层目录（``mymod/module.json``）时，把那层去掉。"""
+    if "module.json" in files:
+        return files, ""
+    tops = {rel.split("/", 1)[0] for rel in files}
+    if len(tops) == 1:
+        top = tops.pop()
+        if any(rel == top + "/module.json" for rel in files):
+            return ({rel.split("/", 1)[1]: data for rel, data in files.items()}, top)
+    return files, ""
+
+
+def _clean_stage(root):
+    """清掉没人确认的暂存目录（超过一小时）。"""
+    if not os.path.isdir(root):
+        return
+    now = time.time()
+    for name in os.listdir(root):
+        if not name.startswith(STAGE_PREFIX):
+            continue
+        full = os.path.join(root, name)
+        try:
+            if now - os.path.getmtime(full) > STAGE_TTL:
+                shutil.rmtree(full, ignore_errors=True)
+        except OSError:
+            pass
+
+
+def inspect_zip(blob):
+    """校验 + 解析 + 落到暂存目录，返回"要不要装"需要的全部信息。
+
+    真正装好要再调一次 :func:`install_staged`——中间那一步是给人看的时间：
+    模块申请了哪些能力、有没有高危的、装上去会不会顶掉谁。
+    """
+    files = read_zip(blob)
+    files, dropped_root = _strip_root(files)
+    if "module.json" not in files:
+        raise InstallError("压缩包里没有 module.json（模块目录要放在最外层）")
+    root = INSTANCE_MODULES_DIR
+    os.makedirs(root, exist_ok=True)
+    _clean_stage(root)
+    stage = tempfile.mkdtemp(prefix=STAGE_PREFIX, dir=root)
+    try:
+        for rel in sorted(files):
+            full = os.path.join(stage, *rel.split("/"))
+            os.makedirs(os.path.dirname(full), exist_ok=True)
+            with open(full, "wb") as handle:
+                handle.write(files[rel])
+        try:
+            kind = load_module(stage, "0.0.0")
+        except KindError as exc:
+            raise InstallError("这个模块读不出来：%s" % exc)
+    except BaseException:
+        shutil.rmtree(stage, ignore_errors=True)
+        raise
+
+    kind_id = kind["id"]
+    if is_super_feature(kind_id):
+        raise InstallError("%s 是平台保留的命名空间，模块 id 不能用" % RESERVED_PREFIX)
+    for folder, builtin in module_dirs():
+        if os.path.basename(folder) != kind_id:
+            continue
+        if builtin:
+            raise InstallError("平台自带 %s，不能用一个同名的模块顶掉它" % kind_id)
+        raise InstallError("%s 已经装过了；要换版本先卸载再装" % kind_id)
+
+    return {
+        "stage": os.path.basename(stage),
+        "id": kind_id,
+        "name": kind["name"],
+        "version": kind["version"],
+        "author": kind["author"],
+        "api": kind["api"],
+        "requires": kind["requires"],
+        "ok": kind["ok"],
+        "reason": kind["reason"],
+        "notes": kind["notes"],
+        # 申请了哪些能力：高危的自带一句后果，其余的在界面上也照原样列出来
+        "features": sorted(kind["features"]),
+        "superFeatures": kind["superFeatures"],
+        "files": len(files),
+        "size": sum(len(v) for v in files.values()),
+        "sizeText": _size_text(sum(len(v) for v in files.values())),
+        "droppedRoot": dropped_root,
+    }
+
+
+def install_staged(stage):
+    """把暂存目录整体挪成 ``modules/<id>``。挪不动就报错，不留半份模块。"""
+    stage = str(stage or "").strip()
+    root = INSTANCE_MODULES_DIR
+    if not stage.startswith(STAGE_PREFIX) or "/" in stage or "\\" in stage:
+        raise InstallError("这次导入已经过期，请重新选择文件")
+    source = os.path.join(root, stage)
+    if not os.path.isdir(source):
+        raise InstallError("这次导入已经过期，请重新选择文件")
+    try:
+        kind = load_module(source, "0.0.0")
+    except KindError as exc:
+        raise InstallError("这个模块读不出来：%s" % exc)
+    target = os.path.join(root, kind["id"])
+    if os.path.exists(target):
+        raise InstallError("%s 已经装过了" % kind["id"])
+    try:
+        os.rename(source, target)
+    except OSError:
+        raise InstallError("装不上：写入目录失败，请检查磁盘空间")
+    return kind["id"]
+
+
+def remove_installed(module_id):
+    """卸载一个自己装的模块。平台自带的不归这儿管。"""
+    module_id = str(module_id or "").strip()
+    if not module_id or not ID_RE.match(module_id):
+        raise InstallError("模块标识不合法")
+    for folder, builtin in module_dirs():
+        if kind_folder_id(folder) != module_id:
+            continue
+        if builtin:
+            raise InstallError("平台自带的模块不能卸载")
+        real_root = os.path.realpath(INSTANCE_MODULES_DIR)
+        real_dir = os.path.realpath(folder)
+        if os.path.dirname(real_dir) != real_root:
+            raise InstallError("模块标识不合法")
+        shutil.rmtree(real_dir)
+        return module_id
+    raise InstallError("找不到这个模块")
+
+
+def kind_folder_id(folder):
+    """目录名就是模块 id（装的时候按 id 落盘）。"""
+    return os.path.basename(str(folder or "").rstrip("/\\"))

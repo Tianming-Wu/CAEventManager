@@ -55,6 +55,7 @@ import pinyintable
 import policy
 import rng
 import safemode
+import startguard
 import presets
 import shortlinks
 import localconfig
@@ -68,7 +69,7 @@ PAGES_DIR = os.path.join(BASE_DIR, "pages")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.0.93"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.0.94"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -4502,27 +4503,52 @@ def main():
     )
     args = parser.parse_args()
 
-    for seq in db.migrate_to_folders():
-        log("活动 %d 搬到文件夹布局" % seq)
+    # 崩溃自检：动手之前先记一笔「这一次要起了」。中间崩掉就没人写 ok，
+    # 连着三次起不来，再下一次直接按安全模式起（安全模式不碰活动数据，坏东西不会被反复撞）
+    guard = startguard.begin(db.DATA_DIR)
+    if guard["auto"]:
+        localconfig.set_static("safe_mode", True)
+        LOCAL_CFG = localconfig.load()
+        safemode.reset()
+        log("崩溃自检：连续 %d 次启动失败，这一次按安全模式启动" % guard["failures"])
+
     panel.init_db()
     panel.bootstrap(LOCAL_CFG, log=log)
     lists.init_db()
     # 每个活动有自己的库：启动时逐个建表、补默认配置、给公示页写好地址。
     # 已归档的活动业务库被压进包里了，不能在这里凭空再造一个空的出来——
-    # 那样它既没有模块也没有配置，取消归档之前就一直是坏的
-    for seq in panel.event_seqs():
-        if not eventfs.has_data(seq):
-            continue
-        db.set_event(seq)
-        db.init_db()
-        conn = db.connect()
-        bootstrap_secrets()
-        model.ensure_event(conn)
+    # 那样它既没有模块也没有配置，取消归档之前就一直是坏的。
+    # 安全模式下一律不动活动数据：出事时坏的多半就是这里这份东西，原样留着等人来看
+    if safemode.enabled():
+        log("安全模式：不搬移、不初始化活动数据")
+    else:
+        for seq in db.migrate_to_folders():
+            log("活动 %d 搬到文件夹布局" % seq)
+        for seq in panel.event_seqs():
+            if not eventfs.has_data(seq):
+                continue
+            db.set_event(seq)
+            db.init_db()
+            conn = db.connect()
+            bootstrap_secrets()
+            model.ensure_event(conn)
     # the built-in presets live in templates/*.json; the table is what the app
     # reads, so they are copied in on every start
     with panel.tx() as tx:
         by_id = {m["id"]: m for m in modules.all_modules(VERSION)}
         presets.seed(tx, by_id)
+    if guard["auto"]:
+        # 自检替人做的决定也要留下痕迹：面板库这会儿已经能用了
+        try:
+            with panel.tx() as tx:
+                panel.audit(tx, "system", "safe_mode_auto", None,
+                            panel.audit_note(failures=guard["failures"]))
+        except Exception as exc:                       # noqa: BLE001 - 审计失败不该拦住启动
+            log("安全模式自检的审计没写成：%s" % exc)
+
+    # 初始化都过完了：这一次算起来了，自检清零，下次再崩从一数起。
+    # 端口被占这类事发生在这一步之后，不该算进「起不来」里
+    startguard.mark_ok(db.DATA_DIR)
 
     pidfile = os.path.join(db.DATA_DIR, "service.pid")
     try:

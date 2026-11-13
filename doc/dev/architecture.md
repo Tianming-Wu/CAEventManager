@@ -27,6 +27,8 @@ assistant.py      运维助手（模型调用、工具、提示词）
 policy.py         助手放行的唯一判定口
 health.py         服务有效性：按一次读数推出占用与空间的提示（core/health.py）
 shortlinks.py     短链：平台级的转发表，按活动记（core/shortlinks.py）
+safemode.py       安全模式：开关、对外的说明文字与拒绝理由
+startguard.py     崩溃自检：连续三次起不来，再下一次按安全模式起（core/startguard.py）
 ```
 
 路由判定不依赖外部前缀：路径里出现已知活动 token 就按活动处理，否则把剩余路径按面板路由匹配。

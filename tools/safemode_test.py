@@ -10,6 +10,7 @@ import json
 import os
 import shutil
 import socket
+import sqlite3
 import subprocess
 import sys
 import time
@@ -91,6 +92,39 @@ def boot(safe):
     raise SystemExit("服务没起来，日志在 %s" % os.path.join(DATA, "server.log"))
 
 
+def env_for_boot():
+    """与 boot() 同一套环境，但不重启数据目录：崩溃自检要连着重启好几次。"""
+    env = dict(os.environ)
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["LOTTERY_DATA_DIR"] = os.path.join(DATA, "data")
+    env["LOTTERY_THEME_DIR"] = os.path.join(DATA, "theme")
+    env["LOTTERY_CONFIG"] = os.path.join(DATA, "config.json")
+    env.pop("LOTTERY_SAFE_MODE", None)
+    return env
+
+
+def run_once():
+    """跑一次 app.py，不在这里等它：起不来的那几次要的就是它自己退出。"""
+    with open(os.path.join(DATA, "server.log"), "ab") as log:
+        return subprocess.run([sys.executable, "app.py", "--port", str(PORT)],
+                              cwd=ROOT, env=env_for_boot(), stdout=log,
+                              stderr=subprocess.STDOUT, timeout=90)
+
+
+def wait_up(proc):
+    for _ in range(80):
+        if proc.poll() is not None:
+            return False
+        try:
+            with urllib.request.urlopen(BASE + "/login", timeout=2) as res:
+                if b"loginForm" in res.read():
+                    return True
+        except Exception:
+            pass
+        time.sleep(0.25)
+    return False
+
+
 def stop(proc):
     proc.terminate()
     try:
@@ -108,9 +142,24 @@ def owner_password():
     raise SystemExit("没有 owner 密码")
 
 
+def config_file():
+    """这套用的配置文件可能还不存在：读不到就给一份空的。"""
+    try:
+        with open(os.path.join(DATA, "config.json"), encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return {}
+
+
+def write_config(cfg):
+    with open(os.path.join(DATA, "config.json"), "w", encoding="utf-8") as fh:
+        json.dump(cfg, fh)
+
+
 def main():
     shutil.rmtree(DATA, ignore_errors=True)
     token = ""
+    seq = 0
 
     print("== 正常模式：先有一场活动 ==")
     proc = boot(safe=False)
@@ -119,6 +168,7 @@ def main():
         post("/api/panel/login", {"username": "owner", "password": pw})
         code, made = post("/api/panel/events/create", {"template": "nwuca.salon"})
         token = (made.get("event") or {}).get("token") or ""
+        seq = (made.get("event") or {}).get("seq") or 0
         check("正常模式建得出活动", code == 200 and bool(token), (code, made))
         code, body = get("/%s/" % token)
         check("正常模式公示页是活动页", code == 200 and "服务暂时不可用".encode() not in body, code)
@@ -198,6 +248,103 @@ def main():
         check("活动页回来了", code == 200 and "服务暂时不可用".encode() not in body, code)
         code, body = get("/login")
         check("横幅不见了", "服务处于安全模式".encode() not in body, code)
+    finally:
+        stop(proc)
+
+    print("== 崩溃自检：连续三次起不来就自己进安全模式 ==")
+    jar.clear()
+    # 上面「恢复」那一步清过数据目录，这里重新造一场活动当素材
+    with open(os.path.join(DATA, "server.log"), "ab") as log:
+        proc = subprocess.Popen([sys.executable, "app.py", "--port", str(PORT)], cwd=ROOT,
+                                env=env_for_boot(), stdout=log, stderr=subprocess.STDOUT)
+    try:
+        check("先正常起一次", wait_up(proc))
+        pw = owner_password()
+        post("/api/panel/login", {"username": "owner", "password": pw})
+        code, made = post("/api/panel/events/create", {"template": "nwuca.salon"})
+        token = (made.get("event") or {}).get("token") or ""
+        seq = (made.get("event") or {}).get("seq") or 0
+        check("造出一场活动", code == 200 and bool(token) and bool(seq), (code, made))
+    finally:
+        stop(proc)
+
+    event_db = os.path.join(DATA, "data", "events", str(seq), "data.sqlite3")
+    backup = event_db + ".bak"
+    check("找得到这场活动的库", seq and os.path.isfile(event_db), event_db)
+    # WAL 先落进主文件再备份：坏掉之后要能原样修回来
+    conn = sqlite3.connect(event_db)
+    try:
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    finally:
+        conn.close()
+    shutil.copyfile(event_db, backup)
+    for suffix in ("-wal", "-shm"):
+        try:
+            os.unlink(event_db + suffix)
+        except OSError:
+            pass
+    # 把库的文件头弄坏：正常模式启动时在这里炸，安全模式不碰活动数据就没事
+    with open(event_db, "r+b") as fh:
+        fh.seek(0)
+        fh.write(b"this is not a sqlite database")
+        fh.truncate(32)
+
+    crashed = 0
+    for i in range(3):
+        try:
+            out = run_once()
+            crashed += 1 if out.returncode != 0 else 0
+            check("第 %d 次启动失败（数据读不出来）" % (i + 1), out.returncode != 0,
+                  out.returncode)
+        except subprocess.TimeoutExpired:
+            check("第 %d 次启动失败（数据读不出来）" % (i + 1), False, "没有退出")
+    check("三次都起不来", crashed == 3, crashed)
+    state = json.load(open(os.path.join(DATA, "data", "startup.json"), encoding="utf-8"))
+    check("自检记下了连续三次失败",
+          state.get("attempts") == 3 and state.get("ok") is False, state)
+
+    jar.clear()
+    with open(os.path.join(DATA, "server.log"), "ab") as log:
+        proc = subprocess.Popen([sys.executable, "app.py", "--port", str(PORT)], cwd=ROOT,
+                                env=env_for_boot(), stdout=log, stderr=subprocess.STDOUT)
+    try:
+        check("第四次自己起来了", wait_up(proc))
+        code, body = get("/login")
+        check("而且是按安全模式起的",
+              code == 200 and "服务处于安全模式".encode() in body, code)
+        raw_cfg = config_file()
+        check("开关写进了 config.json", raw_cfg.get("safe_mode") is True, raw_cfg)
+        code, body = get("/%s/api/board" % token)
+        check("活动接口照旧 503，坏数据没被碰", code == 503, code)
+        state = json.load(open(os.path.join(DATA, "data", "startup.json"), encoding="utf-8"))
+        check("起来之后自检清零", state.get("attempts") == 0 and state.get("ok") is True, state)
+        post("/api/panel/login", {"username": "owner", "password": pw})
+        code, audit = get("/api/panel/audit?limit=10")
+        check("审计里记了一笔自动进入安全模式",
+              code == 200 and b"safe_mode_auto" in audit, (code, audit[:120]))
+    finally:
+        stop(proc)
+
+    print("== 数据修好之后自己回到正常模式 ==")
+    jar.clear()
+    shutil.copyfile(backup, event_db)
+    for suffix in ("-wal", "-shm"):
+        try:
+            os.unlink(event_db + suffix)
+        except OSError:
+            pass
+    cfg = config_file()
+    cfg["safe_mode"] = False
+    write_config(cfg)
+    with open(os.path.join(DATA, "server.log"), "ab") as log:
+        proc = subprocess.Popen([sys.executable, "app.py", "--port", str(PORT)], cwd=ROOT,
+                                env=env_for_boot(), stdout=log, stderr=subprocess.STDOUT)
+    try:
+        check("修好之后正常起来了", wait_up(proc))
+        code, body = get("/login")
+        check("没再进安全模式", "服务处于安全模式".encode() not in body, code)
+        code, body = get("/%s/" % token)
+        check("活动页回来了", code == 200 and "服务暂时不可用".encode() not in body, code)
     finally:
         stop(proc)
         shutil.rmtree(DATA, ignore_errors=True)

@@ -88,7 +88,9 @@ python tools/bump_version.py --show
 - **连着三次没起来，再下一次自动按安全模式启动**：把 `safe_mode` 写进 `config.json`，
   这一次不搬移、不初始化活动数据（坏掉的那份原样留着），于是服务起得来，站长进得去
 - 安全模式下活动页照样 503，与被谁切进来无关；日志里有一行
-  `崩溃自检：连续 3 次启动失败，这一次按安全模式启动`，审计里有一笔 `safe_mode_auto`
+  `崩溃自检：连续 3 次启动失败，这一次按安全模式启动`，审计里有一笔
+  `enter_safe_mode`，说明是 `reason: multiple crash detected`（面板上手动进出记的是
+  `enter_safe_mode` / `exit_safe_mode`，说明 `reason: manual`）
 - 修好之后按常规退出安全模式：面板「服务器管理 › 退出安全模式」，或把 `safe_mode` 改回
   `false` 再重启。起来一次就清零，不会因为几天前的崩溃又跳进安全模式
 - 手工想清掉计数：删掉 `data/startup.json`（下一次启动从一开始数）

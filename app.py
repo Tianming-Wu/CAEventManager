@@ -69,7 +69,7 @@ PAGES_DIR = os.path.join(BASE_DIR, "pages")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.0.94"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.0.95"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -2745,8 +2745,10 @@ class Handler(BaseHTTPRequestHandler):
                                    "supervised": supervised()})
             localconfig.set_static("safe_mode", want)
             with panel.tx() as tx:
+                # 与 sudo 同一套写法：进入/退出各一条，说明里写清为什么
                 panel.audit(tx, acc["username"],
-                            "safemode_on" if want else "safemode_off", None)
+                            "enter_safe_mode" if want else "exit_safe_mode", None,
+                            panel.audit_note(reason="manual"))
             can_restart = supervised()
             if can_restart:
                 restart_after_response()
@@ -3204,10 +3206,9 @@ class Handler(BaseHTTPRequestHandler):
             rid = int(data.get("id") or 0)
             row = open_roster(rid, write=True)
             by_admin = row["owner_id"] != acc["id"]
-            if by_admin:
-                # 拥有者删自己的名单不用提权；超管代删是另一回事
-                need("superadmin", "owner")
-                need_sudo()
+            # 删除是三级动作：不管是谁的名单，删之前都要提权（没提权时密码提示就是那次确认）
+            need("superadmin", "owner")
+            need_sudo()
             with lists.tx() as lx:
                 lists.delete_roster(lx, rid)
             with panel.tx() as tx:
@@ -3461,9 +3462,9 @@ class Handler(BaseHTTPRequestHandler):
             sid = int(data.get("id") or 0)
             row = open_signup(sid, write=True)
             by_admin = row["owner_id"] != acc["id"]
-            if by_admin:
-                need("superadmin", "owner")
-                need_sudo()
+            # 删除是三级动作：不管是谁的报名，删之前都要提权（没提权时密码提示就是那次确认）
+            need("superadmin", "owner")
+            need_sudo()
             with lists.tx() as lx:
                 lists.delete_signup(lx, sid)
             with panel.tx() as tx:
@@ -4541,8 +4542,8 @@ def main():
         # 自检替人做的决定也要留下痕迹：面板库这会儿已经能用了
         try:
             with panel.tx() as tx:
-                panel.audit(tx, "system", "safe_mode_auto", None,
-                            panel.audit_note(failures=guard["failures"]))
+                panel.audit(tx, "system", "enter_safe_mode", None,
+                            panel.audit_note(reason="multiple crash detected"))
         except Exception as exc:                       # noqa: BLE001 - 审计失败不该拦住启动
             log("安全模式自检的审计没写成：%s" % exc)
 

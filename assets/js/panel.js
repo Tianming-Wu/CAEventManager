@@ -303,8 +303,7 @@
 
   // 允许点遮罩关闭的弹窗（都是没有输入、关掉不丢东西的）
   var OVERLAY_OUTSIDE_CLOSE = { presets: true, info: true, "event-detail": true,
-                                "event-transfer": true, "admin-roster": true,
-                                "admin-signup": true };
+                                "admin-roster": true, "admin-signup": true };
 
   /* 叠放：sudo 提示这类"盖在当前弹窗上的小窗"关掉之后要回到原来那一层，
      不能把下面的详情一起关掉 */
@@ -766,10 +765,8 @@
   // While not elevated the password prompt is that confirmation, so this is
   // skipped - typing it is already deliberate, and cancelling it leaves no
   // trace because nothing ever reached the server.
-  // opts.always：这一次一定要问一句。动作可能压根不需要密码（拥有者删自己建的名单），
-  // 那样就没有密码提示可以充当确认，只剩这一下点击。
   function confirmHighRisk(title, note, label, danger, run, opts) {
-    if (!sudoActive() && !(opts && opts.always)) return run(note);
+    if (!sudoActive()) return run(note);
     openOverlay("confirm", title,
       '<p class="page-sub">' + note + "</p>"
       + '<div class="row" style="margin-top:18px;justify-content:flex-end">'
@@ -797,12 +794,12 @@
         apiSudo("/event/reclaim", { method: "POST", body: { seq: Number(seq) } },
           "回收站内资源", note)
           .then(function (d) {
-            closeAllOverlays();
+            // 回收不动活动本身，详情照旧留着
             PX.toast("已回收 " + ((d && d.shortlinks) || 0) + " 条短链");
             return reloadAll();
           })
           .catch(fail);
-      });
+      }, { keepUnder: true });
   }
 
   /* 已归档活动的三个提权动作：下载完整数据、取消归档、彻底删除 */
@@ -854,8 +851,8 @@
       card.querySelectorAll("[data-detail-act]").forEach(function (btn) {
         btn.addEventListener("click", function () {
           var act = acts[Number(btn.getAttribute("data-detail-act"))];
-          // 改动对象的动作成功后自己收掉弹窗（详情里的数据已经过期）；
-          // 下载、打开这类不改动对象的动作留在详情里
+          // 只有把对象挪走或抹掉的动作（归档、强制归档、取消归档、彻底删除）做完才收弹窗；
+          // 转移、回收、下载、打开都不动它，详情留在原处
           if (act) act.run();
         });
       });
@@ -876,14 +873,18 @@
       apply: function (people) {
         var who = people[0];
         if (!who) return;
+        // 转移不算把活动挪走：确认框叠在详情上面，点取消只回到详情，
+        // 换完之后详情也照旧留着（它这会儿显示的负责人是旧的，刷新页面才会变）。
+        // 这一步的确认是动作本身要的：负责人自己转不用密码，没有那道密码提示
         openOverlay("event-transfer", "转移负责人" + (e ? "：" + eventTitle(e) : ""),
           '<p class="page-sub">把这场的负责人换成 ' + PX.esc(who.label) + "？" +
           "换过之后你不再是它的负责人。</p>" +
           '<div class="row" style="margin-top:18px;justify-content:flex-end">' +
           '<button class="btn" type="button" data-close-overlay="1">取消</button>' +
-          '<button class="btn danger" type="button" id="transferGo">转移</button></div>');
+          '<button class="btn danger" type="button" id="transferGo">转移</button></div>',
+          null, true);
         $("#transferGo").addEventListener("click", function () {
-          closeAllOverlays();
+          closeOverlay();
           apiSudo("/event/transfer",
             { method: "POST", body: { seq: Number(seq), uid: who.uid } }, "转移负责人")
             .then(function () {
@@ -902,12 +903,13 @@
       apiSudo("/event/force_archive", { method: "POST", body: { seq: Number(seq) } },
         "强制归档活动", note)
         .then(function () {
+          // 归档把活动挪到「已归档的活动」那张表：详情留着就没对象了
           closeAllOverlays();
           PX.toast("已归档");
           return reloadAll();
         })
         .catch(fail);
-    });
+    }, { keepUnder: true });
   }
 
   function archivedDownload(seq) {
@@ -2594,7 +2596,8 @@
     var del = $("#rosterDelete");
     if (del) {
       del.addEventListener("click", function () {
-        // 删自己建的名单不需要密码，所以这一步的确认只能由弹窗自己给
+        // 删除名单是三级动作：不管是谁的名单都要提权（没提权时密码提示就是确认），
+        // 确认框叠在名单设置上面，取消就回到设置
         confirmHighRisk("删除名单",
           "名单里的人会一起删掉，人员记录保留。确认继续？", "删除", true,
           function (note) {
@@ -2607,7 +2610,7 @@
                 location.hash = "#/rosters";
               })
               .catch(function (e) { PX.toast(PX.esc(e.message), true); });
-          }, { always: true });
+          }, { keepUnder: true });
       });
     }
   }
@@ -2815,6 +2818,8 @@
     var wanted = routeFromHash() || FALLBACK_ROUTE;
     // 换一页就把会话抽屉收回去：返回键回到别处时，它不该还浮在上面
     closeAssistantDrawer();
+    // 弹窗同理：换一页了，上一页的详情不该还压在新页面上（它属于那个对象，不是这一页的）
+    if (wanted !== S.route) closeAllOverlays();
     if (!guardBypass && S.route === "new-event" && wanted !== "new-event" && S.dirty) {
       // 地址退回表单那一页，但不许重画：location.replace 会再触发一次 hashchange，
       // 表单会按预设重填一遍，填过的内容和脏标记当场都没了（"继续编辑"也就无从恢复）
@@ -4109,18 +4114,18 @@
       apply: function (people) {
         var who = people[0];
         if (!who) return;
+        // 转移不挪动这份名单或报名：确认框叠在详情上面，取消回到详情，转完也留着
         confirmHighRisk("转移拥有者",
           "把它交给 " + PX.esc(who.label) + "？原来的拥有者会保留写入权限。确认继续？",
           "转移", false, function (note) {
             apiSudo("/" + kind + "/transfer",
               { method: "POST", body: { id: row.id, uid: who.uid } }, "转移拥有者", note)
               .then(function () {
-                closeAllOverlays();
                 PX.toast("已交给 " + who.label);
                 return loadAdminLists().then(drawRosterAdmin);
               })
               .catch(fail);
-          });
+          }, { keepUnder: true });
       }
     });
   }
@@ -4131,12 +4136,13 @@
         apiSudo("/" + kind + "/delete", { method: "POST", body: { id: row.id } },
                 "删除" + (kind === "roster" ? "名单" : "报名"), note)
           .then(function () {
+            // 删掉了就没有对象了：整摞收掉，回到表里
             closeAllOverlays();
             PX.toast("已删除");
             return loadAdminLists().then(drawRosterAdmin);
           })
           .catch(fail);
-      }, { always: true });
+      }, { keepUnder: true });
   }
 
   function drawApprovalUsers() {

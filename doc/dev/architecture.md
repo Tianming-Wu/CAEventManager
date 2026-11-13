@@ -105,7 +105,9 @@ SQLite 开 WAL；写入统一走事务包装（`tx()`），一次写入成功之
 - `detail` 如果存在，必须是 `key: value, key2: value2`（`panel.audit_note`）：
   键用英文小写，值可以是中文（人名、活动名这类必须照原样放进去的），但不写整句话
 - 例：`sudo_on` → `ip: 127.0.0.1`，`sudo_off` → `reason: manual` / `reason: timeout`，
-  `event_member_cancel` → `event_id: 9`，`roster_grant` → `granted: 2`
+  `enter_safe_mode` → `reason: manual` / `reason: multiple crash detected`，
+  `exit_safe_mode` → `reason: manual`，`event_member_cancel` → `event_id: 9`，
+  `roster_grant` → `granted: 2`
 - 账号对外只有一个标识：**uid**（`panel.next_uid`，站长 10000 起，uint32）。编号一次发放、
   不再回收，`settings.uid_seq` 记账；`id` 是进程内部的自增主键，`username` 只是可以改的登录名，
   两者都不进对外载荷。`panel.public_name()` 是"给别人看的名字"的唯一出口：称呼优先，其次编号

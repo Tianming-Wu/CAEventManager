@@ -225,6 +225,10 @@ def main():
         code, off = post("/api/panel/service/safe_mode", {"on": False})
         check("进了 sudo 就能改开关", code == 200 and off.get("safeMode") is False,
               (code, off))
+        code, audit = get("/api/panel/audit?limit=5")
+        check("手动退出安全模式记的是 exit_safe_mode / reason: manual",
+              code == 200 and b"exit_safe_mode" in audit and b"reason: manual" in audit,
+              (code, audit[:200]))
         check("不是看护进程起的服务：只改配置，不自己重启",
               off.get("restarting") is False, off)
         code, restarted = post("/api/panel/service/restart", {})
@@ -320,8 +324,9 @@ def main():
         check("起来之后自检清零", state.get("attempts") == 0 and state.get("ok") is True, state)
         post("/api/panel/login", {"username": "owner", "password": pw})
         code, audit = get("/api/panel/audit?limit=10")
-        check("审计里记了一笔自动进入安全模式",
-              code == 200 and b"safe_mode_auto" in audit, (code, audit[:120]))
+        check("审计里记了一笔 enter_safe_mode，说明是连续崩溃",
+              code == 200 and b"enter_safe_mode" in audit
+              and b"reason: multiple crash detected" in audit, (code, audit[:200]))
     finally:
         stop(proc)
 

@@ -778,6 +778,8 @@ def print_page(browser):
         if gate is not None:
             gate.close()
         ctx.close()
+        # 删除是三级动作：没提权时先要密码，那道提示本身就是确认
+        call(owner, "/api/panel/sudo", {"password": PASSWORD})
         for path, body in (("/api/panel/signup/delete", {"id": sid}),
                            ("/api/panel/roster/delete", {"id": rid})):
             try:
@@ -895,6 +897,8 @@ def qr_formats(browser):
               "; ".join(page._errors)[:200])
     finally:
         ctx.close()
+        # 删除是三级动作：没提权时先要密码，那道提示本身就是确认
+        call(owner, "/api/panel/sudo", {"password": PASSWORD})
         for path, body in (("/api/panel/signup/delete", {"id": sid}),
                            ("/api/panel/roster/delete", {"id": rid})):
             try:
@@ -967,6 +971,8 @@ def xlsx_page(browser):
               "; ".join(page._errors)[:200])
     finally:
         ctx.close()
+        # 删除是三级动作：没提权时先要密码，那道提示本身就是确认
+        call(owner, "/api/panel/sudo", {"password": PASSWORD})
         for path, body in (("/api/panel/signup/delete", {"id": sid}),
                            ("/api/panel/roster/delete", {"id": rid})):
             try:
@@ -1340,6 +1346,8 @@ def crumb_motion(browser):
     finally:
         ctx.close()
         # 这两份是为了测动画造的：收干净，别让后面的用例以为列表本来就非空
+        # 删除是三级动作：没提权时先要密码，那道提示本身就是确认
+        call(owner, "/api/panel/sudo", {"password": PASSWORD})
         for path, body in (("/api/panel/signup/delete", {"id": sid}),
                            ("/api/panel/roster/delete", {"id": rid})):
             try:
@@ -2248,7 +2256,13 @@ def leave_guard_page(browser):
                   page.inner_text("#overlayBody")[:80])
             page.click('#overlayBody [data-close-overlay="1"]')
             page.wait_for_timeout(300)
-            check("确认框里点取消也是一个字都没改", page.locator("#overlay").is_hidden())
+            # 取消不改变对象：确认框收掉，回到原来那张详情
+            detail_back = page.evaluate("""() => ({
+                open: !document.getElementById('overlay').hidden,
+                body: document.getElementById('overlayBody').textContent})""")
+            check("确认框里点取消也是一个字都没改，回到详情",
+                  detail_back["open"] and "活动号" in detail_back["body"]
+                  and "换成" not in detail_back["body"], detail_back["body"][:80])
 
         page.goto(BASE + "/panel#/new-event/nwuca.salon")
         page.wait_for_timeout(800)
@@ -2465,9 +2479,29 @@ def roster_admin_page(browser):
         page.click("#overlay", position={"x": 20, "y": 20})
         page.wait_for_timeout(300)
         check("点外面能关掉详情", page.locator("#overlay").is_hidden())
-        # 彻底删除：先问一句，删完弹窗收掉、列表刷新
-        page.click("[data-admin-roster]")
-        page.wait_for_timeout(400)
+        # 转移不挪动这份名单：做完详情还在（确认框与密码提示都叠在它上面）
+        if WITH_ACCOUNTS:
+            page.click("[data-admin-roster]")
+            page.wait_for_timeout(400)
+            page.click('[data-list-act="1"]')
+            page.wait_for_timeout(600)
+            page.click(".pp-list [data-pp-id]")
+            page.wait_for_timeout(200)
+            page.click(".pp-done")
+            page.wait_for_timeout(600)
+            if page.locator("#sudoPass").count():
+                page.fill("#sudoPass", PASSWORD)
+                page.click("#sudoEnter")
+                page.wait_for_timeout(1600)
+            elif page.locator("#confirmGo").count():
+                page.click("#confirmGo")
+                page.wait_for_timeout(1600)
+            check("转移之后详情还开着", not page.locator("#overlay").is_hidden(),
+                  page.inner_text("#overlayTitle"))
+        # 彻底删除：删除是三级动作，没提权时先要密码；删完弹窗收掉、列表刷新
+        if page.locator("#overlay").is_hidden():
+            page.click("[data-admin-roster]")
+            page.wait_for_timeout(400)
         idx = page.evaluate("""() => {
             const btns = Array.from(
                 document.querySelectorAll('#overlayBody [data-list-act]'));
@@ -2476,12 +2510,18 @@ def roster_admin_page(browser):
         }""")
         check("详情里有彻底删除", idx is not None, idx)
         page.click('[data-list-act="%s"]' % idx)
-        page.wait_for_timeout(500)
-        check("删之前先问一句",
-              page.inner_text("#overlayTitle").strip() == "彻底删除名单",
-              page.inner_text("#overlayTitle"))
-        page.click("#confirmGo")
-        page.wait_for_timeout(1600)
+        page.wait_for_timeout(600)
+        # 删除是三级动作：没提权时先要密码（提示本身就是确认），已经提权时再问一句
+        if page.locator("#sudoPass").count():
+            check("没提权时删之前先要一次密码", True)
+            page.fill("#sudoPass", PASSWORD)
+            page.click("#sudoEnter")
+            page.wait_for_timeout(1800)
+        else:
+            check("提权之后删之前再问一句", page.locator("#confirmGo").count() == 1,
+                  page.inner_text("#overlayBody")[:80])
+            page.click("#confirmGo")
+            page.wait_for_timeout(1600)
         check("删完之后弹窗收掉了", page.locator("#overlay").is_hidden())
         check("列表里也没有了",
               "名单管理测试" not in page.inner_text("#adminRosterTable tbody"),
@@ -3140,6 +3180,7 @@ def touch_page(browser):
     finally:
         ctx.close()
         try:
+            call(owner, "/api/panel/sudo", {"password": PASSWORD})
             call(owner, "/api/panel/roster/delete", {"id": phone_roster})
         except Exception:
             pass
@@ -3188,6 +3229,7 @@ def touch_page(browser):
             check("选完写回日期文本框", got["date"] == "2026-12-01", got)
             check("选完写回时刻文本框", got["time"] == "19:30", got)
             check("清除按钮随之可用", got["clear"] is False, got)
+            call(opener, "/api/panel/sudo", {"password": PASSWORD})
             call(opener, "/api/panel/signup/delete", {"id": sid})
     finally:
         ctx.close()

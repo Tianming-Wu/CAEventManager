@@ -787,14 +787,15 @@
     });
   }
 
-  /* 归档：把名单或报名收起来（不设密码，只有一句确认）。
-     名单上还挂着报名时先问一句「一并归档？」——确认之后一起收，
-     不拿「先去处理那几个报名」去拦人 */
+  /* 归档：把名单或报名收起来。自己的东西只要一句确认（不设密码，超管能放回来）；
+     替别人做是提权操作，那一步照样要密码。名单上还挂着报名时先问一句「一并归档？」，
+     确认之后一起收，不拿「先去处理那几个报名」去拦人 */
   function archiveList(kind, id, onDone) {
     var what = kind === "roster" ? "名单" : "报名";
     function send(cascade) {
-      return PX.api("/" + kind + "/archive",
-                    { method: "POST", body: { id: Number(id), cascade: !!cascade } });
+      return apiSudo("/" + kind + "/archive",
+                     { method: "POST", body: { id: Number(id), cascade: !!cascade } },
+                     "归档" + what);
     }
     send(false).then(function (d) { onDone(d || {}); }).catch(function (e) {
       var linked = e && e.data && e.data.linkedSignups;
@@ -2111,6 +2112,9 @@
       return;
     }
     head.textContent = r.title;
+    // 只有拥有者能归档这份报名
+    var archiveBtn = $("#signupArchiveBtn");
+    if (archiveBtn) archiveBtn.hidden = !r.owner;
     $("#signupSub").textContent = r.statusLabel + " · 已报 " + r.entries +
       (r.capacity ? " / " + r.capacity : "") + " 人 · 写入名单 " +
       (r.rosterName || "—") +
@@ -2597,7 +2601,10 @@
         ">拥有者与可写成员</option></select></div>") +
       '<div class="row" style="margin-top:18px;justify-content:flex-end">' +
       '<button class="btn" type="button" data-close-overlay="1">取消</button>' +
-      (row ? '<button class="btn danger" type="button" id="rosterArchive">归档名单</button>' : "") +
+      // 只有拥有者能归档（挂个写入权的人连按钮都不该看到）
+      (row && row.owner !== false
+        ? '<button class="btn danger" type="button" id="rosterArchive">归档名单</button>'
+        : "") +
       '<button class="btn primary" type="button" id="rosterSave">保存</button></div>');
     $("#rosterName").focus();
     $("#rosterSave").addEventListener("click", function () {
@@ -4212,9 +4219,11 @@
   }
 
   /* 归档：把东西从列表里退下去，数据一条不动。做完之后它就不在这张表里了，所以收掉详情。
+     自己的东西只要一句确认；替别人做是提权操作，没提权时先要密码。
      名单上还挂着报名时，会再问一句「一并归档？」 */
   function archiveAdminList(kind, row) {
     var what = kind === "roster" ? "名单" : "报名";
+    var mine = S.me && row.ownerId === S.me.id;
     confirmHighRisk("归档" + what,
       "归档之后谁都打不开也改不动，只有超级管理员能取消归档或彻底删除。确认继续？",
       "归档", true, function () {
@@ -4223,7 +4232,7 @@
           PX.toast("已归档");
           loadAdminLists().then(drawRosterAdmin);
         });
-      }, { noSudo: true, keepUnder: true });
+      }, { noSudo: mine, keepUnder: true });
   }
 
   function unarchiveAdminList(kind, row) {

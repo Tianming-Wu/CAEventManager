@@ -1165,6 +1165,11 @@ def main():
     refused = post(owner, "/api/panel/roster/delete", {"id": spare_id}, expect=409)
     check("没归档的名单不能直接删",
           "归档" in (refused.get("error") or ""), refused)
+    # 替别人归档是提权操作：自己的东西不收密码，动别人的要
+    post(owner, "/api/panel/sudo/exit", {})
+    post(owner, "/api/panel/roster/archive", {"id": spare_id}, expect=403)
+    check("替别人归档要先进 sudo", True)
+    post(owner, "/api/panel/sudo", {"password": owner_password()})
     archived = post(owner, "/api/panel/roster/archive", {"id": spare_id})
     check("超管能替别人归档", bool(archived and archived.get("ok")), archived)
     gone = post(owner, "/api/panel/roster/delete", {"id": spare_id})

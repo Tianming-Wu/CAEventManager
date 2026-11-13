@@ -69,7 +69,7 @@ PAGES_DIR = os.path.join(BASE_DIR, "pages")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.0.97"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.0.98"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -3213,9 +3213,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True, "changed": bool(changed)})
 
         if path == "/roster/archive" and method == "POST":
-            # 归档：拥有者对自己那份名单的软删除（超管也能替不在场的人做）。
-            # 东西离开列表、不能再改、也不能再往里写，数据一条不动；超管能取消归档，
-            # 所以这里不设密码——界面上的那一句确认就够了
+            # 归档：拥有者对自己那份名单的软删除。收得回来就不算危险动作，所以不要密码；
+            # 但超管替别人做是「用自己的权限动别人的数据」，走的是提权那一档
             data = body()
             rid = int(data.get("id") or 0)
             cascade = bool(data.get("cascade"))
@@ -3223,6 +3222,7 @@ class Handler(BaseHTTPRequestHandler):
             by_admin = row["owner_id"] != acc["id"]
             if by_admin:
                 need("superadmin", "owner")
+                need_sudo()
             linked = lists.live_signups(lists.connect(), rid)
             if linked and not cascade:
                 # 不拦着人，只把选择摆出来：一并归档，或者先去处理那几个报名。
@@ -3534,13 +3534,14 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True, "changed": bool(changed)})
 
         if path == "/signup/archive" and method == "POST":
-            # 归档报名：拥有者的软删除（超管也能替不在场的人做）。与名单一样不设密码
+            # 归档报名：拥有者的软删除。自己归档不要密码；替别人做要提权
             data = body()
             sid = int(data.get("id") or 0)
             row = open_signup(sid)                 # 看得见就行
             by_admin = row["owner_id"] != acc["id"]
             if by_admin:
                 need("superadmin", "owner")
+                need_sudo()
             with lists.tx() as lx:
                 lists.set_archived(lx, "signup", sid, time.time())
             with panel.tx() as tx:

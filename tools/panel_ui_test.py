@@ -2639,6 +2639,11 @@ def module_install_page(browser):
         page.wait_for_timeout(900)
         check("模块管理页上有导入模块",
               page.inner_text("#moduleInstallBtn").strip() == "导入模块")
+        # 文件选择框只按扩展名筛一次：把 MIME 也写进 accept，弹出来的会是
+        # 「自定义文件 (*.zip; *.zip)」那种重复的过滤器
+        check("文件选择框只筛 .zip 一次",
+              page.get_attribute("#moduleFile", "accept") == ".zip",
+              page.get_attribute("#moduleFile", "accept"))
         page.set_input_files("#moduleFile", zip_path)
         page.wait_for_timeout(1200)
         body = page.inner_text("#overlayBody")

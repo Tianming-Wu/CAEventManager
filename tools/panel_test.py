@@ -1056,6 +1056,99 @@ def main():
     check("someone with no seat sees an empty queue",
           outsider["pending"] == [] and outsider["asks"] == [], outsider)
 
+    print("== 账号的彻底删除 ==")
+    doomed = session()
+    post(anon, "/api/panel/register", {"username": "doomed", "name": "要删的人",
+                                       "password": "doomed-pass-1", "note": ""})
+    doomed_row = [a for a in call(owner, "/api/panel/accounts")["accounts"]
+                  if a["username"] == "doomed"][0]
+    doomed_id, doomed_uid = doomed_row["id"], doomed_row["uid"]
+    check("新账号还不能删（没停用）", bool(doomed_row["deleteBlocked"]), doomed_row)
+    post(owner, "/api/panel/sudo", {"password": owner_password()})
+    refused = post(owner, "/api/panel/account/delete", {"id": doomed_id}, expect=409)
+    check("审核前删不掉", refused and "停用" in refused["error"], refused)
+    post(owner, "/api/panel/account/decide", {"id": doomed_id, "action": "reject"})
+    post(owner, "/api/panel/account/decide", {"id": doomed_id, "action": "approve"})
+    post(owner, "/api/panel/account/decide", {"id": doomed_id, "action": "disable"},
+         marker="CAEventManager")
+    refused = post(owner, "/api/panel/account/delete", {"id": doomed_id}, expect=409)
+    check("刚停用的账号也删不掉，并说清还差多久",
+          refused and "才能删除" in refused["error"], refused)
+
+    # 停用满三天是静态门槛：把停用时间往前挪，走完剩下的路
+    import sqlite3
+    raw = sqlite3.connect(os.path.join(DATA, "panel.sqlite3"))
+    raw.execute("UPDATE accounts SET decided_at=? WHERE id=?",
+                (time.time() - 4 * 86400, doomed_id))
+    raw.commit()
+    raw.close()
+    blocked = [a for a in call(owner, "/api/panel/accounts")["accounts"]
+               if a["id"] == doomed_id][0]
+    check("停满之后就能删了", blocked["deleteBlocked"] == "", blocked)
+
+    # 名下还有在用的活动时不许删：先转交
+    doomed2 = session()
+    post(anon, "/api/panel/register", {"username": "doomed2", "name": "还有个活动",
+                                       "password": "doomed-pass-2", "note": ""})
+    doomed2_row = [a for a in call(owner, "/api/panel/accounts")["accounts"]
+                   if a["username"] == "doomed2"][0]
+    post(owner, "/api/panel/account/decide",
+         {"id": doomed2_row["id"], "action": "approve"})
+    post(doomed2, "/api/panel/login",
+         {"username": "doomed2", "password": "doomed-pass-2"})
+    theirs = post(doomed2, "/api/panel/events/create",
+                  {"template": "nwuca.salon", "title": "它的活动"})
+    their_seq = theirs["event"]["seq"]
+    post(owner, "/api/panel/account/decide",
+         {"id": doomed2_row["id"], "action": "disable"})
+    raw = sqlite3.connect(os.path.join(DATA, "panel.sqlite3"))
+    raw.execute("UPDATE accounts SET decided_at=? WHERE id=?",
+                (time.time() - 4 * 86400, doomed2_row["id"]))
+    raw.commit()
+    raw.close()
+    refused = post(owner, "/api/panel/account/delete",
+                   {"id": doomed2_row["id"]}, expect=409)
+    check("名下有在用的活动就拦住，让人先转交",
+          refused and "转移负责人" in refused["error"], refused)
+
+    # 归档之后就不拦了：删人、活动留空，取消归档时再指定负责人。
+    # 这场的负责人不是站长，所以走「强制归档」那条路
+    post(owner, "/api/panel/event/force_archive", {"seq": their_seq})
+    gone = post(owner, "/api/panel/account/delete", {"id": doomed2_row["id"]})
+    check("归档的活动不拦着删人", gone and gone["eventsOrphaned"] == 1, gone)
+    check("账号确实没了",
+          not any(a["uid"] == doomed2_row["uid"]
+                  for a in call(owner, "/api/panel/accounts")["accounts"]))
+    archived = [e for e in call(owner, "/api/panel/events?archived=1")["events"]
+                if e["seq"] == their_seq]
+    check("那场活动标着负责人已删除",
+          archived and archived[0]["ownerMissing"] is True, archived)
+    refused = post(owner, "/api/panel/event/unarchive", {"seq": their_seq}, expect=409)
+    check("取消归档要同时指定新的负责人",
+          refused and "负责人" in refused["error"], refused)
+    owner_uid = [a["uid"] for a in call(owner, "/api/panel/accounts")["accounts"]
+                 if a["role"] == "owner"][0]
+    moved = post(owner, "/api/panel/event/unarchive",
+                 {"seq": their_seq, "owner": owner_uid})
+    check("指定之后转移与恢复一起完成",
+          moved and moved["archived"] is False and moved["owner"], moved)
+    back = [e for e in call(owner, "/api/panel/events")["events"]
+            if e["seq"] == their_seq]
+    check("活动现在挂在新的负责人名下",
+          back and back[0]["ownerMissing"] is False and back[0]["ownerName"], back)
+
+    trail = json.dumps(call(owner, "/api/panel/audit?q=account_delete&limit=10")["audit"],
+                       ensure_ascii=False)
+    check("删账号写进了审计", "account_delete" in trail, trail[:200])
+
+    post(owner, "/api/panel/sudo/exit")
+    post(owner, "/api/panel/sudo", {"password": owner_password()})
+    dropped = post(owner, "/api/panel/account/delete", {"id": doomed_id})
+    check("停满三天的账号可以删掉", dropped and dropped["deleted"] is True, dropped)
+    check("删完之后账号表里没有它",
+          not any(a["uid"] == doomed_uid
+                  for a in call(owner, "/api/panel/accounts")["accounts"]))
+
     print("== 名单：三个范围 ==")
     check("我参与的 covers what I own",
           call(owner, "/api/panel/rosters?scope=joined")["total"] >= 2)

@@ -50,6 +50,8 @@ STATIC_DEFAULTS = {
     "shortlink_per_event": 5,
     # 服务安全模式：启动时生效，外部资源不加载、活动内数据只读
     "safe_mode": False,
+    # 账号彻底删除的门槛：停用满这么多天的账号才允许删（防止手一抖把刚停的人删掉）
+    "delete_account_after_days": 3,
 }
 
 SECRET_LEN = 32

@@ -146,6 +146,10 @@ python tools/prod_check.py https://example.org/mount <活动 token>   # 线上�
 | `owner_username` / `owner_name` | 站长的登录名与称呼 |
 | `shortlink_per_event` | 静态设置：一个活动最多同时持有几条短链（默认 5），改完重启生效 |
 | `safe_mode` | 静态设置：服务安全模式（默认 `false`），改完重启生效 |
+| `delete_account_after_days` | 静态设置：账号要停用满几天才允许彻底删除（默认 3），改完重启生效 |
+
+「静态设置」指写在 `config.json` 里、改完必须重启才生效的项；界面上没有入口（面板里能改的那些
+叫活动设置 / 平台设置，存在库里，立刻生效）。
 
 随机源：有 `/dev/hwrng` 就与内核的混合着用，没有就只用内核的 CSPRNG。想知道这台机器用的是哪一种，
 看服务启动后在服务器上执行 `python3 -c "import sys; sys.path.insert(0,'core'); import rng; print(rng.source())"`。

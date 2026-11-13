@@ -68,7 +68,7 @@ PAGES_DIR = os.path.join(BASE_DIR, "pages")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.0.90"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.0.91"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -502,6 +502,15 @@ def _with_stopped(view, stopped):
     return view
 
 
+def _with_orphan(view, row):
+    """活动列表上再标一笔：负责人账号已经被彻底删掉了。
+
+    只有已归档的活动会这样（删账号时不拦归档的活动）；取消归档时得同时指定新负责人。
+    """
+    view["ownerMissing"] = not row["owner_id"] or not (view.get("ownerName") or "")
+    return view
+
+
 def presets_ok_slug(slug):
     return bool(slug) and bool(presets.ID_RE.match(slug))
 
@@ -757,11 +766,11 @@ def _return_to(back, mount):
     return ""
 
 
-def _accounts_with_usage(conn, rows):
-    """用户管理那张表要的账号：带上各自存了多少对话。
+def _accounts_with_usage(conn, rows, days=0):
+    """用户管理那张表要的账号：带上各自存了多少对话，以及能不能彻底删掉。
 
     配额是平台资源，谁用了多少得一眼看见，不然调配额就是猜。一次聚合查询，
-    不按账号各查一次。
+    不按账号各查一次。``days`` 是彻底删除的停用门槛（静态设置）。
     """
     used = {}
     for row in conn.execute(
@@ -772,6 +781,8 @@ def _accounts_with_usage(conn, rows):
     for row in rows:
         view = panel.view(row)
         view["chatUsed"] = used.get(int(row["id"]), 0)
+        # 不能删的理由（空串就是能删）：界面照着它决定按钮出不出现
+        view["deleteBlocked"] = panel.delete_blocker(conn, row, days)[1]
         out.append(view)
     return out
 
@@ -1653,7 +1664,10 @@ class Handler(BaseHTTPRequestHandler):
                                "offset": offset, "limit": limit,
                                "quotaDefault": panel.CHAT_QUOTA_DEFAULT,
                                "quotaMax": panel.CHAT_QUOTA_MAX,
-                               "accounts": _accounts_with_usage(conn, rows)})
+                               "accounts": _accounts_with_usage(
+                                   conn, rows,
+                                   localconfig.static_limit(LOCAL_CFG,
+                                                            "delete_account_after_days"))})
 
         if path == "/people" and method == "GET":
             # 「选人」的唯一数据源：只回编号、称呼与头像。登录名是凭据，一个都不给。
@@ -1790,8 +1804,8 @@ class Handler(BaseHTTPRequestHandler):
                     "total": int(total or 0),
                     "offset": offset,
                     "limit": limit,
-                    "events": [_with_stopped(panel.event_view(r, base, None), stopped)
-                               for r in rows],
+                    "events": [_with_orphan(_with_stopped(
+                        panel.event_view(r, base, None), stopped), r) for r in rows],
                 })
             rows = conn.execute(
                 "SELECT e.*, m.role AS my_role, o.name AS owner_name"
@@ -1805,8 +1819,8 @@ class Handler(BaseHTTPRequestHandler):
             # reading a per-event URL would point every row at one activity
             base = (LOCAL_CFG.get("public_base_prefix") or "").rstrip("/")
             stopped = panel.disabled_modules(conn)
-            events = [_with_stopped(panel.event_view(r, base, r["my_role"]), stopped)
-                      for r in rows]
+            events = [_with_orphan(_with_stopped(
+                panel.event_view(r, base, r["my_role"]), stopped), r) for r in rows]
             # 活动名在每个活动自己的库里：缺名字的按它自己的活动号去补
             for row, view in zip(rows, events):
                 if view["title"]:
@@ -1852,6 +1866,51 @@ class Handler(BaseHTTPRequestHandler):
                 panel.audit(tx, acc["username"], action, str(target["uid"]),
                             panel.audit_note(reason=reason))
             return self._json({"ok": True, "status": status})
+
+        if path == "/account/delete" and method == "POST":
+            # 彻底删除账号：不可逆。超管及以上 + sudo，而且只删"已经停用够久、
+            # 名下没有还在用的东西"的账号（门槛见 localconfig 的静态设置）
+            actor = need("superadmin", "owner")
+            need_sudo()
+            data = body()
+            target = conn.execute("SELECT * FROM accounts WHERE id=?",
+                                  (int(data.get("id") or 0),)).fetchone()
+            if target is None:
+                raise model.ApiError("账号不存在", 404)
+            if actor["role"] == "superadmin" and target["role"] != "admin":
+                raise model.ApiError("超级管理员只能删除普通管理员", 403)
+            days = localconfig.static_limit(LOCAL_CFG, "delete_account_after_days")
+            ok, why = panel.delete_blocker(conn, target, days)
+            if not ok:
+                raise model.ApiError(why, 409)
+            # 名单与报名是长期资产：人可以删，别人做的东西不能跟着消失
+            lx = lists.connect()
+            owned = lx.execute(
+                "SELECT (SELECT COUNT(*) FROM rosters WHERE owner_id=?) AS rosters,"
+                "       (SELECT COUNT(*) FROM signups WHERE owner_id=?) AS signups",
+                (target["id"], target["id"])).fetchone()
+            if int(owned["rosters"] or 0) or int(owned["signups"] or 0):
+                raise model.ApiError(
+                    "名下还有 %d 份名单、%d 条报名：先删掉或处理掉，再删账号"
+                    % (int(owned["rosters"] or 0), int(owned["signups"] or 0)), 409)
+            refuse_stale()
+            signed = conn.execute(
+                "SELECT COUNT(*) AS n FROM sessions WHERE account_id=?",
+                (target["id"],)).fetchone()["n"]
+            panel.drop_avatar(target["id"])
+            with panel.tx() as tx:
+                counts = panel.purge_account(tx, target["id"])
+                # 已归档的活动不拦着删人：负责人留空，取消归档时再指定新的
+                left = tx.execute(
+                    "UPDATE events SET owner_id=NULL"
+                    " WHERE owner_id=? AND archived_at<>0", (target["id"],)).rowcount
+                panel.audit(tx, acc["username"], "account_delete", str(target["uid"]),
+                            panel.audit_note(uid=target["uid"],
+                                             sessions=int(signed or 0),
+                                             tokens=counts.get("api_tokens", 0),
+                                             events_orphaned=left))
+            return self._json({"ok": True, "deleted": True,
+                               "uid": target["uid"], "eventsOrphaned": left})
 
         if path == "/account/role" and method == "POST":
             actor = need("owner")
@@ -2377,25 +2436,58 @@ class Handler(BaseHTTPRequestHandler):
                                "title": row["title"], "bytes": size})
 
         if path == "/event/unarchive" and method == "POST":
-            # 取消归档：超管提权，把归档包解开，负责人就能下载后再归一次
+            # 取消归档：超管提权，把归档包解开，负责人就能下载后再归一次。
+            # 负责人账号可能已经被彻底删了（归档的活动不拦着删人），
+            # 这种时候要同时指定新的负责人：转移与恢复是同一步
             data = body()
             seq = int(data.get("seq") or 0)
             need("superadmin", "owner")
             need_sudo()
             row = event_row(seq)
+            owner_uid = int(data.get("owner") or 0)
+            current = conn.execute("SELECT uid, name, status FROM accounts WHERE id=?",
+                                   (row["owner_id"] or 0,)).fetchone()
+            new_owner = None
+            if current is None:
+                if not owner_uid:
+                    raise model.ApiError(
+                        "这场活动的负责人账号已经不存在，取消归档要同时指定新的负责人", 409)
+                new_owner = conn.execute(
+                    "SELECT id, uid, name, status FROM accounts WHERE uid=?",
+                    (owner_uid,)).fetchone()
+                if new_owner is None or new_owner["status"] != "active":
+                    raise model.ApiError("新的负责人需要是一个正常状态的账号", 404)
             try:
                 restored = eventfs.restore(seq)
             except eventfs.EventFsError as exc:
                 raise model.ApiError(str(exc))
             with panel.tx() as tx:
                 tx.execute("UPDATE events SET archived_at=0 WHERE seq=?", (seq,))
+                if new_owner is not None:
+                    tx.execute("UPDATE events SET owner_id=? WHERE seq=?",
+                               (new_owner["id"], seq))
+                    tx.execute(
+                        "INSERT INTO event_members (seq, account_id, role, state, added_at)"
+                        " VALUES (?,?,?,?,?) ON CONFLICT(seq, account_id)"
+                        " DO UPDATE SET role='owner', state='active'",
+                        (seq, new_owner["id"], "owner", "active", time.time()))
+                    tx.execute(
+                        "UPDATE event_members SET role='member'"
+                        " WHERE seq=? AND account_id<>? AND role='owner'",
+                        (seq, new_owner["id"]))
                 panel.audit(tx, acc["username"], "event_unarchive", str(seq),
-                            panel.audit_note(title=row["title"]))
+                            panel.audit_note(title=row["title"],
+                                             new_owner=panel.public_name(
+                                                 new_owner["name"] if new_owner else "",
+                                                 new_owner["uid"] if new_owner else 0)))
             if restored:
                 db.set_event(seq)
                 db.init_db()
             return self._json({"ok": True, "seq": seq, "archived": False,
-                               "restored": restored})
+                               "restored": restored,
+                               "owner": panel.public_name(
+                                   new_owner["name"], new_owner["uid"])
+                                        if new_owner is not None else ""})
 
         if path == "/event/delete" and method == "POST":
             # 彻底删除已归档的活动：不可逆，只有超管能做

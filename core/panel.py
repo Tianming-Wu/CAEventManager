@@ -722,6 +722,54 @@ def events_on_module(conn, module_id):
     return int(row["n"] or 0)
 
 
+# --------------------------------------------------------------------------- #
+# 账号的彻底删除
+# --------------------------------------------------------------------------- #
+def delete_blocker(conn, row, days):
+    """能不能彻底删掉这个账号：返回 ``(能, 不能的理由)``。
+
+    这是不可逆的操作，所以门槛定得笨一点：必须是**已经停用**的账号，而且要停满
+    ``delete_account_after_days`` 天（静态设置）。名下还在用的活动会拦住删除——
+    先转移负责人再删人；已经归档的活动不拦（归档是历史，回头取消归档时再指定新负责人）。
+    """
+    if row is None:
+        return False, "账号不存在"
+    if row["role"] == "owner":
+        return False, "站长的账号不可删除"
+    if (row["status"] or "") != "disabled":
+        return False, "只有已停用的账号可以删除"
+    left = float(days) * 86400 - (time.time() - float(row["decided_at"] or 0))
+    if left > 0:
+        # 差多久就直说，免得人反复点
+        hours = max(1, int(left // 3600))
+        return False, "停用满 %d 天才能删除，还差 %d 小时" % (
+            int(days), hours if hours < 48 else int(left // 86400))
+    live = conn.execute(
+        "SELECT COUNT(*) AS n FROM events WHERE owner_id=? AND archived_at=0",
+        (row["id"],)).fetchone()["n"]
+    if int(live or 0):
+        return False, "名下还有 %d 个活动：先转移负责人，再删账号" % int(live)
+    return True, ""
+
+
+def purge_account(tx, account_id):
+    """把这个账号留下的东西一起收掉（审计除外，它记的是编号）。
+
+    返回删掉的行数，写进审计里，事后能看出当时清了多少。
+    """
+    aid = int(account_id)
+    counts = {}
+    for table, column in (("sessions", "account_id"), ("api_tokens", "account_id"),
+                          ("drafts", "account_id"), ("assistant_sessions", "account_id"),
+                          ("account_group_members", "account_id"),
+                          ("preset_favorites", "account_id"),
+                          ("notices", "account_id"), ("event_members", "account_id")):
+        cur = tx.execute("DELETE FROM %s WHERE %s=?" % (table, column), (aid,))   # sql-ok 只拼表名与列名，值都走 ?
+        counts[table] = cur.rowcount
+    tx.execute("DELETE FROM accounts WHERE id=?", (aid,))
+    return counts
+
+
 def draft_get(conn, account_id, key):
     row = conn.execute(
         "SELECT payload, updated_at FROM drafts WHERE account_id=? AND key=?",

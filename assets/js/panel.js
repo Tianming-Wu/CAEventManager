@@ -808,7 +808,7 @@
     var rows = [
       ["活动号", String(e.seq)],
       ["token", e.id],
-      ["负责人", e.ownerName || "—"],
+      ["负责人", e.ownerMissing ? "账号已删除" : (e.ownerName || "—")],
       ["模块", e.kind || "—"],
       [archived ? "归档时间" : "创建时间",
        archived ? PX.whenExact(e.archivedAt) : PX.when(e.createdAt)]
@@ -915,6 +915,36 @@
   }
 
   function archivedRestore(seq) {
+    var e = (S.archived || []).filter(function (x) {
+      return String(x.seq) === String(seq);
+    })[0] || {};
+    if (e.ownerMissing) {
+      // 负责人账号已经被彻底删了：取消归档要顺带指定一个新的负责人。
+      // 归档的活动不拦着删人，所以这种活动一定存在，得有个说法
+      return new Promise(function (resolve) {
+        pickPeople({
+          title: "取消归档：先指定负责人",
+          mode: "single",
+          apply: function (people) {
+            var who = people[0];
+            if (!who) return resolve(false);
+            confirmHighRisk("取消归档",
+              "这场活动的负责人账号已不存在。取消归档并交给 " + PX.esc(who.label) + "？",
+              "取消归档", false, function (note) {
+                apiSudo("/event/unarchive",
+                  { method: "POST", body: { seq: Number(seq), owner: who.uid } },
+                  "取消归档", note)
+                  .then(function () {
+                    PX.toast("已取消归档，负责人是 " + who.label);
+                    resolve(true);
+                    return reloadAll();
+                  })
+                  .catch(function (err) { resolve(false); fail(err); });
+              }, { keepUnder: true });
+          }
+        });
+      });
+    }
     return new Promise(function (resolve) {
       confirmHighRisk("取消归档", "确认取消归档？",
         "取消归档", false, function (note) {
@@ -3869,6 +3899,16 @@
     if (isSuper()) {
       btns.push('<button class="btn ghost" data-quota="' + a.id + '">调整存档配额</button>');
     }
+    // 彻底删除：不可逆，只有"停用够久、名下没有还在用的东西"的账号才给这颗按钮，
+    // 不能删的时候把理由写在下面（不然人只会觉得按钮怎么不见了）
+    var deletable = isSuper() && a.role !== "owner" && !a.deleteBlocked;
+    if (deletable) {
+      btns.push('<button class="btn danger" data-acct-del="' + a.id + '">彻底删除</button>');
+    }
+    var blockedNote = (isSuper() && a.role !== "owner" && a.deleteBlocked
+      && a.status === "disabled")
+      ? '<p class="note" style="margin-top:12px">彻底删除：' + PX.esc(a.deleteBlocked) + "</p>"
+      : "";
 
     openOverlay("account", a.username,
       '<dl class="kv">' + rows.map(function (r) {
@@ -3876,7 +3916,8 @@
       }).join("") + "</dl>" +
       (btns.length
         ? '<div class="row" style="margin-top:16px">' + btns.join("") + "</div>"
-        : '<p class="page-sub" style="margin-top:16px">这个账号没有可以执行的操作。</p>'));
+        : '<p class="page-sub" style="margin-top:16px">这个账号没有可以执行的操作。</p>') +
+      blockedNote);
     // afterMutation() re-opens this dialog with fresh data
     $("#overlayBody").setAttribute("data-acct-body", String(a.id));
   }
@@ -3924,7 +3965,9 @@
       return "<tr>" +
         "<td>" + eventNameCell(e) + "</td>" +
         '<td class="num mono">' + e.seq + "</td>" +
-        "<td>" + PX.esc(e.ownerName || "—") + "</td>" +
+        (e.ownerMissing
+          ? '<td class="dim">账号已删除</td>'
+          : "<td>" + PX.esc(e.ownerName || "—") + "</td>") +
         '<td class="mono">' + PX.whenExact(e.archivedAt) + "</td>" +
         '<td class="mono">' + PX.esc(shortToken(e.id)) + "</td>" +
         '<td class="actions"><button class="detail-btn" type="button" ' +
@@ -5180,6 +5223,28 @@
       " · 已用 " + sizeText(a.chatUsed);
   }
 
+  /* 彻底删除账号：不可逆。先问一句，再走提权（没提权时密码就是那道确认） */
+  function deleteAccount(id) {
+    var a = S.accounts.filter(function (x) { return x.id === id; })[0];
+    if (!a) return;
+    openOverlay("confirm", "彻底删除 " + displayName(a) + "？",
+      '<p class="page-sub">删除后无法恢复。确认继续？</p>' +
+      '<div class="row" style="margin-top:18px;justify-content:flex-end">' +
+      '<button class="btn" type="button" data-close-overlay="1">取消</button>' +
+      '<button class="btn danger" type="button" id="acctDropGo">删除</button></div>');
+    $("#acctDropGo").addEventListener("click", function () {
+      closeAllOverlays();
+      apiSudo("/account/delete", { method: "POST", body: { id: a.id } }, "彻底删除账号")
+        .then(function (d) {
+          PX.toast(d && d.eventsOrphaned
+            ? "账号已删除，" + d.eventsOrphaned + " 场已归档的活动等取消归档时再指定负责人"
+            : "账号已删除");
+          return reloadAll();
+        })
+        .catch(fail);
+    });
+  }
+
   function quotaDialog(id) {
     var a = S.accounts.filter(function (x) { return x.id === id; })[0];
     if (!a) return;
@@ -5274,6 +5339,9 @@
 
     var quota = t.closest("[data-quota]");
     if (quota) return quotaDialog(Number(quota.getAttribute("data-quota")));
+
+    var dropAcct = t.closest("[data-acct-del]");
+    if (dropAcct) return deleteAccount(Number(dropAcct.getAttribute("data-acct-del")));
 
     var toggle = t.closest("[data-toggle]");
     if (toggle) return onGroupHead(toggle.getAttribute("data-toggle"));

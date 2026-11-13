@@ -179,6 +179,14 @@
         </svg>
         <span class="nav-text">活动管理</span>
       </a>
+      <a class="nav-item" href="#/roster-admin" data-nav="roster-admin"
+         data-min-role="superadmin">
+        <svg viewBox="0 0 20 20" aria-hidden="true">
+          <rect x="2.7" y="3.6" width="14.6" height="12.8" rx="1.7"/>
+          <path d="M5.8 7.6h8.4M5.8 10.4h8.4M5.8 13.2h8.4"/>
+        </svg>
+        <span class="nav-text">名单管理</span>
+      </a>
 
       <!-- a group: the header only expands, the children lead to pages -->
       <div class="nav-group" data-group="approvals" data-min-role="superadmin">
@@ -1124,6 +1132,40 @@
         </div>
         <div class="row" style="margin-top:10px;justify-content:flex-end">
           <button class="btn sm" id="archivedMore" type="button" hidden>加载更多</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====================================================== 名单管理 -->
+    <section class="page" data-page="roster-admin" hidden>
+      <header class="page-head">
+        <h1>名单管理</h1>
+        <p class="page-sub">服务上的全部名单与报名。点名称打开详情，转移与删除都在那里</p>
+      </header>
+
+      <div class="card">
+        <div class="card-head"><h2>名单</h2></div>
+        <div class="tblwrap">
+          <table class="tbl fixed" id="adminRosterTable">
+            <thead><tr>
+              <th>名单</th><th>拥有者</th><th>可见性</th><th class="num">人数</th>
+              <th>更新时间</th><th class="actions">操作</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2>报名</h2></div>
+        <div class="tblwrap">
+          <table class="tbl fixed" id="adminSignupTable">
+            <thead><tr>
+              <th>报名</th><th>拥有者</th><th>状态</th><th class="num">已报名</th>
+              <th>更新时间</th><th class="actions">操作</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
         </div>
       </div>
     </section>

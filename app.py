@@ -68,7 +68,7 @@ PAGES_DIR = os.path.join(BASE_DIR, "pages")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.0.91"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.0.92"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -3201,13 +3201,43 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/roster/delete" and method == "POST":
             data = body()
             rid = int(data.get("id") or 0)
-            row = need_roster_owner(open_roster(rid, write=True))
+            row = open_roster(rid, write=True)
+            by_admin = row["owner_id"] != acc["id"]
+            if by_admin:
+                # 拥有者删自己的名单不用提权；超管代删是另一回事
+                need("superadmin", "owner")
+                need_sudo()
             with lists.tx() as lx:
                 lists.delete_roster(lx, rid)
             with panel.tx() as tx:
                 panel.audit(tx, acc["username"], "roster_delete", str(rid),
-                            panel.audit_note(name=row["name"]))
+                            panel.audit_note(name=row["name"],
+                                             by="admin" if by_admin else "owner"))
             return self._json({"ok": True})
+
+        if path == "/roster/transfer" and method == "POST":
+            # 名单换人：超管提权代做。原来的拥有者留一份写入权，免得自己建出来的东西
+            # 被收走之后想改又没门路
+            data = body()
+            rid = int(data.get("id") or 0)
+            need("superadmin", "owner")
+            need_sudo()
+            row = open_roster(rid, write=True)
+            target = conn.execute("SELECT id, uid, name, status FROM accounts WHERE uid=?",
+                                  (int(data.get("uid") or 0),)).fetchone()
+            if target is None or target["status"] != "active":
+                raise model.ApiError("新的拥有者需要是一个正常状态的账号", 404)
+            if target["id"] == row["owner_id"]:
+                return self._json({"ok": True, "already": True})
+            with lists.tx() as lx:
+                lx.execute("UPDATE rosters SET owner_id=?, updated_at=? WHERE id=?",
+                           (target["id"], time.time(), rid))
+                lists.set_grant(lx, "roster", rid, row["owner_id"], "write", "transfer")
+            label = panel.public_name(target["name"], target["uid"])
+            with panel.tx() as tx:
+                panel.audit(tx, acc["username"], "roster_transfer", str(rid),
+                            panel.audit_note(name=row["name"], to=label))
+            return self._json({"ok": True, "owner": label})
 
         if path == "/roster/entry" and method == "POST":
             data = body()
@@ -3380,8 +3410,10 @@ class Handler(BaseHTTPRequestHandler):
             limit = _int_arg(query, "limit", 30, 1, 100)
             res = lists.list_signups(lists.connect(), acc, q, scope, offset, limit)
             base = (LOCAL_CFG.get("public_base_prefix") or "").rstrip("/")
+            names = roster_owner_names([item["ownerId"] for item in res["signups"]])
             for item in res["signups"]:
                 item["url"] = "%s/join/%s" % (base, item["token"])
+                item["ownerName"] = names.get(item["ownerId"], "")
             return self._json({"ok": True, **res})
 
         if path == "/signup" and method == "GET":
@@ -3427,12 +3459,40 @@ class Handler(BaseHTTPRequestHandler):
             data = body()
             sid = int(data.get("id") or 0)
             row = open_signup(sid, write=True)
+            by_admin = row["owner_id"] != acc["id"]
+            if by_admin:
+                need("superadmin", "owner")
+                need_sudo()
             with lists.tx() as lx:
                 lists.delete_signup(lx, sid)
             with panel.tx() as tx:
                 panel.audit(tx, acc["username"], "signup_delete", str(sid),
-                            panel.audit_note(title=row["title"]))
+                            panel.audit_note(title=row["title"],
+                                             by="admin" if by_admin else "owner"))
             return self._json({"ok": True})
+
+        if path == "/signup/transfer" and method == "POST":
+            # 报名换人：与名单同一条规矩（超管提权代做，原拥有者留一份写入权）
+            data = body()
+            sid = int(data.get("id") or 0)
+            need("superadmin", "owner")
+            need_sudo()
+            row = open_signup(sid, write=True)
+            target = conn.execute("SELECT id, uid, name, status FROM accounts WHERE uid=?",
+                                  (int(data.get("uid") or 0),)).fetchone()
+            if target is None or target["status"] != "active":
+                raise model.ApiError("新的拥有者需要是一个正常状态的账号", 404)
+            if target["id"] == row["owner_id"]:
+                return self._json({"ok": True, "already": True})
+            with lists.tx() as lx:
+                lx.execute("UPDATE signups SET owner_id=? WHERE id=?",
+                           (target["id"], sid))
+                lists.set_grant(lx, "signup", sid, row["owner_id"], "write", "transfer")
+            label = panel.public_name(target["name"], target["uid"])
+            with panel.tx() as tx:
+                panel.audit(tx, acc["username"], "signup_transfer", str(sid),
+                            panel.audit_note(title=row["title"], to=label))
+            return self._json({"ok": True, "owner": label})
 
         if path == "/signup/entries" and method == "GET":
             sid = _int_arg(query, "id", 0, 0, 1000000)

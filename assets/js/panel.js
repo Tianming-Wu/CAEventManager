@@ -33,6 +33,7 @@
     "templates": { min: "admin" },
     "users": { min: "superadmin" },
     "all-events": { min: "superadmin" },
+    "roster-admin": { min: "superadmin" },
     "approval-users": { min: "superadmin", group: "approvals" },
     "approval-events": { min: "superadmin", group: "approvals" },
     "new-event": { min: "admin" },
@@ -62,6 +63,9 @@
     archived: [],
     archivedTotal: null,
     archivedLoading: false,
+    // 名单管理（超管）：全站的名单与报名
+    adminRosters: [],
+    adminSignups: [],
     currentFields: [],
     templateId: null,
     templateFilter: "",
@@ -223,7 +227,7 @@
     // 依赖的模块被停用：标题右边一枚红色胶囊，原因放在悬停/点击的提示里，
     // 不进卡片正文——多一行字会把卡片撑高，三列排布就参差了
     var badge = e.stopped
-      ? '<button class="badge-off" type="button" data-off-tip="1"' +
+      ? '<button class="badge-off" type="button" data-tip="依赖模块被禁用"' +
         ' aria-label="不可用：依赖模块被禁用">' + ICON_ALERT + "不可用</button>"
       : "";
     return '<div class="event-card">' +
@@ -2897,6 +2901,9 @@
       "all-events": function () {
         return Promise.all([loadEvents(), loadArchived(true)]).then(draw);
       },
+      "roster-admin": function () {
+        return loadAdminLists().then(draw);
+      },
       users: function () { return loadAccounts().then(draw); },
       "approval-users": function () { return loadAccounts().then(draw); },
       audit: function () { return loadAudit().then(draw); },
@@ -2953,6 +2960,7 @@
       case "new-event": return drawNewEvent();
       case "users": return drawUsers();
       case "all-events": return drawAllEvents();
+      case "roster-admin": return drawRosterAdmin();
       case "approval-users": return drawApprovalUsers();
       case "approval-events": return drawApprovalEvents();
       case "modules": return drawModules();
@@ -3899,16 +3907,15 @@
     if (isSuper()) {
       btns.push('<button class="btn ghost" data-quota="' + a.id + '">调整存档配额</button>');
     }
-    // 彻底删除：不可逆，只有"停用够久、名下没有还在用的东西"的账号才给这颗按钮，
-    // 不能删的时候把理由写在下面（不然人只会觉得按钮怎么不见了）
-    var deletable = isSuper() && a.role !== "owner" && !a.deleteBlocked;
-    if (deletable) {
+    // 彻底删除只给"已停用、而且真的能删"的账号：
+    // 没停用就根本不出现；停用了还删不掉就做成灰按钮，悬停说出缺什么
+    var canDelete = isSuper() && a.role !== "owner";
+    if (canDelete && a.deleteBlocked === "") {
       btns.push('<button class="btn danger" data-acct-del="' + a.id + '">彻底删除</button>');
+    } else if (canDelete && a.status === "disabled") {
+      btns.push('<span class="btn danger is-locked" data-tip="' +
+                PX.esc(a.deleteBlocked || "") + '" aria-disabled="true">彻底删除</span>');
     }
-    var blockedNote = (isSuper() && a.role !== "owner" && a.deleteBlocked
-      && a.status === "disabled")
-      ? '<p class="note" style="margin-top:12px">彻底删除：' + PX.esc(a.deleteBlocked) + "</p>"
-      : "";
 
     openOverlay("account", a.username,
       '<dl class="kv">' + rows.map(function (r) {
@@ -3916,8 +3923,7 @@
       }).join("") + "</dl>" +
       (btns.length
         ? '<div class="row" style="margin-top:16px">' + btns.join("") + "</div>"
-        : '<p class="page-sub" style="margin-top:16px">这个账号没有可以执行的操作。</p>') +
-      blockedNote);
+        : '<p class="page-sub" style="margin-top:16px">这个账号没有可以执行的操作。</p>'));
     // afterMutation() re-opens this dialog with fresh data
     $("#overlayBody").setAttribute("data-acct-body", String(a.id));
   }
@@ -3951,7 +3957,7 @@
       '<button class="link-btn" type="button" data-event-detail="' + e.seq + '">' +
       "<b>" + PX.esc(eventTitle(e)) + "</b></button>" +
       (e.stopped
-        ? '<button class="badge-off" type="button" data-off-tip="1"' +
+        ? '<button class="badge-off" type="button" data-tip="依赖模块被禁用"' +
           ' aria-label="不可用：依赖模块被禁用">' + ICON_ALERT + "不可用</button>"
         : "") +
       "</span>";
@@ -4004,6 +4010,137 @@
         '<td class="actions"><button class="detail-btn" type="button" ' +
         'data-event-detail="' + e.seq + '">详情</button></td>' + "</tr>";
     }).join("") : emptyRow(6, "还没有活动");
+  }
+
+  /* 名单管理：服务上的全部名单与报名，超管及以上才看得到。
+     做法与「活动管理」一样：表格只列事实，转移与删除都在详情弹窗里 */
+  function loadAdminLists() {
+    if (!isSuper()) return Promise.resolve();
+    return Promise.all([
+      PX.api("/rosters?scope=all&limit=100"),
+      PX.api("/signups?scope=all&limit=100")
+    ]).then(function (res) {
+      S.adminRosters = res[0].rosters || [];
+      S.adminSignups = res[1].signups || [];
+    }).catch(function (e) { PX.toast(PX.esc(e.message), true); });
+  }
+
+  function drawRosterAdmin() {
+    var rosters = S.adminRosters || [];
+    $("#adminRosterTable tbody").innerHTML = rosters.length ? rosters.map(function (r) {
+      return "<tr>" +
+        '<td><button class="link-btn" type="button" data-admin-roster="' + r.id + '">' +
+        "<b>" + PX.esc(r.name) + "</b></button></td>" +
+        "<td>" + PX.esc(r.ownerName || "—") + "</td>" +
+        "<td>" + PX.esc(r.visibilityLabel || "") + "</td>" +
+        '<td class="num mono">' + (r.members || 0) + "</td>" +
+        '<td class="mono">' + PX.when(r.updatedAt || r.createdAt) + "</td>" +
+        '<td class="actions"><button class="detail-btn" type="button" ' +
+        'data-admin-roster="' + r.id + '">详情</button></td>' + "</tr>";
+    }).join("") : emptyRow(6, "还没有名单");
+
+    var signups = S.adminSignups || [];
+    $("#adminSignupTable tbody").innerHTML = signups.length ? signups.map(function (s) {
+      return "<tr>" +
+        '<td><button class="link-btn" type="button" data-admin-signup="' + s.id + '">' +
+        "<b>" + PX.esc(s.title) + "</b></button></td>" +
+        "<td>" + PX.esc(s.ownerName || "—") + "</td>" +
+        "<td>" + PX.esc(s.statusLabel || "") + "</td>" +
+        '<td class="num mono">' + (s.entries || 0) + "</td>" +
+        '<td class="mono">' + PX.when(s.updatedAt || s.createdAt) + "</td>" +
+        '<td class="actions"><button class="detail-btn" type="button" ' +
+        'data-admin-signup="' + s.id + '">详情</button></td>' + "</tr>";
+    }).join("") : emptyRow(6, "还没有报名");
+  }
+
+  /* 名单 / 报名的详情：超管在这里换人或者删掉别人名下的东西（都要提权） */
+  function openAdminListDetail(kind, id) {
+    var list = kind === "roster" ? (S.adminRosters || []) : (S.adminSignups || []);
+    var row = list.filter(function (x) { return String(x.id) === String(id); })[0];
+    if (!row) return;
+    var title = kind === "roster" ? row.name : row.title;
+    var rows = kind === "roster"
+      ? [["拥有者", row.ownerName || "—"],
+         ["可见性", row.visibilityLabel || ""],
+         ["人数", String(row.members || 0)],
+         ["创建时间", PX.when(row.createdAt)],
+         ["更新时间", PX.when(row.updatedAt || row.createdAt)]]
+      : [["拥有者", row.ownerName || "—"],
+         ["状态", row.statusLabel || ""],
+         ["已报名", String(row.entries || 0)],
+         ["创建时间", PX.when(row.createdAt)],
+         ["更新时间", PX.when(row.updatedAt || row.createdAt)]];
+    var acts = [];
+    acts.push({
+      text: "打开 ↗", kind: "ghost", primary: true,
+      run: function () {
+        var url = String(location.href).split("#")[0] +
+          (kind === "roster" ? "#/roster/" + row.id : "#/signup/" + row.id);
+        window.open(url, "_blank");
+      }
+    });
+    acts.push({ text: "转移拥有者", kind: "", run: function () {
+      transferListOwner(kind, row);
+    } });
+    acts.push({ text: "彻底删除", kind: "danger", run: function () {
+      deleteAdminList(kind, row);
+    } });
+    var html = '<dl class="kv">' + rows.map(function (r) {
+      return "<dt>" + PX.esc(r[0]) + "</dt><dd>" + PX.esc(r[1]) + "</dd>";
+    }).join("") + "</dl>" +
+      '<div class="detail-actions detail-actions-top">' +
+      '<button class="btn ghost" type="button" data-list-act="0">' + acts[0].text + "</button></div>" +
+      '<div class="detail-actions">' + acts.slice(1).map(function (a, i) {
+        return '<button class="btn ' + a.kind + '" type="button" data-list-act="' +
+          (i + 1) + '">' + PX.esc(a.text) + "</button>";
+      }).join("") + "</div>";
+    openOverlay(kind === "roster" ? "admin-roster" : "admin-signup", title, html,
+      function (card) {
+        card.querySelectorAll("[data-list-act]").forEach(function (btn) {
+          btn.addEventListener("click", function () {
+            var act = acts[Number(btn.getAttribute("data-list-act"))];
+            if (act) act.run();
+          });
+        });
+      });
+  }
+
+  function transferListOwner(kind, row) {
+    var title = kind === "roster" ? row.name : row.title;
+    pickPeople({
+      title: "转移拥有者" + (title ? "：" + title : ""),
+      mode: "single",
+      exclude: [S.me && S.me.id],
+      apply: function (people) {
+        var who = people[0];
+        if (!who) return;
+        confirmHighRisk("转移拥有者",
+          "把它交给 " + PX.esc(who.label) + "？原来的拥有者会保留写入权限。确认继续？",
+          "转移", false, function (note) {
+            apiSudo("/" + kind + "/transfer",
+              { method: "POST", body: { id: row.id, uid: who.uid } }, "转移拥有者", note)
+              .then(function () {
+                PX.toast("已交给 " + who.label);
+                return loadAdminLists().then(drawRosterAdmin);
+              })
+              .catch(fail);
+          });
+      }
+    });
+  }
+
+  function deleteAdminList(kind, row) {
+    var title = kind === "roster" ? row.name : row.title;
+    confirmHighRisk("彻底删除" + (kind === "roster" ? "名单" : "报名"),
+      "删除后无法恢复。确认继续？", "删除", true, function (note) {
+        apiSudo("/" + kind + "/delete", { method: "POST", body: { id: row.id } },
+                "删除" + (kind === "roster" ? "名单" : "报名"), note)
+          .then(function () {
+            PX.toast("已删除");
+            return loadAdminLists().then(drawRosterAdmin);
+          })
+          .catch(fail);
+      });
   }
 
   function drawApprovalUsers() {
@@ -5365,6 +5502,15 @@
     if (archiveBtn) return archiveEvent(archiveBtn.getAttribute("data-archive"));
     var detailBtn = t.closest("[data-event-detail]");
     if (detailBtn) return openEventDetail(detailBtn.getAttribute("data-event-detail"));
+
+    var adminRoster = t.closest("[data-admin-roster]");
+    if (adminRoster) {
+      return openAdminListDetail("roster", adminRoster.getAttribute("data-admin-roster"));
+    }
+    var adminSignup = t.closest("[data-admin-signup]");
+    if (adminSignup) {
+      return openAdminListDetail("signup", adminSignup.getAttribute("data-admin-signup"));
+    }
     var forceBtn = t.closest("[data-force-archive]");
     if (forceBtn) return forceArchive(forceBtn.getAttribute("data-force-archive"));
     var reclaimBtn = t.closest("[data-reclaim]");
@@ -5388,12 +5534,12 @@
                           modToggle.getAttribute("data-on") === "1");
     }
 
-    var offTip = t.closest("[data-off-tip]");
+    var offTip = t.closest("[data-tip]");
     if (offTip) {
       // 悬停看过的那一次不算数：点一下先"钉住"（触屏没有悬停，全靠这一下），
       // 再点一下才收
       if (cardTipEl && cardTipAnchor === offTip && cardTipPinned) return closeCardTip();
-      showCardTip(offTip, "依赖模块被禁用");
+      showCardTip(offTip, offTip.getAttribute("data-tip") || "");
       cardTipPinned = true;
       return;
     }
@@ -5501,7 +5647,7 @@
     }
     // 卡片上的小提示也是同一个规矩：点别处就收，别让它停在屏幕上
     if (cardTipEl && !(e.target.closest &&
-                       (e.target.closest("[data-off-tip]") ||
+                       (e.target.closest("[data-tip]") ||
                         e.target.closest(".card-tip")))) {
       closeCardTip();
     }
@@ -5513,13 +5659,13 @@
 
   /* 悬停看原因；触屏没有悬停，所以在点击里再给一次机会 */
   document.addEventListener("mouseover", function (e) {
-    var badge = e.target.closest && e.target.closest("[data-off-tip]");
+    var badge = e.target.closest && e.target.closest("[data-tip]");
     if (!badge) return;
     if (cardTipEl && cardTipAnchor === badge) return;
-    showCardTip(badge, "依赖模块被禁用");
+    showCardTip(badge, badge.getAttribute("data-tip") || "");
   });
   document.addEventListener("mouseout", function (e) {
-    var badge = e.target.closest && e.target.closest("[data-off-tip]");
+    var badge = e.target.closest && e.target.closest("[data-tip]");
     if (!badge || cardTipPinned) return;
     if (cardTipAnchor === badge) closeCardTip();
   });

@@ -2432,6 +2432,89 @@ def module_refresh_page(browser):
         ctx.close()
 
 
+def roster_admin_page(browser):
+    """名单管理：超管看全站的名单与报名，详情里能转交与删除。"""
+    print("== 名单管理 ==")
+    owner = owner_opener()
+    made = call(owner, "/api/panel/roster/create", {"name": "名单管理测试"})
+    check("先造一份名单", bool(made and made.get("id")), made)
+    ctx, page = new_page(browser, 1440, 900)
+    try:
+        ui_login(page)
+        check("侧栏里有名单管理",
+              page.locator('[data-nav="roster-admin"]').count() == 1)
+        page.goto(BASE + "/panel#/roster-admin")
+        page.wait_for_timeout(900)
+        check("两个表都在",
+              page.locator("#adminRosterTable").count() == 1
+              and page.locator("#adminSignupTable").count() == 1)
+        heads = page.eval_on_selector_all(
+            "#adminRosterTable thead th", "els => els.map(e => e.textContent.trim())")
+        check("名单表是 名单 / 拥有者 / 可见性 / 人数 / 更新时间 / 操作",
+              heads == ["名单", "拥有者", "可见性", "人数", "更新时间", "操作"], heads)
+        check("全站的名单在表里",
+              "名单管理测试" in page.inner_text("#adminRosterTable tbody"),
+              page.inner_text("#adminRosterTable tbody")[:120])
+        page.click("[data-admin-roster]")
+        page.wait_for_timeout(500)
+        body = page.inner_text("#overlayBody")
+        check("详情里有转移与删除",
+              "转移拥有者" in body and "彻底删除" in body, body[:140])
+        check("也说得出拥有者是谁", "拥有者" in body, body[:80])
+    finally:
+        ctx.close()
+        for row in call(owner, "/api/panel/rosters?scope=all&limit=100")["rosters"]:
+            if row["name"] == "名单管理测试":
+                call(owner, "/api/panel/sudo", {"password": PASSWORD})
+                call(owner, "/api/panel/roster/delete", {"id": row["id"]})
+
+
+def account_delete_page(browser):
+    """账号弹窗里的「彻底删除」：没停用就不出现，停用未满三天是灰的并说明原因。"""
+    print("== 账号弹窗：彻底删除什么时候出现 ==")
+    owner = owner_opener()
+    user = "dropme" + TAG
+    call(owner, "/api/panel/register",
+         {"username": user, "name": "待删除的人", "password": "drop-pass-1", "note": ""})
+    listed = call(owner, "/api/panel/accounts?limit=200")["accounts"]
+    row = [a for a in listed if a["username"] == user][0]
+    call(owner, "/api/panel/account/decide", {"id": row["id"], "action": "approve"})
+    ctx, page = new_page(browser, 1280, 860)
+    try:
+        ui_login(page)
+        page.goto(BASE + "/panel#/users")
+        page.wait_for_timeout(900)
+        page.click('[data-acct="%d"]' % row["id"])
+        page.wait_for_timeout(400)
+        check("正常状态的账号看不到删除",
+              page.locator("[data-acct-del]").count() == 0
+              and "彻底删除" not in page.inner_text("#overlayBody"),
+              page.inner_text("#overlayBody")[:120])
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(200)
+        # 停用它，再看一次：按钮在，但是灰的，悬停有说明
+        call(owner, "/api/panel/sudo", {"password": PASSWORD})
+        call(owner, "/api/panel/account/decide", {"id": row["id"], "action": "disable"})
+        page.goto(BASE + "/panel#/users")
+        page.wait_for_timeout(900)
+        page.click('[data-acct="%d"]' % row["id"])
+        page.wait_for_timeout(400)
+        locked = page.locator(".btn.is-locked")
+        check("停用之后按钮出现了", locked.count() == 1)
+        check("但还点不动，并写着原因",
+              "停用" in (locked.first.get_attribute("data-tip") or ""),
+              locked.first.get_attribute("data-tip"))
+        check("灰按钮里写的是彻底删除", locked.first.inner_text().strip() == "彻底删除",
+              locked.first.inner_text())
+    finally:
+        ctx.close()
+        call(owner, "/api/panel/sudo", {"password": PASSWORD})
+        for a in call(owner, "/api/panel/accounts?limit=200")["accounts"]:
+            if a["username"] == user:
+                call(owner, "/api/panel/account/decide",
+                     {"id": a["id"], "action": "enable"})
+
+
 def brand_left(page):
     """The product name's left edge: sudo mode pushes it over, it never moves otherwise."""
     return page.evaluate(
@@ -3345,6 +3428,8 @@ def main():
                 create_page(browser)
                 leave_guard_page(browser)
                 module_refresh_page(browser)
+                roster_admin_page(browser)
+                account_delete_page(browser)
                 # profile_page edits the signed-in account, so it only runs on a
                 # throw-away instance
                 if WITH_ACCOUNTS:

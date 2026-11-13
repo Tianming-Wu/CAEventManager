@@ -1149,6 +1149,25 @@ def main():
           not any(a["uid"] == doomed_uid
                   for a in call(owner, "/api/panel/accounts")["accounts"]))
 
+    print("== 名单管理：超管转交与代删 ==")
+    spare = post(owner, "/api/panel/roster/create", {"name": "转交测试名单"})
+    spare_id = spare["id"]
+    post(owner, "/api/panel/sudo", {"password": owner_password()})
+    moved = post(owner, "/api/panel/roster/transfer",
+                 {"id": spare_id, "uid": alice_uid})
+    check("超管能把名单交给别人", moved and moved.get("owner"), moved)
+    detail = call(owner, "/api/panel/roster?id=%d" % spare_id)["roster"]
+    check("拥有者换成了那个人", detail["ownerId"] == alice_id, detail.get("ownerId"))
+    check("原来的拥有者留了一份写入权",
+          any(e["accountId"] == owner_id for e in detail["editors"]), detail["editors"])
+    post(helper, "/api/panel/roster/entry",
+         {"id": spare_id, "sid": "20240900", "name": "转交后能写"})
+    check("新的拥有者能直接改", True)
+    gone = post(owner, "/api/panel/roster/delete", {"id": spare_id})
+    check("超管能代删别人的名单", bool(gone and gone.get("ok")), gone)
+    every = call(owner, "/api/panel/signups?scope=all")["signups"]
+    check("全站的报名也带拥有者", all("ownerName" in s for s in every), every[:1])
+
     print("== 名单：三个范围 ==")
     check("我参与的 covers what I own",
           call(owner, "/api/panel/rosters?scope=joined")["total"] >= 2)

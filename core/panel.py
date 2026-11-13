@@ -740,10 +740,10 @@ def delete_blocker(conn, row, days):
         return False, "只有已停用的账号可以删除"
     left = float(days) * 86400 - (time.time() - float(row["decided_at"] or 0))
     if left > 0:
-        # 差多久就直说，免得人反复点
-        hours = max(1, int(left // 3600))
-        return False, "停用满 %d 天才能删除，还差 %d 小时" % (
-            int(days), hours if hours < 48 else int(left // 86400))
+        # 差多久就直说，免得人反复点（向上取整：还差 2.9 天就说 3 天）
+        hours = max(1, -int(-left // 3600))
+        span = ("%d 小时" % hours) if hours < 48 else ("%d 天" % max(1, -int(-left // 86400)))
+        return False, "停用满 %d 天才能删除，还差 %s" % (int(days), span)
     live = conn.execute(
         "SELECT COUNT(*) AS n FROM events WHERE owner_id=? AND archived_at=0",
         (row["id"],)).fetchone()["n"]

@@ -1489,6 +1489,9 @@ select:invalid { color: var(--dim); }
 a.crumb, a.crumb:hover, .nav-item, .nav-item:hover { text-decoration: none; }
 .btn:hover:not(:disabled) { background: var(--surface-2); }
 .btn:disabled { opacity: .45; cursor: not-allowed; }
+/* 灰掉的按钮：看得出来是按钮、点不动，悬停有说明（disabled 的控件收不到鼠标事件，
+   所以这里用 span 而不是 <button disabled>） */
+.btn.is-locked { opacity: .45; cursor: not-allowed; }
 .btn.primary {
   background: var(--accent);
   border-color: var(--accent);

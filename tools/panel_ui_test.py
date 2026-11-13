@@ -1947,6 +1947,23 @@ def profile_page(page):
     page.on("request", watch_token_request)
     page.click("#tokenNew")
     page.wait_for_timeout(350)
+    # 权限那几行：方框与文字必须同一行同一高度（.field label 是块级的，容易把方框
+    # 挤到单独一行），方框用平台自己的 18px 方框而不是浏览器默认的
+    geo = page.evaluate("""() => Array.from(document.querySelectorAll('.check-row')).map(r => {
+        const box = r.querySelector('input');
+        const tn = Array.from(r.childNodes)
+            .find(n => n.nodeType === 3 && n.textContent.trim());
+        const range = document.createRange();
+        range.selectNodeContents(tn);
+        const b = box.getBoundingClientRect();
+        const t = range.getBoundingClientRect();
+        return {mid: Math.round((b.top + b.height / 2) - (t.top + t.height / 2)),
+                w: Math.round(b.width), display: getComputedStyle(r).display};
+    })""")
+    check("权限行的方框与文字同一行同一高度",
+          geo and all(abs(g["mid"]) <= 1 and g["display"] == "flex" for g in geo), geo)
+    check("权限行用的是平台自己的方框",
+          geo and all(g["w"] == 18 for g in geo), geo)
     check("令牌弹窗有描述这一行的提示",
           "令牌描述，仅显示用途" in page.inner_text("#overlayBody"),
           page.inner_text("#overlayBody")[:200])

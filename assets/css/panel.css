@@ -3200,12 +3200,15 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
 .update-bar .btn { flex: none; }
 
 /* ---------- API 令牌 ---------- */
-/* 权限那几行：方框借用上面那一套画法，文字与方框同一高度，说明跟在下面一行 */
-.field label.check-row { margin-bottom: 0; }
+/* 权限那几行：方框借用上面那一套画法，说明缩进跟在下一行。
+   `.field label` 是块级的（0,1,1），优先级压过 `.check-row`（0,1,0），
+   不写上这一条的话方框（display:grid）会独占一行，文字被挤到下一行去 */
+.field label.check-row,
 .check-row {
   display: flex;
   align-items: center;
   gap: 8px;
+  margin-bottom: 0;
   padding: 4px 0;
   flex-wrap: wrap;
   cursor: pointer;

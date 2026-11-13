@@ -427,7 +427,10 @@ def accounts_and_tokens():
     check("权限只认已知的几档",
           panel.normalize_scopes(["write", "nonsense"]) == ["write"],
           panel.normalize_scopes(["write", "nonsense"]))
-    check("什么都没给就是只读", panel.normalize_scopes([]) == ["read"])
+    # 空权限的令牌一次请求都发不出去（连自己是谁都问不出来），所以不补默认值、直接拒绝
+    check("一条都不给就是空的，不偷偷补一个 read",
+          panel.normalize_scopes([]) == [] and panel.normalize_scopes(["nope"]) == [],
+          panel.normalize_scopes([]))
 
 
 def main():

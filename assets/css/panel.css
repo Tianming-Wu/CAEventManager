@@ -614,17 +614,6 @@ button.nav-item {
   margin-top: 6px;
 }
 
-/* the account page's own switch, showing the same countdown */
-.sudo-state {
-  /* the text stays left, the button stays right, and neither wraps */
-  flex: 0 1 auto;
-  margin-right: auto;
-  font-size: .84rem;
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-}
-.sudo-state.on { color: var(--accent-strong); font-weight: 600; }
-
 .sudo-pop {
   position: fixed;
   z-index: 70;
@@ -1295,7 +1284,8 @@ select:invalid { color: var(--dim); }
   cursor: pointer;
 }
 .check { display: flex; align-items: center; gap: 8px; cursor: pointer; }
-.check input[type="checkbox"] {
+.check input[type="checkbox"],
+.check-row input[type="checkbox"] {
   appearance: none;
   -webkit-appearance: none;
   flex: 0 0 auto;
@@ -1311,7 +1301,8 @@ select:invalid { color: var(--dim); }
   transition: background .12s ease, border-color .12s ease;
 }
 /* place-content centres this exactly: same distance from all four edges */
-.check input[type="checkbox"]::before {
+.check input[type="checkbox"]::before,
+.check-row input[type="checkbox"]::before {
   content: "";
   width: 10px;
   height: 10px;
@@ -1320,12 +1311,15 @@ select:invalid { color: var(--dim); }
   transform: scale(0);
   transition: transform .12s ease;
 }
-.check input[type="checkbox"]:checked {
+.check input[type="checkbox"]:checked,
+.check-row input[type="checkbox"]:checked {
   background: var(--accent);
   border-color: var(--accent);
 }
-.check input[type="checkbox"]:checked::before { transform: scale(1); }
-.check input[type="checkbox"]:focus-visible {
+.check input[type="checkbox"]:checked::before,
+.check-row input[type="checkbox"]:checked::before { transform: scale(1); }
+.check input[type="checkbox"]:focus-visible,
+.check-row input[type="checkbox"]:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
@@ -3206,15 +3200,18 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
 .update-bar .btn { flex: none; }
 
 /* ---------- API 令牌 ---------- */
+/* 权限那几行：方框借用上面那一套画法，文字与方框同一高度，说明跟在下面一行 */
+.field label.check-row { margin-bottom: 0; }
 .check-row {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
   padding: 4px 0;
   flex-wrap: wrap;
+  cursor: pointer;
 }
 .check-row input { flex: none; }
-.check-row .hint { flex: 1 1 100%; margin: 0 0 0 22px; }
+.check-row .hint { flex: 1 1 100%; margin: 0 0 0 26px; }
 .token-once {
   margin: 14px 0 6px;
   padding: 12px 14px;

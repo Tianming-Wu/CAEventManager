@@ -438,16 +438,6 @@
       // the last three seconds blink, then the mode ends on its own
       el.classList.toggle("blink", left <= 3);
     }
-    // the account page offers the same switch, with the same countdown
-    var state = $("#sudoState");
-    if (state) {
-      state.textContent = left > 0
-        ? "已进入，将于 " + clockText(left) + " 后退出"
-        : "未进入";
-      state.classList.toggle("on", left > 0);
-    }
-    var button = $("#sudoBtn");
-    if (button) button.textContent = left > 0 ? "退出 sudo 模式" : "进入 sudo 模式";
   }
 
   function sudoChipEl() { return $("#sudoChip"); }
@@ -455,15 +445,6 @@
   $("#sudoChip").addEventListener("click", function () {
     if (SUDO.pop) closeSudoPop();
     else openSudoPop();
-  });
-
-  // The account page offers the switch directly, so the mode can be entered on
-  // purpose instead of only as the answer to a refused action.
-  $("#sudoBtn").addEventListener("click", function () {
-    if (sudoActive()) return quitSudo();
-    askSudoPassword().then(function () {
-      PX.toast("已进入 sudo 模式");
-    }).catch(fail);
   });
 
   // The mark sits in the title bar; the class on the shell grows it into place,
@@ -4634,20 +4615,31 @@
     openOverlay("token", "新建 API 令牌",
       '<div class="field"><label for="tkName">名称</label>' +
       '<input id="tkName" type="text" maxlength="40" placeholder="比如：群机器人">' +
-      '<p class="hint">取一个以后能认出用途的名字</p></div>' +
-      '<div class="field"><label>权限</label>' + rows +
-      '<p class="hint">账号本身的权限仍然生效，令牌只能在它之下再收窄</p></div>' +
+      '<p class="hint">令牌描述，仅显示用途</p></div>' +
+      '<div class="field"><label>权限</label>' + rows + "</div>" +
       '<div class="field"><label for="tkDays">有效期</label>' +
       '<select id="tkDays">' +
       '<option value="0">永不过期</option>' +
       '<option value="30">30 天</option>' +
       '<option value="90">90 天</option>' +
       '<option value="365">一年</option></select></div>' +
-      '<div class="row" style="margin-top:18px;justify-content:flex-end">' +
+      '<div class="row" style="margin-top:18px;justify-content:space-between">' +
+      '<span class="err" id="tkScopeErr"></span>' +
+      '<span class="row">' +
       '<button class="btn" type="button" data-close-overlay="1">取消</button>' +
-      '<button class="btn primary" type="button" id="tkGo">创建</button></div>');
+      '<button class="btn primary" type="button" id="tkGo">创建</button></span></div>');
     $("#tkName").focus();
     $("#tkGo").addEventListener("click", createToken);
+    // 一项权限都不给，这张令牌连自己是谁都问不出来：直接不让建
+    function syncScope() {
+      var picked = document.querySelectorAll(".tk-scope:checked").length > 0;
+      $("#tkGo").disabled = !picked;
+      $("#tkScopeErr").textContent = picked ? "" : "无法创建空权限令牌";
+    }
+    document.querySelectorAll(".tk-scope").forEach(function (box) {
+      box.addEventListener("change", syncScope);
+    });
+    syncScope();
   }
 
   var TOKEN_SCOPE_HINT = {

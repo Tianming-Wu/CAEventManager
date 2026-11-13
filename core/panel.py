@@ -15,6 +15,7 @@ Registration always creates admin + pending; only approval flips it to active.
 """
 
 import base64
+import errors
 import json
 import os
 import paths
@@ -926,10 +927,14 @@ def mask_token(head, tail):
 
 
 def normalize_scopes(raw):
+    """把申请的范围收成平台认的那几条，保持 TOKEN_SCOPES 的顺序。
+
+    一条都不剩就是空列表——空权限的令牌什么都做不了（连自己是谁都问不出来），
+    所以由调用方拒绝，而不是悄悄补一个 read 上去。
+    """
     if isinstance(raw, str):
         raw = [p.strip() for p in raw.split(",")]
-    out = [s for s in TOKEN_SCOPES if s in (raw or [])]
-    return out or ["read"]
+    return [s for s in TOKEN_SCOPES if s in (raw or [])]
 
 
 def create_token(conn, account_id, name, scopes, days=0):
@@ -942,12 +947,16 @@ def create_token(conn, account_id, name, scopes, days=0):
 
 def create_token_hash(conn, account_id, name, scopes, days, hash_hex, head, tail):
     """Store a token whose plaintext only ever existed in the user's browser."""
+    scopes = normalize_scopes(scopes)
+    if not scopes:
+        # 空权限的令牌一次请求都发不出去，留着只会让人以为它坏了
+        raise errors.ApiError("无法创建空权限令牌")
     now = time.time()
     conn.execute(
         "INSERT INTO api_tokens (account_id, name, head, tail, hash, scopes,"
         " created_at, expires_at) VALUES (?,?,?,?,?,?,?,?)",
         (int(account_id), (name or "").strip()[:40] or "未命名",
-         head, tail, hash_hex, ",".join(normalize_scopes(scopes)),
+         head, tail, hash_hex, ",".join(scopes),
          now, now + days * 86400 if days else 0))
     return conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
 

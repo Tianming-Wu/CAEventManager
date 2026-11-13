@@ -1947,6 +1947,24 @@ def profile_page(page):
     page.on("request", watch_token_request)
     page.click("#tokenNew")
     page.wait_for_timeout(350)
+    check("令牌弹窗有描述这一行的提示",
+          "令牌描述，仅显示用途" in page.inner_text("#overlayBody"),
+          page.inner_text("#overlayBody")[:200])
+    # 一项权限都不给：创建键点不动，并在左下角说清为什么
+    boxes = page.locator(".tk-scope")
+    for i in range(boxes.count()):
+        boxes.nth(i).uncheck()
+    page.wait_for_timeout(200)
+    check("空权限时创建键是灰的",
+          page.locator("#tkGo").is_disabled())
+    check("左下角写着无法创建空权限令牌",
+          page.inner_text("#tkScopeErr").strip() == "无法创建空权限令牌",
+          page.inner_text("#tkScopeErr"))
+    boxes.first.check()
+    page.wait_for_timeout(200)
+    check("勾回来就能建了",
+          page.locator("#tkGo").is_enabled()
+          and page.inner_text("#tkScopeErr").strip() == "")
     page.fill("#tkName", "界面测试")
     page.click("#tkGo")
     page.wait_for_timeout(900)
@@ -2963,38 +2981,14 @@ def sudo_page(page):
     check("a clean session still works",
           page.locator(".page[data-page=events]").is_visible())
 
-    # the mode can also be entered on purpose, from the account page
+    # 进入 sudo 只能靠顶栏那个盾形标记：账户页上那张调试用的卡片已经去掉了
     page.goto(BASE + "/panel#/account")
     page.wait_for_timeout(500)
-    check("the account page offers the switch",
-          page.locator("#sudoBtn").inner_text().strip() == "进入 sudo 模式",
-          page.locator("#sudoBtn").inner_text())
-    check("and says the mode is off", "未进入" in page.inner_text("#sudoState"),
-          page.inner_text("#sudoState"))
-    page.click("#sudoBtn")
-    page.wait_for_selector("#sudoPass", timeout=8000)
-    check("it asks for the password too", page.locator("#sudoPass").count() == 1)
-    page.fill("#sudoPass", PASSWORD)
-    page.click("#sudoEnter")
-    page.wait_for_function(
-        "() => document.getElementById('shell').classList.contains('sudo')",
-        timeout=8000)
-    page.wait_for_timeout(500)
-    check("the switch elevates the session", page.locator("#sudoChip").is_visible())
-    check("the button flips to leaving",
-          page.locator("#sudoBtn").inner_text().strip() == "退出 sudo 模式",
-          page.locator("#sudoBtn").inner_text())
-    check("the card counts down", "已进入" in page.inner_text("#sudoState"),
-          page.inner_text("#sudoState"))
-    first = page.inner_text("#sudoState")
-    page.wait_for_timeout(1200)
-    check("and its countdown runs", page.inner_text("#sudoState") != first,
-          (first, page.inner_text("#sudoState")))
-    page.click("#sudoBtn")
-    page.wait_for_timeout(900)
-    check("clicking it again leaves the mode", not page.locator("#sudoChip").is_visible())
-    check("and the card says so", "未进入" in page.inner_text("#sudoState"),
-          page.inner_text("#sudoState"))
+    check("账户页上没有 sudo 卡片",
+          page.locator("#sudoBtn").count() == 0
+          and "sudo 模式" not in page.inner_text('[data-page="account"]'),
+          page.inner_text('[data-page="account"]')[:160])
+    check("顶栏的标记还在", page.locator("#sudoChip").count() == 1)
 
     # put the instance back: the spare is archived, the token rotation stays on
     # the spare alone

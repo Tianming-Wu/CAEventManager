@@ -1682,6 +1682,9 @@ def main():
     writer = post(owner, "/api/panel/token/create",
                   {"name": "写入脚本", "scopes": ["read", "write"], "days": 30})
     plain2 = writer["token"]
+    check("一项权限都不给就建不出来",
+          post(owner, "/api/panel/token/create",
+               {"name": "空权限", "scopes": []}, expect=400) is not None)
     made_roster = bearer("/api/panel/roster/import", plain2,
                          {"name": "令牌建的名单",
                           "text": "学号,姓名,院系\n20259001,甲一,计算机学院"})

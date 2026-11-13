@@ -1163,10 +1163,68 @@ def main():
     post(helper, "/api/panel/roster/entry",
          {"id": spare_id, "sid": "20240900", "name": "转交后能写"})
     check("新的拥有者能直接改", True)
+    refused = post(owner, "/api/panel/roster/delete", {"id": spare_id}, expect=409)
+    check("没归档的名单不能直接删",
+          "归档" in (refused.get("error") or ""), refused)
+    archived = post(owner, "/api/panel/roster/archive", {"id": spare_id})
+    check("超管能替别人归档", bool(archived and archived.get("ok")), archived)
     gone = post(owner, "/api/panel/roster/delete", {"id": spare_id})
-    check("超管能代删别人的名单", bool(gone and gone.get("ok")), gone)
+    check("归档之后超管能彻底删除", bool(gone and gone.get("ok")), gone)
     every = call(owner, "/api/panel/signups?scope=all")["signups"]
     check("全站的报名也带拥有者", all("ownerName" in s for s in every), every[:1])
+
+    print("== 名单与报名：先归档，再彻底删除 ==")
+    # 拥有者自己归档：名单退出列表、不能再改也不能再往里写
+    own = post(helper, "/api/panel/roster/create", {"name": "归档测试名单"})
+    own_id = own["id"]
+    post(helper, "/api/panel/roster/entry",
+         {"id": own_id, "sid": "20240901", "name": "归档前的人"})
+    post(helper, "/api/panel/sudo", {"password": "alice-pass-1"})
+    check("拥有者能归档自己的名单",
+          bool(post(helper, "/api/panel/roster/archive", {"id": own_id}).get("ok")))
+    check("归档之后自己的列表里没有它",
+          own_id not in [r["id"] for r in call(helper, "/api/panel/rosters?scope=mine")["rosters"]])
+    call(helper, "/api/panel/roster?id=%d" % own_id, expect=409)
+    check("打不开了", True)
+    post(helper, "/api/panel/roster/entry",
+         {"id": own_id, "sid": "20240902", "name": "归档后的人"}, expect=409)
+    check("也写不进去了", True)
+    call(helper, "/api/panel/rosters?scope=all&archived=1", expect=403)
+    check("归档的名单只有超管能列出来", True)
+    listed = call(owner, "/api/panel/rosters?scope=all&archived=1")["rosters"]
+    check("超管在归档那一栏看得到它", own_id in [r["id"] for r in listed], listed[:1])
+    check("归档的名单带着归档时间", all(r.get("archivedAt") for r in listed), listed[:1])
+    post(helper, "/api/panel/roster/unarchive", {"id": own_id}, expect=403)
+    check("拥有者自己取消不了归档", True)
+    post(owner, "/api/panel/roster/unarchive", {"id": own_id})
+    check("超管能取消归档",
+          own_id in [r["id"] for r in call(helper, "/api/panel/rosters?scope=mine")["rosters"]])
+    post(helper, "/api/panel/roster/entry",
+         {"id": own_id, "sid": "20240903", "name": "放出来又能写"})
+    check("取消归档之后又能写进去了", True)
+
+    # 报名：名单还在给报名用时不许归档名单，报名归档之后公开页当场失效
+    signup = post(helper, "/api/panel/signup/create",
+                  {"title": "归档测试报名", "roster_id": own_id})["id"]
+    refused = post(helper, "/api/panel/roster/archive", {"id": own_id}, expect=409)
+    check("名单还有报名在用时不许归档",
+          "报名" in (refused.get("error") or ""), refused)
+    post(helper, "/api/panel/signup/archive", {"id": signup})
+    check("拥有者能归档自己的报名", True)
+    tok = [s for s in call(owner, "/api/panel/signups?scope=all&archived=1")["signups"]
+           if s["id"] == signup]
+    check("报名出现在归档那一栏", bool(tok), tok)
+    if tok:
+        call(anon, "/join/%s" % tok[0]["token"], expect=410)
+        check("归档之后公开链接打不开了", True)
+    post(helper, "/api/panel/roster/archive", {"id": own_id})
+    check("报名归档之后名单也能归档了", True)
+    post(owner, "/api/panel/roster/delete", {"id": own_id}, expect=409)
+    check("还有报名指着它时不许彻底删除", True)
+    post(owner, "/api/panel/signup/delete", {"id": signup})
+    check("超管能彻底删除归档的报名", True)
+    post(owner, "/api/panel/roster/delete", {"id": own_id})
+    check("最后一个引用没了，名单也能彻底删除", True)
 
     print("== 名单：三个范围 ==")
     check("我参与的 covers what I own",

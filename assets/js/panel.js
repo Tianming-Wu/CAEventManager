@@ -66,6 +66,7 @@
     // 名单管理（超管）：全站的名单与报名
     adminRosters: [],
     adminSignups: [],
+    adminArchived: false,
     currentFields: [],
     templateId: null,
     templateFilter: "",
@@ -2558,7 +2559,7 @@
         ">拥有者与可写成员</option></select></div>") +
       '<div class="row" style="margin-top:18px;justify-content:flex-end">' +
       '<button class="btn" type="button" data-close-overlay="1">取消</button>' +
-      (row ? '<button class="btn danger" type="button" id="rosterDelete">删除名单</button>' : "") +
+      (row ? '<button class="btn danger" type="button" id="rosterArchive">归档名单</button>' : "") +
       '<button class="btn primary" type="button" id="rosterSave">保存</button></div>');
     $("#rosterName").focus();
     $("#rosterSave").addEventListener("click", function () {
@@ -2593,19 +2594,20 @@
         location.hash = "#/roster/" + out;
       }).catch(function (e) { PX.toast(PX.esc(e.message), true); });
     });
-    var del = $("#rosterDelete");
+    var del = $("#rosterArchive");
     if (del) {
       del.addEventListener("click", function () {
-        // 删除名单是三级动作：不管是谁的名单都要提权（没提权时密码提示就是确认），
-        // 确认框叠在名单设置上面，取消就回到设置
-        confirmHighRisk("删除名单",
-          "名单里的人会一起删掉，人员记录保留。确认继续？", "删除", true,
+        // 归档是拥有者能做的最重的一步：名单退出列表、谁都打不开也改不动，
+        // 数据一条不动。真的要抹掉它得由超级管理员在「名单管理」里做
+        confirmHighRisk("归档名单",
+          "归档之后这份名单谁都打不开也改不动，人员与条目原样留着。"
+          + "确认继续？", "归档", true,
           function (note) {
-            apiSudo("/roster/delete", { method: "POST", body: { id: r.id } },
-                    "删除名单", note)
+            apiSudo("/roster/archive", { method: "POST", body: { id: r.id } },
+                    "归档名单", note)
               .then(function () {
                 closeAllOverlays();
-                PX.toast("已删除");
+                PX.toast("已归档，需要时联系超级管理员");
                 S.roster = null;
                 location.hash = "#/rosters";
               })
@@ -2902,6 +2904,10 @@
         return Promise.all([loadEvents(), loadArchived(true)]).then(draw);
       },
       "roster-admin": function () {
+        // 进来先看「当前」那一栏：归档是少数情况，不该是默认视角
+        S.adminArchived = false;
+        S.adminRosters = null;
+        S.adminSignups = null;
         return loadAdminLists().then(draw);
       },
       users: function () { return loadAccounts().then(draw); },
@@ -4013,12 +4019,13 @@
   }
 
   /* 名单管理：服务上的全部名单与报名，超管及以上才看得到。
-     做法与「活动管理」一样：表格只列事实，转移与删除都在详情弹窗里 */
+     做法与「活动管理」一样：表格只列事实，归档、转移与彻底删除都在详情弹窗里 */
   function loadAdminLists() {
     if (!isSuper()) return Promise.resolve();
+    var tail = "&limit=100" + (S.adminArchived ? "&archived=1" : "");
     return Promise.all([
-      PX.api("/rosters?scope=all&limit=100"),
-      PX.api("/signups?scope=all&limit=100")
+      PX.api("/rosters?scope=all" + tail),
+      PX.api("/signups?scope=all" + tail)
     ]).then(function (res) {
       S.adminRosters = res[0].rosters || [];
       S.adminSignups = res[1].signups || [];
@@ -4026,6 +4033,27 @@
   }
 
   function drawRosterAdmin() {
+    var archived = !!S.adminArchived;
+    var scopeBox = $("#adminListScope");
+    if (scopeBox) {
+      Array.prototype.forEach.call(scopeBox.querySelectorAll("[data-archived]"), function (b) {
+        var on = b.getAttribute("data-archived") === (archived ? "1" : "0");
+        b.classList.toggle("on", on);
+        b.setAttribute("aria-selected", on ? "true" : "false");
+      });
+    }
+    var hint = $("#adminListHint");
+    if (hint) {
+      hint.textContent = archived
+        ? "归档之后谁都打不开也改不动，只有这里能取消归档或彻底删除"
+        : "";
+    }
+    // 归档那一栏里，最后的时间列显示的是归档时间
+    ["#adminRosterTable", "#adminSignupTable"].forEach(function (sel) {
+      var head = document.querySelector(sel + " thead th:nth-child(5)");
+      if (head) head.textContent = archived ? "归档时间" : "更新时间";
+    });
+
     var rosters = S.adminRosters || [];
     $("#adminRosterTable tbody").innerHTML = rosters.length ? rosters.map(function (r) {
       return "<tr>" +
@@ -4034,10 +4062,11 @@
         "<td>" + PX.esc(r.ownerName || "—") + "</td>" +
         "<td>" + PX.esc(r.visibilityLabel || "") + "</td>" +
         '<td class="num mono">' + (r.members || 0) + "</td>" +
-        '<td class="mono">' + PX.when(r.updatedAt || r.createdAt) + "</td>" +
+        '<td class="mono">' + PX.when(archived ? r.archivedAt
+          : (r.updatedAt || r.createdAt)) + "</td>" +
         '<td class="actions"><button class="detail-btn" type="button" ' +
         'data-admin-roster="' + r.id + '">详情</button></td>' + "</tr>";
-    }).join("") : emptyRow(6, "还没有名单");
+    }).join("") : emptyRow(6, archived ? "没有归档的名单" : "还没有名单");
 
     var signups = S.adminSignups || [];
     $("#adminSignupTable tbody").innerHTML = signups.length ? signups.map(function (s) {
@@ -4047,52 +4076,69 @@
         "<td>" + PX.esc(s.ownerName || "—") + "</td>" +
         "<td>" + PX.esc(s.statusLabel || "") + "</td>" +
         '<td class="num mono">' + (s.entries || 0) + "</td>" +
-        '<td class="mono">' + PX.when(s.updatedAt || s.createdAt) + "</td>" +
+        '<td class="mono">' + PX.when(archived ? s.archivedAt
+          : (s.updatedAt || s.createdAt)) + "</td>" +
         '<td class="actions"><button class="detail-btn" type="button" ' +
         'data-admin-signup="' + s.id + '">详情</button></td>' + "</tr>";
-    }).join("") : emptyRow(6, "还没有报名");
+    }).join("") : emptyRow(6, archived ? "没有归档的报名" : "还没有报名");
   }
 
-  /* 名单 / 报名的详情：超管在这里换人或者删掉别人名下的东西（都要提权） */
+  /* 名单 / 报名的详情：超管在这里归档、换人或者彻底删掉别人名下的东西（都要提权）。
+     归档与彻底删除会给对象换位置，做完就收掉详情；转移不挪动它，详情留着 */
   function openAdminListDetail(kind, id) {
     var list = kind === "roster" ? (S.adminRosters || []) : (S.adminSignups || []);
     var row = list.filter(function (x) { return String(x.id) === String(id); })[0];
     if (!row) return;
+    var isArchived = !!S.adminArchived;
     var title = kind === "roster" ? row.name : row.title;
     var rows = kind === "roster"
       ? [["拥有者", row.ownerName || "—"],
          ["可见性", row.visibilityLabel || ""],
          ["人数", String(row.members || 0)],
          ["创建时间", PX.when(row.createdAt)],
-         ["更新时间", PX.when(row.updatedAt || row.createdAt)]]
+         [isArchived ? "归档时间" : "更新时间",
+          PX.when(isArchived ? row.archivedAt : (row.updatedAt || row.createdAt))]]
       : [["拥有者", row.ownerName || "—"],
          ["状态", row.statusLabel || ""],
          ["已报名", String(row.entries || 0)],
          ["创建时间", PX.when(row.createdAt)],
-         ["更新时间", PX.when(row.updatedAt || row.createdAt)]];
+         [isArchived ? "归档时间" : "更新时间",
+          PX.when(isArchived ? row.archivedAt : (row.updatedAt || row.createdAt))]];
     var acts = [];
-    acts.push({
-      text: "打开 ↗", kind: "ghost", primary: true,
-      run: function () {
-        var url = String(location.href).split("#")[0] +
-          (kind === "roster" ? "#/roster/" + row.id : "#/signup/" + row.id);
-        window.open(url, "_blank");
-      }
-    });
-    acts.push({ text: "转移拥有者", kind: "", run: function () {
-      transferListOwner(kind, row);
-    } });
-    acts.push({ text: "彻底删除", kind: "danger", run: function () {
-      deleteAdminList(kind, row);
-    } });
+    if (!isArchived) {
+      acts.push({
+        text: "打开 ↗", kind: "ghost", primary: true,
+        run: function () {
+          var url = String(location.href).split("#")[0] +
+            (kind === "roster" ? "#/roster/" + row.id : "#/signup/" + row.id);
+          window.open(url, "_blank");
+        }
+      });
+      acts.push({ text: "转移拥有者", kind: "", run: function () {
+        transferListOwner(kind, row);
+      } });
+      acts.push({ text: "归档", kind: "", run: function () {
+        archiveAdminList(kind, row);
+      } });
+    } else {
+      acts.push({ text: "取消归档", kind: "", run: function () {
+        unarchiveAdminList(kind, row);
+      } });
+      acts.push({ text: "彻底删除", kind: "danger", run: function () {
+        deleteAdminList(kind, row);
+      } });
+    }
+    var head = acts.filter(function (a) { return a.primary; });
+    var rest = acts.filter(function (a) { return !a.primary; });
     var html = '<dl class="kv">' + rows.map(function (r) {
       return "<dt>" + PX.esc(r[0]) + "</dt><dd>" + PX.esc(r[1]) + "</dd>";
     }).join("") + "</dl>" +
-      '<div class="detail-actions detail-actions-top">' +
-      '<button class="btn ghost" type="button" data-list-act="0">' + acts[0].text + "</button></div>" +
-      '<div class="detail-actions">' + acts.slice(1).map(function (a, i) {
+      (head.length ? '<div class="detail-actions detail-actions-top">' +
+        '<button class="btn ghost" type="button" data-list-act="0">' +
+        head[0].text + "</button></div>" : "") +
+      '<div class="detail-actions">' + rest.map(function (a, i) {
         return '<button class="btn ' + a.kind + '" type="button" data-list-act="' +
-          (i + 1) + '">' + PX.esc(a.text) + "</button>";
+          (i + head.length) + '">' + PX.esc(a.text) + "</button>";
       }).join("") + "</div>";
     openOverlay(kind === "roster" ? "admin-roster" : "admin-signup", title, html,
       function (card) {
@@ -4130,11 +4176,45 @@
     });
   }
 
+  /* 归档：把东西从列表里退下去，数据一条不动。做完之后它就不在这张表里了，所以收掉详情 */
+  function archiveAdminList(kind, row) {
+    var what = kind === "roster" ? "名单" : "报名";
+    confirmHighRisk("归档" + what,
+      "归档之后谁都打不开也改不动，只有超级管理员能取消归档或彻底删除。确认继续？",
+      "归档", true, function (note) {
+        apiSudo("/" + kind + "/archive", { method: "POST", body: { id: row.id } },
+                "归档" + what, note)
+          .then(function () {
+            closeAllOverlays();
+            PX.toast("已归档");
+            return loadAdminLists().then(drawRosterAdmin);
+          })
+          .catch(fail);
+      }, { keepUnder: true });
+  }
+
+  function unarchiveAdminList(kind, row) {
+    var what = kind === "roster" ? "名单" : "报名";
+    confirmHighRisk("取消归档" + what,
+      "取消归档之后它回到普通列表里，拥有者又能打开它。确认继续？",
+      "取消归档", false, function (note) {
+        apiSudo("/" + kind + "/unarchive", { method: "POST", body: { id: row.id } },
+                "取消归档" + what, note)
+          .then(function () {
+            closeAllOverlays();
+            PX.toast("已取消归档");
+            return loadAdminLists().then(drawRosterAdmin);
+          })
+          .catch(fail);
+      }, { keepUnder: true });
+  }
+
   function deleteAdminList(kind, row) {
-    confirmHighRisk("彻底删除" + (kind === "roster" ? "名单" : "报名"),
+    var what = kind === "roster" ? "名单" : "报名";
+    confirmHighRisk("彻底删除" + what,
       "删除后无法恢复。确认继续？", "删除", true, function (note) {
         apiSudo("/" + kind + "/delete", { method: "POST", body: { id: row.id } },
-                "删除" + (kind === "roster" ? "名单" : "报名"), note)
+                "删除" + what, note)
           .then(function () {
             // 删掉了就没有对象了：整摞收掉，回到表里
             closeAllOverlays();
@@ -5903,6 +5983,20 @@
       loadRosters(false).then(drawRosters);
     });
   }
+  var adminScopeBox = $("#adminListScope");
+  if (adminScopeBox) {
+    adminScopeBox.addEventListener("click", function (e) {
+      var btn = e.target.closest ? e.target.closest("[data-archived]") : null;
+      if (!btn) return;
+      var next = btn.getAttribute("data-archived") === "1";
+      if (next === !!S.adminArchived) return;
+      S.adminArchived = next;
+      S.adminRosters = null;
+      S.adminSignups = null;
+      drawRosterAdmin();
+      loadAdminLists().then(drawRosterAdmin);
+    });
+  }
   $("#rosterTable").addEventListener("click", function (e) {
     var btn = e.target.closest ? e.target.closest("[data-open-roster]") : null;
     if (!btn) return;
@@ -6028,6 +6122,23 @@
       });
     });
   $("#signupSaveBtn").addEventListener("click", saveSignup);
+  $("#signupArchiveBtn").addEventListener("click", function () {
+    // 拥有者能做的最重的一步：报名从列表里退下去、公开链接随之失效，
+    // 报名记录一条不动。真要抹掉得由超级管理员在「名单管理」里做
+    if (!S.signup) return;
+    confirmHighRisk("归档报名",
+      "归档之后公开链接立刻失效，已经收到的报名原样留着。确认继续？", "归档", true,
+      function (note) {
+        apiSudo("/signup/archive", { method: "POST", body: { id: S.signup.id } },
+                "归档报名", note)
+          .then(function () {
+            PX.toast("已归档，需要时联系超级管理员");
+            S.signup = null;
+            location.hash = "#/signups";
+          })
+          .catch(fail);
+      });
+  });
   $("#signupBack").addEventListener("click", function () {
     location.hash = "#/signups";
   });

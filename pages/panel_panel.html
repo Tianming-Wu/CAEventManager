@@ -679,6 +679,7 @@
           <button class="btn" id="signupExportBtn" type="button">导出报名表</button>
           <button class="btn" id="signupXlsxBtn" type="button">导出 Excel</button>
           <button class="btn" id="signupPrintBtn" type="button">打印报名表</button>
+          <button class="btn danger" id="signupArchiveBtn" type="button">归档报名</button>
           <button class="btn primary" id="signupSaveBtn" type="button">保存设置</button>
         </div>
       </header>
@@ -1140,11 +1141,17 @@
     <section class="page" data-page="roster-admin" hidden>
       <header class="page-head">
         <h1>名单管理</h1>
-        <p class="page-sub">服务上的全部名单与报名。点名称打开详情，转移与删除都在那里</p>
+        <p class="page-sub">服务上的全部名单与报名。点名称打开详情，归档、转移与彻底删除都在那里</p>
       </header>
 
       <div class="card">
-        <div class="card-head"><h2>名单</h2></div>
+        <div class="card-head">
+          <div class="pills" id="adminListScope" role="tablist" aria-label="名单管理范围">
+            <button class="pill" type="button" role="tab" data-archived="0">当前</button>
+            <button class="pill" type="button" role="tab" data-archived="1">已归档</button>
+          </div>
+          <span class="hint" id="adminListHint"></span>
+        </div>
         <div class="tblwrap">
           <table class="tbl fixed" id="adminRosterTable">
             <thead><tr>

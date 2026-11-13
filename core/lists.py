@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS rosters (
     visibility TEXT    NOT NULL DEFAULT 'private',
     grant_mode TEXT    NOT NULL DEFAULT 'auto',      -- auto | confirm
     org_id     INTEGER NOT NULL DEFAULT 0,
+    archived_at REAL   NOT NULL DEFAULT 0,           -- 0 = 在用；归档之后只有超管能取消归档或彻底删除
     created_at REAL    NOT NULL,
     updated_at REAL    NOT NULL
 );
@@ -98,6 +99,7 @@ CREATE TABLE IF NOT EXISTS signups (
     visibility       TEXT    NOT NULL DEFAULT 'private',
     grant_mode       TEXT    NOT NULL DEFAULT 'auto',
     approve_mode     TEXT    NOT NULL DEFAULT 'owner',
+    archived_at      REAL    NOT NULL DEFAULT 0,     -- 0 = 在用；归档之后只有超管能取消归档或彻底删除
     created_at       REAL    NOT NULL,
     updated_at       REAL    NOT NULL
 );
@@ -139,6 +141,8 @@ LATE_COLUMNS = (
     ("signups", "theme", "TEXT NOT NULL DEFAULT '{}'"),
     ("rosters", "grant_mode", "TEXT NOT NULL DEFAULT 'auto'"),
     ("rosters", "approve_mode", "TEXT NOT NULL DEFAULT 'owner'"),
+    ("rosters", "archived_at", "REAL NOT NULL DEFAULT 0"),
+    ("signups", "archived_at", "REAL NOT NULL DEFAULT 0"),
 )
 
 GRANT_MODES = ("auto", "confirm")
@@ -159,7 +163,7 @@ FIELD_INTO_LABEL = {"": "只留在本次报名", "person.dept": "写入学号对
                     "person.grp": "写入班级", "roster.tag": "写成名单里的分组",
                     "roster.note": "写成名单里的备注"}
 STATUS_LABEL = {"disabled": "已禁用", "upcoming": "未开始", "open": "进行中",
-                "full": "已满", "ended": "已结束"}
+                "full": "已满", "ended": "已结束", "archived": "已归档"}
 # 谁能批写入申请：只有拥有者，或拥有者让可写的人也来批
 APPROVE_MODES = ("owner", "editors")
 APPROVE_MODE_LABEL = {"owner": "只有我", "editors": "可写的人也可以"}
@@ -334,7 +338,54 @@ def update_roster(conn, roster_id, **fields):
 
 def delete_roster(conn, roster_id):
     conn.execute("DELETE FROM roster_entries WHERE roster_id=?", (roster_id,))
+    conn.execute("DELETE FROM grants WHERE object_kind='roster' AND object_id=?",
+                 (roster_id,))
     conn.execute("DELETE FROM rosters WHERE id=?", (roster_id,))
+
+
+# --------------------------------------------------------------------------- #
+# 归档：名单与报名都不给「直接删」
+# --------------------------------------------------------------------------- #
+# 平台的一条底线：普通账号删不掉别人（也包括自己）建出来的东西。拥有者能做的只是
+# **归档**——东西离开列表、不能再改、也不能再往里写，数据一条不动；取消归档与彻底
+# 删除都在超级管理员手里，都要提权并记审计（与活动那套一模一样）。
+_ARCHIVE_TABLE = {"roster": "rosters", "signup": "signups"}
+
+
+def set_archived(conn, kind, object_id, at=None):
+    """把一份名单/报名标成归档（``at`` 传 0 表示取消归档）。"""
+    table = _ARCHIVE_TABLE.get(kind)
+    if table is None:
+        raise KeyError(kind)
+    now = time.time()
+    conn.execute("UPDATE %s SET archived_at=?, updated_at=? WHERE id=?" % table,   # sql-ok 表名来自白名单
+                 (float(at or 0), now, int(object_id)))
+
+
+def is_archived(row):
+    if row is None:
+        return False
+    try:
+        keys = row.keys()
+    except AttributeError:
+        return False
+    return "archived_at" in keys and bool(row["archived_at"])
+
+
+def live_signups_using(conn, roster_id):
+    """还有几个没归档的报名在往这份名单里写：有的话先别归档这份名单。"""
+    row = conn.execute(
+        "SELECT COUNT(*) AS n FROM signups WHERE roster_id=? AND archived_at=0",
+        (int(roster_id),)).fetchone()
+    return int(row["n"] or 0)
+
+
+def archived_roster_used(conn, roster_id):
+    """彻底删掉之前看一眼：还有报名指着它吗（归档的也算，删了就成悬空引用）。"""
+    row = conn.execute(
+        "SELECT COUNT(*) AS n FROM signups WHERE roster_id=? OR filter_roster_id=?",
+        (int(roster_id), int(roster_id))).fetchone()
+    return int(row["n"] or 0)
 
 
 def roster(conn, roster_id):
@@ -477,8 +528,9 @@ def writable(conn, acc, kind, row):
     return bool(grant_summary(conn, acc, kind, row)["editable"])
 
 
-def list_rosters(conn, acc, q="", scope="joined", offset=0, limit=50):
+def list_rosters(conn, acc, q="", scope="joined", offset=0, limit=50, archived=False):
     where, args = [], []
+    where.append("r.archived_at > 0" if archived else "r.archived_at = 0")
     if scope == "joined":
         # 我参与的 = 我创建的 + 别人把写入权给我的
         where.append("(r.owner_id=? OR r.id IN (SELECT object_id FROM grants"
@@ -535,6 +587,7 @@ def roster_view(row, members=0, acc=None, conn=None):
         "members": int(members or 0),
         "createdAt": row["created_at"],
         "updatedAt": row["updated_at"],
+        "archivedAt": row["archived_at"] if "archived_at" in row.keys() else 0,
         "mine": perms["owner"],
         "editable": perms["editable"],
         "owner": perms["owner"],
@@ -558,7 +611,7 @@ def pending_approvals(conn, acc):
         "SELECT g.object_kind, g.object_id, g.account_id, g.added_at,"
         "       r.name, r.owner_id, r.approve_mode"
         " FROM grants g JOIN rosters r ON r.id = g.object_id"
-        " WHERE g.object_kind='roster' AND g.level='pending'"
+        " WHERE g.object_kind='roster' AND g.level='pending' AND r.archived_at=0"
         "   AND (r.owner_id = ?"
         "        OR (r.approve_mode='editors' AND EXISTS ("
         "            SELECT 1 FROM grants w WHERE w.object_kind='roster'"
@@ -578,6 +631,7 @@ def my_asks(conn, acc):
         "SELECT g.object_kind, g.object_id, g.added_at, r.name, r.owner_id"
         " FROM grants g JOIN rosters r ON r.id = g.object_id"
         " WHERE g.object_kind='roster' AND g.level='pending' AND g.account_id=?"
+        "   AND r.archived_at=0"
         " ORDER BY g.added_at DESC", (acc["id"],)).fetchall()
     return [{"kind": r["object_kind"], "id": r["object_id"], "name": r["name"],
              "ownerId": r["owner_id"], "askedAt": r["added_at"]} for r in rows]
@@ -970,6 +1024,8 @@ def signup_by_token(conn, token):
 
 def delete_signup(conn, signup_id):
     conn.execute("DELETE FROM signup_entries WHERE signup_id=?", (signup_id,))
+    conn.execute("DELETE FROM grants WHERE object_kind='signup' AND object_id=?",
+                 (signup_id,))
     conn.execute("DELETE FROM signups WHERE id=?", (signup_id,))
 
 
@@ -988,6 +1044,8 @@ def signup_counts(conn, ids=None):
 def signup_status(row, count, now=None):
     """开不开放由时间与名额自动判定；只有"禁用"是人说了算的。"""
     now = time.time() if now is None else now
+    if is_archived(row):
+        return "archived"
     if row["state"] in ("closed", "disabled"):
         return "disabled"
     if row["opens_at"] and now < row["opens_at"]:
@@ -1029,13 +1087,15 @@ def signup_view(conn, row, count=0, acc=None):
         "visibilityLabel": VIS_LABEL.get(row["visibility"], row["visibility"]),
         "createdAt": row["created_at"],
         "updatedAt": row["updated_at"],
+        "archivedAt": row["archived_at"] if "archived_at" in row.keys() else 0,
         "owner": owner,
         "editable": owner,
     }
 
 
-def list_signups(conn, acc, q="", scope="joined", offset=0, limit=30):
+def list_signups(conn, acc, q="", scope="joined", offset=0, limit=30, archived=False):
     where, args = [], []
+    where.append("s.archived_at > 0" if archived else "s.archived_at = 0")
     if scope == "mine":
         where.append("s.owner_id=?")
         args.append(acc["id"])

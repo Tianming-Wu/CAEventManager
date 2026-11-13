@@ -61,6 +61,27 @@ def call(opener, path, body=None):
         return json.loads(res.read().decode())
 
 
+def drop_signup(opener, sid):
+    """收尾：平台不给直接删，先归档再由超管彻底删除。"""
+    if not sid:
+        return
+    for path in ("/api/panel/signup/archive", "/api/panel/signup/delete"):
+        try:
+            call(opener, path, {"id": sid})
+        except Exception:
+            pass
+
+
+def drop_roster(opener, rid):
+    if not rid:
+        return
+    for path in ("/api/panel/roster/archive", "/api/panel/roster/delete"):
+        try:
+            call(opener, path, {"id": rid})
+        except Exception:
+            pass
+
+
 def new_page(browser, width=1440, height=900, touch=False, mobile=False, dpr=1):
     ctx = browser.new_context(
         viewport={"width": width, "height": height}, has_touch=touch,
@@ -364,6 +385,11 @@ def roster_page(page):
     page.wait_for_selector("#rosterVis", timeout=8000)
     check("the dialog decides how write access is granted",
           page.locator("#rosterGrantMode").count() == 1)
+    # 平台不给普通账号删东西：这里只有打包收起来的「归档名单」
+    check("设置里能归档，但没有删除",
+          page.locator("#rosterArchive").count() == 1
+          and "删除名单" not in page.inner_text("#overlayBody"),
+          page.inner_text("#overlayBody")[:120])
     page.select_option("#rosterVis", "public")
     page.select_option("#rosterGrantMode", "confirm")
     page.click("#rosterSave")
@@ -552,6 +578,12 @@ def signup_page(page, browser):
     page.wait_for_timeout(1200)
     check("a valid window is saved", "进行中" in page.inner_text("#signupSub"),
           page.inner_text("#signupSub"))
+    # 平台不给普通账号删东西：报名页上只有把链接收起来的「归档报名」
+    check("报名页上能归档、没有删除",
+          page.locator("#signupArchiveBtn").count() == 1
+          and page.inner_text("#signupArchiveBtn").strip() == "归档报名"
+          and "删除报名" not in page.inner_text('[data-page="signup"]'),
+          page.inner_text('[data-page="signup"]')[:120])
     check("a slash date is rewritten as yyyy-mm-dd",
           page.input_value("#signupOpensDate") == "2026-11-01",
           page.input_value("#signupOpensDate"))
@@ -778,14 +810,10 @@ def print_page(browser):
         if gate is not None:
             gate.close()
         ctx.close()
-        # 删除是三级动作：没提权时先要密码，那道提示本身就是确认
+        # 收尾：平台不给直接删，先归档再由超管彻底删除
         call(owner, "/api/panel/sudo", {"password": PASSWORD})
-        for path, body in (("/api/panel/signup/delete", {"id": sid}),
-                           ("/api/panel/roster/delete", {"id": rid})):
-            try:
-                call(owner, path, body)
-            except Exception:
-                pass
+        drop_signup(owner, sid)
+        drop_roster(owner, rid)
 
 
 def png_1bit(path):
@@ -897,14 +925,10 @@ def qr_formats(browser):
               "; ".join(page._errors)[:200])
     finally:
         ctx.close()
-        # 删除是三级动作：没提权时先要密码，那道提示本身就是确认
+        # 收尾：平台不给直接删，先归档再由超管彻底删除
         call(owner, "/api/panel/sudo", {"password": PASSWORD})
-        for path, body in (("/api/panel/signup/delete", {"id": sid}),
-                           ("/api/panel/roster/delete", {"id": rid})):
-            try:
-                call(owner, path, body)
-            except Exception:
-                pass
+        drop_signup(owner, sid)
+        drop_roster(owner, rid)
         for name in ("qr-1to1.png", "qr.svg"):
             try:
                 os.remove(os.path.join(out, name))
@@ -971,14 +995,10 @@ def xlsx_page(browser):
               "; ".join(page._errors)[:200])
     finally:
         ctx.close()
-        # 删除是三级动作：没提权时先要密码，那道提示本身就是确认
+        # 收尾：平台不给直接删，先归档再由超管彻底删除
         call(owner, "/api/panel/sudo", {"password": PASSWORD})
-        for path, body in (("/api/panel/signup/delete", {"id": sid}),
-                           ("/api/panel/roster/delete", {"id": rid})):
-            try:
-                call(owner, path, body)
-            except Exception:
-                pass
+        drop_signup(owner, sid)
+        drop_roster(owner, rid)
         for name in ("import-%d.xlsx" % rid, "down-%d.xlsx" % rid):
             try:
                 os.remove(os.path.join(blank, name))
@@ -1346,14 +1366,10 @@ def crumb_motion(browser):
     finally:
         ctx.close()
         # 这两份是为了测动画造的：收干净，别让后面的用例以为列表本来就非空
-        # 删除是三级动作：没提权时先要密码，那道提示本身就是确认
+        # 收尾：平台不给直接删，先归档再由超管彻底删除
         call(owner, "/api/panel/sudo", {"password": PASSWORD})
-        for path, body in (("/api/panel/signup/delete", {"id": sid}),
-                           ("/api/panel/roster/delete", {"id": rid})):
-            try:
-                call(owner, path, body)
-            except Exception:
-                pass
+        drop_signup(owner, sid)
+        drop_roster(owner, rid)
 
 
 def switch_metrics(page):
@@ -2472,8 +2488,9 @@ def roster_admin_page(browser):
         page.click("[data-admin-roster]")
         page.wait_for_timeout(500)
         body = page.inner_text("#overlayBody")
-        check("详情里有转移与删除",
-              "转移拥有者" in body and "彻底删除" in body, body[:140])
+        check("详情里有转移与归档",
+              "转移拥有者" in body and "归档" in body, body[:140])
+        check("没归档的名单不给彻底删除", "彻底删除" not in body, body[:140])
         check("也说得出拥有者是谁", "拥有者" in body, body[:80])
         # 点遮罩关掉：和活动详情一样，这类只读弹窗关掉不丢东西
         page.click("#overlay", position={"x": 20, "y": 20})
@@ -2498,40 +2515,57 @@ def roster_admin_page(browser):
                 page.wait_for_timeout(1600)
             check("转移之后详情还开着", not page.locator("#overlay").is_hidden(),
                   page.inner_text("#overlayTitle"))
-        # 彻底删除：删除是三级动作，没提权时先要密码；删完弹窗收掉、列表刷新
+        # 归档：给对象换位置，做完详情收掉、当前表里没有它
         if page.locator("#overlay").is_hidden():
             page.click("[data-admin-roster]")
             page.wait_for_timeout(400)
-        idx = page.evaluate("""() => {
-            const btns = Array.from(
-                document.querySelectorAll('#overlayBody [data-list-act]'));
-            const hit = btns.find(b => b.textContent.trim() === '彻底删除');
-            return hit ? hit.getAttribute('data-list-act') : null;
-        }""")
-        check("详情里有彻底删除", idx is not None, idx)
-        page.click('[data-list-act="%s"]' % idx)
+        page.click('[data-list-act="2"]')      # 打开 / 转移 / 归档
         page.wait_for_timeout(600)
-        # 删除是三级动作：没提权时先要密码（提示本身就是确认），已经提权时再问一句
         if page.locator("#sudoPass").count():
-            check("没提权时删之前先要一次密码", True)
             page.fill("#sudoPass", PASSWORD)
             page.click("#sudoEnter")
             page.wait_for_timeout(1800)
-        else:
-            check("提权之后删之前再问一句", page.locator("#confirmGo").count() == 1,
-                  page.inner_text("#overlayBody")[:80])
+        elif page.locator("#confirmGo").count():
             page.click("#confirmGo")
             page.wait_for_timeout(1600)
-        check("删完之后弹窗收掉了", page.locator("#overlay").is_hidden())
-        check("列表里也没有了",
+        check("归档之后弹窗收掉了", page.locator("#overlay").is_hidden())
+        check("当前那一栏里没有它了",
+              "名单管理测试" not in page.inner_text("#adminRosterTable tbody"),
+              page.inner_text("#adminRosterTable tbody")[:120])
+        # 已归档那一栏：超管能取消归档，也能彻底删除
+        page.click('#adminListScope [data-archived="1"]')
+        page.wait_for_timeout(900)
+        check("已归档那一栏里有它",
+              "名单管理测试" in page.inner_text("#adminRosterTable tbody"),
+              page.inner_text("#adminRosterTable tbody")[:120])
+        check("那一栏的时间列是归档时间",
+              page.inner_text("#adminRosterTable thead tr th:nth-child(5)") == "归档时间",
+              page.inner_text("#adminRosterTable thead tr th:nth-child(5)"))
+        page.click("[data-admin-roster]")
+        page.wait_for_timeout(500)
+        body = page.inner_text("#overlayBody")
+        check("归档的详情里有取消归档与彻底删除",
+              "取消归档" in body and "彻底删除" in body, body[:140])
+        check("归档的详情里没有转移", "转移拥有者" not in body, body[:140])
+        page.click('[data-list-act="1"]')      # 取消归档 / 彻底删除
+        page.wait_for_timeout(600)
+        if page.locator("#sudoPass").count():
+            page.fill("#sudoPass", PASSWORD)
+            page.click("#sudoEnter")
+            page.wait_for_timeout(1800)
+        elif page.locator("#confirmGo").count():
+            page.click("#confirmGo")
+            page.wait_for_timeout(1600)
+        check("彻底删除之后弹窗收掉了", page.locator("#overlay").is_hidden())
+        check("已归档那一栏里也没有了",
               "名单管理测试" not in page.inner_text("#adminRosterTable tbody"),
               page.inner_text("#adminRosterTable tbody")[:120])
     finally:
         ctx.close()
+        call(owner, "/api/panel/sudo", {"password": PASSWORD})
         for row in call(owner, "/api/panel/rosters?scope=all&limit=100")["rosters"]:
             if row["name"] == "名单管理测试":
-                call(owner, "/api/panel/sudo", {"password": PASSWORD})
-                call(owner, "/api/panel/roster/delete", {"id": row["id"]})
+                drop_roster(owner, row["id"])
 
 
 def archived_delete_page(browser):
@@ -3181,7 +3215,7 @@ def touch_page(browser):
         ctx.close()
         try:
             call(owner, "/api/panel/sudo", {"password": PASSWORD})
-            call(owner, "/api/panel/roster/delete", {"id": phone_roster})
+            drop_roster(owner, phone_roster)
         except Exception:
             pass
 
@@ -3230,7 +3264,7 @@ def touch_page(browser):
             check("选完写回时刻文本框", got["time"] == "19:30", got)
             check("清除按钮随之可用", got["clear"] is False, got)
             call(opener, "/api/panel/sudo", {"password": PASSWORD})
-            call(opener, "/api/panel/signup/delete", {"id": sid})
+            drop_signup(opener, sid)
     finally:
         ctx.close()
 

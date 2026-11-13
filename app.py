@@ -69,7 +69,7 @@ PAGES_DIR = os.path.join(BASE_DIR, "pages")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.0.95"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.0.96"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -1221,6 +1221,10 @@ class Handler(BaseHTTPRequestHandler):
         row = lists.signup_by_token(lx, token)
         if row is None:
             return self._err("not found", 404)
+        # 归档的报名对外就当它不在：链接还指着它，但页面与提交都停下
+        target = lists.roster(lx, row["roster_id"]) if row is not None else None
+        if lists.is_archived(row) or lists.is_archived(target):
+            return self._err("这个报名已经结束", 410)
 
         if method == "GET" and route.startswith("/assets/"):
             rel = route[len("/assets/"):]
@@ -3014,11 +3018,13 @@ class Handler(BaseHTTPRequestHandler):
                 % ",".join("?" * len(ids)), ids)
             return {r["id"]: (r["name"] or r["username"]) for r in rows}
 
-        def open_roster(rid, write=False):
+        def open_roster(rid, write=False, allow_archived=False):
             """The roster row, after checking this account may look at it."""
             row = lists.roster(lists.connect(), rid)
             if row is None:
                 raise model.ApiError("名单不存在", 404)
+            if lists.is_archived(row) and not allow_archived:
+                raise model.ApiError("这份名单已经归档，请联系超级管理员", 409)
             if write:
                 if not lists.writable(lists.connect(), acc, "roster", row):
                     raise model.ApiError("没有该名单的写入权限", 403)
@@ -3138,7 +3144,12 @@ class Handler(BaseHTTPRequestHandler):
             limit = _int_arg(query, "limit", 30, 1, 100)
             if scope not in ("joined", "mine", "all"):
                 scope = "joined"
-            res = lists.list_rosters(lists.connect(), acc, q, scope, offset, limit)
+            # 归档的名单只给超级管理员看（它已经从「我的名单」里退下去了）
+            archived = (query.get("archived") or ["0"])[0] in ("1", "true", "yes")
+            if archived:
+                need("superadmin", "owner")
+            res = lists.list_rosters(lists.connect(), acc, q, scope, offset, limit,
+                                     archived=archived)
             names = roster_owner_names([r["ownerId"] for r in res["rosters"]])
             for r in res["rosters"]:
                 r["ownerName"] = names.get(r["ownerId"], "")
@@ -3201,20 +3212,64 @@ class Handler(BaseHTTPRequestHandler):
                                     if k in data))))
             return self._json({"ok": True, "changed": bool(changed)})
 
+        if path == "/roster/archive" and method == "POST":
+            # 归档：拥有者对自己那份名单的软删除（超管也能替不在场的人做）。
+            # 东西离开列表、不能再改、也不能再往里写，数据一条不动
+            data = body()
+            rid = int(data.get("id") or 0)
+            row = open_roster(rid)                 # 看得见就行：拥有者一定看得见自己那份
+            by_admin = row["owner_id"] != acc["id"]
+            if by_admin:
+                need("superadmin", "owner")
+            need_sudo()
+            used = lists.live_signups_using(lists.connect(), rid)
+            if used:
+                raise model.ApiError(
+                    "还有 %d 个报名在往这份名单里写人，先归档那几个报名" % used, 409)
+            with lists.tx() as lx:
+                lists.set_archived(lx, "roster", rid, time.time())
+            with panel.tx() as tx:
+                panel.audit(tx, acc["username"], "roster_archive", str(rid),
+                            panel.audit_note(name=row["name"],
+                                             by="admin" if by_admin else "owner"))
+            return self._json({"ok": True, "archivedAt": time.time()})
+
+        if path == "/roster/unarchive" and method == "POST":
+            # 取消归档是超管的事：普通账号只负责把事情收起来，放回来要平台点头
+            data = body()
+            rid = int(data.get("id") or 0)
+            need("superadmin", "owner")
+            need_sudo()
+            row = open_roster(rid, allow_archived=True)
+            if not lists.is_archived(row):
+                return self._json({"ok": True, "already": True})
+            with lists.tx() as lx:
+                lists.set_archived(lx, "roster", rid, 0)
+            with panel.tx() as tx:
+                panel.audit(tx, acc["username"], "roster_unarchive", str(rid),
+                            panel.audit_note(name=row["name"]))
+            return self._json({"ok": True})
+
         if path == "/roster/delete" and method == "POST":
             data = body()
             rid = int(data.get("id") or 0)
-            row = open_roster(rid, write=True)
-            by_admin = row["owner_id"] != acc["id"]
-            # 删除是三级动作：不管是谁的名单，删之前都要提权（没提权时密码提示就是那次确认）
+            # 权限先说话：没有这个身份的人连它是什么状态都不该知道
             need("superadmin", "owner")
             need_sudo()
+            row = open_roster(rid, allow_archived=True)
+            # 彻底删除只对归档过的名单开放：这份东西先由拥有者归档、再由超管清掉，
+            # 中间那一步保证「谁都不能一下就抹掉别人的东西」
+            if not lists.is_archived(row):
+                raise model.ApiError("先归档这份名单，再由超级管理员彻底删除", 409)
+            used = lists.archived_roster_used(lists.connect(), rid)
+            if used:
+                raise model.ApiError(
+                    "还有 %d 个报名指着这份名单，先处理那几个报名" % used, 409)
             with lists.tx() as lx:
                 lists.delete_roster(lx, rid)
             with panel.tx() as tx:
                 panel.audit(tx, acc["username"], "roster_delete", str(rid),
-                            panel.audit_note(name=row["name"],
-                                             by="admin" if by_admin else "owner"))
+                            panel.audit_note(name=row["name"]))
             return self._json({"ok": True})
 
         if path == "/roster/transfer" and method == "POST":
@@ -3389,11 +3444,13 @@ class Handler(BaseHTTPRequestHandler):
                                "count": len(pending)})
 
         # ---- 报名：一个公开链接 + 时间窗，往名单里写人 ----
-        def open_signup(sid, write=False):
+        def open_signup(sid, write=False, allow_archived=False):
             lx = lists.connect()
             row = lists.signup(lx, sid)
             if row is None:
                 raise model.ApiError("报名不存在", 404)
+            if lists.is_archived(row) and not allow_archived:
+                raise model.ApiError("这个报名已经归档，请联系超级管理员", 409)
             if write:
                 if row["owner_id"] != acc["id"]:
                     raise model.ApiError("仅报名创建者可修改", 403)
@@ -3410,7 +3467,12 @@ class Handler(BaseHTTPRequestHandler):
                 scope = "joined"
             offset = _int_arg(query, "offset", 0, 0, 100000)
             limit = _int_arg(query, "limit", 30, 1, 100)
-            res = lists.list_signups(lists.connect(), acc, q, scope, offset, limit)
+            # 归档的报名只给超级管理员看（它已经不在这几个人的列表里了）
+            archived = (query.get("archived") or ["0"])[0] in ("1", "true", "yes")
+            if archived:
+                need("superadmin", "owner")
+            res = lists.list_signups(lists.connect(), acc, q, scope, offset, limit,
+                                     archived=archived)
             base = (LOCAL_CFG.get("public_base_prefix") or "").rstrip("/")
             names = roster_owner_names([item["ownerId"] for item in res["signups"]])
             for item in res["signups"]:
@@ -3434,6 +3496,8 @@ class Handler(BaseHTTPRequestHandler):
             roster_row = lists.roster(lists.connect(), roster_id)
             if roster_row is None:
                 raise model.ApiError("请选择报名写入的名单")
+            if lists.is_archived(roster_row):
+                raise model.ApiError("这份名单已经归档，先取消归档再往里写人", 409)
             if not lists.writable(lists.connect(), acc, "roster", roster_row):
                 raise model.ApiError("对该名单没有写入权限，无法往里面写人", 403)
             with lists.tx() as lx:
@@ -3457,20 +3521,53 @@ class Handler(BaseHTTPRequestHandler):
                                     if k in data))))
             return self._json({"ok": True, "changed": bool(changed)})
 
+        if path == "/signup/archive" and method == "POST":
+            # 归档报名：拥有者的软删除（超管也能替不在场的人做）
+            data = body()
+            sid = int(data.get("id") or 0)
+            row = open_signup(sid)                 # 看得见就行
+            by_admin = row["owner_id"] != acc["id"]
+            if by_admin:
+                need("superadmin", "owner")
+            need_sudo()
+            with lists.tx() as lx:
+                lists.set_archived(lx, "signup", sid, time.time())
+            with panel.tx() as tx:
+                panel.audit(tx, acc["username"], "signup_archive", str(sid),
+                            panel.audit_note(title=row["title"],
+                                             by="admin" if by_admin else "owner"))
+            return self._json({"ok": True, "archivedAt": time.time()})
+
+        if path == "/signup/unarchive" and method == "POST":
+            data = body()
+            sid = int(data.get("id") or 0)
+            need("superadmin", "owner")
+            need_sudo()
+            row = open_signup(sid, allow_archived=True)
+            if not lists.is_archived(row):
+                return self._json({"ok": True, "already": True})
+            with lists.tx() as lx:
+                lists.set_archived(lx, "signup", sid, 0)
+            with panel.tx() as tx:
+                panel.audit(tx, acc["username"], "signup_unarchive", str(sid),
+                            panel.audit_note(title=row["title"]))
+            return self._json({"ok": True})
+
         if path == "/signup/delete" and method == "POST":
             data = body()
             sid = int(data.get("id") or 0)
-            row = open_signup(sid, write=True)
-            by_admin = row["owner_id"] != acc["id"]
-            # 删除是三级动作：不管是谁的报名，删之前都要提权（没提权时密码提示就是那次确认）
+            # 权限先说话，再看状态
             need("superadmin", "owner")
             need_sudo()
+            row = open_signup(sid, allow_archived=True)
+            # 与名单同一条：先归档，再由超管彻底删除
+            if not lists.is_archived(row):
+                raise model.ApiError("先归档这个报名，再由超级管理员彻底删除", 409)
             with lists.tx() as lx:
                 lists.delete_signup(lx, sid)
             with panel.tx() as tx:
                 panel.audit(tx, acc["username"], "signup_delete", str(sid),
-                            panel.audit_note(title=row["title"],
-                                             by="admin" if by_admin else "owner"))
+                            panel.audit_note(title=row["title"]))
             return self._json({"ok": True})
 
         if path == "/signup/transfer" and method == "POST":
@@ -4364,6 +4461,8 @@ class Handler(BaseHTTPRequestHandler):
                 row = lists.roster(lx, rid)
                 if row is None:
                     raise model.ApiError("名单不存在", 404)
+                if lists.is_archived(row):
+                    raise model.ApiError("这份名单已经归档，换一份再绑", 409)
                 if not lists.row_visible(me.acc, row):
                     raise model.ApiError("无权查看该名单", 403)
             with db.tx(conn):

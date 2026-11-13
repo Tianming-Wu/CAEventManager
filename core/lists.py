@@ -372,12 +372,11 @@ def is_archived(row):
     return "archived_at" in keys and bool(row["archived_at"])
 
 
-def live_signups_using(conn, roster_id):
-    """还有几个没归档的报名在往这份名单里写：有的话先别归档这份名单。"""
-    row = conn.execute(
-        "SELECT COUNT(*) AS n FROM signups WHERE roster_id=? AND archived_at=0",
-        (int(roster_id),)).fetchone()
-    return int(row["n"] or 0)
+def live_signups(conn, roster_id):
+    """还挂在名单上的那几个报名（归档名单时一并收，或者据此问一句）。"""
+    return conn.execute(
+        "SELECT * FROM signups WHERE roster_id=? AND archived_at=0"
+        " ORDER BY id", (int(roster_id),)).fetchall()
 
 
 def archived_roster_used(conn, roster_id):

@@ -658,13 +658,12 @@ def main():
         # 活动正常开启时：负责人能下载
         blob = call(owner, "/api/panel/event/download?seq=%d" % aseq)
         check("开启时负责人能下载数据", blob is not None and len(blob) > 200, blob if blob is None else len(blob))
-        # 归档要 sudo：前面的用例可能已经进过，先退出来
+        # 归档自己的活动不要密码（超管能放回来，不是不可逆的事）
         post(owner, "/api/panel/sudo/exit", {})
-        post(owner, "/api/panel/event/archive", {"seq": aseq}, expect=403)
-        check("归档要进 sudo", True)
-        post(owner, "/api/panel/sudo", {"password": owner_password()})
         res = post(owner, "/api/panel/event/archive", {"seq": aseq})
-        check("负责人能归档自己的活动", res and res.get("archived"), res)
+        check("没提权也能归档自己的活动", res and res.get("archived"), res)
+        # 后面的取消归档、下载、彻底删除都要提权
+        post(owner, "/api/panel/sudo", {"password": owner_password()})
         listed = [e for e in call(owner, "/api/panel/events?archived=1")["events"]
                   if e["seq"] == aseq]
         check("归档后退到已归档列表", len(listed) == 1, listed)
@@ -1174,13 +1173,13 @@ def main():
     check("全站的报名也带拥有者", all("ownerName" in s for s in every), every[:1])
 
     print("== 名单与报名：先归档，再彻底删除 ==")
-    # 拥有者自己归档：名单退出列表、不能再改也不能再往里写
+    # 拥有者自己归档：不要密码，名单退出列表、不能再改也不能再往里写
     own = post(helper, "/api/panel/roster/create", {"name": "归档测试名单"})
     own_id = own["id"]
     post(helper, "/api/panel/roster/entry",
          {"id": own_id, "sid": "20240901", "name": "归档前的人"})
-    post(helper, "/api/panel/sudo", {"password": "alice-pass-1"})
-    check("拥有者能归档自己的名单",
+    post(helper, "/api/panel/sudo/exit", {})
+    check("没提权也能归档自己的名单",
           bool(post(helper, "/api/panel/roster/archive", {"id": own_id}).get("ok")))
     check("归档之后自己的列表里没有它",
           own_id not in [r["id"] for r in call(helper, "/api/panel/rosters?scope=mine")["rosters"]])
@@ -1203,22 +1202,22 @@ def main():
          {"id": own_id, "sid": "20240903", "name": "放出来又能写"})
     check("取消归档之后又能写进去了", True)
 
-    # 报名：名单还在给报名用时不许归档名单，报名归档之后公开页当场失效
+    # 报名：名单还挂着报名时，先问一句「一并归档？」，确认之后一起收
     signup = post(helper, "/api/panel/signup/create",
                   {"title": "归档测试报名", "roster_id": own_id})["id"]
-    refused = post(helper, "/api/panel/roster/archive", {"id": own_id}, expect=409)
-    check("名单还有报名在用时不许归档",
-          "报名" in (refused.get("error") or ""), refused)
-    post(helper, "/api/panel/signup/archive", {"id": signup})
-    check("拥有者能归档自己的报名", True)
+    linked = post(helper, "/api/panel/roster/archive", {"id": own_id}, expect=409)
+    check("名单上还挂着报名时先把数说清",
+          (linked or {}).get("linkedSignups") == 1, linked)
+    cascaded = post(helper, "/api/panel/roster/archive",
+                    {"id": own_id, "cascade": True})
+    check("一并归档：名单与那几个报名一起收",
+          (cascaded or {}).get("signupsArchived") == [signup], cascaded)
     tok = [s for s in call(owner, "/api/panel/signups?scope=all&archived=1")["signups"]
            if s["id"] == signup]
-    check("报名出现在归档那一栏", bool(tok), tok)
+    check("报名也跟着进了归档那一栏", bool(tok), tok)
     if tok:
         call(anon, "/join/%s" % tok[0]["token"], expect=410)
         check("归档之后公开链接打不开了", True)
-    post(helper, "/api/panel/roster/archive", {"id": own_id})
-    check("报名归档之后名单也能归档了", True)
     post(owner, "/api/panel/roster/delete", {"id": own_id}, expect=409)
     check("还有报名指着它时不许彻底删除", True)
     post(owner, "/api/panel/signup/delete", {"id": signup})

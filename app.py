@@ -69,7 +69,7 @@ PAGES_DIR = os.path.join(BASE_DIR, "pages")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.0.96"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.0.97"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -2351,7 +2351,8 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/event/archive" and method == "POST":
             # 归档是负责人对自己活动的软删除：服务端把文件夹打包，外面只留元数据。
-            # 它本质是主站动作，活动设置里只是快捷入口——所以走主站 sudo，与「解锁修改」无关
+            # 只是把自己的东西收起来，而且超管能取消归档，所以不设密码——
+            # 界面上的那一句确认就够了。真正不可逆的「彻底删除」才走 sudo
             data = body()
             seq = int(data.get("seq") or 0)
             seat = seat_of(seq)
@@ -2361,7 +2362,6 @@ class Handler(BaseHTTPRequestHandler):
             if row["archived_at"]:
                 return self._json({"ok": True, "seq": seq, "archived": True,
                                    "already": True})
-            need_sudo()
             refuse_stale()
             size = do_archive(seq, row["title"])
             return self._json({"ok": True, "seq": seq, "archived": True,
@@ -3214,25 +3214,37 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/roster/archive" and method == "POST":
             # 归档：拥有者对自己那份名单的软删除（超管也能替不在场的人做）。
-            # 东西离开列表、不能再改、也不能再往里写，数据一条不动
+            # 东西离开列表、不能再改、也不能再往里写，数据一条不动；超管能取消归档，
+            # 所以这里不设密码——界面上的那一句确认就够了
             data = body()
             rid = int(data.get("id") or 0)
+            cascade = bool(data.get("cascade"))
             row = open_roster(rid)                 # 看得见就行：拥有者一定看得见自己那份
             by_admin = row["owner_id"] != acc["id"]
             if by_admin:
                 need("superadmin", "owner")
-            need_sudo()
-            used = lists.live_signups_using(lists.connect(), rid)
-            if used:
-                raise model.ApiError(
-                    "还有 %d 个报名在往这份名单里写人，先归档那几个报名" % used, 409)
+            linked = lists.live_signups(lists.connect(), rid)
+            if linked and not cascade:
+                # 不拦着人，只把选择摆出来：一并归档，或者先去处理那几个报名。
+                # linkedSignups 让界面能把话说准（「还有 2 个报名链接到这份名单」）
+                return self._json({
+                    "ok": False,
+                    "error": "还有 %d 个报名链接到这份名单" % len(linked),
+                    "linkedSignups": len(linked),
+                }, 409)
+            now = time.time()
             with lists.tx() as lx:
-                lists.set_archived(lx, "roster", rid, time.time())
+                lists.set_archived(lx, "roster", rid, now)
+                for r in linked:
+                    # 一并收起来：报名页当场失效，已经收到的报名一条不删
+                    lists.set_archived(lx, "signup", r["id"], now)
             with panel.tx() as tx:
                 panel.audit(tx, acc["username"], "roster_archive", str(rid),
                             panel.audit_note(name=row["name"],
-                                             by="admin" if by_admin else "owner"))
-            return self._json({"ok": True, "archivedAt": time.time()})
+                                             by="admin" if by_admin else "owner",
+                                             cascade=len(linked) or None))
+            return self._json({"ok": True, "archivedAt": now,
+                               "signupsArchived": [r["id"] for r in linked]})
 
         if path == "/roster/unarchive" and method == "POST":
             # 取消归档是超管的事：普通账号只负责把事情收起来，放回来要平台点头
@@ -3522,14 +3534,13 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True, "changed": bool(changed)})
 
         if path == "/signup/archive" and method == "POST":
-            # 归档报名：拥有者的软删除（超管也能替不在场的人做）
+            # 归档报名：拥有者的软删除（超管也能替不在场的人做）。与名单一样不设密码
             data = body()
             sid = int(data.get("id") or 0)
             row = open_signup(sid)                 # 看得见就行
             by_admin = row["owner_id"] != acc["id"]
             if by_admin:
                 need("superadmin", "owner")
-            need_sudo()
             with lists.tx() as lx:
                 lists.set_archived(lx, "signup", sid, time.time())
             with panel.tx() as tx:

@@ -2173,21 +2173,14 @@ def create_page(browser):
             check("the menu offers 归档", page.locator("[data-archive]").count() == 1)
             page.click("[data-archive]")
             page.wait_for_timeout(600)
-            # nothing is elevated, so the password prompt is the confirmation:
-            # typing it is deliberate, and cancelling it leaves no trace
-            check("archiving asks for the password straight away",
-                  page.locator("#sudoPass").count() == 1)
+            # 归档自己的活动不要密码：一句确认就够（密码留给真正不可逆的删除）
+            check("归档只问一句，不弹密码框",
+                  page.locator("#confirmGo").count() == 1
+                  and page.locator("#sudoPass").count() == 0)
             entered = page.inner_text("#overlayBody")
             check("and names the action", "归档" in entered, entered[:60])
             check("and says what it will do", "确认归档？" in entered, entered[:120])
-            desc_h = page.evaluate("() => { const el = document.querySelector('.sudo-prompt-desc');"
-                                   " return el ? Math.round(el.getBoundingClientRect().height) : 0; }")
-            check("描述那块留了固定的高度", desc_h > 0, desc_h)
-            check("the prompt has no header bar",
-                  page.evaluate("() => getComputedStyle("
-                                "document.querySelector('.overlay-card .overlay-head'))"
-                                ".display") == "none")
-            enter_sudo(page)
+            page.click("#confirmGo")
             page.wait_for_timeout(900)
             left = page.evaluate("""() => Array.from(
                 document.querySelectorAll('#ownedEvents .card-menu-btn'))
@@ -2463,11 +2456,12 @@ def module_refresh_page(browser):
 
 
 def roster_admin_page(browser):
-    """名单管理：超管看全站的名单与报名，详情里能转交与删除。"""
+    """名单管理：超管看全站的名单与报名，详情里能归档、转交与彻底删除。"""
     print("== 名单管理 ==")
     owner = owner_opener()
     made = call(owner, "/api/panel/roster/create", {"name": "名单管理测试"})
-    check("先造一份名单", bool(made and made.get("id")), made)
+    rid = (made or {}).get("id")
+    check("先造一份名单", bool(rid), made)
     ctx, page = new_page(browser, 1440, 900)
     try:
         ui_login(page)
@@ -2515,7 +2509,9 @@ def roster_admin_page(browser):
                 page.wait_for_timeout(1600)
             check("转移之后详情还开着", not page.locator("#overlay").is_hidden(),
                   page.inner_text("#overlayTitle"))
-        # 归档：给对象换位置，做完详情收掉、当前表里没有它
+        # 归档：名单上还挂着报名时补问一句「一并归档？」，确认之后一起收
+        call(owner, "/api/panel/signup/create",
+             {"title": "链接到名单的报名", "roster_id": rid})
         if page.locator("#overlay").is_hidden():
             page.click("[data-admin-roster]")
             page.wait_for_timeout(400)
@@ -2524,20 +2520,35 @@ def roster_admin_page(browser):
         if page.locator("#sudoPass").count():
             page.fill("#sudoPass", PASSWORD)
             page.click("#sudoEnter")
-            page.wait_for_timeout(1800)
+            page.wait_for_timeout(1600)
         elif page.locator("#confirmGo").count():
             page.click("#confirmGo")
-            page.wait_for_timeout(1600)
+            page.wait_for_timeout(1200)
+        check("名单上还挂着报名时补问一句",
+              page.locator("#cascadeGo").count() == 1
+              and "报名链接到这份名单" in page.inner_text("#overlayBody"),
+              page.inner_text("#overlayBody")[:120])
+        check("这句话给的是取消与全部归档",
+              page.inner_text("#cascadeGo").strip() == "全部归档"
+              and "取消" in page.inner_text("#overlayBody"), page.inner_text("#overlayBody")[:120])
+        page.click("#cascadeGo")
+        page.wait_for_timeout(1600)
         check("归档之后弹窗收掉了", page.locator("#overlay").is_hidden())
         check("当前那一栏里没有它了",
               "名单管理测试" not in page.inner_text("#adminRosterTable tbody"),
               page.inner_text("#adminRosterTable tbody")[:120])
-        # 已归档那一栏：超管能取消归档，也能彻底删除
+        check("链接到它的报名也一起收走了",
+              "链接到名单的报名" not in page.inner_text("#adminSignupTable tbody"),
+              page.inner_text("#adminSignupTable tbody")[:120])
+        # 已归档那一栏：名单与报名都在，超管能取消归档也能彻底删除
         page.click('#adminListScope [data-archived="1"]')
         page.wait_for_timeout(900)
-        check("已归档那一栏里有它",
+        check("已归档那一栏里有名单",
               "名单管理测试" in page.inner_text("#adminRosterTable tbody"),
               page.inner_text("#adminRosterTable tbody")[:120])
+        check("已归档那一栏里也有报名",
+              "链接到名单的报名" in page.inner_text("#adminSignupTable tbody"),
+              page.inner_text("#adminSignupTable tbody")[:120])
         check("那一栏的时间列是归档时间",
               page.inner_text("#adminRosterTable thead tr th:nth-child(5)") == "归档时间",
               page.inner_text("#adminRosterTable thead tr th:nth-child(5)"))
@@ -2556,16 +2567,50 @@ def roster_admin_page(browser):
         elif page.locator("#confirmGo").count():
             page.click("#confirmGo")
             page.wait_for_timeout(1600)
+        # 报名还指着它，所以这一步只得到一句说明，名单还在
+        check("还有报名指着时不给彻底删除",
+              "名单管理测试" in page.inner_text("#adminRosterTable tbody"),
+              page.inner_text("#adminRosterTable tbody")[:120])
+        if not page.locator("#overlay").is_hidden():
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(300)
+        # 先把报名彻底删掉，再删名单
+        page.click("[data-admin-signup]")
+        page.wait_for_timeout(500)
+        page.click('[data-list-act="1"]')      # 取消归档 / 彻底删除
+        page.wait_for_timeout(600)
+        if page.locator("#sudoPass").count():
+            page.fill("#sudoPass", PASSWORD)
+            page.click("#sudoEnter")
+            page.wait_for_timeout(1800)
+        elif page.locator("#confirmGo").count():
+            page.click("#confirmGo")
+            page.wait_for_timeout(1600)
+        check("报名彻底删除之后那一栏里没有它了",
+              "链接到名单的报名" not in page.inner_text("#adminSignupTable tbody"),
+              page.inner_text("#adminSignupTable tbody")[:120])
+        page.click("[data-admin-roster]")
+        page.wait_for_timeout(500)
+        page.click('[data-list-act="1"]')
+        page.wait_for_timeout(600)
+        if page.locator("#sudoPass").count():
+            page.fill("#sudoPass", PASSWORD)
+            page.click("#sudoEnter")
+            page.wait_for_timeout(1800)
+        elif page.locator("#confirmGo").count():
+            page.click("#confirmGo")
+            page.wait_for_timeout(1600)
         check("彻底删除之后弹窗收掉了", page.locator("#overlay").is_hidden())
-        check("已归档那一栏里也没有了",
+        check("已归档那一栏里也没有名单了",
               "名单管理测试" not in page.inner_text("#adminRosterTable tbody"),
               page.inner_text("#adminRosterTable tbody")[:120])
     finally:
         ctx.close()
         call(owner, "/api/panel/sudo", {"password": PASSWORD})
-        for row in call(owner, "/api/panel/rosters?scope=all&limit=100")["rosters"]:
-            if row["name"] == "名单管理测试":
-                drop_roster(owner, row["id"])
+        for flag in ("", "&archived=1"):
+            for row in call(owner, "/api/panel/rosters?scope=all&limit=100" + flag)["rosters"]:
+                if row["name"] == "名单管理测试":
+                    drop_roster(owner, row["id"])
 
 
 def archived_delete_page(browser):
@@ -2715,6 +2760,13 @@ def sudo_page(page):
     check("and says which action",
           "重置访问地址" in page.inner_text("#overlayBody"),
           page.inner_text("#overlayBody")[:60])
+    desc_h = page.evaluate("() => { const el = document.querySelector('.sudo-prompt-desc');"
+                           " return el ? Math.round(el.getBoundingClientRect().height) : 0; }")
+    check("描述那块留了固定的高度", desc_h > 0, desc_h)
+    check("the prompt has no header bar",
+          page.evaluate("() => getComputedStyle("
+                        "document.querySelector('.overlay-card .overlay-head'))"
+                        ".display") == "none")
     page.click("#sudoCancel")
     page.wait_for_timeout(400)
     check("cancelling closes the dialog", page.locator("#overlay").is_hidden())
@@ -3532,7 +3584,7 @@ def sudo_expiry(browser):
         card = '.page[data-page=events] [data-menu="%s"]' % rotated["id"]
         page.click(card)
         page.wait_for_timeout(250)
-        page.click(".card-menu [data-archive]")
+        page.click(".card-menu [data-rotate]")
         page.wait_for_timeout(600)
         check("the password is asked for again", page.locator("#sudoPass").count() == 1)
         page.click("#sudoCancel")

@@ -766,8 +766,11 @@
   // While not elevated the password prompt is that confirmation, so this is
   // skipped - typing it is already deliberate, and cancelling it leaves no
   // trace because nothing ever reached the server.
+  // opts.noSudo：这个动作不要密码（归档、转移自己的东西就是这种），没有密码提示
+  // 可以充当确认，所以这一句确认总要有。opts.keepUnder：确认框叠在详情上面，
+  // 取消只回到详情。
   function confirmHighRisk(title, note, label, danger, run, opts) {
-    if (!sudoActive()) return run(note);
+    if (!(opts && opts.noSudo) && !sudoActive()) return run(note);
     openOverlay("confirm", title,
       '<p class="page-sub">' + note + "</p>"
       + '<div class="row" style="margin-top:18px;justify-content:flex-end">'
@@ -780,6 +783,39 @@
       // 其它的确认框收掉整摞，回到页面
       if (opts && opts.keepUnder) closeOverlay();
       else closeAllOverlays();
+      run();
+    });
+  }
+
+  /* 归档：把名单或报名收起来（不设密码，只有一句确认）。
+     名单上还挂着报名时先问一句「一并归档？」——确认之后一起收，
+     不拿「先去处理那几个报名」去拦人 */
+  function archiveList(kind, id, onDone) {
+    var what = kind === "roster" ? "名单" : "报名";
+    function send(cascade) {
+      return PX.api("/" + kind + "/archive",
+                    { method: "POST", body: { id: Number(id), cascade: !!cascade } });
+    }
+    send(false).then(function (d) { onDone(d || {}); }).catch(function (e) {
+      var linked = e && e.data && e.data.linkedSignups;
+      if (!linked) { fail(e); return; }
+      askCascadeArchive(what, linked, function () {
+        send(true).then(function (d) { onDone(d || {}); }).catch(fail);
+      });
+    });
+  }
+
+  /* 「还有 N 个报名链接到这份名单。一并归档？」——取消就什么都不做 */
+  function askCascadeArchive(what, count, run) {
+    openOverlay("confirm", "归档" + what,
+      '<p class="page-sub">还有 ' + count + " 个报名链接到这份" + what +
+      "。一并归档？</p>" +
+      '<div class="row" style="margin-top:18px;justify-content:flex-end">' +
+      '<button class="btn" type="button" data-close-overlay="1">取消</button>' +
+      '<button class="btn primary" type="button" id="cascadeGo">全部归档</button></div>',
+      null, true);
+    $("#cascadeGo").addEventListener("click", function () {
+      closeOverlay();
       run();
     });
   }
@@ -1005,19 +1041,21 @@
   function archiveEvent(seq) {
     var e = S.events.filter(function (x) { return String(x.seq) === String(seq); })[0];
     closeCardMenu();
+    // 归档自己的活动不要密码（收起来的东西超管能放回来），一句确认就够；
+    // 真正不可逆的是「彻底删除」，那一步才提权
     confirmHighRisk("归档活动",
       "确认归档？"
       + (e ? "<br>存档：" + PX.esc(eventTitle(e)) : ""),
       "归档", true,
-      function (note) {
+      function () {
         apiSudo("/event/archive", { method: "POST", body: { seq: Number(seq) } },
-          "归档活动", note)
+          "归档活动")
           .then(function () {
             PX.toast("已归档");
             return reloadAll();
           })
           .catch(fail);
-      });
+      }, { noSudo: true });
   }
 
   function decideInvite(seq, action) {
@@ -2602,17 +2640,14 @@
         confirmHighRisk("归档名单",
           "归档之后这份名单谁都打不开也改不动，人员与条目原样留着。"
           + "确认继续？", "归档", true,
-          function (note) {
-            apiSudo("/roster/archive", { method: "POST", body: { id: r.id } },
-                    "归档名单", note)
-              .then(function () {
-                closeAllOverlays();
-                PX.toast("已归档，需要时联系超级管理员");
-                S.roster = null;
-                location.hash = "#/rosters";
-              })
-              .catch(function (e) { PX.toast(PX.esc(e.message), true); });
-          }, { keepUnder: true });
+          function () {
+            archiveList("roster", r.id, function () {
+              closeAllOverlays();
+              PX.toast("已归档，需要时联系超级管理员");
+              S.roster = null;
+              location.hash = "#/rosters";
+            });
+          }, { noSudo: true, keepUnder: true });
       });
     }
   }
@@ -4176,21 +4211,19 @@
     });
   }
 
-  /* 归档：把东西从列表里退下去，数据一条不动。做完之后它就不在这张表里了，所以收掉详情 */
+  /* 归档：把东西从列表里退下去，数据一条不动。做完之后它就不在这张表里了，所以收掉详情。
+     名单上还挂着报名时，会再问一句「一并归档？」 */
   function archiveAdminList(kind, row) {
     var what = kind === "roster" ? "名单" : "报名";
     confirmHighRisk("归档" + what,
       "归档之后谁都打不开也改不动，只有超级管理员能取消归档或彻底删除。确认继续？",
-      "归档", true, function (note) {
-        apiSudo("/" + kind + "/archive", { method: "POST", body: { id: row.id } },
-                "归档" + what, note)
-          .then(function () {
-            closeAllOverlays();
-            PX.toast("已归档");
-            return loadAdminLists().then(drawRosterAdmin);
-          })
-          .catch(fail);
-      }, { keepUnder: true });
+      "归档", true, function () {
+        archiveList(kind, row.id, function () {
+          closeAllOverlays();
+          PX.toast("已归档");
+          loadAdminLists().then(drawRosterAdmin);
+        });
+      }, { noSudo: true, keepUnder: true });
   }
 
   function unarchiveAdminList(kind, row) {
@@ -6128,16 +6161,13 @@
     if (!S.signup) return;
     confirmHighRisk("归档报名",
       "归档之后公开链接立刻失效，已经收到的报名原样留着。确认继续？", "归档", true,
-      function (note) {
-        apiSudo("/signup/archive", { method: "POST", body: { id: S.signup.id } },
-                "归档报名", note)
-          .then(function () {
-            PX.toast("已归档，需要时联系超级管理员");
-            S.signup = null;
-            location.hash = "#/signups";
-          })
-          .catch(fail);
-      });
+      function () {
+        archiveList("signup", S.signup.id, function () {
+          PX.toast("已归档，需要时联系超级管理员");
+          S.signup = null;
+          location.hash = "#/signups";
+        });
+      }, { noSudo: true });
   });
   $("#signupBack").addEventListener("click", function () {
     location.hash = "#/signups";

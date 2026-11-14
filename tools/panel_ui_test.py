@@ -309,7 +309,7 @@ def roster_page(page):
           "还没有名单" in page.inner_text("#rosterTable tbody"),
           page.inner_text("#rosterTable tbody"))
     pills = page.locator("#rosterScopeBox .pill")
-    check("three scopes are offered", pills.count() == 3, pills.count())
+    check("四个范围都在（含已归档）", pills.count() == 4, pills.count())
     check("我参与的 is the default", "on" in (pills.first.get_attribute("class") or ""),
           pills.first.get_attribute("class"))
     check("the pills are capsule shaped", page.evaluate(
@@ -2492,6 +2492,69 @@ def module_refresh_page(browser):
         ctx.close()
 
 
+def archived_slices_page(browser):
+    """自己归档的名单与报名：自己看得见（只读），别人的那份看不到。"""
+    print("== 我的名单 / 我的报名：已归档那一栏 ==")
+    owner = owner_opener()
+    rid = call(owner, "/api/panel/roster/create", {"name": "自己归档的名单"})["id"]
+    call(owner, "/api/panel/roster/entry", {"id": rid, "sid": "20240177", "name": "甲一"})
+    sid = call(owner, "/api/panel/signup/create",
+               {"title": "自己归档的报名", "roster_id": rid})["id"]
+    call(owner, "/api/panel/signup/archive", {"id": sid})
+    call(owner, "/api/panel/roster/archive", {"id": rid})
+    ctx, page = new_page(browser, 1440, 900)
+    try:
+        ui_login(page)
+        page.goto(BASE + "/panel#/rosters")
+        page.wait_for_timeout(900)
+        check("我的名单有已归档那一栏",
+              page.locator('#rosterScopeBox [data-scope="archived"]').count() == 1)
+        check("当前那一栏里没有它",
+              "自己归档的名单" not in page.inner_text("#rosterTable tbody"),
+              page.inner_text("#rosterTable tbody")[:120])
+        page.click('#rosterScopeBox [data-scope="archived"]')
+        page.wait_for_timeout(900)
+        body = page.inner_text("#rosterTable tbody")
+        check("归档的名单自己看得见", "自己归档的名单" in body, body[:140])
+        check("名字旁边挂着已归档", "已归档" in body, body[:140])
+        check("时间列换成归档时间",
+              page.inner_text("#rosterTable thead tr th:nth-child(4)") == "归档时间",
+              page.inner_text("#rosterTable thead tr th:nth-child(4)"))
+        check("归档的那一行没有打开按钮",
+              page.locator("#rosterTable [data-open-roster]").count() == 0)
+        check("表下面写着谁能恢复",
+              not page.locator("#rosterArchivedNote").is_hidden()
+              and "超级管理员" in page.inner_text("#rosterArchivedNote"),
+              page.inner_text("#rosterArchivedNote"))
+
+        page.goto(BASE + "/panel#/signups")
+        page.wait_for_timeout(900)
+        check("我的报名有已归档那一栏",
+              page.locator('#signupScopeBox [data-archived="1"]').count() == 1)
+        page.click('#signupScopeBox [data-archived="1"]')
+        page.wait_for_timeout(900)
+        body = page.inner_text("#signupTable tbody")
+        check("归档的报名自己看得见", "自己归档的报名" in body, body[:140])
+        check("状态写着已归档", "已归档" in body, body[:140])
+        check("归档的那一行没有编辑按钮",
+              page.locator("#signupTable [data-open-signup]").count() == 0)
+        check("报名表下面也写着谁能恢复",
+              not page.locator("#signupArchivedNote").is_hidden()
+              and "超级管理员" in page.inner_text("#signupArchivedNote"),
+              page.inner_text("#signupArchivedNote"))
+        # 回到当前那一栏：归档的不该混进来
+        page.click('#signupScopeBox [data-archived="0"]')
+        page.wait_for_timeout(800)
+        check("切回当前就没有了",
+              "自己归档的报名" not in page.inner_text("#signupTable tbody"),
+              page.inner_text("#signupTable tbody")[:120])
+    finally:
+        ctx.close()
+        call(owner, "/api/panel/sudo", {"password": PASSWORD})
+        drop_signup(owner, sid)
+        drop_roster(owner, rid)
+
+
 def roster_admin_page(browser):
     """名单管理：超管看全站的名单与报名，详情里能归档、转交与彻底删除。"""
     print("== 名单管理 ==")
@@ -3711,6 +3774,7 @@ def main():
                 create_page(browser)
                 leave_guard_page(browser)
                 module_refresh_page(browser)
+                archived_slices_page(browser)
                 roster_admin_page(browser)
                 module_install_page(browser)
                 archived_delete_page(browser)

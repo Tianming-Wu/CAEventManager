@@ -1286,7 +1286,10 @@ def main():
          {"id": own_id, "sid": "20240902", "name": "归档后的人"}, expect=409)
     check("也写不进去了", True)
     call(helper, "/api/panel/rosters?scope=all&archived=1", expect=403)
-    check("归档的名单只有超管能列出来", True)
+    check("全部归档的名单只有超管能列出来", True)
+    mine_archived = [r["id"] for r in
+                     call(helper, "/api/panel/rosters?scope=mine&archived=1")["rosters"]]
+    check("自己归档的自己看得见（只读清单）", own_id in mine_archived, mine_archived)
     listed = call(owner, "/api/panel/rosters?scope=all&archived=1")["rosters"]
     check("超管在归档那一栏看得到它", own_id in [r["id"] for r in listed], listed[:1])
     check("归档的名单带着归档时间", all(r.get("archivedAt") for r in listed), listed[:1])
@@ -1315,6 +1318,10 @@ def main():
     if tok:
         call(anon, "/join/%s" % tok[0]["token"], expect=410)
         check("归档之后公开链接打不开了", True)
+    mine_signups = [s["id"] for s in call(helper, "/api/panel/signups?archived=1")["signups"]]
+    check("自己归档的报名自己也看得见", signup in mine_signups, mine_signups)
+    call(helper, "/api/panel/signups?scope=all&archived=1", expect=403)
+    check("全部归档的报名还是只有超管能列", True)
     post(owner, "/api/panel/roster/delete", {"id": own_id}, expect=409)
     check("还有报名指着它时不许彻底删除", True)
     post(owner, "/api/panel/signup/delete", {"id": signup})

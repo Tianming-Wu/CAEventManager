@@ -591,6 +591,7 @@
             <button class="pill" type="button" role="tab" data-scope="joined">我参与的</button>
             <button class="pill" type="button" role="tab" data-scope="mine">我创建的</button>
             <button class="pill" type="button" role="tab" data-scope="all">全部名单</button>
+            <button class="pill" type="button" role="tab" data-scope="archived">已归档</button>
           </div>
           <span class="hint" id="rosterCount"></span>
           <div class="searchbox">
@@ -616,6 +617,7 @@
         <div class="row" style="margin-top:12px">
           <button class="btn sm" id="rosterMore" type="button" hidden>加载更多</button>
         </div>
+        <p class="hint" id="rosterArchivedNote" hidden>归档的名单只有超级管理员能恢复</p>
       </div>
       <input type="file" id="rosterImportFile" hidden
              accept=".csv,.tsv,.txt,.xlsx">
@@ -634,7 +636,10 @@
       </header>
       <div class="card">
         <div class="card-head">
-          <h2>报名</h2>
+          <div class="pills" id="signupScopeBox" role="tablist">
+            <button class="pill" type="button" role="tab" data-archived="0">当前</button>
+            <button class="pill" type="button" role="tab" data-archived="1">已归档</button>
+          </div>
           <span class="hint" id="signupCount"></span>
           <div class="searchbox">
             <input class="search" id="signupSearch" type="search" placeholder="搜索报名名称"
@@ -657,6 +662,7 @@
         <div class="row" style="margin-top:12px">
           <button class="btn sm" id="signupMore" type="button" hidden>加载更多</button>
         </div>
+        <p class="hint" id="signupArchivedNote" hidden>归档的报名只有超级管理员能恢复</p>
       </div>
     </section>
 

@@ -68,6 +68,8 @@
     adminRosters: [],
     adminSignups: [],
     adminArchived: false,
+    // 我的报名：当前 / 已归档
+    signupArchived: false,
     currentFields: [],
     templateId: null,
     templateFilter: "",
@@ -1427,9 +1429,12 @@
       S.rosters = [];
       S.rosterTotal = null;
     }
-    var parts = ["/rosters?scope=" + (S.rosterScope || "mine"),
+    // 「已归档」是自家人那一栏：只列自己归档的，只读
+    var archived = (S.rosterScope || "mine") === "archived";
+    var parts = ["/rosters?scope=" + (archived ? "mine" : (S.rosterScope || "mine")),
                  "offset=" + (more ? S.rosters.length : 0),
                  "limit=" + ROSTER_PAGE];
+    if (archived) parts.push("archived=1");
     if (S.rosterFilter) parts.push("q=" + encodeURIComponent(S.rosterFilter));
     return PX.api(parts.join("&"))
       .then(function (d) {
@@ -1443,21 +1448,32 @@
     var body = $("#rosterTable tbody");
     if (!body) return;
     var rows = S.rosters || [];
+    var archived = (S.rosterScope || "mine") === "archived";
+    // 归档那一栏的最后时间列写的是归档时间
+    var head = document.querySelector("#rosterTable thead th:nth-child(4)");
+    if (head) head.textContent = archived ? "归档时间" : "最近更新";
     body.innerHTML = rows.length ? rows.map(function (r) {
       return "<tr>" +
-        '<td><a href="#/roster/' + r.id + '"><b>' + PX.esc(r.name) + "</b></a>" +
+        "<td>" + (archived
+          ? "<b>" + PX.esc(r.name) + "</b>" +
+            ' <span class="tag">已归档</span>'
+          : '<a href="#/roster/' + r.id + '"><b>' + PX.esc(r.name) + "</b></a>") +
         (r.note ? '<div class="hint">' + PX.esc(r.note) + "</div>" : "") +
-        (r.mine ? "" : '<div class="hint">由 ' + PX.esc(r.ownerName || "—") +
+        (archived || r.mine ? "" : '<div class="hint">由 ' + PX.esc(r.ownerName || "—") +
           " 创建 · 当前权限：" + PX.esc(r.levelLabel) + "</div>") +
         "</td>" +
         '<td class="right num">' + r.members + "</td>" +
         "<td>" + PX.esc(r.visibilityLabel) + "</td>" +
-        '<td class="mono">' + PX.when(r.updatedAt) + "</td>" +
-        '<td class="actions"><button class="btn sm" type="button" data-open-roster="' +
-        r.id + '">打开</button></td></tr>';
+        '<td class="mono">' + PX.when(archived ? r.archivedAt : r.updatedAt) + "</td>" +
+        '<td class="actions">' + (archived
+          ? '<span class="hint">—</span>'
+          : '<button class="btn sm" type="button" data-open-roster="' + r.id +
+            '">打开</button>') + "</td></tr>";
     }).join("") : emptyRow(5, S.rosterTotal === 0
-      ? "还没有名单"
+      ? (archived ? "还没有归档的名单" : "还没有名单")
       : "正在读取…");
+    var note = $("#rosterArchivedNote");
+    if (note) note.hidden = !archived;
 
     var count = $("#rosterCount");
     if (count) {
@@ -1821,6 +1837,8 @@
     }
     var parts = ["/signups?offset=" + (more ? S.signups.length : 0),
                  "limit=" + SIGNUP_PAGE];
+    // 「已归档」是自家人那一栏：只列自己归档的，只读
+    if (S.signupArchived) parts.push("archived=1");
     if (S.signupFilter) parts.push("q=" + encodeURIComponent(S.signupFilter));
     return PX.api(parts.join("&"))
       .then(function (d) {
@@ -1834,9 +1852,13 @@
     var body = $("#signupTable tbody");
     if (!body) return;
     var rows = S.signups || [];
+    var archived = !!S.signupArchived;
+    // 归档那一栏的最后一行只写「恢复联系谁」，不给编辑入口
     body.innerHTML = rows.length ? rows.map(function (r) {
       return "<tr>" +
-        '<td><a href="#/signup/' + r.id + '"><b>' + PX.esc(r.title) + "</b></a>" +
+        "<td>" + (archived
+          ? "<b>" + PX.esc(r.title) + "</b>" + ' <span class="tag">已归档</span>'
+          : '<a href="#/signup/' + r.id + '"><b>' + PX.esc(r.title) + "</b></a>") +
         (r.note ? '<div class="hint">' + PX.esc(r.note) + "</div>" : "") + "</td>" +
         "<td>" + PX.esc(r.rosterName || "—") +
         (r.filterRosterName ? '<div class="hint">限 ' + PX.esc(r.filterRosterName) +
@@ -1845,9 +1867,14 @@
         PX.esc(r.statusLabel) + "</span></td>" +
         '<td class="right num">' + r.entries +
         (r.capacity ? " / " + r.capacity : "") + "</td>" +
-        '<td class="actions"><button class="btn sm" type="button" data-open-signup="' +
-        r.id + '">编辑</button></td></tr>';
-    }).join("") : emptyRow(5, S.signupTotal === 0 ? "还没有报名" : "正在读取…");
+        '<td class="actions">' + (archived
+          ? '<span class="hint">—</span>'
+          : '<button class="btn sm" type="button" data-open-signup="' + r.id +
+            '">编辑</button>') + "</td></tr>";
+    }).join("") : emptyRow(5, S.signupTotal === 0
+      ? (archived ? "还没有归档的报名" : "还没有报名") : "正在读取…");
+    var note = $("#signupArchivedNote");
+    if (note) note.hidden = !archived;
     var count = $("#signupCount");
     if (count) count.textContent = S.signupTotal === null ? "" : "共 " + S.signupTotal + " 个";
     var more = $("#signupMore");
@@ -1855,6 +1882,14 @@
       var left = (S.signupTotal === null) ? 0 : S.signupTotal - rows.length;
       more.hidden = left <= 0;
       more.textContent = left > 0 ? "再显示 " + Math.min(SIGNUP_PAGE, left) + " 个" : "";
+    }
+    var box = $("#signupScopeBox");
+    if (box) {
+      Array.prototype.forEach.call(box.querySelectorAll("[data-archived]"), function (b) {
+        var on = (b.getAttribute("data-archived") === "1") === archived;
+        b.classList.toggle("on", on);
+        b.setAttribute("aria-selected", on ? "true" : "false");
+      });
     }
   }
 
@@ -2942,7 +2977,11 @@
         S.rosterScope = S.rosterScope || "joined";
         return loadRosters(false).then(drawRosters);
       },
-      signups: function () { return loadSignups(false).then(drawSignups); },
+      signups: function () {
+        // 进来先看「当前」：归档是少数情况
+        S.signupArchived = false;
+        return loadSignups(false).then(drawSignups);
+      },
       screens: function () { return loadScreenPacks().then(drawScreens); },
       account: function () { return loadTokens().then(drawTokens); }
     };
@@ -6155,6 +6194,18 @@
     if (!btn) return;
     location.hash = "#/signup/" + btn.getAttribute("data-open-signup");
   });
+  var signupScopeBox = $("#signupScopeBox");
+  if (signupScopeBox) {
+    signupScopeBox.addEventListener("click", function (e) {
+      var btn = e.target.closest ? e.target.closest("[data-archived]") : null;
+      if (!btn) return;
+      var next = btn.getAttribute("data-archived") === "1";
+      if (next === !!S.signupArchived) return;
+      S.signupArchived = next;
+      drawSignups();
+      loadSignups(false).then(drawSignups);
+    });
+  }
   $("#signupMore").addEventListener("click", function () {
     loadSignups(true).then(drawSignups);
   });

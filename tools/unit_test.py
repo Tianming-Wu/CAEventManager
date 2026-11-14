@@ -648,6 +648,70 @@ def main():
                       [{"role": "user", "content": "我有几份名单"}])
         check("只读动作不用批准就跑了",
               client3.calls and "pending" not in plain, (client3.calls, plain))
+
+        # 挂着的动作记在哪段对话上：界面靠它点小红点
+        a._PENDING.clear()
+        add_plan[:] = [{"tool_calls": [{"id": "c4", "function": {
+            "name": "roster_add_person",
+            "arguments": json.dumps({"roster_id": 3, "sid": "2024002",
+                                     "name": "李四"})}}]}]
+        a.run(None, acc, FakeClient(), {"ready": True},
+              [{"role": "user", "content": "把李四加到名单 3"}], session=11)
+        held = a.pending_sessions(acc)
+        check("挂着的动作记在它那段对话上", list(held) == [11], held)
+        check("别人看不见这段挂起",
+              a.pending_sessions({"id": 8, "role": "admin"}) == {},
+              a.pending_sessions({"id": 8, "role": "admin"}))
+
+        # 还没存过的对话（id 0）：会话存下来的那一刻认领过去
+        a._PENDING.clear()
+        add_plan[:] = [{"tool_calls": [{"id": "c5", "function": {
+            "name": "roster_add_person",
+            "arguments": json.dumps({"roster_id": 3, "sid": "2024003",
+                                     "name": "王五"})}}]}]
+        a.run(None, acc, FakeClient(), {"ready": True},
+              [{"role": "user", "content": "把王五加到名单 3"}])
+        check("新对话先挂在 0 上", list(a.pending_sessions(acc)) == [0],
+              a.pending_sessions(acc))
+        a.adopt_session(acc, 42, [{"role": "user", "content": "把王五加到名单 3"}])
+        check("会话存下来之后认领到那段对话",
+              list(a.pending_sessions(acc)) == [42], a.pending_sessions(acc))
+        a.adopt_session(acc, 43, [{"role": "user", "content": "另一句话"}])
+        check("对不上号的不认领", list(a.pending_sessions(acc)) == [42],
+              a.pending_sessions(acc))
+        a.drop_session(acc, 42)
+        check("会话删掉之后挂起也一起丢", a.pending_sessions(acc) == {},
+              a.pending_sessions(acc))
+
+        # 移出名单：模型只给学号，工具自己去名单里换成 personId
+        class RosterClient:
+            def __init__(self):
+                self.calls = []
+
+            def get(self, path):
+                self.calls.append(("GET", path, {}))
+                return {"ok": True, "total": 1,
+                        "entries": [{"personId": 91, "sid": "2024001", "name": "张三"}]}
+
+            def post(self, path, body=None):
+                self.calls.append(("POST", path, body or {}))
+                return {"ok": True}
+
+        rc = RosterClient()
+        ok = a._tool_roster_remove_person(rc, {"roster_id": 3, "sid": "2024001"})
+        drop = [c for c in rc.calls if c[0] == "POST"]
+        check("移出名单按学号找到人再删",
+              ok.get("ok") and drop and drop[0][1] == "/api/panel/roster/entry/drop"
+              and drop[0][2].get("personId") == 91, (ok, rc.calls))
+        rc2 = RosterClient()
+        miss = a._tool_roster_remove_person(rc2, {"roster_id": 3, "sid": "2024999"})
+        check("名单里没有这个人就不删",
+              miss.get("error") and not [c for c in rc2.calls if c[0] == "POST"],
+              (miss, rc2.calls))
+        check("移出名单在策略里是写动作",
+              app.policy.is_write("roster_remove_person")
+              and "移出" in app.policy.describe("roster_remove_person"),
+              app.policy.describe("roster_remove_person"))
     finally:
         a._post_chat = real_post
     print("== SQL 拼接审计 ==")

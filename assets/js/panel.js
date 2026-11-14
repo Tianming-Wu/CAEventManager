@@ -1696,7 +1696,7 @@
             '" data-entry-to="' + (gone ? "active" : "left") + '">' +
             (gone ? "恢复" : "标为退出") + "</button>" +
             '<button class="btn sm danger" type="button" data-entry-drop="' +
-            e.personId + '">移出</button>'
+            e.personId + '" data-entry-name="' + PX.esc(e.name) + '">移出</button>'
           : '<span class="hint">只读</span>') + "</td></tr>";
     }).join("") : rowsOrEmpty(8, "rosterEntries",
       S.entryTotal === 0 ? "还没有成员" : "没有匹配的成员");
@@ -4911,9 +4911,15 @@
     host_stats: "读取服务器状态",
     list_docs: "读取文档清单",
     read_doc: "读取文档",
-    roster_add_person: "名单加人",
-    signup_window: "改报名设置",
-    event_rename: "改活动名称"
+    roster_add_person: "写入名单",
+    roster_remove_person: "移出名单",
+    signup_window: "修改报名设置",
+    event_rename: "修改活动名称"
+  };
+
+  /* 会真的改数据的动作：标签用强调色，跟只读的那些分开 */
+  var WRITE_TOOLS = {
+    roster_add_person: 1, roster_remove_person: 1, signup_window: 1, event_rename: 1
   };
 
   /* 一步一行会刷出一串重复标签：同一轮里连调两次名单就并成「读取名单成员 ×2」 */
@@ -4932,8 +4938,7 @@
       var g = group[name];
       var label = STEP_LABEL[g.tool] || g.tool;
       if (g.n > 1) label += " ×" + g.n;
-      if (!g.ok) label += "（未获准）";
-      return { label: label, ok: g.ok };
+      return { label: label, ok: g.ok, write: !!WRITE_TOOLS[g.tool] };
     });
   }
 
@@ -4958,6 +4963,7 @@
     return PX.api("/assistant")
       .then(function (d) {
         S.assistantCfg = d.config || { ready: false };
+        adoptPendingServer(d.pending || []);
         drawAssistant();
       })
       .catch(function (e) { PX.toast(PX.esc(e.message), true); });
@@ -5158,6 +5164,7 @@
       markLoaded("assistant");
       drawAssistant();
       drawAssistantQuota();
+      restorePending(id);
     }).catch(function () {
       S.assistantSessionId = 0;
       markLoaded("assistant");
@@ -5165,6 +5172,19 @@
       drawAssistant();
       drawAssistantQuota();
     });
+  }
+
+  /* 这一段对话还挂着一个等批准的动作（刷新过、或刚从别的页面回来）：
+     把那条提示捡回来。令牌在服务端还等着，五分钟内有效 */
+  function restorePending(id) {
+    if (!id || S.assistantPending) return Promise.resolve();
+    return PX.api("/assistant/pending?session=" + id).then(function (d) {
+      if (S.assistantSessionId !== id) return;         // 人已经换到别处去了
+      if (d && d.pending) { showApproval(d.pending); return; }
+      // 服务端说没有了（过时、或已经批过）：把这个点点掉
+      if (S.asPending) delete S.asPending[id];
+      drawAssistantPending();
+    }).catch(function () {});
   }
 
   function setSessionName(text) {
@@ -5190,11 +5210,23 @@
     var shell = $("#shell");
     if (shell.classList.contains("as-drawer-open")) return;
     PX.api("/assistant/sessions").then(function (d) {
+      adoptDrawerPending(d.sessions || []);
       drawAssistantDrawer(d);
       shell.classList.add("as-drawer-open");
       syncScrim();
       $("#asDrawerClose").focus();
     }).catch(function (e) { PX.toast(PX.esc(e.message), true); });
+  }
+
+  // 列表里那几行的 `pending` 是服务端说了算；还没存过的对话（id 0）不在列表里，留着
+  function adoptDrawerPending(rows) {
+    var keep = {};
+    Object.keys(S.asPending || {}).forEach(function (k) {
+      if (!Number(k)) keep[k] = true;
+    });
+    (rows || []).forEach(function (s) { if (s.pending) keep[s.id] = true; });
+    S.asPending = keep;
+    syncPendingDot();
   }
 
   function closeAssistantDrawer() {
@@ -5214,16 +5246,20 @@
   }
 
   function drawAssistantDrawer(d) {
-    S.assistantQuota = d.quota;
-    S.assistantUsed = d.used;
-    var rows = d.sessions || [];
+    d = d || {};
+    // 也用来"只重画一遍"（小红点变了），那时手上没有新数据，沿用上一次的
+    if (d.quota !== undefined) S.assistantQuota = d.quota;
+    if (d.used !== undefined) S.assistantUsed = d.used;
+    var rows = d.sessions || S.assistantList || [];
     S.assistantList = rows;
     var body = $("#asDrawerBody");
     if (body) {
       body.innerHTML = rows.length ? '<div class="as-slist">' + rows.map(function (s) {
         // 属性都带 as- 前缀：页面里那套 data-rename / data-del 是活动的，别撞上
+        var wait = hasSessionPendingOf(s.id);
         return '<div class="as-srow' +
           (s.id === S.assistantSessionId ? " on" : "") + '" data-sid="' + s.id + '">' +
+          (wait ? '<span class="as-wait" title="有一个等你批准的动作"></span>' : "") +
           '<button class="as-sopen" type="button" data-as-open="' + s.id + '">' +
           PX.esc(s.title) + '<span>' + PX.when(s.updatedAt) + " · " +
           Math.max(1, Math.round(s.size / 1024)) + " KB</span></button>" +
@@ -5237,10 +5273,15 @@
     }
     var foot = $("#asDrawerFoot");
     if (foot) {
-      foot.textContent = "存档 " + Math.round(d.used / 1024) + " / " +
-        Math.round(d.quota / 1024) + " KB";
+      foot.textContent = "存档 " + Math.round(S.assistantUsed / 1024) + " / " +
+        Math.round(S.assistantQuota / 1024) + " KB";
     }
     drawAssistantQuota();
+  }
+
+  function hasSessionPendingOf(id) {
+    if (!S.asPending) return false;
+    return !!(S.asPending[Number(id) || 0] || S.asPending[id]);
   }
 
   function assistantDrawerClick(e) {
@@ -5307,6 +5348,9 @@
             drawAssistant();
           }
           drawAssistantQuota();
+          // 这段对话没了，它挂着的那个动作也就没地方点了
+          if (S.asPending) delete S.asPending[id];
+          syncPendingDot();
           refreshAssistantDrawer();
           PX.toast("已删除");
         })
@@ -5365,7 +5409,11 @@
           PX.esc(m.content).replace(/\n/g, "<br>") + "</div>" + stamp + "</div></div>";
       }
       var steps = stepChips(m.steps).map(function (s) {
-        return '<span class="as-step' + (s.ok ? "" : " bad") + '">' +
+        if (!s.ok) {
+          return '<span class="as-step bad" title="没有执行">' +
+            PX.esc(s.label) + "</span>";
+        }
+        return '<span class="as-step' + (s.write ? " is-write" : "") + '">' +
           PX.esc(s.label) + "</span>";
       }).join("");
       return '<div class="as-msg as-bot">' +
@@ -5440,14 +5488,15 @@
     var box = $("#assistantText");
     box.value = "";
     growAssistantBox();
-    runAssistantTurn("/assistant/chat", { messages: S.assistantMsgs });
+    runAssistantTurn("/assistant/chat", { messages: S.assistantMsgs,
+                                          session: S.assistantSessionId || 0 });
   }
 
   /* 一轮问答：问一句、或者对某个写动作点批准/拒绝，走的是同一条收尾。
      服务端会带 pending 回来（助手要改数据），那时先不动记录，等人在输入框上方那一条上点头。 */
   function runAssistantTurn(path, body) {
     setAssistantRunning(true);
-    hideApproval();
+    hideApproval(true);            // 这一轮开始时，本会话原来挂着的那个作废
     showThinking();
     var controller = window.AbortController ? new AbortController() : null;
     S.assistantAbort = controller;
@@ -5490,19 +5539,56 @@
     $("#asApprovalText").textContent = "助手想执行「" + (pending.label || "改动") + "」：" +
       (pending.summary || "");
     bar.hidden = false;
+    markSessionPending(true);
     $("#asApprovalYes").focus();
   }
 
-  function hideApproval() {
+  /* 收起那一条。`done` 为真表示这一次已经点了批准或拒绝（这份挂起没了）；
+     换会话时只是把它收起来，那份挂起还在服务端等着，所以小红点要留着 */
+  function hideApproval(done) {
     S.assistantPending = null;
     var bar = $("#asApproval");
     if (bar) bar.hidden = true;
+    if (done) markSessionPending(false);
+  }
+
+  /* ---- 挂起的写动作：侧栏与会话卡片上的小红点 ----
+     服务端是权威（换会话、刷新页面之后由它告诉我们哪几段还挂着），
+     这里只是把它画出来；本机点下去的那一刻先自己记一笔，省一趟请求 */
+  function markSessionPending(on) {
+    S.asPending = S.asPending || {};
+    var sid = S.assistantSessionId || 0;
+    if (on) S.asPending[sid] = true;
+    else delete S.asPending[sid];
+    drawAssistantPending();
+  }
+
+  function adoptPendingServer(ids) {
+    S.asPending = {};
+    (ids || []).forEach(function (id) {
+      S.asPending[Number(id) || 0] = true;
+    });
+    drawAssistantPending();
+  }
+
+  function hasSessionPending() {
+    return !!(S.asPending && Object.keys(S.asPending).length);
+  }
+
+  function drawAssistantPending() {
+    syncPendingDot();
+    if (assistantDrawerOpen() && S.assistantList) drawAssistantDrawer({});
+  }
+
+  function syncPendingDot() {
+    var dot = $("#assistantDot");
+    if (dot) dot.hidden = !hasSessionPending();
   }
 
   function answerApproval(allow) {
     var pending = S.assistantPending;
     if (!pending) return;
-    hideApproval();
+    hideApproval(true);
     runAssistantTurn("/assistant/approve", { token: pending.token, allow: !!allow });
   }
 
@@ -6865,7 +6951,16 @@
     if (!t) return;
     var drop = t.getAttribute("data-entry-drop");
     if (drop) {
-      rosterEntryAction("drop", Number(drop));
+      // 移出是把这一条删掉（分组、标签、备注一起没了），不能点错就到对面去；
+      // 自己名单里的动作，只要一句确认，不用密码
+      var who = t.getAttribute("data-entry-name") || "这个人";
+      confirmHighRisk("移出名单",
+                      "把 " + PX.esc(who) + " 移出「" +
+                      PX.esc((S.roster && S.roster.name) || "这份名单") +
+                      "」？分组、标签与备注会一起丢掉，只想留个记录就用「标为退出」。",
+                      "移出", true,
+                      function () { rosterEntryAction("drop", Number(drop)); },
+                      {noSudo: true});
       return;
     }
     rosterEntryAction("state", Number(t.getAttribute("data-entry-state")),
@@ -7077,6 +7172,8 @@
       });
       // a reload keeps an elevation that has not run out yet
       setSudo(d.sudoUntil, d.now);
+      // 刷新之后侧栏那个小红点还得在：服务端把挂着的对话一起带过来
+      adoptPendingServer(d.assistantPending || []);
       return reloadAll().then(function () {
         loadNotices();
         loadApprovals();

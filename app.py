@@ -69,7 +69,7 @@ PAGES_DIR = os.path.join(BASE_DIR, "pages")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.1.110"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.2.111"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -1391,6 +1391,9 @@ class Handler(BaseHTTPRequestHandler):
                                "viaToken": token_row["name"] if token_row else "",
                                "scopes": ([s for s in (token_row["scopes"] or "").split(",") if s]
                                           if token_row else []),
+                               # 刷新之后侧栏上的小红点还得在：这里把挂着的对话带出去
+                               "assistantPending": (sorted(assistant.pending_sessions(acc))
+                                                    if acc else []),
                                "now": time.time(),
                                "version": VERSION})
 
@@ -2858,7 +2861,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/assistant" and method == "GET":
             return self._json({"ok": True, "config": assistant.config_of(acc),
                                "tools": sorted(policy.visible(acc)),
-                               "writes": sorted(policy.WRITE_ACTIONS)})
+                               "writes": sorted(policy.WRITE_ACTIONS),
+                               # 还挂着等人点头的对话：侧栏与会话卡片上的小红点靠它
+                               "pending": sorted(assistant.pending_sessions(acc))})
 
         if path == "/assistant/config" and method == "POST":
             data = body()
@@ -2890,7 +2895,12 @@ class Handler(BaseHTTPRequestHandler):
             client = assistant.PanelClient(self.server.server_address[1], prefix,
                                            self.headers.get("Cookie") or "")
             try:
-                result = assistant.run(conn, acc, client, full, messages, version=VERSION)
+                session = int(data.get("session") or 0)
+            except (TypeError, ValueError):
+                session = 0
+            try:
+                result = assistant.run(conn, acc, client, full, messages,
+                                       version=VERSION, session=session)
             except Exception as exc:
                 raise model.ApiError("调用模型失败：%s" % str(exc)[:120], 502)
             # 这里**不写审计**：问一句不是一次操作，攒在审计里会把它淹掉。
@@ -2936,10 +2946,19 @@ class Handler(BaseHTTPRequestHandler):
 
         # ---- 对话存档 ----
         if path == "/assistant/sessions" and method == "GET":
-            return self._json({"ok": True,
-                               "sessions": panel.chat_sessions(conn, acc["id"]),
+            pending = assistant.pending_sessions(acc)
+            rows = panel.chat_sessions(conn, acc["id"])
+            for row in rows:
+                row["pending"] = row["id"] in pending
+            return self._json({"ok": True, "sessions": rows,
                                "quota": panel.chat_quota(acc),
                                "used": panel.chat_used(conn, acc["id"])})
+
+        if path == "/assistant/pending" and method == "GET":
+            # 刷新页面之后，那条待批准的提示要到这儿捡回来：令牌在服务端还等着
+            sid = _int_arg(query, "session", 0, 0, 100000000)
+            view = assistant.pending_sessions(acc).get(sid)
+            return self._json({"ok": True, "pending": view or None})
 
         if path == "/assistant/session" and method == "GET":
             sid = _int_arg(query, "id", 0, 0, 100000000)
@@ -2963,6 +2982,9 @@ class Handler(BaseHTTPRequestHandler):
                 raise model.ApiError(str(exc), 413)
             except LookupError as exc:
                 raise model.ApiError(str(exc), 404)
+            # 刚存下来的这段对话如果是"还没有 id 的那一段"，把挂着的动作认领过来：
+            # 否则待批准的提示在会话卡片上点不到（见 assistant.adopt_session）
+            assistant.adopt_session(acc, sid, messages)
             return self._json({"ok": True, "id": sid,
                                "used": panel.chat_used(conn, acc["id"]),
                                "quota": panel.chat_quota(acc)})
@@ -2989,6 +3011,8 @@ class Handler(BaseHTTPRequestHandler):
                     panel.chat_delete(tx, acc["id"], data.get("id"))
             except LookupError as exc:
                 raise model.ApiError(str(exc), 404)
+            # 这段对话没了，挂在上面的那个待批准动作也没有地方点了
+            assistant.drop_session(acc, data.get("id"))
             return self._json({"ok": True,
                                "used": panel.chat_used(conn, acc["id"]),
                                "quota": panel.chat_quota(acc)})

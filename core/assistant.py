@@ -422,6 +422,37 @@ def _tool_roster_add_person(client, args):
     return {"ok": True, "roster_id": rid, "sid": sid, "name": name}
 
 
+def _tool_roster_remove_person(client, args):
+    rid = int(args.get("roster_id") or 0)
+    sid = str(args.get("sid") or "").strip()
+    name = str(args.get("name") or "").strip()
+    if not rid or not (sid or name):
+        return {"error": "需要 roster_id，再加上学号或姓名"}
+    # 移出接口认的是 personId，模型手里只有学号与姓名，先在这份名单里找一条
+    path = "/api/panel/roster/entries?id=%d&limit=30&q=%s" % (
+        rid, urllib.request.quote(sid or name))
+    data = client.get(path)
+    if not data.get("ok"):
+        return {"error": data.get("error") or "读不到这份名单"}
+    hits = []
+    for e in (data.get("entries") or []):
+        if sid and str(e.get("sid")) != sid:
+            continue
+        if not sid and str(e.get("name")) != name:
+            continue
+        hits.append(e)
+    if not hits:
+        return {"error": "这份名单里没有 %s" % (sid or name)}
+    if len(hits) > 1:
+        return {"error": "找到 %d 个同名的人，请给学号" % len(hits)}
+    row = hits[0]
+    res = client.post("/api/panel/roster/entry/drop",
+                      {"id": rid, "personId": row.get("personId")})
+    if res.get("ok") is False:
+        return {"error": res.get("error") or "没移成"}
+    return {"ok": True, "roster_id": rid, "sid": row.get("sid"), "name": row.get("name")}
+
+
 def _minute_input(text):
     """``yyyy-mm-dd HH:MM`` → epoch；空串表示不限。看不懂就说看不懂。"""
     text = str(text or "").strip()
@@ -553,6 +584,17 @@ TOOLS = [
                     "required": ["roster_id", "sid", "name"]},
      "summary": lambda a: "把 %s（%s）加进名单 #%s" % (
          a.get("name") or "?", a.get("sid") or "?", a.get("roster_id") or "?")},
+    {"name": "roster_remove_person", "run": _tool_roster_remove_person, "write": True,
+     "description": "把一个人从名单里移出。这是删掉这一条，不是标为退出：他的分组、标签与"
+                    "备注会一起丢掉。只想留个记录就别用这个",
+     "parameters": {"type": "object",
+                    "properties": {"roster_id": {"type": "integer"},
+                                   "sid": {"type": "string", "description": "学号"},
+                                   "name": {"type": "string",
+                                            "description": "姓名；没有学号时用它找人"}},
+                    "required": ["roster_id"]},
+     "summary": lambda a: "把 %s 从名单 #%s 移出" % (
+         a.get("sid") or a.get("name") or "?", a.get("roster_id") or "?")},
     {"name": "signup_window", "run": _tool_signup_window, "write": True,
      "description": "改一个报名的时间窗、名额或开关（只传要改的那几项）",
      "parameters": {"type": "object",
@@ -583,9 +625,9 @@ SYSTEM_PROMPT = (
     "规则：\n"
     "1. 只回答平台范围内的事；不清楚就先调用工具查，别猜。\n"
     "2. 你只能做当前账号有权做的事。工具报无权时照实说，别绕。\n"
-    "3. 要改数据就直接调用对应的写工具：往名单里加人、改报名的时间窗与名额、改活动名称。"
-    "调用之后平台会把动作摆到用户面前，用户点了批准才真的写进去；没批准就当没做成，"
-    "照实说一句，不要换个说法反复重试。这三件以外的事平台不开放，告诉用户去哪个页面操作，"
+    "3. 要改数据就直接调用对应的写工具：往名单里加人、把人从名单里移出、改报名的时间窗与名额、"
+    "改活动名称。调用之后平台会把动作摆到用户面前，用户点了批准才真的写进去；没批准就当没做成，"
+    "照实说一句，不要换个说法反复重试。这些以外的事平台不开放，告诉用户去哪个页面操作，"
     "并说清是哪个页面。\n"
     "4. 回答用简体中文、书面语，简洁；数字与名字要准确，不要编造。\n"
     "5. 不要把学号、姓名等个人信息成段罗列，只给用户当下需要的那部分。\n"
@@ -811,14 +853,74 @@ def _drop_stale():
         _PENDING.pop(token, None)
 
 
-def _stash(acc, cfg, client, convo, steps, calls, version):
+def _stash(acc, cfg, client, convo, steps, calls, version, session=0):
     import secrets
     _drop_stale()
     token = secrets.token_urlsafe(16)
     _PENDING[token] = {"at": time.time(), "acc": acc["id"], "cfg": cfg,
                        "client": client, "convo": convo, "steps": steps,
-                       "calls": calls, "version": version}
+                       "calls": calls, "version": version,
+                       # 挂起的是哪一段对话：界面要据此在会话卡片与侧栏上点一个小红点
+                       "session": int(session or 0)}
     return token
+
+
+def adopt_session(acc, sid, messages):
+    """新对话第一次存下来时，把"还没有会话 id"的挂起动作认领到这段对话上。
+
+    挂起是在第一次问答里产生的，那会儿会话还没存、id 还是 0；认领的依据是
+    「这段对话最后一句用户说的话，与握把里那句一字不差」，不靠猜。
+    """
+    last = ""
+    for m in reversed(messages or []):
+        if isinstance(m, dict) and m.get("role") == "user":
+            text = str(m.get("content") or "").strip()
+            if text:
+                last = text[:4000]
+                break
+    if not last or not sid:
+        return
+    who = acc["id"] if acc is not None else None
+    _drop_stale()
+    for grip in _PENDING.values():
+        if grip.get("acc") != who or int(grip.get("session") or 0):
+            continue
+        said = [c.get("content") for c in (grip.get("convo") or [])
+                if c.get("role") == "user"]
+        if said and said[-1] == last:
+            grip["session"] = int(sid)
+
+
+def drop_session(acc, sid):
+    """会话被删掉：挂在它上面的待批准动作一起丢掉，否则小红点再也点不下去。"""
+    who = acc["id"] if acc is not None else None
+    for token in [t for t, grip in _PENDING.items()
+                  if grip.get("acc") == who
+                  and int(grip.get("session") or 0) == int(sid or 0)]:
+        _PENDING.pop(token, None)
+
+
+def pending_sessions(acc):
+    """这个账号还挂着等人的写动作：``{会话 id: {token, label, summary}}``。
+
+    会话 id 为 0 表示那段对话还没存过；换会话、刷新页面都不影响它——
+    令牌照样在服务端等五分钟，界面只是靠这张表知道"哪儿还有个没点头的动作"。
+    """
+    _drop_stale()
+    who = acc["id"] if acc is not None else None
+    out = {}
+    for token, grip in _PENDING.items():
+        if grip.get("acc") != who:
+            continue
+        calls = grip.get("calls") or []
+        if not calls:
+            continue
+        try:
+            view = _pending_view(token, calls[0])
+        except Exception:                              # 说不清是什么动作就不报，别让刷新炸掉
+            continue
+        out[int(grip.get("session") or 0)] = view
+    return out
 
 
 def _pending_view(token, call):
@@ -859,7 +961,7 @@ def _call_tool(acc, client, call):
     return name, args, result
 
 
-def _drive(acc, cfg, client, convo, steps, version, calls):
+def _drive(acc, cfg, client, convo, steps, version, calls, session=0):
     """跑模型这一轮。``calls`` 非空表示从"已经问过模型、手上还有几个调用"接着跑。"""
     for _ in range(MAX_STEPS):
         if calls is None:
@@ -878,7 +980,7 @@ def _drive(acc, cfg, client, convo, steps, version, calls):
             allowed, _reason = policy.verdict(acc, name, _parse_arguments(fn.get("arguments")))
             if tool.get("write") and allowed:
                 # 停在这里：剩下的调用跟着握把一起存起来，等人点头
-                token = _stash(acc, cfg, client, convo, steps, calls, version)
+                token = _stash(acc, cfg, client, convo, steps, calls, version, session)
                 return {"reply": "", "steps": steps,
                         "pending": _pending_view(token, call)}
             name, _args, result = _call_tool(acc, client, call)
@@ -892,7 +994,7 @@ def _drive(acc, cfg, client, convo, steps, version, calls):
             "steps": steps}
 
 
-def run(conn, acc, client, cfg, messages, log=print, version=""):
+def run(conn, acc, client, cfg, messages, log=print, version="", session=0):
     """One question in, one answer out.  Returns {reply, steps} or {pending}."""
     names = [t["function"]["name"] for t in tool_schema(acc)]
     convo = [{"role": "system", "content": system_prompt(acc, names, version)}]
@@ -902,7 +1004,7 @@ def run(conn, acc, client, cfg, messages, log=print, version=""):
             convo.append({"role": role, "content": str(m["content"])[:4000]})
     if not convo or convo[-1]["role"] != "user":
         raise ValueError("最后一句应该是用户的话")
-    return _drive(acc, cfg, client, convo, [], version, None)
+    return _drive(acc, cfg, client, convo, [], version, None, session)
 
 
 def approve(acc, token, allow):
@@ -928,4 +1030,4 @@ def approve(acc, token, allow):
     grip["convo"].append({"role": "tool", "tool_call_id": call.get("id") or name,
                           "content": _clip(json.dumps(result, ensure_ascii=False), 6000)})
     return _drive(acc, grip["cfg"], grip["client"], grip["convo"], grip["steps"],
-                  grip["version"], calls[1:])
+                  grip["version"], calls[1:], grip.get("session") or 0)

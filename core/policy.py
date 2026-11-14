@@ -34,9 +34,13 @@ READ_ACTIONS = {
 # （见 `assistant.run` / `assistant.approve`）。
 WRITE_ACTIONS = {
     "roster_add_person": "往名单里加一个人",
+    "roster_remove_person": "把一个人从名单里移出",
     "signup_window": "改报名的时间窗与名额",
     "event_rename": "改活动名称",
 }
+
+# 会抹掉东西的写动作：批准条与动作提示用强调色标出来，别跟只读的混在一起
+DESTRUCTIVE = {"roster_remove_person"}
 
 ROLE_RANK = {"admin": 1, "superadmin": 2, "owner": 3}
 

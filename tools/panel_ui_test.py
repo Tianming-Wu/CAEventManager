@@ -376,6 +376,28 @@ def roster_page(page):
           "20249002" in page.inner_text("#rosterEntryTable tbody"),
           page.inner_text("#rosterEntryTable tbody"))
 
+    # 移出会把这一条删掉（分组、标签、备注一起没），所以先问一句、不用密码
+    drop_btn = '#rosterEntryTable tbody tr:has-text("20249002") [data-entry-drop]'
+    page.click(drop_btn)
+    page.wait_for_selector("#confirmGo", timeout=8000)
+    check("点移出先问一句", "移出名单" in page.inner_text("#overlayTitle"),
+          page.inner_text("#overlayTitle"))
+    check("确认里点明删掉什么、还给了留记录的那条路",
+          "标为退出" in page.inner_text("#overlayBody"),
+          page.inner_text("#overlayBody")[:160])
+    page.click('#overlayBody [data-close-overlay="1"]')
+    page.wait_for_timeout(400)
+    check("取消之后人还在名单里",
+          "20249002" in page.inner_text("#rosterEntryTable tbody"),
+          page.inner_text("#rosterEntryTable tbody")[:120])
+    page.click(drop_btn)
+    page.wait_for_selector("#confirmGo", timeout=8000)
+    page.click("#confirmGo")
+    page.wait_for_timeout(1200)
+    check("真的确认了才移出去",
+          "20249002" not in page.inner_text("#rosterEntryTable tbody"),
+          page.inner_text("#rosterEntryTable tbody")[:160])
+
     shot_page = page
     with page.expect_download(timeout=15000) as caught:
         page.click("#rosterExportBtn")
@@ -431,7 +453,8 @@ def roster_page(page):
     page.click("#rosterBack")
     page.wait_for_timeout(800)
     body = page.inner_text("#rosterTable tbody")
-    check("the list shows it with its member count", "UI 测试名单" in body and "2" in body, body)
+    # 上面把 20249002 移出了，所以现在只剩一个人
+    check("the list shows it with its member count", "UI 测试名单" in body and "1" in body, body)
 
 
 def signup_page(page, browser):
@@ -1173,6 +1196,7 @@ def assistant_page(page):
                                {"role": "assistant", "content": "在", "ts": now,
                                 "steps": [{"tool": "roster_entries", "ok": True},
                                           {"tool": "roster_entries", "ok": True},
+                                          {"tool": "roster_add_person", "ok": True},
                                           {"tool": "list_rosters", "ok": False}]}]})
     sid = (saved or {}).get("id")
     check("先存下一段对话", bool(sid), saved)
@@ -1227,14 +1251,74 @@ def assistant_page(page):
           stamps["texts"])
     chips = page.evaluate("""() => Array.from(
         document.querySelectorAll('#assistantLog .as-step')).map(c => ({
-            text: c.textContent.trim(), bad: c.classList.contains('bad')}))""")
+            text: c.textContent.trim(), bad: c.classList.contains('bad'),
+            write: c.classList.contains('is-write'),
+            title: c.getAttribute('title') || ''}))""")
     check("同一个工具连调两次并成一条", "读取名单成员 ×2" in [c["text"] for c in chips], chips)
-    check("没做成的动作单独标出来，并说明未获准",
-          any(c["text"].startswith("读取名单列表") and "未获准" in c["text"] for c in chips),
-          chips)
+    check("写动作的提示用强调色分清",
+          any(c["text"] == "写入名单" and c["write"] for c in chips), chips)
+    check("没做成的动作标红，不再挂一句“未获准”",
+          any(c["text"] == "读取名单列表" and c["bad"] and not c["write"]
+              and "未获准" not in c["text"] for c in chips), chips)
+    check("红色那条用 title 说明没执行",
+          any(c["bad"] and c["title"] == "没有执行" for c in chips), chips)
     check("不再用“看了…”这种说法",
           not any(t.startswith("看了") or t.startswith("查了")
                   for t in [c["text"] for c in chips]), chips)
+
+    print("== 会话列表：整卡片高亮与边距 ==")
+    # 再来一段对话，才有一张"不是当前这段"的卡片可以量悬停底色
+    call(owner_opener(), "/api/panel/assistant/session/save",
+         {"id": 0, "title": "另一段对话",
+          "messages": [{"role": "user", "content": "再问一句"}]})
+    page.click("#asSessionBar")
+    page.wait_for_timeout(900)
+    box = page.evaluate("""() => {
+        const row = document.querySelector('#asDrawerBody .as-srow:not(.on)');
+        const del = row.querySelector('[data-as-del]').getBoundingClientRect();
+        const open = row.querySelector('.as-sopen').getBoundingClientRect();
+        return {rowRight: Math.round(row.getBoundingClientRect().right),
+                delRight: Math.round(del.right),
+                rowPad: getComputedStyle(row).paddingRight,
+                openLeft: Math.round(open.left)};
+    }""")
+    check("删除键与卡片右边留出边距",
+          box["rowRight"] - box["delRight"] >= 2 and box["rowPad"].startswith("4"),
+          box)
+
+    def row_bg():
+        return page.evaluate("""() => getComputedStyle(
+            document.querySelector('#asDrawerBody .as-srow:not(.on)')).backgroundColor""")
+
+    idle_bg = row_bg()
+    # 悬停在标题上、悬停在删除键上：整张卡片都应该亮起来，而且是同一种底色
+    open_box = page.locator("#asDrawerBody .as-srow:not(.on) .as-sopen").first.bounding_box()
+    page.mouse.move(open_box["x"] + 20, open_box["y"] + open_box["height"] / 2)
+    page.wait_for_timeout(250)
+    on_title = row_bg()
+    del_box = page.locator('#asDrawerBody .as-srow:not(.on) [data-as-del]').first.bounding_box()
+    page.mouse.move(del_box["x"] + del_box["width"] / 2,
+                    del_box["y"] + del_box["height"] / 2)
+    page.wait_for_timeout(250)
+    on_del = row_bg()
+    check("悬停标题时整张卡片高亮", on_title != idle_bg, (idle_bg, on_title))
+    check("悬停按钮时卡片底色不变（高亮覆盖整个卡片）",
+          on_del == on_title, (on_title, on_del))
+    page.mouse.move(4, 4)
+    page.click("#asDrawerClose")
+    page.wait_for_timeout(400)
+
+    print("== 待批准的小红点 ==")
+    dots = page.evaluate("""() => {
+        const dot = document.getElementById('assistantDot');
+        const cs = dot ? getComputedStyle(dot) : null;
+        return {there: !!dot, hidden: dot ? dot.hidden : null,
+                w: cs ? cs.width : "", bg: cs ? cs.backgroundColor : "",
+                nav: !!document.querySelector('[data-nav="assistant"] #assistantDot')};
+    }""")
+    check("运维助手那一项里有个小红点，平时收着",
+          dots["there"] and dots["nav"] and dots["hidden"], dots)
+    check("红点很小、不带数字", dots["w"] in ("7px", "6px", "8px") and dots["bg"] != "", dots)
 
     print("== 写动作的批准条与会话名位置 ==")
     layout = page.evaluate("""() => {

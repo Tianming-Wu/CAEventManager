@@ -387,6 +387,16 @@ svg {
   line-height: 18px;
   text-align: center;
 }
+/* 运维助手那条上的小红点：有个动作在等你批准。不带数字，只是一个“这儿有事” */
+.nav-dot {
+  margin-left: auto;
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--danger);
+}
+.nav-dot[hidden] { display: none; }
 
 /* a nav entry that expands instead of navigating */
 button.nav-item {
@@ -2223,6 +2233,8 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
     font-size: .64rem;
   }
   .nav-badge.count { display: none; }
+  /* 只剩图标时，小红点贴到图标右上角，与徽标同一种摆法 */
+  .nav-dot { position: absolute; top: 7px; right: 7px; margin: 0; }
   .nav-sep { margin: 8px 6px; }
   .content { padding: 18px 18px calc(24px + env(safe-area-inset-bottom)); }
 
@@ -3009,6 +3021,12 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   color: var(--muted);
 }
 .as-step.bad { border-color: var(--danger-line); color: var(--danger); }
+/* 写动作：强调色。真的改过数据的那些一眼看得出来，与只读的分开 */
+.as-step.is-write {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
 /* 正在读一段存档对话：整块居中，一句"正在加载对话"。
    `[hidden]` 要压过下面的 display:flex，否则关不掉 */
 .as-loading {
@@ -3204,8 +3222,23 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
 
 /* 会话列表（弹窗里） */
 .as-slist { display: flex; flex-direction: column; gap: 4px; max-height: min(52vh, 420px); overflow-y: auto; }
-.as-srow { display: flex; align-items: center; gap: 4px; border-radius: var(--radius-sm); }
-.as-srow.on { background: var(--accent-soft); }
+/* 悬停高亮整张卡片（含右边两个按钮），不是只亮标题那一块；右边留出边距，删除键别贴到边 */
+.as-srow {
+  position: relative;
+  display: flex; align-items: center; gap: 4px;
+  padding-right: 4px;
+  border-radius: var(--radius-sm);
+  transition: background .12s;
+}
+.as-srow:hover { background: var(--surface-2); }
+.as-srow.on, .as-srow.on:hover { background: var(--accent-soft); }
+/* 这段对话还挂着一个等批准的动作：卡片右上角一个小红点，压在按钮上方也不挡点击 */
+.as-wait {
+  position: absolute; top: 4px; right: 5px;
+  width: 7px; height: 7px; border-radius: 999px;
+  background: var(--danger);
+  pointer-events: none;
+}
 .as-sopen {
   flex: 1 1 auto; min-width: 0; text-align: left; appearance: none; border: 0;
   background: transparent; color: var(--text); font: inherit; font-size: .86rem;
@@ -3213,7 +3246,6 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .as-sopen span { display: block; color: var(--muted); font-size: .74rem; }
-.as-sopen:hover { background: var(--surface-2); }
 .as-sicon {
   appearance: none; flex: none; width: 26px; height: 26px; display: grid;
   place-items: center; padding: 0; border: 0; border-radius: 999px;
@@ -3221,7 +3253,7 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
 }
 .as-sicon svg { width: 14px; height: 14px; fill: none; stroke: currentColor;
   stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
-.as-sicon:hover { background: var(--surface-2); color: var(--text); }
+.as-sicon:hover { background: var(--surface-3); color: var(--text); }
 .as-sicon.danger:hover { color: var(--danger); background: var(--danger-soft); }
 
 /* ---------- 服务已更新 ---------- */

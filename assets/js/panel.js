@@ -5097,20 +5097,31 @@
   function openAssistantSession(id) {
     S.assistantSessionId = id;
     S.assistantMsgs = [];
-    drawAssistant();
     if (!id) {
+      // 新的对话：没有要等的东西，直接就是那一页空白，中间不闪任何东西
+      markLoaded("assistant");
+      drawAssistant();
       drawAssistantQuota();
       setSessionName("新会话");
       return Promise.resolve();
     }
+    // 读一段存档对话：等的时候整块居中写"正在加载对话"，
+    // 别先把"新对话"那一页摆出来再换成历史
+    markLoading("assistant");
+    setSessionName("正在加载…");
+    drawAssistant();
     return PX.api("/assistant/session?id=" + id).then(function (r) {
       S.assistantMsgs = (r.session && r.session.messages) || [];
       setSessionName((r.session && r.session.title) || "会话");
       try { localStorage.setItem("as:lastSession", String(id)); } catch (e) {}
+      markLoaded("assistant");
       drawAssistant();
       drawAssistantQuota();
     }).catch(function () {
       S.assistantSessionId = 0;
+      markLoaded("assistant");
+      setSessionName("新会话");
+      drawAssistant();
       drawAssistantQuota();
     });
   }
@@ -5284,8 +5295,13 @@
         return '<button class="assistant-ask" type="button">' + PX.esc(q) + "</button>";
       }).join("");
     }
+    // 正在读存档对话时，中间的"正在加载对话"顶掉"新对话"那一页：
+    // 不然会先看见欢迎语与几个问法，再被历史消息替换掉
+    var busy = !loaded("assistant");
+    var loadingView = $("#assistantLoading");
+    if (loadingView) loadingView.hidden = !busy;
     var empty = $("#assistantEmpty");
-    if (empty) empty.hidden = (S.assistantMsgs || []).length > 0;
+    if (empty) empty.hidden = busy || (S.assistantMsgs || []).length > 0;
     var keep = $("#asKeepNote");
     if (keep) {
       keep.textContent = ((S.assistantCfg || {}).resume === false)

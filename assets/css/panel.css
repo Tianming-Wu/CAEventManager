@@ -2974,6 +2974,17 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   color: var(--muted);
 }
 .as-step.bad { border-color: var(--danger-line); color: var(--danger); }
+/* 正在读一段存档对话：整块居中，一句"正在加载对话"。
+   `[hidden]` 要压过下面的 display:flex，否则关不掉 */
+.as-loading {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: .88rem;
+}
+.as-loading[hidden] { display: none; }
 .assistant-empty { display: flex; flex-direction: column; gap: 10px; }
 .assistant-lead { margin: 0; font-weight: 650; }
 .assistant-asks { display: flex; flex-wrap: wrap; gap: 8px; }

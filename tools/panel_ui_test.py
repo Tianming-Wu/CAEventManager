@@ -1162,6 +1162,45 @@ def assistant_page(page):
     page.evaluate("() => document.getElementById('assistantText')"
                   ".dispatchEvent(new Event('input'))")
 
+    print("== 加载存档对话的中间态 ==")
+    # 造一段存档：不需要模型密钥，直接存一次就行
+    saved = call(owner_opener(), "/api/panel/assistant/session/save",
+                 {"id": 0, "title": "中间态测试",
+                  "messages": [{"role": "user", "content": "你好"},
+                               {"role": "assistant", "content": "在"}]})
+    sid = (saved or {}).get("id")
+    check("先存下一段对话", bool(sid), saved)
+
+    # 采样器：切到助手页，之后每帧记一次"正在加载对话"有没有露出来
+    probe = """(payload) => new Promise(resolve => {
+        if (payload.last === null) localStorage.removeItem('as:lastSession');
+        else localStorage.setItem('as:lastSession', String(payload.last));
+        location.hash = '#/overview';
+        setTimeout(() => {
+            const seen = [];
+            const t0 = performance.now();
+            location.hash = '#/assistant';
+            (function tick() {
+                const el = document.getElementById('assistantLoading');
+                if (el && !el.hidden) seen.push(Math.round(performance.now() - t0));
+                if (performance.now() - t0 < 500) requestAnimationFrame(tick);
+                else resolve(seen);
+            })();
+        }, 320);
+    })"""
+    if sid:
+        seen_old = page.evaluate(probe, {"last": sid})
+        check("打开存档对话时先整块显示正在加载对话", len(seen_old) > 0, seen_old)
+        page.wait_for_timeout(400)
+        check("读完之后历史在上面",
+              "你好" in page.inner_text("#assistantLog"),
+              page.inner_text("#assistantLog")[:80])
+        seen_new = page.evaluate(probe, {"last": None})
+        check("本来就没有对话时不闪加载态", seen_new == [], seen_new)
+        page.wait_for_timeout(400)
+        check("新对话直接就是那一页空白",
+              page.locator("#assistantEmpty").is_visible()
+              and page.locator("#assistantLoading").is_hidden())
     print("== 模型设置弹窗 ==")
     page.click("#asSettings")
     page.wait_for_timeout(350)

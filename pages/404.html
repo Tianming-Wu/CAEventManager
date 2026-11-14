@@ -6,25 +6,154 @@
 <meta name="robots" content="noindex, nofollow">
 <title>没有这个页面</title>
 <style>
+  /* 404 可能出现在任意路径下，相对的 assets 路径会解析错，所以样式内联，
+     不依赖 app.css；配色与字体照抄设计系统的那一套暖纸色 + 单一琥珀强调色。 */
+  :root {
+    color-scheme: light dark;
+    --bg: #fbfaf8;
+    --surface: #ffffff;
+    --surface-2: #f4f2ef;
+    --line: #ddd9d3;
+    --line-soft: #edeae5;
+    --text: #1c1917;
+    --muted: #57534e;
+    --dim: #8b837b;
+    --accent: #b45309;
+    --accent-strong: #92400e;
+    --accent-soft: #fdf1dc;
+    --accent-line: #e6c9a3;
+    --accent-ink: #ffffff;
+    --radius: 10px;
+    --radius-sm: 7px;
+    --shadow: 0 8px 24px rgba(28, 25, 23, .10);
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB",
+            "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #131211;
+      --surface: #1a1917;
+      --surface-2: #22201d;
+      --line: #37332e;
+      --line-soft: #272420;
+      --text: #f4f1ec;
+      --muted: #a8a29a;
+      --dim: #7c766e;
+      --accent: #e5a53c;
+      --accent-strong: #f0b95c;
+      --accent-soft: #2e2413;
+      --accent-line: #55401a;
+      --accent-ink: #1a1509;
+      --shadow: 0 8px 24px rgba(0, 0, 0, .5);
+    }
+  }
+
+  * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; }
   body {
     display: grid;
     place-items: center;
-    font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
-    background: #f6f5f2;
-    color: #3b3a36;
+    padding: 24px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.55;
+    -webkit-text-size-adjust: 100%;
   }
-  main { max-width: 30em; padding: 2em; text-align: center; }
-  h1 { font-size: 1.4rem; margin: 0 0 .6em; font-weight: 600; }
-  p { margin: 0; color: #6d6a63; line-height: 1.7; font-size: .95rem; }
-  a { color: inherit; }
-  .ver { margin-top: 1.6em; font-size: .78rem; color: #9a968d; }
+
+  main {
+    width: min(30em, 100%);
+    text-align: center;
+    animation: rise .4s ease both;
+  }
+
+  /* 作废的票：沿用 .tkt.bonus 的虚线轮廓语汇，中间开两个缺口当撕口 */
+  .stub {
+    position: relative;
+    display: inline-block;
+    padding: 18px 34px 16px;
+    margin-bottom: 26px;
+    background: var(--surface);
+    border: 1px dashed var(--accent-line);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+  }
+  .stub::before, .stub::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    width: 16px; height: 16px;
+    transform: translateY(-50%);
+    background: var(--bg);
+    border: 1px dashed var(--accent-line);
+    border-radius: 50%;
+  }
+  .stub::before { left: -9px; }
+  .stub::after { right: -9px; }
+  .stub .code {
+    font-family: var(--mono);
+    font-weight: 700;
+    font-size: clamp(3.4rem, 18vw, 5.2rem);
+    line-height: 1;
+    letter-spacing: .04em;
+    color: var(--accent-strong);
+    font-variant-numeric: tabular-nums;
+  }
+  .stub .void {
+    margin-top: 6px;
+    font-family: var(--mono);
+    font-size: .74rem;
+    letter-spacing: .22em;
+    text-transform: uppercase;
+    color: var(--dim);
+  }
+
+  h1 { font-size: 1.3rem; font-weight: 650; letter-spacing: -.005em; margin: 0 0 .5em; }
+  p { margin: .3em 0; color: var(--muted); }
+
+  .back {
+    display: inline-block;
+    margin-top: 22px;
+    padding: 8px 18px;
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-sm);
+    background: var(--accent);
+    color: var(--accent-ink);
+    font-size: .9rem;
+    font-weight: 600;
+    text-decoration: none;
+    transition: background .12s, border-color .12s;
+  }
+  .back:hover { background: var(--accent-strong); border-color: var(--accent-strong); }
+
+  .ver {
+    margin-top: 30px;
+    padding-top: 14px;
+    border-top: 1px solid var(--line-soft);
+    font-size: .74rem;
+    color: var(--dim);
+  }
+
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    main { animation: none; }
+  }
 </style>
 </head>
 <body>
 <main>
+  <div class="stub">
+    <div class="code">404</div>
+    <div class="void">页面不存在</div>
+  </div>
   <h1>没有这个页面</h1>
-  <p>地址可能已经失效，或者本来就不存在。<br>回到 <a href="/panel">主面板</a> 再看一眼。</p>
+  <p>地址可能已经失效，或者本来就不存在。</p>
+  <a class="back" href="/panel">回到主面板</a>
   <p class="ver">CAEventManager v{{VERSION}}</p>
 </main>
 </body>

@@ -18,6 +18,7 @@ import random
 import re
 import shutil
 import sys
+import time
 import urllib.request
 import zipfile
 
@@ -1163,11 +1164,16 @@ def assistant_page(page):
                   ".dispatchEvent(new Event('input'))")
 
     print("== 加载存档对话的中间态 ==")
-    # 造一段存档：不需要模型密钥，直接存一次就行
+    # 造一段存档：不需要模型密钥，直接存一次就行。
+    # 顺手带上时间戳与"同一个工具调用两次"，用来量气泡下面的时间与合并后的动作提示
+    now = int(time.time())
     saved = call(owner_opener(), "/api/panel/assistant/session/save",
                  {"id": 0, "title": "中间态测试",
-                  "messages": [{"role": "user", "content": "你好"},
-                               {"role": "assistant", "content": "在"}]})
+                  "messages": [{"role": "user", "content": "你好", "ts": now},
+                               {"role": "assistant", "content": "在", "ts": now,
+                                "steps": [{"tool": "roster_entries", "ok": True},
+                                          {"tool": "roster_entries", "ok": True},
+                                          {"tool": "list_rosters", "ok": False}]}]})
     sid = (saved or {}).get("id")
     check("先存下一段对话", bool(sid), saved)
 
@@ -1201,6 +1207,35 @@ def assistant_page(page):
         check("新对话直接就是那一页空白",
               page.locator("#assistantEmpty").is_visible()
               and page.locator("#assistantLoading").is_hidden())
+
+    print("== 气泡下的时间与动作提示 ==")
+    page.evaluate("""(sid) => {
+        localStorage.setItem('as:lastSession', String(sid));
+        location.hash = '#/overview';
+    }""", sid)
+    page.wait_for_timeout(300)
+    page.evaluate("() => { location.hash = '#/assistant'; }")
+    page.wait_for_timeout(700)
+    stamps = page.evaluate("""() => {
+        const log = document.getElementById('assistantLog');
+        const times = Array.from(log.querySelectorAll('.as-time'));
+        return {n: times.length, texts: times.map(t => t.textContent.trim())};
+    }""")
+    check("每条消息下面都有一个时间", stamps["n"] == 2, stamps)
+    check("当天的时间只给时分秒",
+          all(re.fullmatch(r"\d{2}:\d{2}:\d{2}", t) for t in stamps["texts"]),
+          stamps["texts"])
+    chips = page.evaluate("""() => Array.from(
+        document.querySelectorAll('#assistantLog .as-step')).map(c => ({
+            text: c.textContent.trim(), bad: c.classList.contains('bad')}))""")
+    check("同一个工具连调两次并成一条", "读取名单成员 ×2" in [c["text"] for c in chips], chips)
+    check("没做成的动作单独标出来，并说明未获准",
+          any(c["text"].startswith("读取名单列表") and "未获准" in c["text"] for c in chips),
+          chips)
+    check("不再用“看了…”这种说法",
+          not any(t.startswith("看了") or t.startswith("查了")
+                  for t in [c["text"] for c in chips]), chips)
+
     print("== 写动作的批准条与会话名位置 ==")
     layout = page.evaluate("""() => {
         const bar = document.getElementById('asApproval');
@@ -1211,13 +1246,15 @@ def assistant_page(page):
         const wasHidden = bar.hidden;
         bar.hidden = false;                       // 量尺寸时先摆出来，量完还原
         const r = bar.getBoundingClientRect();
+        const c = chip.getBoundingClientRect();   // 会话条也要在批准条露面时量
         bar.hidden = wasHidden;
         const f = form.getBoundingClientRect();
         return {hidden: wasHidden, text: bar.textContent.trim(),
                 above: r.height > 0 && r.bottom <= f.top + 1,
                 inComposer: form.contains(bar),
                 chipInHead: head ? head.contains(chip) : false,
-                chipAboveForm: chip.getBoundingClientRect().bottom < f.top,
+                chipAboveForm: c.bottom <= f.top + 1,
+                chipAboveBar: r.height > 0 && c.bottom <= r.top + 1,
                 yes: document.getElementById('asApprovalYes').textContent.trim(),
                 no: document.getElementById('asApprovalNo').textContent.trim()};
     }""")
@@ -1226,7 +1263,9 @@ def assistant_page(page):
           layout["above"] and not layout["inComposer"], layout)
     check("两个键是拒绝与批准",
           layout["no"] == "拒绝" and layout["yes"] == "批准", layout)
-    check("会话名挪到了标题下面", layout["chipInHead"] and layout["chipAboveForm"], layout)
+    check("会话名回到输入框上方，并且排在批准条上面",
+          layout["chipAboveForm"] and layout["chipAboveBar"]
+          and not layout["chipInHead"], layout)
     print("== 模型设置弹窗 ==")
     page.click("#asSettings")
     page.wait_for_timeout(350)

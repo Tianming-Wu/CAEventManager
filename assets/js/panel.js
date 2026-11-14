@@ -4900,20 +4900,58 @@
   ];
 
   var STEP_LABEL = {
-    list_events: "看了活动列表",
-    event_board: "看了活动数据",
-    list_rosters: "看了名单列表",
-    roster_entries: "看了名单成员",
-    list_signups: "看了报名列表",
-    signup_entries: "看了报名记录",
-    search_people: "查了人员库",
-    recent_audit: "看了审计日志",
-    host_stats: "看了服务器状态"
+    list_events: "读取活动列表",
+    event_board: "读取活动数据",
+    list_rosters: "读取名单列表",
+    roster_entries: "读取名单成员",
+    list_signups: "读取报名列表",
+    signup_entries: "读取报名记录",
+    search_people: "检索人员库",
+    recent_audit: "读取审计日志",
+    host_stats: "读取服务器状态",
+    list_docs: "读取文档清单",
+    read_doc: "读取文档",
+    roster_add_person: "名单加人",
+    signup_window: "改报名设置",
+    event_rename: "改活动名称"
   };
 
-  function stepLabel(step) {
-    var label = STEP_LABEL[step.tool] || step.tool;
-    return step.ok ? label : label + "（未获准）";
+  /* 一步一行会刷出一串重复标签：同一轮里连调两次名单就并成「读取名单成员 ×2」 */
+  function stepChips(steps) {
+    var order = [], group = {};
+    (steps || []).forEach(function (s) {
+      if (!s || !s.tool) return;
+      if (!group[s.tool]) {
+        group[s.tool] = { tool: s.tool, ok: true, n: 0 };
+        order.push(s.tool);
+      }
+      group[s.tool].n += 1;
+      if (!s.ok) group[s.tool].ok = false;
+    });
+    return order.map(function (name) {
+      var g = group[name];
+      var label = STEP_LABEL[g.tool] || g.tool;
+      if (g.n > 1) label += " ×" + g.n;
+      if (!g.ok) label += "（未获准）";
+      return { label: label, ok: g.ok };
+    });
+  }
+
+  /* 时间戳：当天只给时分秒；同年补日期；跨年再补年份 */
+  function messageTime(ts) {
+    if (!ts) return "";
+    var d = new Date(ts * 1000), now = new Date();
+    if (isNaN(d.getTime())) return "";
+    var hm = PX.pad(d.getHours()) + ":" + PX.pad(d.getMinutes()) + ":" +
+      PX.pad(d.getSeconds());
+    var day = PX.pad(d.getMonth() + 1) + "/" + PX.pad(d.getDate());
+    if (d.getFullYear() !== now.getFullYear()) return d.getFullYear() + "/" + day + " " + hm;
+    if (d.getMonth() !== now.getMonth() || d.getDate() !== now.getDate()) return day + " " + hm;
+    return hm;
+  }
+
+  function nowStamp() {
+    return Math.round(Date.now() / 1000);
   }
 
   function loadAssistant() {
@@ -5319,17 +5357,21 @@
     var log = $("#assistantLog");
     if (!log) return;
     log.innerHTML = (S.assistantMsgs || []).map(function (m) {
+      var when = messageTime(m.ts);
+      var stamp = when ? '<span class="as-time">' + PX.esc(when) + "</span>" : "";
       if (m.role === "user") {
-        return '<div class="as-msg as-user"><div class="as-text">' +
-          PX.esc(m.content).replace(/\n/g, "<br>") + "</div></div>";
+        return '<div class="as-msg as-user"><div class="as-body">' +
+          '<div class="as-text">' +
+          PX.esc(m.content).replace(/\n/g, "<br>") + "</div>" + stamp + "</div></div>";
       }
-      var steps = (m.steps || []).map(function (s) {
+      var steps = stepChips(m.steps).map(function (s) {
         return '<span class="as-step' + (s.ok ? "" : " bad") + '">' +
-          PX.esc(stepLabel(s)) + "</span>";
+          PX.esc(s.label) + "</span>";
       }).join("");
       return '<div class="as-msg as-bot">' +
         (steps ? '<div class="as-steps">' + steps + "</div>" : "") +
-        '<div class="as-text md">' + PX.md(m.content || "") + "</div></div>";
+        '<div class="as-body"><div class="as-text md">' + PX.md(m.content || "") +
+        "</div>" + stamp + "</div></div>";
     }).join("");
     scrollAssistant();
   }
@@ -5393,7 +5435,7 @@
       return;
     }
     S.assistantMsgs = S.assistantMsgs || [];
-    S.assistantMsgs.push({ role: "user", content: question });
+    S.assistantMsgs.push({ role: "user", content: question, ts: nowStamp() });
     drawAssistant();
     var box = $("#assistantText");
     box.value = "";
@@ -5416,18 +5458,19 @@
         showApproval(d.pending);
         if (d.reply) {
           S.assistantMsgs.push({ role: "assistant", content: d.reply,
-                                 steps: d.steps || [] });
+                                 steps: d.steps || [], ts: nowStamp() });
         }
         return;
       }
       S.assistantMsgs.push({ role: "assistant", content: d.reply || "",
-                             steps: d.steps || [] });
+                             steps: d.steps || [], ts: nowStamp() });
     }).catch(function (e) {
       if (e && (e.name === "AbortError" || /abort/i.test(String(e.message)))) {
-        S.assistantMsgs.push({ role: "assistant", content: "（已停止）", steps: [] });
+        S.assistantMsgs.push({ role: "assistant", content: "（已停止）", steps: [],
+                               ts: nowStamp() });
       } else {
         S.assistantMsgs.push({ role: "assistant", content: "出错了：" + e.message,
-                               steps: [] });
+                               steps: [], ts: nowStamp() });
       }
     }).then(function () {
       S.assistantAbort = null;

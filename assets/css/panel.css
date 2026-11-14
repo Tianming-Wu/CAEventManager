@@ -2875,12 +2875,12 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
 }
 .as-only-narrow { display: none; }
 
-/* 会话条：输入框上方左侧，一行小字，点开是会话列表 */
-/* 会话名挪到标题下面：左边一个小组件，点开是会话列表（原来挤在输入框上方） */
+/* 会话条：输入框上方左侧一行小字，点开是会话列表。
+   批准条出现时它在批准条上面——两条都往上长，输入框位置不动 */
 .as-sessionbar {
   appearance: none;
   align-self: flex-start;
-  margin: 6px 0 0;
+  margin: 0 0 -4px;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -2901,7 +2901,7 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   display: flex;
   align-items: center;
   gap: 12px;
-  margin: 0 0 8px;
+  margin: 0;
   padding: 9px 12px;
   border: 1px solid var(--accent-line);
   border-radius: var(--radius-sm);
@@ -2947,8 +2947,24 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
 .assistant-log:empty { display: none; }
 .as-msg { display: flex; min-width: 0; }
 .as-user { justify-content: flex-end; }
-.as-text {
+/* 气泡与它下面的时间戳叠成一列；用户靠右，助手靠左 */
+.as-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
   max-width: min(100%, 620px);
+}
+.as-user .as-body { align-items: flex-end; }
+.as-bot .as-body { align-items: flex-start; }
+.as-time {
+  font-size: .72rem;
+  line-height: 1;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+.as-text {
+  max-width: 100%;
   min-width: 0;
   overflow-wrap: anywhere;
   padding: 9px 12px;

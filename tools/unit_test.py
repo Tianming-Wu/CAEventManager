@@ -712,6 +712,9 @@ def main():
               app.policy.is_write("roster_remove_person")
               and "移出" in app.policy.describe("roster_remove_person"),
               app.policy.describe("roster_remove_person"))
+        check("提示词要求在当轮重新取数，不吃上一轮的结论",
+              "每一轮都重新取数" in a.SYSTEM_PROMPT
+              and "不能当成结论" in a.SYSTEM_PROMPT, a.SYSTEM_PROMPT[-160:])
     finally:
         a._post_chat = real_post
     print("== SQL 拼接审计 ==")

@@ -1974,6 +1974,18 @@ def main():
     check("取回来的消息是两条",
           len((back or {}).get("session", {}).get("messages") or []) == 2, back)
 
+    # 名字是人改的：存对话不能把它冲回第一句话
+    post(owner, "/api/panel/assistant/session/rename", {"id": sid, "title": "测试"})
+    post(owner, "/api/panel/assistant/session/save",
+         {"id": sid, "title": "平台上现在有多少活动？", "messages": [
+             {"role": "user", "content": "平台上现在有多少活动？"},
+             {"role": "assistant", "content": "你有 1 场活动。"},
+             {"role": "user", "content": "那名单呢"}]})
+    named = call(owner, "/api/panel/assistant/session?id=%d" % sid)
+    check("存对话不会把人改的名字冲掉",
+          (named or {}).get("session", {}).get("title") == "测试",
+          (named or {}).get("session", {}).get("title"))
+
     # 配额是平台资源：超管调别人的配额要留痕
     target_id = [a for a in call(owner, "/api/panel/accounts")["accounts"]
                  if a["username"] == "asprobe"][0]["id"]

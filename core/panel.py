@@ -1079,7 +1079,12 @@ def chat_session(conn, account_id, sid):
 
 
 def chat_save(conn, acc, sid, title, messages):
-    """Create or update one session.  Raises ValueError when over quota."""
+    """Create or update one session.  Raises ValueError when over quota.
+
+    名字只在**新建**的时候说一次；改名字走 ``/assistant/session/rename``。存对话顺手把
+    标题一起写回去的话，人手改的名字（以及模型起的短名字）会被冲成第一句提问——
+    这正是"我改过它，回头又变回去了"的原因。
+    """
     blob = json.dumps(messages or [], ensure_ascii=False)
     size = len(blob.encode("utf-8"))
     quota = chat_quota(acc)
@@ -1096,8 +1101,8 @@ def chat_save(conn, acc, sid, title, messages):
         if row is None:
             raise LookupError("找不到这段会话")
         conn.execute(
-            "UPDATE assistant_sessions SET title=?, messages=?, size=?, updated_at=?"
-            " WHERE id=?", (title or row["title"], blob, size, now, row["id"]))
+            "UPDATE assistant_sessions SET messages=?, size=?, updated_at=? WHERE id=?",
+            (blob, size, now, row["id"]))
         return row["id"]
     cur = conn.execute(
         "INSERT INTO assistant_sessions (account_id, title, messages, size,"

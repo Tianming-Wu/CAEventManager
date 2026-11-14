@@ -5080,7 +5080,8 @@
     PX.api("/assistant/title", { method: "POST", body: { text: first.content } })
       .then(function (d) {
         var title = (d.title || "").trim();
-        if (!title) return;
+        // 这中间人自己改过名字了：别拿模型起的名字盖掉他
+        if (!title || S.assistantTitleManual) return;
         if (S.assistantSessionId === id) setSessionName(title);
         return PX.api("/assistant/session/rename",
                       { method: "POST", body: { id: id, title: title } })
@@ -5092,19 +5093,23 @@
   function saveAssistantSession() {
     var msgs = S.assistantMsgs || [];
     if (!msgs.length) return Promise.resolve();
+    // 名字只在新会话时说一次：之后存对话不再动它，人手改的名字才留得住
+    var fresh = !S.assistantSessionId;
     return PX.api("/assistant/session/save", {
       method: "POST",
-      body: { id: S.assistantSessionId || 0, title: currentTitle(), messages: msgs }
+      body: { id: S.assistantSessionId || 0,
+              title: fresh ? currentTitle() : "", messages: msgs }
     }).then(function (d) {
-      var fresh = !S.assistantSessionId;
       S.assistantSessionId = d.id;
       S.assistantUsed = d.used;
       S.assistantQuota = d.quota;
       try { localStorage.setItem("as:lastSession", String(d.id)); } catch (e) {}
-      if (fresh) setSessionInHash(d.id);
-      setSessionName(currentTitle());
+      if (fresh) {
+        setSessionInHash(d.id);
+        setSessionName(currentTitle());
+        autoTitleSession(d.id);
+      }
       drawAssistantQuota();
-      if (fresh) autoTitleSession(d.id);
     }).catch(function (e) {
       // 满了就说清楚，别默默丢掉用户的对话
       if (e.status === 413) PX.toast(PX.esc(e.message), true);
@@ -5142,6 +5147,7 @@
   function openAssistantSession(id) {
     S.assistantSessionId = id;
     S.assistantMsgs = [];
+    S.assistantTitleManual = false;   // 换了一段对话："名字是人改的"这个标记重新算
     if (!id) {
       // 新的对话：没有要等的东西，直接就是那一页空白，中间不闪任何东西
       markLoaded("assistant");
@@ -5319,7 +5325,10 @@
       PX.api("/assistant/session/rename", { method: "POST", body: { id: id, title: name } })
         .then(function () {
           closeOverlay();
-          if (S.assistantSessionId === id) setSessionName(name);
+          if (S.assistantSessionId === id) {
+            S.assistantTitleManual = true;   // 名字是人定的，之后谁也别改它
+            setSessionName(name);
+          }
           refreshAssistantDrawer();
           PX.toast("已重命名");
         })

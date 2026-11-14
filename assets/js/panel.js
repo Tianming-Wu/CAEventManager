@@ -50,6 +50,9 @@
 
   var S = {
     me: null,
+    // 每一份列表取回来了没有：没取回来的空列表只能说"正在读取…"，
+    // 不能说"还没有…"（见 rowsOrEmpty）
+    listLoaded: {},
     accounts: [],
     events: [],
     audit: [],
@@ -288,6 +291,16 @@
   function emptyRow(cols, text) {
     return '<tr><td colspan="' + cols + '" class="empty">' + PX.esc(text) + "</td></tr>";
   }
+
+  /* 列表的两种空状态：正在读的时候说"正在读取"，读完了确实是空的才说"还没有…"。
+     结论性的字（还没有 / 没有匹配）只能在数据回来之后出现——不然切一栏就闪一下
+     "还没有名单"，看上去像东西没了。 */
+  function loaded(key) { return !!S.listLoaded[key]; }
+  function rowsOrEmpty(cols, key, text) {
+    return emptyRow(cols, loaded(key) ? text : "正在读取…");
+  }
+  function markLoading(key) { S.listLoaded[key] = false; }
+  function markLoaded(key) { S.listLoaded[key] = true; }
 
   function roleTag(a) {
     var cls = a.role === "owner" ? "owner" : (a.role === "superadmin" ? "superadmin" : "");
@@ -1304,10 +1317,12 @@
   }
 
   function loadNotices() {
+    markLoading("notices");
     return PX.api("/notices")
       .then(function (d) {
         S.notices = d.notices || [];
         S.noticeUnread = d.unread || 0;
+        markLoaded("notices");
         drawBell();
         drawNoticeList();
         maybeShowAlert();
@@ -1339,7 +1354,8 @@
     if (foot) foot.hidden = !S.notices.some(function (n) { return n.unread; });
     var svc = servicesShown();
     if (!S.notices.length && !svc.length) {
-      box.innerHTML = '<p class="notice-empty">还没有通知</p>';
+      box.innerHTML = '<p class="notice-empty">' +
+        (loaded("notices") ? "还没有通知" : "正在读取…") + "</p>";
       return;
     }
     box.innerHTML = svc.map(drawServiceRow).join("") +
@@ -1426,6 +1442,7 @@
     } else {
       S.rosters = [];
       S.rosterTotal = null;
+      markLoading("rosters");
     }
     var parts = ["/rosters?scope=" + (S.rosterScope || "mine"),
                  "offset=" + (more ? S.rosters.length : 0),
@@ -1435,6 +1452,7 @@
       .then(function (d) {
         S.rosters = (more ? S.rosters : []).concat(d.rosters || []);
         S.rosterTotal = d.total || 0;
+        markLoaded("rosters");
       })
       .catch(function (e) { PX.toast(PX.esc(e.message), true); });
   }
@@ -1455,9 +1473,7 @@
         '<td class="mono">' + PX.when(r.updatedAt) + "</td>" +
         '<td class="actions"><button class="btn sm" type="button" data-open-roster="' +
         r.id + '">打开</button></td></tr>';
-    }).join("") : emptyRow(5, S.rosterTotal === 0
-      ? "还没有名单"
-      : "正在读取…");
+    }).join("") : rowsOrEmpty(5, "rosters", "还没有名单");
 
     var count = $("#rosterCount");
     if (count) {
@@ -1499,6 +1515,7 @@
     } else {
       S.rosterEntries = [];
       S.entryTotal = null;
+      markLoading("rosterEntries");
     }
     var parts = ["/roster/entries?id=" + S.roster.id,
                  "offset=" + (more ? S.rosterEntries.length : 0),
@@ -1508,6 +1525,7 @@
       .then(function (d) {
         S.rosterEntries = (more ? S.rosterEntries : []).concat(d.entries || []);
         S.entryTotal = d.total || 0;
+        markLoaded("rosterEntries");
       })
       .catch(function (e) { PX.toast(PX.esc(e.message), true); });
   }
@@ -1679,9 +1697,8 @@
             '<button class="btn sm danger" type="button" data-entry-drop="' +
             e.personId + '">移出</button>'
           : '<span class="hint">只读</span>') + "</td></tr>";
-    }).join("") : emptyRow(8, S.entryTotal === 0
-      ? "还没有成员"
-      : "没有匹配的成员");
+    }).join("") : rowsOrEmpty(8, "rosterEntries",
+      S.entryTotal === 0 ? "还没有成员" : "没有匹配的成员");
     var more = $("#rosterEntryMore");
     if (more) {
       var left = (S.entryTotal === null) ? 0 : S.entryTotal - rows.length;
@@ -1697,11 +1714,13 @@
 
   /* ------------------------------------------------------------------ 屏幕包 --- */
   function loadScreenPacks() {
+    markLoading("screenPacks");
     return PX.api("/screen_packs")
       .then(function (d) {
         S.screenPacks = d.packs || [];
         S.packManage = !!d.canManage;
         S.packLimits = d.limits || null;
+        markLoaded("screenPacks");
       })
       .catch(function (e) { PX.toast(PX.esc(e.message), true); });
   }
@@ -1759,7 +1778,8 @@
             PX.esc(pk.id) + '">删除</button>'
           : "") +
         "</div>";
-    }).join("") : '<p class="hint">暂无可用屏幕</p>';
+    }).join("") : '<p class="hint">' +
+      (loaded("screenPacks") ? "还没有可用的屏幕" : "正在读取…") + "</p>";
     drawScreenRules();
   }
 
@@ -1818,6 +1838,7 @@
     } else {
       S.signups = [];
       S.signupTotal = null;
+      markLoading("signups");
     }
     var parts = ["/signups?offset=" + (more ? S.signups.length : 0),
                  "limit=" + SIGNUP_PAGE];
@@ -1826,6 +1847,7 @@
       .then(function (d) {
         S.signups = (more ? S.signups : []).concat(d.signups || []);
         S.signupTotal = d.total || 0;
+        markLoaded("signups");
       })
       .catch(function (e) { PX.toast(PX.esc(e.message), true); });
   }
@@ -1847,7 +1869,7 @@
         (r.capacity ? " / " + r.capacity : "") + "</td>" +
         '<td class="actions"><button class="btn sm" type="button" data-open-signup="' +
         r.id + '">编辑</button></td></tr>';
-    }).join("") : emptyRow(5, S.signupTotal === 0 ? "还没有报名" : "正在读取…");
+    }).join("") : rowsOrEmpty(5, "signups", "还没有报名");
     var count = $("#signupCount");
     if (count) count.textContent = S.signupTotal === null ? "" : "共 " + S.signupTotal + " 个";
     var more = $("#signupMore");
@@ -1881,6 +1903,7 @@
     } else {
       S.signupEntries = [];
       S.signupEntryTotal = null;
+      markLoading("signupEntries");
     }
     var parts = ["/signup/entries?id=" + S.signup.id,
                  "offset=" + (more ? S.signupEntries.length : 0),
@@ -1890,6 +1913,7 @@
       .then(function (d) {
         S.signupEntries = (more ? S.signupEntries : []).concat(d.entries || []);
         S.signupEntryTotal = d.total || 0;
+        markLoaded("signupEntries");
       })
       .catch(function (e) { PX.toast(PX.esc(e.message), true); });
   }
@@ -2163,7 +2187,7 @@
         "<td>" + PX.esc(e.grp || "—") + "</td>" +
         '<td class="mono">' + PX.whenExact(e.ts) + "</td>" +
         '<td class="wrap">' + (extra ? PX.esc(extra) : "—") + "</td></tr>";
-    }).join("") : emptyRow(6, S.signupEntryTotal === 0 ? "还没有人报名" : "没有匹配的记录");
+    }).join("") : rowsOrEmpty(6, "signupEntries", S.signupEntryTotal === 0 ? "还没有人报名" : "没有匹配的记录");
     var more = $("#signupEntryMore");
     if (more) {
       var left = (S.signupEntryTotal === null) ? 0 : S.signupEntryTotal - rows.length;
@@ -2367,11 +2391,15 @@
    * 超管那份「活跃审批」是两条独立的路由，鉴权各自管各自的。
    * 从名单页跳过来时会带上 ?back=，那就给一个返回键；直接点侧栏进来则没有。 */
   function loadApprovals() {
+    markLoading("approvals");
+    markLoading("myAsks");
     return PX.api("/list_approvals")
       .then(function (d) {
         S.approvals = d.pending || [];
         S.myAsks = d.asks || [];
         S.approvalsCount = d.count || 0;
+        markLoaded("approvals");
+        markLoaded("myAsks");
         renderApprovalBadge();
       })
       .catch(function (e) { PX.toast(PX.esc(e.message), true); });
@@ -2529,7 +2557,7 @@
             '<button class="btn sm" type="button" data-reject="' + a.id +
             '" data-approve-acct="' + a.accountId + '">拒绝</button></td></tr>';
         }).join("")
-      : emptyRow(4, "暂无待审批的申请");
+      : rowsOrEmpty(4, "approvals", "没有待处理的申请");
     $("#myAsksTable tbody").innerHTML = S.myAsks.length
       ? S.myAsks.map(function (a) {
           return "<tr>" +
@@ -2538,7 +2566,7 @@
             '<td class="mono">' + PX.whenExact(a.askedAt) + "</td>" +
             '<td class="actions"><span class="hint">等待确认</span></td></tr>';
         }).join("")
-      : emptyRow(4, "暂无等待确认的申请");
+      : rowsOrEmpty(4, "myAsks", "还没有等待确认的申请");
   }
 
   function decideApproval(rid, accountId, action) {
@@ -2932,6 +2960,8 @@
         S.adminArchived = false;
         S.adminRosters = null;
         S.adminSignups = null;
+        markLoading("adminRosters");
+        markLoading("adminSignups");
         return loadAdminLists().then(draw);
       },
       users: function () { return loadAccounts().then(draw); },
@@ -3030,7 +3060,8 @@
 
     $("#overviewEvents").innerHTML = mine.length
       ? mine.slice(0, 4).map(function (e) { return eventCard(e); }).join("")
-      : '<div class="empty">还没有活动。</div>';
+      : (loaded("events") ? '<div class="empty">还没有活动</div>'
+                         : '<div class="empty">正在读取…</div>');
 
     var card = $("#overviewAuditCard");
     if (canAudit() && S.audit.length) {
@@ -3069,12 +3100,14 @@
     var owned = ownedEvents();
     $("#ownedEvents").innerHTML = owned.length
       ? owned.map(function (e) { return eventCard(e); }).join("")
-      : '<div class="empty">还没有创建过活动</div>';
+      : (loaded("events") ? '<div class="empty">还没有创建过活动</div>'
+                         : '<div class="empty">正在读取…</div>');
 
     var joined = joinedEvents();
     $("#joinedEvents").innerHTML = joined.length
       ? joined.map(function (e) { return eventCard(e); }).join("")
-      : '<div class="empty">还没有参与别人创建的活动</div>';
+      : (loaded("events") ? '<div class="empty">还没有参与别人创建的活动</div>'
+                         : '<div class="empty">正在读取…</div>');
   }
 
   // A preset is a saved snapshot of one activity's setup: module, parameters and
@@ -3120,16 +3153,23 @@
     if (!el) return;
     el.innerHTML = rows.length
       ? rows.map(function (p) { return presetCard(p, shelf); }).join("")
-      : '<div class="empty">' + PX.esc(empty) + "</div>";
+      : '<div class="empty">' +
+        PX.esc(loaded("templates") ? empty : "正在读取…") + "</div>";
   }
 
   function drawTemplates() {
     // importing brings content into the installation: only the station master
     var importBtn = $("#presetImportBtn");
     if (importBtn) importBtn.hidden = !isOwner();
+    // 先把三栏摆成"正在读取…"，别让人看见"还没有收藏的预设"再变出来
+    markLoading("templates");
+    presetShelf("#presetFavorites", [], "fav", "还没有收藏的预设");
+    presetShelf("#presetMine", [], "mine", "还没有创建的预设");
+    presetShelf("#presetSquare", [], "square", "还没有可用的预设");
     return PX.api("/templates").then(function (d) {
       S.templates = d.presets || [];
       S.visibilityOptions = d.visibility || [];
+      markLoaded("templates");
       var fav = S.templates.filter(function (p) { return p.fav; });
       var mine = S.templates.filter(function (p) { return p.mine && !p.builtin; });
       // the square is everything shared, whether or not it is also starred
@@ -3288,8 +3328,11 @@
   }
 
   function drawModules() {
+    markLoading("modules");
+    $("#moduleTable tbody").innerHTML = rowsOrEmpty(5, "modules", "");
     return PX.api("/modules").then(function (d) {
       S.modules = d.modules || [];
+      markLoaded("modules");
       $("#moduleTable tbody").innerHTML = S.modules.map(function (m) {
         // 申请了平台保留的高危能力：挂一枚胶囊，悬停/点一下能看到申请了哪几条。
         // 模块只有装与没装两种状态，装的时候说清楚，不在装好之后做逐条授权
@@ -3315,7 +3358,7 @@
           '" type="button" data-module-toggle="' + PX.esc(m.id) +
           '" data-on="' + (m.enabled ? "0" : "1") + '">' +
           (m.enabled ? "停用" : "启用") + "</button></td></tr>";
-      }).join("") || emptyRow(5, "没有已安装的模块");
+      }).join("") || rowsOrEmpty(5, "modules", "还没有装模块");
     }).catch(function (e) {
       if (e.status === 403) return showDenied("modules");
       PX.toast(PX.esc(e.message), true);
@@ -3422,10 +3465,12 @@
 
   function loadTemplates(force) {
     if (S.templates.length && !force) return Promise.resolve();
+    markLoading("templates");
     return PX.api("/templates").then(function (d) {
       S.templates = d.presets || d.templates || [];
       S.visibilityOptions = d.visibility || [];
-    }).catch(function () { S.templates = []; });
+      markLoaded("templates");
+    }).catch(function () { S.templates = []; markLoaded("templates"); });
   }
 
   /* ------------------------------------------------------------- drafts */
@@ -3942,7 +3987,7 @@
         '<td class="actions">' +
         '<button class="btn sm" data-acct="' + a.id + '">管理</button>' +
         "</td></tr>";
-    }).join("") : emptyRow(6, S.userFilter.trim()
+    }).join("") : rowsOrEmpty(6, "accounts", S.userFilter.trim()
       ? "没有匹配的账号" : "还没有别的账号");
     var more = $("#usersMore");
     if (more) {
@@ -3959,6 +4004,7 @@
     if (reset) {
       S.accounts = [];
       S.accountsTotal = 0;
+      markLoading("accounts");
     } else if (S.accountsTotal !== null && S.accounts.length >= S.accountsTotal) {
       return Promise.resolve();
     }
@@ -3970,6 +4016,7 @@
         S.me = d.me || S.me;
         S.accounts = S.accounts.concat(d.accounts || []);
         S.accountsTotal = d.total || 0;
+        markLoaded("accounts");
         if (d.quotaDefault) S.quotaDefault = d.quotaDefault;
         if (d.quotaMax) S.quotaMax = d.quotaMax;
       })
@@ -4055,6 +4102,7 @@
     if (reset) {
       S.archived = [];
       S.archivedTotal = null;
+      markLoading("archived");
     } else if (S.archivedTotal !== null && S.archived.length >= S.archivedTotal) {
       return Promise.resolve();
     }
@@ -4067,6 +4115,7 @@
       .catch(function (e) { PX.toast(PX.esc(e.message), true); })
       .then(function () {
         S.archivedLoading = false;
+        markLoaded("archived");
         drawArchived();
       });
   }
@@ -4098,9 +4147,7 @@
         '<td class="mono">' + PX.esc(shortToken(e.id)) + "</td>" +
         '<td class="actions"><button class="detail-btn" type="button" ' +
         'data-event-detail="' + e.seq + '">详情</button></td>' + "</tr>";
-    }).join("") : emptyRow(6, S.archivedTotal === 0
-      ? "还没有归档的活动"
-      : "正在读取…");
+    }).join("") : rowsOrEmpty(6, "archived", "还没有归档的活动");
     var more = $("#archivedMore");
     if (more) {
       var left = (S.archivedTotal === null) ? 0 : S.archivedTotal - S.archived.length;
@@ -4129,7 +4176,7 @@
         PX.esc(shortToken(e.id)) + "</td>" +
         '<td class="actions"><button class="detail-btn" type="button" ' +
         'data-event-detail="' + e.seq + '">详情</button></td>' + "</tr>";
-    }).join("") : emptyRow(6, "还没有活动");
+    }).join("") : rowsOrEmpty(6, "events", "当前没有活动");
   }
 
   /* 名单管理：服务上的全部名单与报名，超管及以上才看得到。
@@ -4137,12 +4184,16 @@
   function loadAdminLists() {
     if (!isSuper()) return Promise.resolve();
     var tail = "&limit=100" + (S.adminArchived ? "&archived=1" : "");
+    markLoading("adminRosters");
+    markLoading("adminSignups");
     return Promise.all([
       PX.api("/rosters?scope=all" + tail),
       PX.api("/signups?scope=all" + tail)
     ]).then(function (res) {
       S.adminRosters = res[0].rosters || [];
       S.adminSignups = res[1].signups || [];
+      markLoaded("adminRosters");
+      markLoaded("adminSignups");
     }).catch(function (e) { PX.toast(PX.esc(e.message), true); });
   }
 
@@ -4180,7 +4231,8 @@
           : (r.updatedAt || r.createdAt)) + "</td>" +
         '<td class="actions"><button class="detail-btn" type="button" ' +
         'data-admin-roster="' + r.id + '">详情</button></td>' + "</tr>";
-    }).join("") : emptyRow(6, archived ? "没有归档的名单" : "还没有名单");
+    }).join("") : rowsOrEmpty(6, "adminRosters",
+      archived ? "还没有归档的名单" : "当前没有名单");
 
     var signups = S.adminSignups || [];
     $("#adminSignupTable tbody").innerHTML = signups.length ? signups.map(function (s) {
@@ -4194,7 +4246,8 @@
           : (s.updatedAt || s.createdAt)) + "</td>" +
         '<td class="actions"><button class="detail-btn" type="button" ' +
         'data-admin-signup="' + s.id + '">详情</button></td>' + "</tr>";
-    }).join("") : emptyRow(6, archived ? "没有归档的报名" : "还没有报名");
+    }).join("") : rowsOrEmpty(6, "adminSignups",
+      archived ? "还没有归档的报名" : "当前没有报名");
   }
 
   /* 名单 / 报名的详情：超管在这里归档、换人或者彻底删掉别人名下的东西（都要提权）。
@@ -4355,7 +4408,7 @@
         '<button class="btn sm primary" data-decide="approve" data-id="' + a.id + '">通过</button> ' +
         '<button class="btn sm danger" data-decide="reject" data-id="' + a.id + '">拒绝</button>' +
         "</td></tr>";
-    }).join("") : emptyRow(5, "没有待处理的申请");
+    }).join("") : rowsOrEmpty(5, "pendingUsers", "没有待处理的申请");
 
     var decided = S.accounts.filter(function (a) {
       return a.decidedAt && a.status !== "pending";
@@ -4368,7 +4421,7 @@
         "<td>" + statusTag(a) + "</td>" +
         "<td>" + PX.esc(a.decidedBy || "—") + "</td>" +
         '<td class="mono">' + PX.when(a.decidedAt) + "</td></tr>";
-    }).join("") : emptyRow(5, "还没有处理记录");
+    }).join("") : rowsOrEmpty(5, "decidedUsers", "还没有处理记录");
   }
 
   function drawApprovalEvents() {
@@ -4534,7 +4587,7 @@
         "<td>" + PX.esc(r.target || "") + "</td>" +
         '<td class="wrap mono" title="' + PX.esc(r.detail || "") + '">' +
         PX.esc(r.detail || "") + "</td></tr>";
-    }).join("") : emptyRow(5, S.auditFilter ? "没有匹配的记录" : "还没有记录");
+    }).join("") : rowsOrEmpty(5, "audit", S.auditFilter ? "没有匹配的记录" : "还没有记录");
   }
 
   function drawAccount() {
@@ -4571,10 +4624,12 @@
   /* 明文只在创建那一刻出现一次：之后服务端只有哈希与前四位/后五位。
      所以"复制"这一步要做得顺手，错过就只能重建一张。 */
   function loadTokens() {
+    markLoading("tokens");
     return PX.api("/tokens")
       .then(function (d) {
         S.tokens = d.tokens || [];
         S.tokenMeta = { scopes: d.scopes || [], labels: d.scopeLabels || {} };
+        markLoaded("tokens");
       })
       .catch(function (e) { PX.toast(PX.esc(e.message), true); });
   }
@@ -4601,7 +4656,7 @@
             t.id + '">吊销</button>'
           : '<span class="tag">' + PX.esc(t.state) + "</span>") +
         "</td></tr>";
-    }).join("") : emptyRow(6, "还没有令牌");
+    }).join("") : rowsOrEmpty(6, "tokens", "还没有令牌");
   }
 
   function tokenDialog() {
@@ -5452,10 +5507,12 @@
       syncPendingBadge();
       return Promise.resolve();
     }
+    markLoading("accounts");
     return PX.api("/accounts?limit=50").then(function (d) {
       S.me = d.me || S.me;
       S.accounts = d.accounts || [];
       S.accountsTotal = d.total || S.accounts.length;
+      markLoaded("accounts");
       renderIdentity();
       applyRoleVisibility();
       syncPendingBadge();
@@ -5484,8 +5541,11 @@
   }
 
   function loadEvents() {
-    return PX.api("/events").then(function (d) { S.events = d.events || []; })
-      .catch(function () { S.events = []; });
+    markLoading("events");
+    return PX.api("/events").then(function (d) {
+      S.events = d.events || [];
+      markLoaded("events");
+    }).catch(function () { S.events = []; markLoaded("events"); });
   }
 
   function loadAudit(q) {
@@ -5493,10 +5553,12 @@
     S.auditFilter = (q === undefined) ? (S.auditFilter || "") : q;
     var query = "?limit=60" +
       (S.auditFilter ? "&q=" + encodeURIComponent(S.auditFilter) : "");
+    markLoading("audit");
     return PX.api("/audit" + query).then(function (d) {
       S.audit = d.audit || [];
       S.auditTotal = d.total || 0;
-    }).catch(function () { S.audit = []; S.auditTotal = 0; });
+      markLoaded("audit");
+    }).catch(function () { S.audit = []; S.auditTotal = 0; markLoaded("audit"); });
   }
 
   function loadMoreAudit() {
@@ -6133,6 +6195,8 @@
       S.adminArchived = next;
       S.adminRosters = null;
       S.adminSignups = null;
+      markLoading("adminRosters");
+      markLoading("adminSignups");
       drawRosterAdmin();
       loadAdminLists().then(drawRosterAdmin);
     });

@@ -2492,6 +2492,36 @@ def module_refresh_page(browser):
         ctx.close()
 
 
+def loading_states_page(browser):
+    """列表的中间态：切栏的那一个 tick 里只能说「正在读取…」。"""
+    print("== 列表的加载中间态 ==")
+    ctx, page = new_page(browser, 1440, 900)
+    try:
+        ui_login(page)
+        page.goto(BASE + "/panel#/roster-admin")
+        page.wait_for_timeout(1200)
+        # 同一个 tick 里点完就读：这时请求还没回来，不能已经摆出「还没有…」
+        tick = page.evaluate("""() => {
+            document.querySelector('#adminListScope [data-archived="1"]').click();
+            return document.querySelector('#adminRosterTable tbody').textContent.trim();
+        }""")
+        check("切到已归档的那一 tick 是正在读取", tick == "正在读取…", tick)
+        page.wait_for_timeout(900)
+        body = page.inner_text("#adminRosterTable tbody").strip()
+        check("读完之后才给结论", body and "正在读取" not in body, body[:60])
+        back = page.evaluate("""() => {
+            document.querySelector('#adminListScope [data-archived="0"]').click();
+            return document.querySelector('#adminSignupTable tbody').textContent.trim();
+        }""")
+        check("切回当前的那一 tick 也是正在读取", back == "正在读取…", back)
+        page.wait_for_timeout(900)
+        check("读完才说有没有报名",
+              "正在读取" not in page.inner_text("#adminSignupTable tbody"),
+              page.inner_text("#adminSignupTable tbody")[:60])
+    finally:
+        ctx.close()
+
+
 def roster_admin_page(browser):
     """名单管理：超管看全站的名单与报名，详情里能归档、转交与彻底删除。"""
     print("== 名单管理 ==")
@@ -3711,6 +3741,7 @@ def main():
                 create_page(browser)
                 leave_guard_page(browser)
                 module_refresh_page(browser)
+                loading_states_page(browser)
                 roster_admin_page(browser)
                 module_install_page(browser)
                 archived_delete_page(browser)

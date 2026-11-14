@@ -403,6 +403,72 @@ def read_doc(rel):
     return None, "没有这份文档：" + want
 
 
+# --------------------------------------------------------------------------- #
+# 写动作：真正执行的那一段。它只会在用户点过"批准"之后被调用
+# --------------------------------------------------------------------------- #
+def _tool_roster_add_person(client, args):
+    rid = int(args.get("roster_id") or 0)
+    sid = str(args.get("sid") or "").strip()
+    name = str(args.get("name") or "").strip()
+    if not rid or not sid or not name:
+        return {"error": "需要 roster_id、学号与姓名"}
+    payload = {"id": rid, "sid": sid, "name": name}
+    for key in ("grp", "dept", "note"):
+        if args.get(key):
+            payload[key] = str(args[key])[:200]
+    res = client.post("/api/panel/roster/entry", payload)
+    if res.get("ok") is False:
+        return {"error": res.get("error") or "没加成"}
+    return {"ok": True, "roster_id": rid, "sid": sid, "name": name}
+
+
+def _minute_input(text):
+    """``yyyy-mm-dd HH:MM`` → epoch；空串表示不限。看不懂就说看不懂。"""
+    text = str(text or "").strip()
+    if not text:
+        return 0.0
+    for fmt in ("%Y-%m-%d %H:%M", "%Y/%m/%d %H:%M", "%Y-%m-%d"):
+        try:
+            return time.mktime(time.strptime(text, fmt))
+        except ValueError:
+            continue
+    raise ValueError("时间要写成 yyyy-mm-dd HH:MM")
+
+
+def _tool_signup_window(client, args):
+    sid = int(args.get("signup_id") or 0)
+    if not sid:
+        return {"error": "需要 signup_id"}
+    body = {"id": sid}
+    try:
+        for key in ("opens_at", "closes_at"):
+            if key in args:
+                body[key] = _minute_input(args.get(key))
+    except ValueError as exc:
+        return {"error": str(exc)}
+    if "capacity" in args:
+        body["capacity"] = max(0, int(args.get("capacity") or 0))
+    if args.get("state") in ("open", "closed"):
+        body["state"] = args["state"]
+    if len(body) == 1:
+        return {"error": "没说清要改哪一项（时间窗 / 名额 / 开关）"}
+    res = client.post("/api/panel/signup/update", body)
+    if res.get("ok") is False:
+        return {"error": res.get("error") or "没改成"}
+    return {"ok": True, "signup_id": sid, "changed": sorted(k for k in body if k != "id")}
+
+
+def _tool_event_rename(client, args):
+    seq = str(args.get("seq") or "").strip()
+    title = str(args.get("title") or "").strip()
+    if not seq or not title:
+        return {"error": "需要 seq 与新的名称"}
+    res = client.post("/api/panel/event/title", {"seq": seq, "title": title[:60]})
+    if res.get("ok") is False:
+        return {"error": res.get("error") or "没改成"}
+    return {"ok": True, "seq": seq, "title": title[:60]}
+
+
 def _tool_list_docs(client, args):
     q = (args.get("q") or "").strip().lower()
     rows = [d for d in doc_entries()
@@ -474,6 +540,40 @@ TOOLS = [
                     "properties": {"path": {"type": "string",
                                             "description": "例如 doc/usage/rosters.md"}},
                     "required": ["path"]}},
+    # ---- 写动作：调用时会先停下来等用户批准（见 run/approve） ----
+    {"name": "roster_add_person", "run": _tool_roster_add_person, "write": True,
+     "description": "往一份名单里加一个人。学号与姓名必填；同一个学号已在名单里就更新他的分组与备注",
+     "parameters": {"type": "object",
+                    "properties": {"roster_id": {"type": "integer"},
+                                   "sid": {"type": "string", "description": "学号"},
+                                   "name": {"type": "string", "description": "姓名"},
+                                   "grp": {"type": "string", "description": "分组或班级"},
+                                   "dept": {"type": "string", "description": "院系"},
+                                   "note": {"type": "string"}},
+                    "required": ["roster_id", "sid", "name"]},
+     "summary": lambda a: "把 %s（%s）加进名单 #%s" % (
+         a.get("name") or "?", a.get("sid") or "?", a.get("roster_id") or "?")},
+    {"name": "signup_window", "run": _tool_signup_window, "write": True,
+     "description": "改一个报名的时间窗、名额或开关（只传要改的那几项）",
+     "parameters": {"type": "object",
+                    "properties": {"signup_id": {"type": "integer"},
+                                   "opens_at": {"type": "string",
+                                                "description": "开始时间 yyyy-mm-dd HH:MM，空串表示不限"},
+                                   "closes_at": {"type": "string",
+                                                 "description": "截止时间 yyyy-mm-dd HH:MM，空串表示不限"},
+                                   "capacity": {"type": "integer", "description": "名额，0 表示不限"},
+                                   "state": {"type": "string", "enum": ["open", "closed"]}},
+                    "required": ["signup_id"]},
+     "summary": lambda a: "改报名 #%s 的%s" % (
+         a.get("signup_id") or "?",
+         "、".join(k for k in ("opens_at", "closes_at", "capacity", "state") if k in a) or "设置")},
+    {"name": "event_rename", "run": _tool_event_rename, "write": True,
+     "description": "给一场活动改名称",
+     "parameters": {"type": "object",
+                    "properties": {"seq": {"type": "string", "description": "活动的 seq 或访问标识"},
+                                   "title": {"type": "string"}},
+                    "required": ["seq", "title"]},
+     "summary": lambda a: "把活动 #%s 改名为「%s」" % (a.get("seq") or "?", a.get("title") or "")},
 ]
 
 BY_NAME = {t["name"]: t for t in TOOLS}
@@ -692,8 +792,105 @@ def suggest_title(cfg, text):
     return title[:TITLE_MAX]
 
 
+# --------------------------------------------------------------------------- #
+# 一轮问答的执行：遇到写动作就停在那里，等人点"批准"
+# --------------------------------------------------------------------------- #
+# 写动作不会自己跑：碰到它就把握把（模型上下文 + 还没跑的那几个调用 + 调用它的那条会话）
+# 存进内存，回一个 pending 给界面；用户点批准后才继续（approve）。令牌一次性、5 分钟过期，
+# 存的是内存里的握把，不落盘——重启就作废，重来一次即可。
+PENDING_TTL = 300
+_PENDING = {}
+
+
+def _drop_stale():
+    now = time.time()
+    for token in [t for t, r in _PENDING.items() if now - r["at"] > PENDING_TTL]:
+        _PENDING.pop(token, None)
+
+
+def _stash(acc, cfg, client, convo, steps, calls, version):
+    import secrets
+    _drop_stale()
+    token = secrets.token_urlsafe(16)
+    _PENDING[token] = {"at": time.time(), "acc": acc["id"], "cfg": cfg,
+                       "client": client, "convo": convo, "steps": steps,
+                       "calls": calls, "version": version}
+    return token
+
+
+def _pending_view(token, call):
+    fn = (call.get("function") or {})
+    name = fn.get("name") or ""
+    args = _parse_arguments(fn.get("arguments"))
+    tool = BY_NAME.get(name) or {}
+    summary = ""
+    try:
+        summary = tool["summary"](args) if tool.get("summary") else ""
+    except Exception:                                   # 说人话的那一句不值得炸整轮
+        summary = ""
+    return {"token": token, "action": name,
+            "label": policy.describe(name) or name,
+            "summary": summary or (policy.describe(name) or name)}
+
+
+def _call_tool(acc, client, call):
+    """执行一个工具调用，返回给模型看的结果（写动作也是从这里走的，只是在批准之后）。"""
+    fn = (call.get("function") or {})
+    name = fn.get("name") or ""
+    args = _parse_arguments(fn.get("arguments"))
+    tool = BY_NAME.get(name)
+    allowed, reason = policy.verdict(acc, name, args)
+    if tool is None:
+        result = {"error": "没有这个工具"}
+    elif not allowed:
+        result = {"error": reason}
+    else:
+        try:
+            result = tool["run"](client, args)
+        except Exception as exc:                        # 工具自己出错不该炸整轮
+            result = {"error": "工具执行失败：%s" % exc}
+    # 接口那边的 403 不必原样转述：模型只要知道"这条路走不通"就够了
+    err = str(result.get("error") or "")
+    if "403" in err or "无权" in err or "权限" in err:
+        result = {"error": "这一步没有权限，换一种问法或者换个账号试试"}
+    return name, args, result
+
+
+def _drive(acc, cfg, client, convo, steps, version, calls):
+    """跑模型这一轮。``calls`` 非空表示从"已经问过模型、手上还有几个调用"接着跑。"""
+    for _ in range(MAX_STEPS):
+        if calls is None:
+            payload = _post_chat(cfg, convo, account=acc)
+            msg = ((payload.get("choices") or [{}])[0].get("message") or {})
+            calls = msg.get("tool_calls") or []
+            if not calls:
+                return {"reply": (msg.get("content") or "").strip(), "steps": steps}
+            convo.append({"role": "assistant", "content": msg.get("content") or "",
+                          "tool_calls": calls})
+        while calls:
+            call = calls[0]
+            fn = (call.get("function") or {})
+            name = fn.get("name") or ""
+            tool = BY_NAME.get(name) or {}
+            allowed, _reason = policy.verdict(acc, name, _parse_arguments(fn.get("arguments")))
+            if tool.get("write") and allowed:
+                # 停在这里：剩下的调用跟着握把一起存起来，等人点头
+                token = _stash(acc, cfg, client, convo, steps, calls, version)
+                return {"reply": "", "steps": steps,
+                        "pending": _pending_view(token, call)}
+            name, _args, result = _call_tool(acc, client, call)
+            steps.append({"tool": name, "ok": "error" not in result,
+                          "note": result.get("error") or ""})
+            convo.append({"role": "tool", "tool_call_id": call.get("id") or name,
+                          "content": _clip(json.dumps(result, ensure_ascii=False), 6000)})
+            calls = calls[1:]
+        calls = None
+    return {"reply": "这一步想问的东西有点多，先说到这里。可以换个更具体的问法。",
+            "steps": steps}
+
+
 def run(conn, acc, client, cfg, messages, log=print, version=""):
-    """One question in, one answer out.  Returns {reply, steps}."""
+    """One question in, one answer out.  Returns {reply, steps} or {pending}."""
     names = [t["function"]["name"] for t in tool_schema(acc)]
     convo = [{"role": "system", "content": system_prompt(acc, names, version)}]
     for m in (messages or [])[-20:]:
@@ -702,39 +899,30 @@ def run(conn, acc, client, cfg, messages, log=print, version=""):
             convo.append({"role": role, "content": str(m["content"])[:4000]})
     if not convo or convo[-1]["role"] != "user":
         raise ValueError("最后一句应该是用户的话")
+    return _drive(acc, cfg, client, convo, [], version, None)
 
-    steps = []
-    for _ in range(MAX_STEPS):
-        payload = _post_chat(cfg, convo, account=acc)
-        choice = (payload.get("choices") or [{}])[0]
-        msg = choice.get("message") or {}
-        calls = msg.get("tool_calls") or []
-        if not calls:
-            return {"reply": (msg.get("content") or "").strip(), "steps": steps}
-        convo.append({"role": "assistant", "content": msg.get("content") or "",
-                      "tool_calls": calls})
-        for call in calls:
-            fn = (call.get("function") or {})
-            name = fn.get("name") or ""
-            args = _parse_arguments(fn.get("arguments"))
-            tool = BY_NAME.get(name)
-            allowed, reason = policy.verdict(acc, name, args)
-            if tool is None:
-                result = {"error": "没有这个工具"}
-            elif not allowed:
-                result = {"error": reason}
-            else:
-                try:
-                    result = tool["run"](client, args)
-                except Exception as exc:                    # 工具自己出错不该炸整轮
-                    result = {"error": "工具执行失败：%s" % exc}
-            # 接口那边的 403 不必原样转述：模型只要知道"这条路走不通"就够了
-            err = str(result.get("error") or "")
-            if "403" in err or "无权" in err or "权限" in err:
-                result = {"error": "这一步没有权限，换一种问法或者换个账号试试"}
-            steps.append({"tool": name, "ok": "error" not in result,
-                          "note": result.get("error") or ""})
-            convo.append({"role": "tool", "tool_call_id": call.get("id") or name,
+
+def approve(acc, token, allow):
+    """用户对某个写动作点了批准或拒绝：接着把这一轮跑完。
+
+    ``allow`` 为假时把"用户拒绝了"写进工具结果，让模型自己收尾——它知道该说没改成。
+    """
+    _drop_stale()
+    grip = _PENDING.pop(str(token or ""), None)
+    if grip is None or grip["acc"] != acc["id"]:
+        raise ValueError("这次确认已经过期，请重新问一遍")
+    calls = grip["calls"]
+    call = calls[0]
+    fn = (call.get("function") or {})
+    name = fn.get("name") or ""
+    if allow:
+        name, _args, result = _call_tool(acc, grip["client"], call)
+    else:
+        result = {"ok": False, "refused": "用户拒绝了这一步，没有执行"}
+    grip["steps"].append({"tool": name, "ok": "error" not in result
+                          and not result.get("refused"),
+                          "note": result.get("error") or ("已拒绝" if not allow else "")})
+    grip["convo"].append({"role": "tool", "tool_call_id": call.get("id") or name,
                           "content": _clip(json.dumps(result, ensure_ascii=False), 6000)})
-    return {"reply": "这一步想问的东西有点多，先说到这里。可以换个更具体的问法。",
-            "steps": steps}
+    return _drive(acc, grip["cfg"], grip["client"], grip["convo"], grip["steps"],
+                  grip["version"], calls[1:])

@@ -2876,10 +2876,11 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
 .as-only-narrow { display: none; }
 
 /* 会话条：输入框上方左侧，一行小字，点开是会话列表 */
+/* 会话名挪到标题下面：左边一个小组件，点开是会话列表（原来挤在输入框上方） */
 .as-sessionbar {
   appearance: none;
   align-self: flex-start;
-  margin: 0 0 -2px;          /* 贴着输入框 */
+  margin: 6px 0 0;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -2894,6 +2895,24 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   cursor: pointer;
 }
 .as-sessionbar:hover { background: var(--surface-2); color: var(--text); }
+/* 助手要改数据的动作：先在这里问一句，人是唯一能点"批准"的人。
+   位置贴着输入框上方——像编辑器里的权限确认那样，不挡对话 */
+.as-approval {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 8px;
+  padding: 9px 12px;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--text);
+  font-size: .84rem;
+  line-height: 1.5;
+}
+.as-approval[hidden] { display: none; }
+.as-approval-text { flex: 1 1 auto; min-width: 0; }
+.as-approval-acts { display: flex; flex: 0 0 auto; gap: 8px; }
 .as-sessionbar svg { width: 14px; height: 14px; flex: none; }
 .as-sessionbar span {
   overflow: hidden;

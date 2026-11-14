@@ -1201,6 +1201,32 @@ def assistant_page(page):
         check("新对话直接就是那一页空白",
               page.locator("#assistantEmpty").is_visible()
               and page.locator("#assistantLoading").is_hidden())
+    print("== 写动作的批准条与会话名位置 ==")
+    layout = page.evaluate("""() => {
+        const bar = document.getElementById('asApproval');
+        const form = document.getElementById('assistantForm');
+        const chip = document.getElementById('asSessionBar');
+        const page = document.querySelector('[data-page="assistant"]');
+        const head = page.querySelector('.page-head');
+        const wasHidden = bar.hidden;
+        bar.hidden = false;                       // 量尺寸时先摆出来，量完还原
+        const r = bar.getBoundingClientRect();
+        bar.hidden = wasHidden;
+        const f = form.getBoundingClientRect();
+        return {hidden: wasHidden, text: bar.textContent.trim(),
+                above: r.height > 0 && r.bottom <= f.top + 1,
+                inComposer: form.contains(bar),
+                chipInHead: head ? head.contains(chip) : false,
+                chipAboveForm: chip.getBoundingClientRect().bottom < f.top,
+                yes: document.getElementById('asApprovalYes').textContent.trim(),
+                no: document.getElementById('asApprovalNo').textContent.trim()};
+    }""")
+    check("批准条平时是收着的", layout["hidden"] and "批准" in layout["text"], layout)
+    check("批准条在输入框上方、不在框里面",
+          layout["above"] and not layout["inComposer"], layout)
+    check("两个键是拒绝与批准",
+          layout["no"] == "拒绝" and layout["yes"] == "批准", layout)
+    check("会话名挪到了标题下面", layout["chipInHead"] and layout["chipAboveForm"], layout)
     print("== 模型设置弹窗 ==")
     page.click("#asSettings")
     page.wait_for_timeout(350)

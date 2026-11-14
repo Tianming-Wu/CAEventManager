@@ -28,10 +28,15 @@ READ_ACTIONS = {
     "host_stats": "owner",
 }
 
-# 允许助手代劳的写动作：**现在是空的**。
-# 加动作时同时给一句人话说明——拒绝时要把这句话说给用户听。
-# 例：{"signup_update": "改报名的时间窗与名额"}
-WRITE_ACTIONS = {}
+# 允许助手代劳的写动作。
+# 加动作时同时给一句人话说明——批准弹窗里那句话就是它，拒绝时也用它回话。
+# **写动作不会自己跑**：助手先停下来，把"要做什么"摆给用户看，点过批准才执行
+# （见 `assistant.run` / `assistant.approve`）。
+WRITE_ACTIONS = {
+    "roster_add_person": "往名单里加一个人",
+    "signup_window": "改报名的时间窗与名额",
+    "event_rename": "改活动名称",
+}
 
 ROLE_RANK = {"admin": 1, "superadmin": 2, "owner": 3}
 

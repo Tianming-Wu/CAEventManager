@@ -9,6 +9,7 @@ These run without a server.  They exist because ``host_stats()`` shipped with a
 ``/proc/stat``, and Windows has no ``/proc``, so every run returned early.
 Feeding it a fake ``/proc`` exercises the real code path on any platform.
 """
+import json
 import os
 import sys
 import tempfile
@@ -566,6 +567,89 @@ def main():
           target("https://example.com/x", True) == "https://example.com/x"
           and target("../other/x", True) == "../other/x", None)
 
+    print("== 运维助手：写动作要先批准 ==")
+
+    class FakeClient:
+        def __init__(self):
+            self.calls = []
+
+        def post(self, path, body=None):
+            self.calls.append((path, body or {}))
+            return {"ok": True}
+
+        def get(self, path):
+            self.calls.append((path, {}))
+            return {"ok": True}
+
+    a = app.assistant
+    acc = {"id": 7, "uid": 10007, "role": "admin", "username": "alice", "name": "王同学"}
+    add_plan = [{"tool_calls": [{"id": "c1", "function": {
+        "name": "roster_add_person",
+        "arguments": json.dumps({"roster_id": 3, "sid": "2024001", "name": "张三"})}}]},
+        {"content": "已经加进去了"}]
+    real_post = a._post_chat
+
+    def fake_post(cfg, convo, account=None):
+        step = add_plan.pop(0)
+        return {"choices": [{"message": dict(step)}]}
+
+    a._post_chat = fake_post
+    try:
+        client = FakeClient()
+        got = a.run(None, acc, client, {"ready": True},
+                    [{"role": "user", "content": "把张三加到名单 3"}])
+        check("写动作先停住，不执行",
+              bool(got.get("pending")) and not client.calls, (got.get("pending"), client.calls))
+        check("停住的那一句说清要做什么",
+              "张三" in (got["pending"]["summary"] or ""), got["pending"])
+        check("标签用的是那句话", got["pending"]["label"] == "往名单里加一个人",
+              got["pending"]["label"])
+        token = got["pending"]["token"]
+        done = a.approve(acc, token, True)
+        check("批准之后才真的写",
+              client.calls and client.calls[0][0] == "/api/panel/roster/entry",
+              client.calls)
+        check("写的是模型说的那个人",
+              client.calls[0][1].get("sid") == "2024001", client.calls[0][1])
+        check("批准之后把这一轮跑完",
+              (done.get("reply") or "").startswith("已经加进去了"), done)
+        try:
+            a.approve(acc, token, True)
+            check("令牌只能用一次", False, "第二次居然还能用")
+        except ValueError:
+            check("令牌只能用一次", True)
+        try:
+            a.approve({"id": 9, "role": "admin"}, token, True)
+            check("别人的令牌用不了", False, "别人的令牌竟然通过了")
+        except ValueError:
+            check("别人的令牌用不了", True)
+
+        # 拒绝：不写任何东西，把"用户拒绝了"交给模型收尾
+        add_plan[:] = [{"tool_calls": [{"id": "c2", "function": {
+            "name": "event_rename",
+            "arguments": json.dumps({"seq": "12", "title": "新名字"})}}]},
+            {"content": "那就不改了"}]
+        client2 = FakeClient()
+        first = a.run(None, acc, client2, {"ready": True},
+                      [{"role": "user", "content": "把活动 12 改名"}])
+        refused = a.approve(acc, first["pending"]["token"], False)
+        check("点了拒绝就一条都没写", client2.calls == [], client2.calls)
+        check("拒绝之后模型接着把话说完了",
+              (refused.get("reply") or "").startswith("那就不改了"), refused)
+        check("拒绝也记进了这一步的过程",
+              any(s.get("tool") == "event_rename" for s in refused.get("steps") or []),
+              refused.get("steps"))
+
+        # 不需要批准的只读动作照旧直接跑
+        add_plan[:] = [{"tool_calls": [{"id": "c3", "function": {
+            "name": "list_rosters", "arguments": "{}"}}]}, {"content": "你有两份名单"}]
+        client3 = FakeClient()
+        plain = a.run(None, acc, client3, {"ready": True},
+                      [{"role": "user", "content": "我有几份名单"}])
+        check("只读动作不用批准就跑了",
+              client3.calls and "pending" not in plain, (client3.calls, plain))
+    finally:
+        a._post_chat = real_post
     print("== SQL 拼接审计 ==")
     import subprocess as _sp
     lint = _sp.run([sys.executable, os.path.join("tools", "sql_lint.py"), "--strict"],

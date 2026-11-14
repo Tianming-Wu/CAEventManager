@@ -343,6 +343,17 @@
       <header class="page-head">
         <h1>运维助手</h1>
         <p class="page-sub" id="assistantSub"></p>
+        <button class="as-sessionbar" id="asSessionBar" type="button">
+          <svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor"
+               stroke-width="1.6" stroke-linecap="round">
+            <path d="M3.4 5.6h13.2M3.4 10h13.2M3.4 14.4h8.4"/>
+          </svg>
+          <span id="asSessionName">新会话</span>
+          <svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor"
+               stroke-width="1.6" stroke-linecap="round">
+            <path d="M6 8.2l4 4 4-4"/>
+          </svg>
+        </button>
         <div class="page-actions">
           <button class="icon-btn" id="asSettings" type="button"
                   title="模型设置" aria-label="模型设置">
@@ -382,13 +393,13 @@
           </div>
         </div>
 
-        <button class="as-sessionbar" id="asSessionBar" type="button">
-          <svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor"
-               stroke-width="1.6" stroke-linecap="round">
-            <path d="M3.4 5.6h13.2M3.4 10h13.2M3.4 14.4h8.4"/>
-          </svg>
-          <span id="asSessionName">新会话</span>
-        </button>
+        <div class="as-approval" id="asApproval" hidden>
+          <span class="as-approval-text" id="asApprovalText"></span>
+          <span class="as-approval-acts">
+            <button class="btn sm" id="asApprovalNo" type="button">拒绝</button>
+            <button class="btn sm primary" id="asApprovalYes" type="button">批准</button>
+          </span>
+        </div>
         <form class="as-composer" id="assistantForm" autocomplete="off">
           <button class="as-expand" id="asExpand" type="button"
                   title="全屏编辑" aria-label="全屏编辑">

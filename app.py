@@ -69,7 +69,7 @@ PAGES_DIR = os.path.join(BASE_DIR, "pages")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.0.108"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.0.109"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -2894,9 +2894,25 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as exc:
                 raise model.ApiError("调用模型失败：%s" % str(exc)[:120], 502)
             # 这里**不写审计**：问一句不是一次操作，攒在审计里会把它淹掉。
-            # 助手真正改了东西时，那次写入自己会记一条，detail 里带「经助手」。
-            return self._json({"ok": True, "reply": result["reply"],
-                               "steps": result["steps"]})
+            # 助手真正改了东西时，那次写入自己会记一条，detail 里带「via: assistant」。
+            # 要写东西的那一步会带 pending 回来：人点了批准才真的执行。
+            return self._json({"ok": True, "reply": result.get("reply", ""),
+                               "steps": result.get("steps") or [],
+                               "pending": result.get("pending")})
+
+        if path == "/assistant/approve" and method == "POST":
+            # 助手要改数据的动作：批准才执行。批准本身不写审计——被批准的那次写入
+            # 自己会记一条，说明里带「via: assistant」
+            data = body()
+            try:
+                result = assistant.approve(acc, data.get("token"), bool(data.get("allow")))
+            except ValueError as exc:
+                raise model.ApiError(str(exc), 409)
+            except Exception as exc:
+                raise model.ApiError("调用模型失败：%s" % str(exc)[:120], 502)
+            return self._json({"ok": True, "reply": result.get("reply", ""),
+                               "steps": result.get("steps") or [],
+                               "pending": result.get("pending")})
 
         if path == "/assistant/title" and method == "POST":
             # 给会话起个名字：纯装饰，起不出来前端照旧用第一句话，所以不写审计

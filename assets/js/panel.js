@@ -106,6 +106,7 @@
     tokenMeta: null,       // 可选的权限与它们的说明
     assistantCfg: null,    // 这个账号的模型配置（不含密钥）
     assistantMsgs: [],     // 本次对话，只在这里，不进库
+    assistantPending: null,   // 助手要改数据、等着用户点批准的那一步
     assistantAbort: null,  // 正在等回答时的中止器：这颗按钮此刻是"停止"
     overviewCounts: {},    // 总览上的"我的名单 / 我的报名"数
     updateTo: "",          // 服务端换了版本，等一个能安全刷新的时机
@@ -5100,6 +5101,7 @@
     if (!id) {
       // 新的对话：没有要等的东西，直接就是那一页空白，中间不闪任何东西
       markLoaded("assistant");
+      hideApproval();
       drawAssistant();
       drawAssistantQuota();
       setSessionName("新会话");
@@ -5108,6 +5110,7 @@
     // 读一段存档对话：等的时候整块居中写"正在加载对话"，
     // 别先把"新对话"那一页摆出来再换成历史
     markLoading("assistant");
+    hideApproval();          // 上一条待批准的请求不属于这一段对话
     setSessionName("正在加载…");
     drawAssistant();
     return PX.api("/assistant/session?id=" + id).then(function (r) {
@@ -5395,15 +5398,28 @@
     var box = $("#assistantText");
     box.value = "";
     growAssistantBox();
+    runAssistantTurn("/assistant/chat", { messages: S.assistantMsgs });
+  }
+
+  /* 一轮问答：问一句、或者对某个写动作点批准/拒绝，走的是同一条收尾。
+     服务端会带 pending 回来（助手要改数据），那时先不动记录，等人在输入框上方那一条上点头。 */
+  function runAssistantTurn(path, body) {
     setAssistantRunning(true);
+    hideApproval();
     showThinking();
     var controller = window.AbortController ? new AbortController() : null;
     S.assistantAbort = controller;
-    PX.api("/assistant/chat", {
-      method: "POST",
-      body: { messages: S.assistantMsgs },
-      signal: controller ? controller.signal : undefined
-    }).then(function (d) {
+    if (controller) body.signal = controller.signal;
+    PX.api(path, { method: "POST", body: body }).then(function (d) {
+      if (d && d.pending) {
+        // 还没执行：把它摆到输入框上方，人点了才真的做
+        showApproval(d.pending);
+        if (d.reply) {
+          S.assistantMsgs.push({ role: "assistant", content: d.reply,
+                                 steps: d.steps || [] });
+        }
+        return;
+      }
       S.assistantMsgs.push({ role: "assistant", content: d.reply || "",
                              steps: d.steps || [] });
     }).catch(function (e) {
@@ -5420,6 +5436,31 @@
       drawAssistant();
       saveAssistantSession();
     });
+  }
+
+  /* 输入框上方那一条：「助手想执行「往名单里加一个人」：把 张三（2024001）加进名单 #3」 */
+  function showApproval(pending) {
+    S.assistantPending = pending || null;
+    var bar = $("#asApproval");
+    if (!bar) return;
+    if (!pending) { bar.hidden = true; return; }
+    $("#asApprovalText").textContent = "助手想执行「" + (pending.label || "改动") + "」：" +
+      (pending.summary || "");
+    bar.hidden = false;
+    $("#asApprovalYes").focus();
+  }
+
+  function hideApproval() {
+    S.assistantPending = null;
+    var bar = $("#asApproval");
+    if (bar) bar.hidden = true;
+  }
+
+  function answerApproval(allow) {
+    var pending = S.assistantPending;
+    if (!pending) return;
+    hideApproval();
+    runAssistantTurn("/assistant/approve", { token: pending.token, allow: !!allow });
   }
 
   function stopAssistant() {
@@ -6063,6 +6104,8 @@
     location.hash = "#/assistant";      // 新会话：点开就是初始页，发消息才落库
     openAssistantSession(0);
   });
+  $("#asApprovalYes").addEventListener("click", function () { answerApproval(true); });
+  $("#asApprovalNo").addEventListener("click", function () { answerApproval(false); });
   $("#asSessionBar").addEventListener("click", openAssistantDrawer);
   $("#asDrawerClose").addEventListener("click", closeAssistantDrawer);
   $("#asDrawerBody").addEventListener("click", assistantDrawerClick);

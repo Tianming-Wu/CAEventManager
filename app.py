@@ -69,7 +69,7 @@ PAGES_DIR = os.path.join(BASE_DIR, "pages")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.0.104"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.0.102"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -3212,9 +3212,9 @@ class Handler(BaseHTTPRequestHandler):
             limit = _int_arg(query, "limit", 30, 1, 100)
             if scope not in ("joined", "mine", "all"):
                 scope = "joined"
-            # 归档的名单：自己归档的自己看得见（只读一行清单），全部归档的只有超管看得见
+            # 归档的名单只给超级管理员看（它已经从「我的名单」里退下去了）
             archived = (query.get("archived") or ["0"])[0] in ("1", "true", "yes")
-            if archived and scope != "mine":
+            if archived:
                 need("superadmin", "owner")
             res = lists.list_rosters(lists.connect(), acc, q, scope, offset, limit,
                                      archived=archived)
@@ -3547,10 +3547,9 @@ class Handler(BaseHTTPRequestHandler):
                 scope = "joined"
             offset = _int_arg(query, "offset", 0, 0, 100000)
             limit = _int_arg(query, "limit", 30, 1, 100)
-            # 归档的报名：自己归档的自己看得见（joined / mine 都只含自己的），
-            # 全部归档的只有超管看得见
+            # 归档的报名只给超级管理员看（它已经不在这几个人的列表里了）
             archived = (query.get("archived") or ["0"])[0] in ("1", "true", "yes")
-            if archived and scope not in ("joined", "mine"):
+            if archived:
                 need("superadmin", "owner")
             res = lists.list_signups(lists.connect(), acc, q, scope, offset, limit,
                                      archived=archived)

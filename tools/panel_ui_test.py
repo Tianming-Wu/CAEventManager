@@ -1686,6 +1686,33 @@ def assistant_page(page):
                 hidden: document.getElementById('asToBottom').hidden};
     }""")
     check("点一下回到底部并自己收起来", bottom["far"] <= 4 and bottom["hidden"], bottom)
+    gap = page.evaluate("""() => {
+        document.getElementById('assistantScroll').scrollTop = 30;
+        const box = document.getElementById('assistantScroll');
+        const btn = document.getElementById('asToBottom').getBoundingClientRect();
+        const bar = box.offsetWidth - box.clientWidth;   // 滚动条占的宽度
+        return {bar: bar, clear: Math.round(box.getBoundingClientRect().right
+                                           - btn.right)};
+    }""")
+    page.wait_for_timeout(300)
+    check("回到最新让开滚动条那一条",
+          gap["clear"] >= gap["bar"] + 2, gap)
+    page.click("#asToBottom")
+    page.wait_for_timeout(600)
+
+    print("== 占用很小的时候百分比不显示成 0 ==")
+    call(owner_opener(), "/api/panel/assistant/config", {"context": 10000000})
+    page.evaluate("() => { location.hash = '#/overview'; }")
+    page.wait_for_timeout(300)
+    page.evaluate("() => { location.hash = '#/assistant'; }")
+    page.wait_for_timeout(900)
+    page.hover("#asContext")
+    page.wait_for_timeout(700)
+    tiny = page.evaluate("() => document.getElementById('asCtxPercent').textContent.trim()")
+    check("不到 1% 时给两位小数", re.fullmatch(r"\d+\.\d{2}%", tiny) is not None, tiny)
+    call(owner_opener(), "/api/panel/assistant/config", {"context": 8000})
+    page.mouse.move(6, 6)
+    page.wait_for_timeout(300)
 
     print("== 手机上的可读宽度 ==")
     wide = page.evaluate("""() => getComputedStyle(
@@ -1764,6 +1791,28 @@ def assistant_page(page):
           and page.input_value("#asModel") != "",
           (page.input_value("#asBase"), page.input_value("#asModel")))
     check("密钥框是密码型", page.get_attribute("#asKey", "type") == "password")
+    adv = page.evaluate("""() => {
+        const head = document.getElementById('asAdvToggle');
+        const body = document.getElementById('asAdvBody');
+        const ctx = document.getElementById('asCtx');
+        return {there: !!head, hidden: body.hidden,
+                inside: body.contains(ctx),
+                label: head.textContent.trim(),
+                placeholder: ctx.getAttribute('placeholder') || '',
+                hint: !!body.querySelector('.hint')};
+    }""")
+    check("上下文上限收在「高级设置」里，点开才露出来",
+          adv["there"] and adv["hidden"] and adv["inside"]
+          and adv["label"] == "高级设置", adv)
+    check("这个参数没有多余的解释文字", not adv["hint"], adv)
+    page.click("#asAdvToggle")
+    page.wait_for_timeout(300)
+    check("点一下展开，再点收起",
+          page.locator("#asAdvBody").is_visible()
+          and page.get_attribute("#asAdvToggle", "aria-expanded") == "true")
+    page.click("#asAdvToggle")
+    page.wait_for_timeout(300)
+    check("收起后又不占地方", page.locator("#asAdvBody").is_hidden())
 
     print("== 开关：和 micula 的一样是 40×20 ==")
     sw = switch_metrics(page)

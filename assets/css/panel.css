@@ -3006,10 +3006,11 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
 .as-ctx-swatch.tools { background: #a78bfa; }
 .as-ctx-swatch.messages { background: var(--accent); }
 /* 会话流右下角那颗「回到最新」：不贴边，和发送键同一条右沿 */
+/* 右边留出滚动条那一条（滚动条画在滚动容器的右沿内侧，贴太近会压上去） */
 .as-tobottom {
   position: absolute;
-  right: 10px;
-  bottom: 10px;
+  right: 22px;
+  bottom: 12px;
   z-index: 20;
   width: 32px;
   height: 32px;
@@ -3484,9 +3485,11 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
 }
 .as-send:hover:not(:disabled) { background: var(--accent-strong); }
 .as-send:disabled { opacity: .5; cursor: default; }
+/* 20px 的图标配 20 单位的 viewBox，是 1:1 的映射：
+   150% 缩放（本机就是）下每条边都落在整像素上，不会一边虚一边实看着偏一点 */
 .as-send svg {
-  width: 19px;
-  height: 19px;
+  width: 20px;
+  height: 20px;
   fill: none;
   stroke: currentColor;
   stroke-width: 2;
@@ -3499,6 +3502,30 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
 .as-expand svg, .as-icon svg { fill: none; stroke: currentColor; stroke-width: 1.6;
   stroke-linecap: round; stroke-linejoin: round; }
 
+/* 模型设置里的「高级设置」：一行小标题 + 一个箭头，点开才露出里面的参数 */
+.as-adv { margin: 14px 0 0; }
+.as-adv-head {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: .82rem;
+  cursor: pointer;
+}
+.as-adv-head:hover { color: var(--text); }
+.as-adv-head svg {
+  width: 14px;
+  height: 14px;
+  transition: transform .16s;
+}
+.as-adv-head.open svg { transform: rotate(180deg); }
+.as-adv-body { margin-top: 10px; }
+.as-adv-body[hidden] { display: none; }
 .as-models {
   margin: 6px 0 0;
   max-height: 168px;

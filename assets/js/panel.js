@@ -5023,10 +5023,16 @@
       '<p class="hint">留空表示保持现状；清除请点下面的按钮</p></div>' +
       '<p class="hint">端点需兼容 OpenAI 的 <code>/chat/completions</code>；' +
       '地址与模型留空时使用默认值</p>' +
-      '<div class="field" style="margin-top:14px"><label for="asCtx">上下文上限</label>' +
-      '<input id="asCtx" type="text" inputmode="numeric" style="max-width:160px" value="' +
-      PX.esc(String(cfg.context || cfg.defaultContext || 128000)) + '">' +
-      '<p class="hint">按 tokens 填；留 0 就按模型名猜（deepseek-flash 这类是 1000000，其余 128000），只用来算那条环的百分比</p></div>' +
+      '<div class="as-adv">' +
+      '<button class="as-adv-head" id="asAdvToggle" type="button" aria-expanded="false">' +
+      '<svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" ' +
+      'stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M6 8.2l4 4 4-4"/></svg><span>高级设置</span></button>' +
+      '<div class="as-adv-body" id="asAdvBody" hidden>' +
+      '<div class="field"><label for="asCtx">上下文上限</label>' +
+      '<input id="asCtx" type="text" inputmode="numeric" style="max-width:160px" ' +
+      'placeholder="由模型决定" value="' +
+      PX.esc(String(cfg.storedContext || "")) + '"></div></div></div>' +
       '<label class="switch" id="asResumeRow" style="margin-top:14px">' +
       '<input type="checkbox" id="asResume"' +
       ((cfg.resume === false) ? "" : " checked") + '>' +
@@ -5038,6 +5044,13 @@
       '<button class="btn primary" id="asSave" type="button">保存</button></div>');
     showKeyMask(cfg);
     $("#asSave").addEventListener("click", saveAssistantConfig);
+    $("#asAdvToggle").addEventListener("click", function () {
+      var body = $("#asAdvBody");
+      var open = body.hidden;
+      body.hidden = !open;
+      this.setAttribute("aria-expanded", open ? "true" : "false");
+      this.classList.toggle("open", open);
+    });
     $("#asModels").addEventListener("click", fetchAssistantModels);
     $("#asModelList").addEventListener("click", function (e) {
       var btn = e.target.closest("[data-model]");
@@ -5258,6 +5271,14 @@
   var CTX_RADIUS = 5.5;
   var CTX_CIRC = 2 * Math.PI * CTX_RADIUS;
 
+  /* 占用很小的时候别一律显示 0%：<1% 两位小数、<10% 一位小数、其余取整 */
+  function fmtPercent(pct) {
+    if (pct <= 0) return "0%";
+    if (pct < 1) return (Math.round(pct * 100) / 100).toFixed(2) + "%";
+    if (pct < 10) return (Math.round(pct * 10) / 10).toFixed(1) + "%";
+    return Math.round(pct) + "%";
+  }
+
   function fmtTokens(n) {
     n = Number(n) || 0;
     function one(v) {
@@ -5279,7 +5300,7 @@
     fill.setAttribute("stroke-dasharray",
       (CTX_CIRC * pct / 100).toFixed(2) + " " + CTX_CIRC.toFixed(2));
     wrap.classList.toggle("warn", pct >= 90);
-    $("#asCtxPercent").textContent = pct + "%";
+    $("#asCtxPercent").textContent = fmtPercent(pct);
     $("#asCtxFigures").textContent = fmtTokens(stats.used) + " / " +
       fmtTokens(stats.window);
     var parts = stats.parts || {};
@@ -5870,9 +5891,10 @@
 
   function saveAssistantConfig() {
     var ctxBox = $("#asCtx");
-    var ctx = ctxBox ? parseInt(ctxBox.value.replace(/[^0-9]/g, ""), 10) : NaN;
+    var raw = ctxBox ? ctxBox.value.replace(/[^0-9]/g, "") : "";
+    var ctx = raw ? parseInt(raw, 10) : 0;      // 空着就是"由模型决定"
     var body = { base: $("#asBase").value.trim(), model: $("#asModel").value.trim(),
-                 context: isNaN(ctx) ? 0 : ctx,
+                 context: ctx,
                  resume: !!($("#asResume") && $("#asResume").checked) };
     // 框里还是那串星号 = 没动过密钥，别把已有的覆盖成空
     if (!keyFieldMasked()) body.key = $("#asKey").value;

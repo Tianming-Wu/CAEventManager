@@ -47,11 +47,10 @@ DEFAULT_MODEL = "deepseek-flash"
 # 模型设置里按自己那家的实际值覆盖（存 accounts.model_ctx）
 DEFAULT_CONTEXT = 128000
 MODEL_CONTEXT = {
-    # DeepSeek 现役模型是 1M 上下文
+    # DeepSeek 现役的两个模型都是 1M 上下文。这里只列确实知道的，
+    # 旧的 deepseek-chat / deepseek-reasoner 已经下线，不再列
     "deepseek-flash": 1000000,
     "deepseek-v4-pro": 1000000,
-    "deepseek-chat": 128000,
-    "deepseek-reasoner": 128000,
 }
 
 
@@ -1127,8 +1126,9 @@ def context_stats(acc, cfg, messages, version=""):
             msg_tokens += estimate_tokens(str(m["content"])[:4000]) + 4
     window = int((cfg or {}).get("context") or model_context((cfg or {}).get("model")))
     used = sys_tokens + tools_tokens + msg_tokens
-    percent = int(round(100.0 * used / window)) if window else 0
-    return {"used": used, "window": window, "percent": min(percent, 999),
+    # 百分比给到两位小数：占用很小的时候界面上显示 0.02% 才不像"没动过"
+    percent = round(100.0 * used / window, 3) if window else 0.0
+    return {"used": used, "window": window, "percent": min(percent, 999.0),
             "parts": {"system": sys_tokens, "tools": tools_tokens,
                       "messages": msg_tokens}}
 

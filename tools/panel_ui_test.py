@@ -1197,6 +1197,7 @@ def assistant_page(page):
                                 "steps": [{"tool": "roster_entries", "ok": True},
                                           {"tool": "roster_entries", "ok": True},
                                           {"tool": "roster_add_person", "ok": True},
+                                          {"tool": "session_title", "ok": True},
                                           {"tool": "list_rosters", "ok": False}]}]})
     sid = (saved or {}).get("id")
     check("先存下一段对话", bool(sid), saved)
@@ -1219,9 +1220,36 @@ def assistant_page(page):
         }, 320);
     })"""
     if sid:
-        seen_old = page.evaluate(probe, {"last": sid})
-        check("打开存档对话时先整块显示正在加载对话", len(seen_old) > 0, seen_old)
-        page.wait_for_timeout(400)
+        # 读存档那一屏：把这条请求扣住，等"正在加载对话"确实画出来了再放行。
+        # 不扣的话本机答得太快，偶尔一帧都采不到（这条断言以前是这么飘的）
+        held = {}
+
+        def hold_session(route):
+            held["route"] = route
+
+        page.route("**/api/panel/assistant/session?id=*", hold_session)
+        page.evaluate("""(sid) => {
+            localStorage.setItem('as:lastSession', String(sid));
+            location.hash = '#/overview';
+        }""", sid)
+        page.wait_for_timeout(300)
+        page.evaluate("() => { location.hash = '#/assistant'; }")
+        shown = None
+        try:
+            page.wait_for_selector("#assistantLoading:not([hidden])", timeout=5000)
+            shown = (page.locator("#assistantLoading").is_visible()
+                     and page.locator("#assistantEmpty").is_hidden())
+        except Exception:
+            shown = False
+        check("打开存档对话时先整块显示正在加载对话", bool(shown), shown)
+        if held.get("route"):
+            try:
+                held["route"].continue_()
+            except Exception:
+                pass
+        page.unroute("**/api/panel/assistant/session?id=*")
+        page.wait_for_selector("#assistantLoading", state="hidden", timeout=8000)
+        page.wait_for_timeout(200)
         check("读完之后历史在上面",
               "你好" in page.inner_text("#assistantLog"),
               page.inner_text("#assistantLog")[:80])
@@ -1257,6 +1285,10 @@ def assistant_page(page):
     check("同一个工具连调两次并成一条", "读取名单成员 ×2" in [c["text"] for c in chips], chips)
     check("写动作的提示用强调色分清",
           any(c["text"] == "写入名单" and c["write"] for c in chips), chips)
+    check("工具名都换成了人话，没有一个英文名漏出来",
+          not any(re.match(r"^[a-z_]+$", c["text"]) for c in chips), chips)
+    check("改会话标题也是写动作，用强调色",
+          any(c["text"] == "修改会话标题" and c["write"] for c in chips), chips)
     check("没做成的动作标红，不再挂一句“未获准”",
           any(c["text"] == "读取名单列表" and c["bad"] and not c["write"]
               and "未获准" not in c["text"] for c in chips), chips)

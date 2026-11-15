@@ -500,6 +500,21 @@ def _tool_event_rename(client, args):
     return {"ok": True, "seq": seq, "title": title[:60]}
 
 
+def _tool_session_title(client, args):
+    """给**当前这一段对话**改名。会话 id 由平台注入（模型不知道自己在哪一段里）。"""
+    sid = int(args.get("_session") or 0)
+    title = str(args.get("title") or "").strip()
+    if not sid:
+        return {"error": "这段对话还没存档，等它存下来再改名"}
+    if not title:
+        return {"error": "需要 title"}
+    title = title[:60]
+    res = client.post("/api/panel/assistant/session/rename", {"id": sid, "title": title})
+    if res.get("ok") is False:
+        return {"error": res.get("error") or "没改成"}
+    return {"ok": True, "session_id": sid, "title": title}
+
+
 def _tool_list_docs(client, args):
     q = (args.get("q") or "").strip().lower()
     rows = [d for d in doc_entries()
@@ -616,6 +631,15 @@ TOOLS = [
                                    "title": {"type": "string"}},
                     "required": ["seq", "title"]},
      "summary": lambda a: "把活动 #%s 改名为「%s」" % (a.get("seq") or "?", a.get("title") or "")},
+    {"name": "session_title", "run": _tool_session_title, "write": True,
+     "needs_session": True,
+     "description": "给当前这一段对话改名字（只是这段会话的标题，不动平台上的数据）。"
+                    "用户说「把这段对话改名叫…」时用它；不超过 12 个字最好读",
+     "parameters": {"type": "object",
+                    "properties": {"title": {"type": "string",
+                                             "description": "新的会话标题"}},
+                    "required": ["title"]},
+     "summary": lambda a: "把这段对话改名为「%s」" % (a.get("title") or "")},
 ]
 
 BY_NAME = {t["name"]: t for t in TOOLS}
@@ -626,7 +650,8 @@ SYSTEM_PROMPT = (
     "1. 只回答平台范围内的事；不清楚就先调用工具查，别猜。\n"
     "2. 你只能做当前账号有权做的事。工具报无权时照实说，别绕。\n"
     "3. 要改数据就直接调用对应的写工具：往名单里加人、把人从名单里移出、改报名的时间窗与名额、"
-    "改活动名称。调用之后平台会把动作摆到用户面前，用户点了批准才真的写进去；没批准就当没做成，"
+    "改活动名称；用户让你给这段对话改名时用 session_title。"
+    "调用之后平台会把动作摆到用户面前，用户点了批准才真的写进去；没批准就当没做成，"
     "照实说一句，不要换个说法反复重试。这些以外的事平台不开放，告诉用户去哪个页面操作，"
     "并说清是哪个页面。\n"
     "4. 回答用简体中文、书面语，简洁；数字与名字要准确，不要编造。\n"
@@ -942,7 +967,7 @@ def _pending_view(token, call):
             "summary": summary or (policy.describe(name) or name)}
 
 
-def _call_tool(acc, client, call):
+def _call_tool(acc, client, call, session=0):
     """执行一个工具调用，返回给模型看的结果（写动作也是从这里走的，只是在批准之后）。"""
     fn = (call.get("function") or {})
     name = fn.get("name") or ""
@@ -954,6 +979,9 @@ def _call_tool(acc, client, call):
     elif not allowed:
         result = {"error": reason}
     else:
+        if tool.get("needs_session"):
+            # 模型不知道自己在哪一段对话里跑：会话 id 由平台补进去
+            args = dict(args, _session=int(session or 0))
         try:
             result = tool["run"](client, args)
         except Exception as exc:                        # 工具自己出错不该炸整轮
@@ -987,7 +1015,7 @@ def _drive(acc, cfg, client, convo, steps, version, calls, session=0):
                 token = _stash(acc, cfg, client, convo, steps, calls, version, session)
                 return {"reply": "", "steps": steps,
                         "pending": _pending_view(token, call)}
-            name, _args, result = _call_tool(acc, client, call)
+            name, _args, result = _call_tool(acc, client, call, session)
             steps.append({"tool": name, "ok": "error" not in result,
                           "note": result.get("error") or ""})
             convo.append({"role": "tool", "tool_call_id": call.get("id") or name,
@@ -1025,7 +1053,8 @@ def approve(acc, token, allow):
     fn = (call.get("function") or {})
     name = fn.get("name") or ""
     if allow:
-        name, _args, result = _call_tool(acc, grip["client"], call)
+        name, _args, result = _call_tool(acc, grip["client"], call,
+                                        grip.get("session") or 0)
     else:
         result = {"ok": False, "refused": "用户拒绝了这一步，没有执行"}
     grip["steps"].append({"tool": name, "ok": "error" not in result

@@ -4914,12 +4914,14 @@
     roster_add_person: "写入名单",
     roster_remove_person: "移出名单",
     signup_window: "修改报名设置",
-    event_rename: "修改活动名称"
+    event_rename: "修改活动名称",
+    session_title: "修改会话标题"
   };
 
   /* 会真的改数据的动作：标签用强调色，跟只读的那些分开 */
   var WRITE_TOOLS = {
-    roster_add_person: 1, roster_remove_person: 1, signup_window: 1, event_rename: 1
+    roster_add_person: 1, roster_remove_person: 1, signup_window: 1, event_rename: 1,
+    session_title: 1
   };
 
   /* 一步一行会刷出一串重复标签：同一轮里连调两次名单就并成「读取名单成员 ×2」 */
@@ -5104,9 +5106,14 @@
       S.assistantUsed = d.used;
       S.assistantQuota = d.quota;
       try { localStorage.setItem("as:lastSession", String(d.id)); } catch (e) {}
+      setSessionInHash(d.id);
       if (fresh) {
-        setSessionInHash(d.id);
         setSessionName(currentTitle());
+        S.assistantTitlePending = true;   // 这一段是新存下来的：该起个短名字
+      }
+      // 起过一次就不再起
+      if (S.assistantTitlePending && !S.assistantTitleManual) {
+        S.assistantTitlePending = false;
         autoTitleSession(d.id);
       }
       drawAssistantQuota();
@@ -5114,6 +5121,28 @@
       // 满了就说清楚，别默默丢掉用户的对话
       if (e.status === 413) PX.toast(PX.esc(e.message), true);
     });
+  }
+
+  /* 发第一句话之前先把会话存下来。
+     两个理由：挂起的写动作是按会话 id 记的（没 id 就点不到那张卡片上的小红点），
+     助手要给自己这段对话改名也得有个 id 可改。存不下来就照常聊，只是刷新之后找不回来 */
+  function ensureAssistantSession() {
+    if (S.assistantSessionId) return Promise.resolve();
+    var msgs = S.assistantMsgs || [];
+    if (!msgs.length) return Promise.resolve();
+    return PX.api("/assistant/session/save", {
+      method: "POST",
+      body: { id: 0, title: currentTitle(), messages: msgs }
+    }).then(function (d) {
+      S.assistantSessionId = d.id;
+      S.assistantUsed = d.used;
+      S.assistantQuota = d.quota;
+      S.assistantTitlePending = true;   // 短名字等这一轮答完再起
+      try { localStorage.setItem("as:lastSession", String(d.id)); } catch (e) {}
+      setSessionInHash(d.id);
+      setSessionName(currentTitle());
+      drawAssistantQuota();
+    }).catch(function () { /* 存不下也照常聊 */ });
   }
 
   function drawAssistantQuota() {
@@ -5141,13 +5170,20 @@
   function setSessionInHash(id) {
     if (!id) return;
     var want = "#/assistant/" + id;
-    if (location.hash !== want) location.replace(want);
+    if (location.hash === want) return;
+    // 只把地址换成带 id 的那一版，不再走一遍 onRoute：刚存下来的这一段没必要重读
+    try {
+      history.replaceState(null, "", want);
+    } catch (e) {
+      location.replace(want);
+    }
   }
 
   function openAssistantSession(id) {
     S.assistantSessionId = id;
     S.assistantMsgs = [];
     S.assistantTitleManual = false;   // 换了一段对话："名字是人改的"这个标记重新算
+    S.assistantTitlePending = false;
     if (!id) {
       // 新的对话：没有要等的东西，直接就是那一页空白，中间不闪任何东西
       markLoaded("assistant");
@@ -5502,8 +5538,11 @@
     var box = $("#assistantText");
     box.value = "";
     growAssistantBox();
-    runAssistantTurn("/assistant/chat", { messages: S.assistantMsgs,
-                                          session: S.assistantSessionId || 0 });
+    // 先把这段对话存下来再问：会话 id 一早就有了，写动作与改名都挂在它上面
+    ensureAssistantSession().then(function () {
+      runAssistantTurn("/assistant/chat", { messages: S.assistantMsgs,
+                                            session: S.assistantSessionId || 0 });
+    });
   }
 
   /* 一轮问答：问一句、或者对某个写动作点批准/拒绝，走的是同一条收尾。
@@ -5515,7 +5554,9 @@
     var controller = window.AbortController ? new AbortController() : null;
     S.assistantAbort = controller;
     if (controller) body.signal = controller.signal;
+    var out = null;
     PX.api(path, { method: "POST", body: body }).then(function (d) {
+      out = d;
       if (d && d.pending) {
         // 还没执行：把它摆到输入框上方，人点了才真的做
         showApproval(d.pending);
@@ -5540,8 +5581,25 @@
       hideThinking();
       setAssistantRunning(false);
       drawAssistant();
+      // 助手刚刚给这段对话改了名：把这一条上的名字换成新的
+      var titled = ((out && out.steps) || []).some(function (s) {
+        return s.tool === "session_title" && s.ok;
+      });
+      if (titled) refreshSessionName();
       saveAssistantSession();
     });
+  }
+
+  /* 会话标题被助手改过之后，从服务端取一次名字换上（它只动这一处，别整段重读） */
+  function refreshSessionName() {
+    if (!S.assistantSessionId) return Promise.resolve();
+    return PX.api("/assistant/session?id=" + S.assistantSessionId).then(function (r) {
+      var title = (r.session && r.session.title) || "";
+      if (!title) return;
+      S.assistantTitleManual = true;   // 名字是这一次改的，别再让自动起名盖回去
+      setSessionName(title);
+      refreshAssistantDrawer();
+    }).catch(function () { /* 名字只是好看，取不到就算了 */ });
   }
 
   /* 输入框上方那一条：「助手想执行「往名单里加一个人」：把 张三（2024001）加进名单 #3」 */

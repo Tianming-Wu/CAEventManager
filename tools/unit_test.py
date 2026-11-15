@@ -715,6 +715,37 @@ def main():
         check("提示词要求在当轮重新取数，不吃上一轮的结论",
               "每一轮都重新取数" in a.SYSTEM_PROMPT
               and "不能当成结论" in a.SYSTEM_PROMPT, a.SYSTEM_PROMPT[-160:])
+
+        # 改当前这段对话的标题：会话 id 由平台注入，模型不必知道自己在哪一段里
+        a._PENDING.clear()
+        add_plan[:] = [{"tool_calls": [{"id": "c6", "function": {
+            "name": "session_title",
+            "arguments": json.dumps({"title": "报名排查"})}}]},
+            {"content": "改好了"}]
+        tc = FakeClient()
+        want = a.run(None, acc, tc, {"ready": True},
+                     [{"role": "user", "content": "把这段对话改名叫报名排查"}], session=42)
+        check("改名也要先问一句",
+              (want.get("pending") or {}).get("action") == "session_title"
+              and not tc.calls, (want.get("pending"), tc.calls))
+        check("批准条上写清改成什么",
+              "报名排查" in ((want.get("pending") or {}).get("summary") or ""),
+              want.get("pending"))
+        done_t = a.approve(acc, (want.get("pending") or {}).get("token"), True)
+        ren = [c for c in tc.calls
+               if c[0] == "/api/panel/assistant/session/rename"]
+        check("批准之后改的是当前这一段",
+              bool(ren) and ren[0][1].get("id") == 42
+              and ren[0][1].get("title") == "报名排查", tc.calls)
+        check("改名之后模型把话说完了",
+              (done_t.get("reply") or "").startswith("改好了"), done_t)
+
+        # 还没存档的对话没有 id 可改：说清楚，别瞎写一个
+        noname = a._tool_session_title(FakeClient(), {"title": "x"})
+        check("没有会话 id 时不往下写",
+              bool(noname.get("error")) and "存档" in noname.get("error", ""), noname)
+        check("改名在策略里是写动作", app.policy.is_write("session_title"),
+              app.policy.describe("session_title"))
     finally:
         a._post_chat = real_post
     print("== SQL 拼接审计 ==")

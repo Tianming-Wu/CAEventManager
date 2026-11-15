@@ -1362,13 +1362,15 @@ def assistant_page(page):
         const log = document.getElementById('assistantLog');
         const steps = log.querySelector('.as-steps');
         const chips = Array.from(log.querySelectorAll('.as-step'));
-        const right = log.getBoundingClientRect().right;
-        return {overflow: chips.some(c => c.getBoundingClientRect().right > right + 1),
+        const bubble = steps.closest('.as-text').getBoundingClientRect();
+        return {overflow: chips.some(c => c.getBoundingClientRect().right
+                                         > bubble.right + 1),
                 wrap: getComputedStyle(steps).flexWrap,
+                inside: !!steps.closest('.as-text'),
                 tips: chips.filter(c => c.hasAttribute('data-step-tip')).length};
     }""")
-    check("胶囊不超出消息区，超了就换行",
-          not fit["overflow"] and fit["wrap"] == "wrap", fit)
+    check("胶囊在气泡里，不超出气泡右边缘，放不下就换行",
+          not fit["overflow"] and fit["wrap"] == "wrap" and fit["inside"], fit)
     check("每颗胶囊都带着自己的摘要", fit["tips"] == 4, fit)
     page.hover('#assistantLog .as-step[data-step-tip="0"]')
     page.wait_for_timeout(500)
@@ -1905,7 +1907,7 @@ def assistant_page(page):
     page.wait_for_timeout(400)
     check("点它先问一句",
           "清除密钥" in page.inner_text("#overlayTitle")
-          and "不能用了" in page.inner_text("#overlayBody"),
+          and "不可用" in page.inner_text("#overlayBody"),
           (page.inner_text("#overlayTitle"), page.inner_text("#overlayBody")[:60]))
     page.click("#confirmGo")
     page.wait_for_timeout(700)

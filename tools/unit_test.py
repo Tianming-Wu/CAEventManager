@@ -774,9 +774,9 @@ def main():
         finally:
             a.say_progress = real_progress
         phases = [p for p, _ in seen]
-        check("一轮里依次是 思考 → 执行工具 → 生成回答 → 收尾",
-              phases[:1] == ["think"] and "tools" in phases and "write" in phases
-              and phases[-1] == "done", seen)
+        check("一轮里依次是 思考 → 执行工具 → 再思考 → 收尾",
+              phases[:1] == ["think"] and "tools" in phases
+              and phases[-1] == "done" and "write" not in phases, seen)
         check("执行工具那一步带上了正式名称",
               ("tools", "读取名单列表") in seen, seen)
         check("收尾之后进度清空", a.progress_of(acc, 7) == {"phase": "", "label": ""},

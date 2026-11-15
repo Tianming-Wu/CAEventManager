@@ -69,7 +69,7 @@ PAGES_DIR = os.path.join(BASE_DIR, "pages")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.14.123"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.15.124"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -2913,6 +2913,56 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True, "reply": result.get("reply", ""),
                                "steps": result.get("steps") or [],
                                "pending": result.get("pending")})
+
+        if path == "/assistant/stream" and method == "POST":
+            # 和 /assistant/chat 做同一件事，只是把最后那段回答逐字推回去（SSE）。
+            # 收尾用关连接表示：写完就 close，浏览器读到 EOF。
+            data = body()
+            cfg = assistant.config_of(acc)
+            if not cfg["ready"]:
+                raise model.ApiError("还没有配置模型：先在「运维助手」页填接口地址、模型名与密钥")
+            full = dict(cfg, key=acc["model_key"] or "")
+            prefix = (raw_path or "").split("/api/panel")[0].rstrip("/")
+            client = assistant.PanelClient(self.server.server_address[1], prefix,
+                                           self.headers.get("Cookie") or "")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Accel-Buffering", "no")
+            self.send_header("Connection", "close")
+            self.end_headers()
+            self.close_connection = True
+
+            def emit(event):
+                try:
+                    self._sse(event)
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError, OSError):
+                    pass                      # 人已经把页面关了，别再往下算
+
+            try:
+                if data.get("token"):
+                    # 批准/拒绝之后接着跑这一轮
+                    result = assistant.approve(acc, data.get("token"),
+                                               bool(data.get("allow")), emit=emit)
+                else:
+                    messages = data.get("messages")
+                    if not isinstance(messages, list):
+                        raise model.ApiError("对话内容格式不对")
+                    try:
+                        session = int(data.get("session") or 0)
+                    except (TypeError, ValueError):
+                        session = 0
+                    result = assistant.run(conn, acc, client, full, messages,
+                                           version=VERSION, session=session, emit=emit)
+                emit(dict({"type": "done", "reply": result.get("reply", ""),
+                           "steps": result.get("steps") or [],
+                           "pending": result.get("pending")}, ok=True))
+            except model.ApiError as exc:
+                emit({"type": "error", "error": exc.message})
+            except Exception as exc:
+                emit({"type": "error", "error": "调用模型失败：%s" % str(exc)[:120]})
+            return
 
         if path == "/assistant/approve" and method == "POST":
             # 助手要改数据的动作：批准才执行。批准本身不写审计——被批准的那次写入

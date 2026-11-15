@@ -3199,6 +3199,17 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
 .as-text.md a { color: var(--accent-strong); }
 
 /* ---- 回答里的 Markdown：标题分六级、引用、分隔线、表格、任务框、代码块 ---- */
+/* 正在写的那一段末尾的光标 */
+.as-caret {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: -2px;
+  background: var(--accent);
+  animation: as-caret 1s steps(1) infinite;
+}
+@keyframes as-caret { 50% { opacity: 0; } }
 .as-text.md strong { font-weight: 650; }
 .as-text.md em { font-style: italic; }
 .as-text.md del { color: var(--muted); }
@@ -3341,9 +3352,10 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   border: 1px solid var(--line);
   color: var(--muted);
 }
-/* 胶囊不许撑出边界：一行放不下就换行，单个太长的截断 */
+/* 胶囊在气泡里面（第一行），所以天生不会超出气泡的右边缘；放不下就换行 */
 .as-bot { max-width: 100%; }
-.as-steps { max-width: 100%; }
+.as-steps { margin: 0 0 8px; }
+.as-text.md > .as-steps:last-child { margin-bottom: 0; }
 .as-step {
   max-width: 100%;
   overflow: hidden;

@@ -5112,7 +5112,7 @@
     });
     $("#asClearKey").addEventListener("click", function () {
       // 清掉之后助手就不能用了，要重填：先问一句，不用密码
-      confirmHighRisk("清除密钥", "清除之后助手就不能用了，要重新填一把。",
+      confirmHighRisk("清除密钥", "清除密钥之后助手将不可用，直到再次填入有效密钥。",
                       "清除", true, function () {
         PX.api("/assistant/config", { method: "POST", body: { clear: true } })
           .then(function (d) {
@@ -5644,10 +5644,11 @@
         return '<span class="as-step' + (s.write ? " is-write" : "") + '"' + tip +
           ">" + PX.esc(s.label) + "</span>";
       }).join("");
-      return '<div class="as-msg as-bot">' +
+      // 胶囊放进气泡里：它不许超过气泡的右边缘，放进去就自然被约束住了
+      return '<div class="as-msg as-bot"><div class="as-body">' +
+        '<div class="as-text md">' +
         (steps ? '<div class="as-steps">' + steps + "</div>" : "") +
-        '<div class="as-body"><div class="as-text md">' + PX.md(m.content || "") +
-        "</div>" + foot + "</div></div>";
+        PX.md(m.content || "") + "</div>" + foot + "</div></div>";
     }).join("");
     if (thinkingOn) paintThinking();   // 重画之后把"正在…"那一行补回去
     scrollAssistant();
@@ -5698,7 +5699,7 @@
   }
 
   /* 这一轮走到哪一步：think / tools / write，说给用户听 */
-  var PHASE_TEXT = { think: "正在思考", write: "正在生成回答" };
+  var PHASE_TEXT = { think: "正在思考" };
 
   function phaseText(phase, label) {
     if (phase === "tools") {
@@ -5806,25 +5807,44 @@
     startAssistantPulse();
     var controller = window.AbortController ? new AbortController() : null;
     S.assistantAbort = controller;
-    if (controller) body.signal = controller.signal;
+    S.assistantStream = { text: "", stick: nearBottom(), frame: null };
     var out = null;
-    PX.api(path, { method: "POST", body: body }).then(function (d) {
-      out = d;
-      if (d && d.pending) {
-        // 还没执行：把它摆到输入框上方，人点了才真的做
-        showApproval(d.pending);
-        if (d.reply) {
-          S.assistantMsgs.push({ role: "assistant", content: d.reply,
-                                 steps: d.steps || [], ts: nowStamp() });
+    var payload = path === "/assistant/chat"
+      ? { messages: body.messages, session: body.session || 0 }
+      : { token: body.token, allow: !!body.allow };
+    fetch(PX.PREFIX + "/api/panel/assistant/stream", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json",
+                 "X-Requested-With": "CAEventManager" },
+      body: JSON.stringify(payload),
+      signal: controller ? controller.signal : undefined
+    }).then(function (res) {
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      return readStream(res, function (ev) {
+        if (ev.type === "delta") {
+          if (!S.assistantStream) return;
+          S.assistantStream.text += ev.text || "";
+          hideThinking();          // 有字出来了：状态行让位给正在写的这段
+          scheduleStreamView();
+        } else if (ev.type === "reset") {
+          if (S.assistantStream) S.assistantStream.text = "";
+          scheduleStreamView();
+        } else if (ev.type === "phase") {
+          setThinkingLabel(phaseText(ev.phase, ev.label));
+        } else if (ev.type === "done") {
+          out = ev;
+        } else if (ev.type === "error") {
+          throw new Error(ev.error || "出错了");
         }
-        return;
-      }
-      S.assistantMsgs.push({ role: "assistant", content: d.reply || "",
-                             steps: d.steps || [], ts: nowStamp() });
+      });
     }).catch(function (e) {
-      if (e && (e.name === "AbortError" || /abort/i.test(String(e.message)))) {
-        S.assistantMsgs.push({ role: "assistant", content: "（已停止）", steps: [],
-                               ts: nowStamp() });
+      var abort = e && (e.name === "AbortError" || /abort/i.test(String(e.message)));
+      var partial = (S.assistantStream && S.assistantStream.text) || "";
+      if (abort) {
+        S.assistantMsgs.push({ role: "assistant",
+                               content: partial ? partial + "\n\n（已停止）" : "（已停止）",
+                               steps: [], ts: nowStamp() });
       } else {
         S.assistantMsgs.push({ role: "assistant", content: "出错了：" + e.message,
                                steps: [], ts: nowStamp() });
@@ -5834,15 +5854,122 @@
       stopAssistantPulse();
       hideThinking();
       setAssistantRunning(false);
+      dropStreamView();
+      var steps = (out && out.steps) || [];
+      if (out && out.pending) {
+        showApproval(out.pending);
+        if (out.reply) {
+          S.assistantMsgs.push({ role: "assistant", content: out.reply,
+                                 steps: steps, ts: nowStamp() });
+        }
+      } else if (out) {
+        S.assistantMsgs.push({ role: "assistant", content: out.reply || "",
+                               steps: steps, ts: nowStamp() });
+      }
       drawAssistant();
       // 助手刚刚给这段对话改了名：把这一条上的名字换成新的
-      var titled = ((out && out.steps) || []).some(function (s) {
-        return s.tool === "session_title" && s.ok;
-      });
+      var titled = steps.some(function (s) { return s.tool === "session_title" && s.ok; });
       if (titled) refreshSessionName();
       saveAssistantSession();
       loadContext();
     });
+  }
+
+  /* ---- 逐字输出：SSE 的分块读、增量渲染、跟着内容的滚动 ---- */
+  function readStream(res, onEvent) {
+    function handle(block) {
+      (block || "").split("\n").forEach(function (line) {
+        if (line.indexOf("data:") !== 0) return;
+        var data = line.slice(5).trim();
+        if (!data || data === "[DONE]") return;
+        try { onEvent(JSON.parse(data)); } catch (e) { /* 半个包就丢掉 */ }
+      });
+    }
+    if (!res.body || !res.body.getReader) {
+      return res.text().then(function (all) { handle(all); });
+    }
+    var reader = res.body.getReader();
+    var decoder = window.TextDecoder ? new TextDecoder() : null;
+    var buffer = "";
+    function pump() {
+      return reader.read().then(function (chunk) {
+        if (chunk.done) {
+          if (buffer.trim()) handle(buffer);
+          return;
+        }
+        buffer += decoder ? decoder.decode(chunk.value, { stream: true })
+                          : "";
+        var cut;
+        while ((cut = buffer.indexOf("\n\n")) >= 0) {
+          handle(buffer.slice(0, cut));
+          buffer = buffer.slice(cut + 2);
+        }
+        return pump();
+      });
+    }
+    return pump();
+  }
+
+  function nearBottom() {
+    var box = $("#assistantScroll");
+    if (!box) return true;
+    return box.scrollHeight - box.scrollTop - box.clientHeight <= 48;
+  }
+
+  /* 正在写的那一段：单独一个气泡，内容一变就重画（每帧最多一次） */
+  function scheduleStreamView() {
+    var state = S.assistantStream;
+    if (!state || state.frame) return;
+    state.frame = window.requestAnimationFrame(function () {
+      state.frame = null;
+      paintStreamView();
+    });
+  }
+
+  function paintStreamView() {
+    var state = S.assistantStream;
+    var log = $("#assistantLog");
+    if (!state || !log) return;
+    var el = $("#asStream");
+    if (!el) {
+      el = document.createElement("div");
+      el.className = "as-msg as-bot";
+      el.id = "asStream";
+      el.innerHTML = '<div class="as-body"><div class="as-text md"></div></div>';
+      log.appendChild(el);
+    }
+    el.querySelector(".as-text").innerHTML = PX.md(state.text) +
+      '<span class="as-caret"></span>';
+    followStream(el);
+  }
+
+  /* 滚动：贴着底部时跟着走；这一段比一屏还长就停在它的顶部，
+     让人从头读，而不是一路被拽到底。用户自己往上翻过就不再跟。 */
+  function followStream(el) {
+    var state = S.assistantStream;
+    var box = $("#assistantScroll");
+    if (!state || !box || !state.stick) return;
+    var boxRect = box.getBoundingClientRect();
+    var elRect = el.getBoundingClientRect();
+    var topInBox = elRect.top - boxRect.top + box.scrollTop;
+    var room = box.clientHeight - 32;
+    var want = elRect.height > room
+      ? topInBox - 12
+      : box.scrollHeight - box.clientHeight;
+    want = Math.max(0, Math.min(want, box.scrollHeight - box.clientHeight));
+    if (Math.abs(box.scrollTop - want) > 0.5) {
+      S.streamScrollOwn = true;
+      box.scrollTop = want;
+    }
+  }
+
+  function dropStreamView() {
+    var el = $("#asStream");
+    if (el) el.remove();
+    if (S.assistantStream && S.assistantStream.frame) {
+      window.cancelAnimationFrame(S.assistantStream.frame);
+    }
+    S.assistantStream = null;
   }
 
   /* 会话标题被助手改过之后，从服务端取一次名字换上（它只动这一处，别整段重读） */
@@ -6632,7 +6759,14 @@
   $("#asApprovalNo").addEventListener("click", function () { answerApproval(false); });
   $("#asApprovalMore").addEventListener("click", toggleApprovalArgs);
   $("#asSessionBar").addEventListener("click", openAssistantDrawer);
-  $("#assistantScroll").addEventListener("scroll", syncToBottom);
+  $("#assistantScroll").addEventListener("scroll", function () {
+    if (S.streamScrollOwn) {
+      S.streamScrollOwn = false;      // 这一跳是我们自己滚的，不算用户的意思
+    } else if (S.assistantStream) {
+      S.assistantStream.stick = nearBottom();
+    }
+    syncToBottom();
+  });
   $("#asToBottom").addEventListener("click", function () {
     var box = $("#assistantScroll");
     if (!box) return;

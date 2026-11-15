@@ -858,12 +858,12 @@ def tool_schema(account=None):
 # --------------------------------------------------------------------------- #
 # 与模型对话
 # --------------------------------------------------------------------------- #
-def _post_chat(cfg, messages, account=None):
+def _chat_request(cfg, messages, account=None, stream=False):
     base = (cfg.get("base") or "").rstrip("/")
     if not base.endswith("/chat/completions"):
         base = base + "/chat/completions"
     body = {"model": cfg.get("model"), "messages": messages, "temperature": 0.2,
-            "stream": False}
+            "stream": bool(stream)}
     tools = tool_schema(account)
     if tools:
         body["tools"] = tools
@@ -872,9 +872,61 @@ def _post_chat(cfg, messages, account=None):
         base, data=json.dumps(body).encode("utf-8"), method="POST",
         headers={"Content-Type": "application/json",
                  "Authorization": "Bearer " + cfg["key"],
-                 "User-Agent": UA})
-    with urllib.request.urlopen(req, timeout=TIMEOUT) as res:
+                 "User-Agent": UA,
+                 "Accept": "text/event-stream" if stream else "application/json"})
+    return urllib.request.urlopen(req, timeout=TIMEOUT)
+
+
+def _post_chat(cfg, messages, account=None):
+    with _chat_request(cfg, messages, account) as res:
         return json.loads(res.read().decode("utf-8") or "{}")
+
+
+def _post_chat_stream(cfg, messages, account=None, emit=None):
+    """流式要一行：把模型的增量交给 emit，最后拼成和 _post_chat 一样的形状。
+
+    上游不认 stream 的时候（有的本地模型就回一整个 JSON），照常按整包解析，
+    只是没有逐字效果——功能不会因此坏掉。
+    """
+    content, calls = [], {}
+    with _chat_request(cfg, messages, account, stream=True) as res:
+        ctype = (res.headers.get("Content-Type") or "").lower()
+        if "event-stream" not in ctype and "stream" not in ctype:
+            payload = json.loads(res.read().decode("utf-8") or "{}")
+            return ((payload.get("choices") or [{}])[0].get("message") or {})
+        for raw in res:
+            line = raw.decode("utf-8", "replace").strip()
+            if not line or not line.startswith("data:"):
+                continue
+            data = line[5:].strip()
+            if data == "[DONE]":
+                break
+            try:
+                chunk = json.loads(data)
+            except ValueError:
+                continue
+            choice = (chunk.get("choices") or [{}])[0]
+            delta = choice.get("delta") or {}
+            piece = delta.get("content")
+            if piece:
+                content.append(piece)
+                if emit:
+                    emit({"type": "delta", "text": piece})
+            for item in (delta.get("tool_calls") or []):
+                idx = int(item.get("index") or 0)
+                slot = calls.setdefault(idx, {"id": "", "type": "function",
+                                              "function": {"name": "", "arguments": ""}})
+                if item.get("id"):
+                    slot["id"] = item["id"]
+                fn = item.get("function") or {}
+                if fn.get("name"):
+                    slot["function"]["name"] = fn["name"]
+                if fn.get("arguments"):
+                    slot["function"]["arguments"] += fn["arguments"]
+    out = {"role": "assistant", "content": "".join(content)}
+    if calls:
+        out["tool_calls"] = [calls[k] for k in sorted(calls)]
+    return out
 
 
 def _parse_arguments(raw):
@@ -1109,17 +1161,25 @@ def _call_tool(acc, client, call, session=0):
     return name, args, result
 
 
-def _drive(acc, cfg, client, convo, steps, version, calls, session=0):
-    """跑模型这一轮。``calls`` 非空表示从"已经问过模型、手上还有几个调用"接着跑。"""
+def _drive(acc, cfg, client, convo, steps, version, calls, session=0, emit=None):
+    """跑模型这一轮。``calls`` 非空表示从"已经问过模型、手上还有几个调用"接着跑。
+
+    ``emit`` 给了就走流式：模型的文字增量一个个交出去，界面上边收边画。
+    """
     for _ in range(MAX_STEPS):
         if calls is None:
-            # 头一次问模型是在想下一步；跑过工具之后再问，是在写回答
-            say_progress(acc, session, "think" if not steps else "write")
-            payload = _post_chat(cfg, convo, account=acc)
-            msg = ((payload.get("choices") or [{}])[0].get("message") or {})
+            say_progress(acc, session, "think")
+            if emit:
+                msg = _post_chat_stream(cfg, convo, account=acc, emit=emit)
+            else:
+                payload = _post_chat(cfg, convo, account=acc)
+                msg = ((payload.get("choices") or [{}])[0].get("message") or {})
             calls = msg.get("tool_calls") or []
             if not calls:
                 return {"reply": (msg.get("content") or "").strip(), "steps": steps}
+            if msg.get("content") and emit:
+                # 边说边调工具：刚才逐字画出来的那段要收回去，等这一轮真正结束再一起给
+                emit({"type": "reset"})
             convo.append({"role": "assistant", "content": msg.get("content") or "",
                           "tool_calls": calls})
         while calls:
@@ -1134,6 +1194,8 @@ def _drive(acc, cfg, client, convo, steps, version, calls, session=0):
                 return {"reply": "", "steps": steps,
                         "pending": _pending_view(token, call)}
             say_progress(acc, session, "tools", policy.label_of(name))
+            if emit:
+                emit({"type": "phase", "phase": "tools", "label": policy.label_of(name)})
             name, _args, result = _call_tool(acc, client, call, session)
             steps.append({"tool": name, "ok": "error" not in result,
                           "note": result.get("error") or "",
@@ -1168,7 +1230,7 @@ def context_stats(acc, cfg, messages, version=""):
                       "messages": msg_tokens}}
 
 
-def run(conn, acc, client, cfg, messages, log=print, version="", session=0):
+def run(conn, acc, client, cfg, messages, log=print, version="", session=0, emit=None):
     """One question in, one answer out.  Returns {reply, steps} or {pending}."""
     names = [t["function"]["name"] for t in tool_schema(acc)]
     convo = [{"role": "system", "content": system_prompt(acc, names, version)}]
@@ -1179,12 +1241,12 @@ def run(conn, acc, client, cfg, messages, log=print, version="", session=0):
     if not convo or convo[-1]["role"] != "user":
         raise ValueError("最后一句应该是用户的话")
     try:
-        return _drive(acc, cfg, client, convo, [], version, None, session)
+        return _drive(acc, cfg, client, convo, [], version, None, session, emit)
     finally:
         say_progress(acc, session, "done")
 
 
-def approve(acc, token, allow):
+def approve(acc, token, allow, emit=None):
     """用户对某个写动作点了批准或拒绝：接着把这一轮跑完。
 
     ``allow`` 为假时把"用户拒绝了"写进工具结果，让模型自己收尾——它知道该说没改成。
@@ -1212,6 +1274,6 @@ def approve(acc, token, allow):
                           "content": _clip(json.dumps(result, ensure_ascii=False), 6000)})
     try:
         return _drive(acc, grip["cfg"], grip["client"], grip["convo"], grip["steps"],
-                      grip["version"], calls[1:], grip.get("session") or 0)
+                      grip["version"], calls[1:], grip.get("session") or 0, emit)
     finally:
         say_progress(acc, grip.get("session") or 0, "done")

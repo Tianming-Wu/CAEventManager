@@ -96,6 +96,25 @@ def call(opener, path, body=None, expect=200, method=None,
         return raw
 
 
+def sse_call(opener, path, body=None):
+    """打一条 SSE：把每一段 data: 解析成事件列表（连接关闭即结束）。"""
+    data = json.dumps(body or {}).encode("utf-8")
+    req = urllib.request.Request(
+        BASE + path, data=data, method="POST",
+        headers={"X-Requested-With": "CAEventManager",
+                 "Content-Type": "application/json"})
+    events = []
+    with opener.open(req, timeout=60) as res:
+        for raw in res:
+            line = raw.decode("utf-8", "replace").strip()
+            if not line.startswith("data:"):
+                continue
+            payload = line[5:].strip()
+            if payload and payload != "[DONE]":
+                events.append(json.loads(payload))
+    return events
+
+
 def post(opener, path, body=None, expect=200, marker="CAEventManager"):
     return call(opener, path, body if body is not None else {}, expect=expect,
                 method="POST", marker=marker)
@@ -1795,6 +1814,35 @@ def main():
                                    "tool_calls": [{"id": "call_1", "type": "function",
                                                    "function": {"name": name,
                                                                 "arguments": "{}"}}]}
+                    if body.get("stream"):
+                        # 逐字：把回答切成小段，按 OpenAI 的 SSE 形状吐出来
+                        self.send_response(200)
+                        self.send_header("Content-Type",
+                                         "text/event-stream; charset=utf-8")
+                        self.send_header("Cache-Control", "no-store")
+                        self.send_header("Connection", "close")
+                        self.end_headers()
+                        self.close_connection = True
+                        text = message.get("content") or ""
+                        for i in range(0, len(text), 6):
+                            chunk = {"choices": [{"delta":
+                                                  {"content": text[i:i + 6]}}]}
+                            self.wfile.write(b"data: " +
+                                             json.dumps(chunk).encode("utf-8") +
+                                             b"\n\n")
+                            self.wfile.flush()
+                        for idx, call in enumerate(message.get("tool_calls") or []):
+                            chunk = {"choices": [{"delta": {"tool_calls": [{
+                                "index": idx, "id": call["id"],
+                                "function": {"name": call["function"]["name"],
+                                             "arguments": call["function"]["arguments"]}}]}}]}
+                            self.wfile.write(b"data: " +
+                                             json.dumps(chunk).encode("utf-8") +
+                                             b"\n\n")
+                            self.wfile.flush()
+                        self.wfile.write(b"data: [DONE]\n\n")
+                        self.wfile.flush()
+                        return
                     raw = json.dumps({"choices": [{"message": message}]}).encode("utf-8")
                     self.send_response(200)
                     self.send_header("Content-Type", "application/json")
@@ -1863,6 +1911,25 @@ def main():
                                          and "（没有）" not in answer["reply"]), answer)
         check("过程里记下了调过的工具",
               answer and any(s["tool"] == "list_events" for s in answer["steps"]), answer)
+        check("每一步还带着摘要（界面上悬停胶囊看的就是它）",
+              answer and any((s.get("detail") or {}).get("result") for s in answer["steps"]),
+              answer["steps"] if answer else None)
+
+        # 逐字输出：同一条路走 SSE，边算边把增量推回来
+        stream_events = sse_call(owner, "/api/panel/assistant/stream",
+                                 {"messages": [{"role": "user", "content": "我有哪些活动？"}]})
+        kinds = [e.get("type") for e in stream_events]
+        deltas = "".join(e.get("text") or "" for e in stream_events
+                         if e.get("type") == "delta")
+        check("流式：先报工具阶段，再逐字给增量，最后收尾",
+              "phase" in kinds and kinds.count("delta") >= 2 and kinds[-1] == "done",
+              kinds)
+        check("增量拼起来就是最终回答",
+              deltas.startswith("你能看到的活动：") or deltas == "",
+              (deltas[:40], stream_events[-1].get("reply", "")[:40]))
+        check("收尾带着 steps 与 reply",
+              bool(stream_events[-1].get("steps")) and bool(stream_events[-1].get("reply")),
+              stream_events[-1])
         check("密钥在服务端填进请求头",
               stub.requests and stub.requests[0]["auth"] == "Bearer sk-test-123",
               stub.requests[0]["auth"] if stub.requests else None)

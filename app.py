@@ -69,7 +69,7 @@ PAGES_DIR = os.path.join(BASE_DIR, "pages")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.10.119"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.11.120"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -2874,10 +2874,12 @@ class Handler(BaseHTTPRequestHandler):
                 raise model.ApiError("接口地址要以 http:// 或 https:// 开头")
             with panel.tx() as tx:
                 resume = data.get("resume")
+                ctx = data.get("context")
                 assistant.save_config(tx, acc["id"], data.get("base"),
                                       data.get("model"), data.get("key") or "",
                                       clear=bool(data.get("clear")),
-                                      resume=None if resume is None else bool(resume))
+                                      resume=None if resume is None else bool(resume),
+                                      ctx=None if ctx is None else int(ctx or 0))
                 panel.audit(tx, acc["username"], "assistant_config", None,
                             panel.audit_note(base=base, model=data.get("model")))
             row = conn.execute("SELECT * FROM accounts WHERE id=?",
@@ -2968,6 +2970,14 @@ class Handler(BaseHTTPRequestHandler):
             sid = _int_arg(query, "session", 0, 0, 100000000)
             return self._json(dict({"ok": True}, **assistant.progress_of(acc, sid)))
 
+        if path == "/assistant/context" and method == "GET":
+            # 这条对话大概占了多少上下文：会话条右边那条环与它的弹窗用
+            sid = _int_arg(query, "session", 0, 0, 100000000)
+            row = panel.chat_session(conn, acc["id"], sid) if sid else None
+            msgs = (row or {}).get("messages") or []
+            stats = assistant.context_stats(acc, assistant.config_of(acc), msgs, VERSION)
+            return self._json(dict({"ok": True}, **stats))
+
         if path == "/assistant/session" and method == "GET":
             sid = _int_arg(query, "id", 0, 0, 100000000)
             row = panel.chat_session(conn, acc["id"], sid)
@@ -2999,7 +3009,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/assistant/session/rename" and method == "POST":
             data = body()
-            title = (data.get("title") or "").strip()[:60]
+            title = (data.get("title") or "").strip()[:panel.CHAT_TITLE_MAX]
             if not title:
                 raise model.ApiError("请填一个名称")
             row = conn.execute(

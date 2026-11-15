@@ -42,6 +42,22 @@ TITLE_MAX = 24
 # 目前是 deepseek-flash 与 deepseek-v4-pro。旧的 deepseek-chat 已经下线。
 DEFAULT_BASE = "https://api.deepseek.com"
 DEFAULT_MODEL = "deepseek-flash"
+# 上下文窗口的缺省估算值（tokens）：各家不一样，界面上的环只表示"大概还剩多少"，
+# 各账号可以在模型设置里改成自己那家的实际值
+DEFAULT_CONTEXT = 128000
+
+
+def estimate_tokens(text):
+    """按字数估 token：中日韩一字约 0.7 个，其余按 4 个字符 1 个。
+
+    没有分词器，也没必要为了一条进度环引一个；数量级对就够了。
+    """
+    s = str(text or "")
+    if not s:
+        return 0
+    wide = sum(1 for ch in s if "\u2e80" <= ch <= "\u9fff" or "\uff00" <= ch <= "\uffef")
+    narrow = len(s) - wide
+    return int(round(wide * 0.7 + narrow / 4.0))
 
 
 def config_of(acc):
@@ -53,6 +69,9 @@ def config_of(acc):
     resume = True
     if "chat_resume" in _keys(row):
         resume = bool(row["chat_resume"])
+    ctx = 0
+    if "model_ctx" in _keys(row):
+        ctx = int(row["model_ctx"] or 0)
     return {"base": stored_base or DEFAULT_BASE,
             "model": stored_model or DEFAULT_MODEL,
             "storedBase": stored_base,
@@ -62,6 +81,9 @@ def config_of(acc):
             "ready": bool(key),
             "defaultBase": DEFAULT_BASE,
             "defaultModel": DEFAULT_MODEL,
+            # 上下文窗口：0 表示用缺省值，界面上显示的永远是实际用的那个数
+            "context": ctx or DEFAULT_CONTEXT,
+            "defaultContext": DEFAULT_CONTEXT,
             # 从侧栏进来时：接着上次那段，还是开一段新的
             "resume": resume}
 
@@ -73,7 +95,7 @@ def _keys(row):
         return ()
 
 
-def save_config(conn, account_id, base, model, key, clear=False, resume=None):
+def save_config(conn, account_id, base, model, key, clear=False, resume=None, ctx=None):
     """Empty key keeps the stored one: 界面上只显示"已配置"，不该逼人每次重填。"""
     sets, args = [], []
     if base is not None:
@@ -85,6 +107,9 @@ def save_config(conn, account_id, base, model, key, clear=False, resume=None):
     if resume is not None:
         sets.append("chat_resume=?")
         args.append(1 if resume else 0)
+    if ctx is not None:
+        sets.append("model_ctx=?")
+        args.append(max(0, min(int(ctx or 0), 100000000)))
     if clear:
         sets.append("model_key=?")
         args.append("")
@@ -1065,6 +1090,27 @@ def _drive(acc, cfg, client, convo, steps, version, calls, session=0):
         calls = None
     return {"reply": "这一步想问的东西有点多，先说到这里。可以换个更具体的问法。",
             "steps": steps}
+
+
+def context_stats(acc, cfg, messages, version=""):
+    """这条对话大概占了多少上下文：系统提示词、工具说明、历史消息三块。
+
+    和 ``run()`` 拼给模型的那份一模一样（同样取最后 20 条、同样截 4000 字），
+    所以环上那个百分比跟真正发出去的请求是一回事。
+    """
+    names = [t["function"]["name"] for t in tool_schema(acc)]
+    sys_tokens = estimate_tokens(system_prompt(acc, names, version))
+    tools_tokens = estimate_tokens(json.dumps(tool_schema(acc), ensure_ascii=False))
+    msg_tokens = 0
+    for m in (messages or [])[-20:]:
+        if m.get("role") in ("user", "assistant") and (m.get("content") or "").strip():
+            msg_tokens += estimate_tokens(str(m["content"])[:4000]) + 4
+    window = int((cfg or {}).get("context") or DEFAULT_CONTEXT)
+    used = sys_tokens + tools_tokens + msg_tokens
+    percent = int(round(100.0 * used / window)) if window else 0
+    return {"used": used, "window": window, "percent": min(percent, 999),
+            "parts": {"system": sys_tokens, "tools": tools_tokens,
+                      "messages": msg_tokens}}
 
 
 def run(conn, acc, client, cfg, messages, log=print, version="", session=0):

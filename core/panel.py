@@ -297,6 +297,8 @@ LATE_COLUMNS = (
     ("accounts", "chat_quota", "INTEGER NOT NULL DEFAULT 0"),
     # 从侧栏进入运维助手时，是否接着上次那段（具体哪一段记在各自设备上）
     ("accounts", "chat_resume", "INTEGER NOT NULL DEFAULT 1"),
+    # 上下文窗口的估算上限（tokens）。0 表示用缺省值；只影响那条进度环的百分比
+    ("accounts", "model_ctx", "INTEGER NOT NULL DEFAULT 0"),
     ("sessions", "sudo_until", "REAL NOT NULL DEFAULT 0"),
     ("sessions", "unlock_until", "REAL NOT NULL DEFAULT 0"),
     # 最近一次带着这个会话发出请求的时刻：在线人数由此得来（见 presence()）
@@ -1032,6 +1034,9 @@ def touch_token(conn, token_id):
 # --------------------------------------------------------------------------- #
 CHAT_QUOTA_DEFAULT = 512 * 1024      # 512 KB；不够的人向站长申请
 CHAT_QUOTA_MAX = 64 * 1024 * 1024
+# 会话标题的长度上限。它要出现在会话条、抽屉、导出文件名里，太长会把版面挤坏，
+# 也是一个"往标题里塞一大段东西"的入口，所以服务端一刀切，不靠界面自觉
+CHAT_TITLE_MAX = 24
 
 
 def chat_quota(acc):
@@ -1093,7 +1098,7 @@ def chat_save(conn, acc, sid, title, messages):
         raise ValueError("对话存档已满（%d / %d 字节），删掉一些旧会话再保存"
                          % (used + size, quota))
     now = time.time()
-    title = (title or "").strip()[:60]
+    title = (title or "").strip()[:CHAT_TITLE_MAX]
     if sid:
         row = conn.execute(
             "SELECT * FROM assistant_sessions WHERE id=? AND account_id=? AND deleted_at=0",

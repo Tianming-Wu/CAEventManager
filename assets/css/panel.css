@@ -2890,12 +2890,19 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
 }
 .as-only-narrow { display: none; }
 
-/* 会话条：输入框上方左侧一行小字，点开是会话列表。
+/* 会话条这一行：左边是会话名（过长就截断），右边是上下文用量那条环。
    批准条出现时它在批准条上面——两条都往上长，输入框位置不动 */
 .as-sessionbar {
-  appearance: none;
-  align-self: flex-start;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin: 0 0 -4px;
+  min-width: 0;
+}
+.as-session-name {
+  appearance: none;
+  flex: 1 1 auto;          /* 撑满这一行，把右边那条环推到行的末尾 */
+  min-width: 0;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -2909,7 +2916,90 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   font-size: .78rem;
   cursor: pointer;
 }
-.as-sessionbar:hover { background: var(--surface-2); color: var(--text); }
+.as-session-name:hover { background: var(--surface-2); color: var(--text); }
+/* 上下文用量：一条环 + 一块明细面板（悬停或点一下出来） */
+.as-ctx { position: relative; flex: none; display: inline-flex; }
+.as-ctx[hidden] { display: none; }
+.as-ctx-trigger {
+  appearance: none;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--dim);
+  cursor: pointer;
+}
+.as-ctx-trigger:hover { background: var(--surface-2); }
+.as-ctx-track { fill: none; stroke: var(--line); stroke-width: 2; }
+.as-ctx-fill {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linecap: round;
+  transform: rotate(-90deg);
+  transform-origin: 7px 7px;
+  transition: stroke-dasharray .2s;
+}
+.as-ctx.warn .as-ctx-fill { stroke: var(--danger); }
+.as-ctx-panel {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 40;
+  width: 264px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  color: var(--muted);
+  font-size: .76rem;
+  line-height: 20px;
+}
+.as-ctx-panel[hidden] { display: none; }
+.as-ctx-head { display: flex; align-items: center; gap: 6px; }
+.as-ctx-headline { color: var(--dim); }
+.as-ctx-percent { color: var(--text); font-weight: 650; }
+.as-ctx-figures {
+  margin-left: auto;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.as-ctx-bar {
+  display: flex;
+  gap: 1px;
+  height: 4px;
+  margin: 10px 0 12px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.as-ctx-seg { flex: none; min-width: 2px; height: 100%; }
+.as-ctx-seg.system { background: var(--dim); }
+.as-ctx-seg.tools { background: #a78bfa; }
+.as-ctx-seg.messages { background: var(--accent); }
+.as-ctx-rows { margin: 0; }
+.as-ctx-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 0;
+}
+.as-ctx-row dt { margin: 0; color: var(--muted); display: flex; align-items: center; }
+.as-ctx-row dd { margin: 0; color: var(--text); font-variant-numeric: tabular-nums; }
+.as-ctx-swatch {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: 2px;
+}
 /* 助手要改数据的动作：先在这里问一句，人是唯一能点"批准"的人。
    位置贴着输入框上方——像编辑器里的权限确认那样，不挡对话。
    展开「详情」时下面是这次调用的参数，用内建代码块那一套样式 */
@@ -2947,8 +3037,10 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   tab-size: 2;
 }
 .as-args[hidden] { display: none; }
-.as-sessionbar svg { width: 14px; height: 14px; flex: none; }
-.as-sessionbar span {
+.as-session-name svg { width: 14px; height: 14px; flex: none; }
+/* 会话名过长就截断：右边要给那条环留位置 */
+.as-session-name #asSessionName {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3014,10 +3106,11 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
 .as-copy .i-check { display: none; }
 .as-copy.copied .i-copy { display: none; }
 .as-copy.copied .i-check { display: block; }
+/* 一直亮着但很淡：只在悬停时显示的话，助手这一侧会让出一截空白，看着像排版漏了一块 */
+.as-copy { opacity: .55; }
 .as-msg:hover .as-copy, .as-copy:focus-visible, .as-copy.copied { opacity: 1; }
-.as-copy:hover { color: var(--text); background: var(--surface-2); }
+.as-copy:hover { color: var(--text); background: var(--surface-2); opacity: 1; }
 .as-copy.copied { color: var(--accent-strong); }
-@media (hover: none) { .as-copy { opacity: 1; } }
 .as-time {
   font-size: .72rem;
   line-height: 1;
@@ -3316,6 +3409,8 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
 /* 手机上才给全屏入口：这一条必须写在上面那条之后，否则被 display:none 盖住 */
 @media (max-width: 760px) {
   .as-expand { display: grid; }
+  /* 手机上气泡吃满宽度：78% 在窄屏里读起来太挤，外层本来就有留白兜着 */
+  .as-body { max-width: 100%; }
 }
 .as-tools { display: flex; align-items: center; gap: 4px; flex: none; }
 .as-icon {

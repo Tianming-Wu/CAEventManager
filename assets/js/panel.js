@@ -5023,6 +5023,10 @@
       '<p class="hint">留空表示保持现状；清除请点下面的按钮</p></div>' +
       '<p class="hint">端点需兼容 OpenAI 的 <code>/chat/completions</code>；' +
       '地址与模型留空时使用默认值</p>' +
+      '<div class="field" style="margin-top:14px"><label for="asCtx">上下文上限</label>' +
+      '<input id="asCtx" type="text" inputmode="numeric" style="max-width:160px" value="' +
+      PX.esc(String(cfg.context || cfg.defaultContext || 128000)) + '">' +
+      '<p class="hint">按 tokens 填（例如 128000 或 1000000），只用来算右边那条环的百分比</p></div>' +
       '<label class="switch" id="asResumeRow" style="margin-top:14px">' +
       '<input type="checkbox" id="asResume"' +
       ((cfg.resume === false) ? "" : " checked") + '>' +
@@ -5201,6 +5205,7 @@
       drawAssistant();
       drawAssistantQuota();
       setSessionName("新会话");
+      drawContext(null);
       return Promise.resolve();
     }
     // 读一段存档对话：等的时候整块居中写"正在加载对话"，
@@ -5216,6 +5221,7 @@
       markLoaded("assistant");
       drawAssistant();
       drawAssistantQuota();
+      loadContext();
       restorePending(id);
     }).catch(function () {
       S.assistantSessionId = 0;
@@ -5242,6 +5248,74 @@
   function setSessionName(text) {
     var el = $("#asSessionName");
     if (el) el.textContent = text || "新会话";
+    if (el) el.title = text || "新会话";   // 截断了也能悬停看全
+  }
+
+  /* ---- 上下文用量：会话名右边那条小环 ----
+     数字是估算的（服务端按字数估 token），用途是"大概还剩多少"；
+     指上去或点一下看明细：系统提示词 / 工具 / 对话消息。 */
+  var CTX_RADIUS = 5.5;
+  var CTX_CIRC = 2 * Math.PI * CTX_RADIUS;
+
+  function fmtTokens(n) {
+    n = Number(n) || 0;
+    function one(v) {
+      return v >= 100 ? String(Math.round(v)) : String(Math.round(v * 10) / 10);
+    }
+    if (n < 1000) return String(n);
+    if (n < 1e6) return "~" + one(n / 1e3) + "K";
+    return "~" + one(n / 1e6) + "M";
+  }
+
+  function drawContext(stats) {
+    var wrap = $("#asContextWrap");
+    var fill = $("#asCtxFill");
+    if (!wrap || !fill) return;
+    S.assistantCtx = stats || null;
+    if (!stats || !stats.window) { wrap.hidden = true; return; }
+    wrap.hidden = false;
+    var pct = Math.max(0, Math.min(100, Number(stats.percent) || 0));
+    fill.setAttribute("stroke-dasharray",
+      (CTX_CIRC * pct / 100).toFixed(2) + " " + CTX_CIRC.toFixed(2));
+    wrap.classList.toggle("warn", pct >= 90);
+    $("#asCtxPercent").textContent = pct + "%";
+    $("#asCtxFigures").textContent = fmtTokens(stats.used) + " / " +
+      fmtTokens(stats.window);
+    var parts = stats.parts || {};
+    var total = (parts.system || 0) + (parts.tools || 0) + (parts.messages || 0);
+    var rows = [["system", "系统提示词"], ["tools", "工具"], ["messages", "对话消息"]];
+    $("#asCtxBar").innerHTML = total ? rows.map(function (r) {
+      var w = pct * (parts[r[0]] || 0) / total;
+      return w <= 0 ? "" : '<span class="as-ctx-seg ' + r[0] +
+        '" style="width:' + w.toFixed(2) + '%"></span>';
+    }).join("") : '<span class="as-ctx-seg messages" style="width:' + pct +
+      '%"></span>';
+    $("#asCtxRows").innerHTML = rows.map(function (r) {
+      return '<div class="as-ctx-row"><dt><span class="as-ctx-swatch ' + r[0] +
+        '"></span>' + r[1] + "</dt><dd>" + fmtTokens(parts[r[0]] || 0) +
+        "</dd></div>";
+    }).join("");
+  }
+
+  function loadContext() {
+    if (!S.assistantSessionId) { drawContext(null); return Promise.resolve(); }
+    return PX.api("/assistant/context?session=" + S.assistantSessionId)
+      .then(drawContext)
+      .catch(function () { /* 环只是参考，取不到就不显示 */ });
+  }
+
+  function showContextPanel(on) {
+    var panel = $("#asContextPanel");
+    var btn = $("#asContext");
+    if (!panel || !btn) return;
+    if (on) {
+      panel.hidden = false;
+      btn.setAttribute("aria-expanded", "true");
+      loadContext();
+      return;
+    }
+    panel.hidden = true;
+    btn.setAttribute("aria-expanded", "false");
   }
 
   // 从侧栏进来时：恢复上次打开的那段（记在本机），或者直接开一段新的。
@@ -5365,8 +5439,8 @@
     var row = ((S.assistantList || []).filter(function (s) { return s.id === id; })[0]) || {};
     openOverlay("as-rename", "重命名会话",
       '<div class="field"><label for="asRename">名称</label>' +
-      '<input id="asRename" type="text" maxlength="60" value="' +
-      PX.esc(row.title || "") + '"></div>' +
+      '<input id="asRename" type="text" maxlength="24" value="' +
+      PX.esc(row.title || "") + '" placeholder="最多 24 个字"></div>' +
       '<div class="row" style="margin-top:16px;justify-content:flex-end">' +
       '<button class="btn" data-close-overlay="1" type="button">取消</button>' +
       '<button class="btn primary" id="asRenameGo" type="button">保存</button></div>');
@@ -5672,6 +5746,7 @@
       });
       if (titled) refreshSessionName();
       saveAssistantSession();
+      loadContext();
     });
   }
 
@@ -5783,7 +5858,10 @@
   }
 
   function saveAssistantConfig() {
+    var ctxBox = $("#asCtx");
+    var ctx = ctxBox ? parseInt(ctxBox.value.replace(/[^0-9]/g, ""), 10) : NaN;
     var body = { base: $("#asBase").value.trim(), model: $("#asModel").value.trim(),
+                 context: isNaN(ctx) ? 0 : ctx,
                  resume: !!($("#asResume") && $("#asResume").checked) };
     // 框里还是那串星号 = 没动过密钥，别把已有的覆盖成空
     if (!keyFieldMasked()) body.key = $("#asKey").value;
@@ -5792,6 +5870,7 @@
         S.assistantCfg = d.config || S.assistantCfg;
         closeOverlay();
         drawAssistant();
+        loadContext();                 // 上下文上限改了，环的分母跟着变
         PX.toast(d.config && d.config.ready ? "已保存" : "已保存，还差密钥", !d.config.ready);
       }).catch(function (e) { PX.toast(PX.esc(e.message), true); });
   }
@@ -6457,6 +6536,34 @@
   $("#asApprovalNo").addEventListener("click", function () { answerApproval(false); });
   $("#asApprovalMore").addEventListener("click", toggleApprovalArgs);
   $("#asSessionBar").addEventListener("click", openAssistantDrawer);
+
+  /* 上下文环：桌面指上去就出明细，触屏点一下（再点或点外面收起） */
+  function ctxHasHover() {
+    return !!(window.matchMedia && window.matchMedia("(hover: hover)").matches);
+  }
+  $("#asContext").addEventListener("click", function (e) {
+    e.stopPropagation();
+    var panel = $("#asContextPanel");
+    var open = panel && !panel.hidden;
+    if (open && ctxHasHover()) return;      // 悬停已经开着，点它不再收
+    showContextPanel(!open);
+  });
+  $("#asContextWrap").addEventListener("mouseenter", function () {
+    if (ctxHasHover()) showContextPanel(true);
+  });
+  $("#asContextWrap").addEventListener("mouseleave", function () {
+    if (ctxHasHover()) showContextPanel(false);
+  });
+  document.addEventListener("pointerdown", function (e) {
+    var panel = $("#asContextPanel");
+    if (!panel || panel.hidden) return;
+    if (e.target && e.target.closest && e.target.closest("#asContextWrap")) return;
+    showContextPanel(false);
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key !== "Escape") return;
+    showContextPanel(false);
+  });
   $("#asDrawerClose").addEventListener("click", closeAssistantDrawer);
   $("#asDrawerBody").addEventListener("click", assistantDrawerClick);
   $("#asExport").addEventListener("click", exportAssistantSession);

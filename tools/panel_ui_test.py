@@ -1580,6 +1580,74 @@ def assistant_page(page):
         .then(t => t).catch(() => '')""")
     check("消息的复制键抄到的是 Markdown 原文",
           "# 一级标题" in (msg_copied or ""), (msg_copied or "")[:60])
+    check("复制键一直看得见，不是只在悬停时才出现",
+          float(page.evaluate("""() => getComputedStyle(
+              document.querySelector('#assistantLog .as-copy')).opacity""")) > 0.3)
+
+    print("== 上下文用量 ==")
+    page.wait_for_timeout(700)
+    ring = page.evaluate("""() => {
+        const wrap = document.getElementById('asContextWrap');
+        const btn = document.getElementById('asContext');
+        const name = document.getElementById('asSessionBar').getBoundingClientRect();
+        const w = wrap.getBoundingClientRect();
+        const fill = document.getElementById('asCtxFill');
+        return {shown: !wrap.hidden,
+                sameLine: Math.abs((name.top + name.height / 2) - (w.top + w.height / 2)) <= 3,
+                rightOfName: w.left >= name.right - 1,
+                dash: fill.getAttribute('stroke-dasharray') || '',
+                aria: btn.getAttribute('aria-label') || ''};
+    }""")
+    check("会话名同一行、右边有上下文环",
+          ring["shown"] and ring["sameLine"] and ring["rightOfName"], ring)
+    check("环按百分比画了弧，说明也写了",
+          ring["dash"].split(" ")[0] not in ("", "0.00") and ring["aria"] == "上下文用量",
+          ring)
+    page.hover("#asContext")
+    page.wait_for_timeout(700)
+    pop = page.evaluate("""() => {
+        const p = document.getElementById('asContextPanel');
+        return {open: !p.hidden, text: p.innerText,
+                rows: Array.from(p.querySelectorAll('.as-ctx-row dt'))
+                        .map(e => e.textContent.trim()),
+                percent: document.getElementById('asCtxPercent').textContent.trim(),
+                figures: document.getElementById('asCtxFigures').textContent.trim(),
+                segs: p.querySelectorAll('.as-ctx-seg').length};
+    }""")
+    check("指上去出现明细：已用多少与上限",
+          pop["open"] and "上下文已用" in pop["text"] and pop["percent"].endswith("%")
+          and "/" in pop["figures"], pop)
+    check("分项是 系统提示词 / 工具 / 对话消息",
+          pop["rows"] == ["系统提示词", "工具", "对话消息"] and pop["segs"] >= 2, pop)
+    page.mouse.move(6, 6)
+    page.wait_for_timeout(400)
+    check("移开就收起", page.locator("#asContextPanel").is_hidden())
+
+    print("== 手机上的可读宽度 ==")
+    wide = page.evaluate("""() => getComputedStyle(
+        document.querySelector('#assistantLog .as-bot .as-body')).maxWidth""")
+    page.set_viewport_size({"width": 420, "height": 820})
+    page.wait_for_timeout(700)
+    mobile = page.evaluate("""() => {
+        const body = document.querySelector('#assistantLog .as-bot .as-body');
+        const scroll = document.getElementById('assistantScroll');
+        const name = document.getElementById('asSessionName');
+        if (!body || !scroll) return {};
+        return {maxWidth: getComputedStyle(body).maxWidth,
+                area: scroll.clientWidth,
+                bubble: body.getBoundingClientRect().width,
+                ellipsis: getComputedStyle(name).textOverflow,
+                nameOverflow: name.scrollWidth > name.clientWidth + 1};
+    }""")
+    check("桌面上气泡最多占 78%", wide in ("78%", "78.0%"), wide)
+    check("手机上气泡吃满可读宽度",
+          mobile and mobile["maxWidth"] == "100%"
+          and mobile["bubble"] >= mobile["area"] * 0.9,
+          (mobile.get("maxWidth"), mobile.get("bubble"), mobile.get("area")))
+    check("会话名给环让位：过长截断",
+          mobile and mobile["ellipsis"] == "ellipsis", mobile)
+    page.set_viewport_size({"width": 1440, "height": 900})
+    page.wait_for_timeout(400)
 
     print("== 写动作的批准条与会话名位置 ==")
     layout = page.evaluate("""() => {

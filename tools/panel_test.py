@@ -1986,6 +1986,32 @@ def main():
           (named or {}).get("session", {}).get("title") == "测试",
           (named or {}).get("session", {}).get("title"))
 
+    # 标题有上限：24 个字，服务端一刀切（它要出现在会话条、抽屉、导出文件名里）
+    post(owner, "/api/panel/assistant/session/rename",
+         {"id": sid, "title": "超" * 60})
+    long_name = call(owner, "/api/panel/assistant/session?id=%d" % sid)["session"]["title"]
+    check("标题最多 24 个字", len(long_name) == 24, (len(long_name), long_name[:30]))
+    post(owner, "/api/panel/assistant/session/rename", {"id": sid, "title": "测试"})
+
+    # 上下文用量：三块加起来等于总数，窗口是配置值（没配就是缺省 128000）
+    post(owner, "/api/panel/assistant/config", {"context": 1000})
+    ctx = call(owner, "/api/panel/assistant/context?session=%d" % sid)
+    parts = (ctx or {}).get("parts") or {}
+    check("上下文用量给出三块的分项",
+          all(k in parts for k in ("system", "tools", "messages")) and ctx["used"] > 0,
+          ctx)
+    check("三块加起来等于总数",
+          parts.get("system", 0) + parts.get("tools", 0) + parts.get("messages", 0)
+          == (ctx or {}).get("used"), ctx)
+    check("窗口用的是配置值，百分比按它算",
+          ctx.get("window") == 1000 and ctx.get("percent") >= 1, ctx)
+    check("会话变长，用量跟着涨",
+          call(owner, "/api/panel/assistant/context?session=%d" % sid)["used"]
+          > 0, ctx)
+    post(owner, "/api/panel/assistant/config", {"context": 0})
+    back_ctx = call(owner, "/api/panel/assistant/context?session=%d" % sid)
+    check("0 就是回到缺省值", back_ctx.get("window") == 128000, back_ctx)
+
     # 配额是平台资源：超管调别人的配额要留痕
     target_id = [a for a in call(owner, "/api/panel/accounts")["accounts"]
                  if a["username"] == "asprobe"][0]["id"]

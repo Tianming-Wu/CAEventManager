@@ -1428,7 +1428,13 @@ def assistant_page(page):
                 chipAboveForm: c.bottom <= f.top + 1,
                 chipAboveBar: r.height > 0 && c.bottom <= r.top + 1,
                 yes: document.getElementById('asApprovalYes').textContent.trim(),
-                no: document.getElementById('asApprovalNo').textContent.trim()};
+                no: document.getElementById('asApprovalNo').textContent.trim(),
+                more: !!document.getElementById('asApprovalMore'),
+                moreHidden: document.getElementById('asApprovalMore')
+                            ? document.getElementById('asApprovalMore').hidden : null,
+                argsHidden: document.getElementById('asApprovalArgs')
+                            ? document.getElementById('asApprovalArgs').hidden : null,
+                argsInBar: bar.contains(document.getElementById('asApprovalArgs'))};
     }""")
     check("批准条平时是收着的", layout["hidden"] and "批准" in layout["text"], layout)
     check("批准条在输入框上方、不在框里面",
@@ -1438,6 +1444,10 @@ def assistant_page(page):
     check("会话名回到输入框上方，并且排在批准条上面",
           layout["chipAboveForm"] and layout["chipAboveBar"]
           and not layout["chipInHead"], layout)
+    # 参数详情：键在条里、面板默认收起；这次没有参数，所以连键都不摆
+    check("批准条里有详情键与参数面板，平时都收着",
+          layout["more"] and layout["argsInBar"] and layout["argsHidden"]
+          and layout["moreHidden"], layout)
     print("== 模型设置弹窗 ==")
     page.click("#asSettings")
     page.wait_for_timeout(350)

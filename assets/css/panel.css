@@ -2908,11 +2908,12 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
 }
 .as-sessionbar:hover { background: var(--surface-2); color: var(--text); }
 /* 助手要改数据的动作：先在这里问一句，人是唯一能点"批准"的人。
-   位置贴着输入框上方——像编辑器里的权限确认那样，不挡对话 */
+   位置贴着输入框上方——像编辑器里的权限确认那样，不挡对话。
+   展开「详情」时下面是这次调用的参数，用内建代码块那一套样式 */
 .as-approval {
   display: flex;
-  align-items: center;
-  gap: 12px;
+  flex-direction: column;
+  gap: 8px;
   margin: 0;
   padding: 9px 12px;
   border: 1px solid var(--accent-line);
@@ -2922,9 +2923,31 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   font-size: .84rem;
   line-height: 1.5;
 }
+.as-approval-row { display: flex; align-items: center; gap: 12px; }
 .as-approval[hidden] { display: none; }
 .as-approval-text { flex: 1 1 auto; min-width: 0; }
 .as-approval-acts { display: flex; flex: 0 0 auto; gap: 8px; }
+/* 「详情」展开出来的参数：与回答里的代码块同一套观感，长行自己横向滚 */
+.as-args {
+  margin: 0;
+  padding: 8px 10px;
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: .78rem;
+  line-height: 1.5;
+  white-space: pre;
+  tab-size: 2;
+}
+.as-args[hidden] { display: none; }
+.as-approval-acts #asApprovalMore[aria-expanded="true"] {
+  background: var(--surface-2);
+  color: var(--text);
+}
 .as-sessionbar svg { width: 14px; height: 14px; flex: none; }
 .as-sessionbar span {
   overflow: hidden;

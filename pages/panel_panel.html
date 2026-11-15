@@ -404,11 +404,16 @@
         </button>
 
         <div class="as-approval" id="asApproval" hidden>
-          <span class="as-approval-text" id="asApprovalText"></span>
-          <span class="as-approval-acts">
-            <button class="btn sm" id="asApprovalNo" type="button">拒绝</button>
-            <button class="btn sm primary" id="asApprovalYes" type="button">批准</button>
-          </span>
+          <div class="as-approval-row">
+            <span class="as-approval-text" id="asApprovalText"></span>
+            <span class="as-approval-acts">
+              <button class="btn sm" id="asApprovalMore" type="button"
+                      aria-expanded="false" hidden>详情</button>
+              <button class="btn sm" id="asApprovalNo" type="button">拒绝</button>
+              <button class="btn sm primary" id="asApprovalYes" type="button">批准</button>
+            </span>
+          </div>
+          <pre class="as-args" id="asApprovalArgs" hidden></pre>
         </div>
         <form class="as-composer" id="assistantForm" autocomplete="off">
           <button class="as-expand" id="asExpand" type="button"

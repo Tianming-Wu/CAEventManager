@@ -602,8 +602,11 @@ def main():
               bool(got.get("pending")) and not client.calls, (got.get("pending"), client.calls))
         check("停住的那一句说清要做什么",
               "张三" in (got["pending"]["summary"] or ""), got["pending"])
-        check("标签用的是那句话", got["pending"]["label"] == "往名单里加一个人",
+        check("标签用正式名称", got["pending"]["label"] == "写入名单",
               got["pending"]["label"])
+        check("参数一起带出来（批准条上能展开看）",
+              (got["pending"].get("args") or {}).get("sid") == "2024001",
+              got["pending"].get("args"))
         token = got["pending"]["token"]
         done = a.approve(acc, token, True)
         check("批准之后才真的写",
@@ -746,6 +749,16 @@ def main():
               bool(noname.get("error")) and "存档" in noname.get("error", ""), noname)
         check("改名在策略里是写动作", app.policy.is_write("session_title"),
               app.policy.describe("session_title"))
+        check("写动作的名称是正式的短名",
+              (want.get("pending") or {}).get("label") == "修改会话标题",
+              want.get("pending"))
+        # 每个工具都有正式名称：批准条、过程标签、文档都用这一份
+        missing = [t["name"] for t in a.TOOLS
+                   if not (app.policy.ACTION_LABELS.get(t["name"]) or "").strip()]
+        check("每个工具都有正式名称", not missing, missing)
+        bad = [v for v in app.policy.ACTION_LABELS.values()
+               if len(v) > 8 or "看" in v or "查" in v or "把" in v]
+        check("名称简短、书面语，不出现“看了/查了/把…”", not bad, bad)
     finally:
         a._post_chat = real_post
     print("== SQL 拼接审计 ==")

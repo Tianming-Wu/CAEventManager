@@ -28,18 +28,38 @@ READ_ACTIONS = {
     "host_stats": "owner",
 }
 
-# 允许助手代劳的写动作。
-# 加动作时同时给一句人话说明——批准弹窗里那句话就是它，拒绝时也用它回话。
+# 每个动作的正式名称。判决、批准条、过程提示三处都用这一份，别各写一套。
+# 写法：动词开头、书面语、不超过六个字；与工具 description 里的说法一致。
+ACTION_LABELS = {
+    "list_events": "读取活动列表",
+    "event_board": "读取活动数据",
+    "list_rosters": "读取名单列表",
+    "roster_entries": "读取名单成员",
+    "list_signups": "读取报名列表",
+    "signup_entries": "读取报名记录",
+    "search_people": "检索人员",
+    "list_docs": "读取文档清单",
+    "read_doc": "读取文档",
+    "recent_audit": "读取审计日志",
+    "host_stats": "读取服务器状态",
+    "roster_add_person": "写入名单",
+    "roster_remove_person": "移出名单",
+    "signup_window": "修改报名设置",
+    "event_rename": "修改活动名称",
+    "session_title": "修改会话标题",
+}
+
+# 允许助手代劳的写动作。值是批准条上的正式名称（同上表）。
 # **写动作不会自己跑**：助手先停下来，把"要做什么"摆给用户看，点过批准才执行
 # （见 `assistant.run` / `assistant.approve`）。
-WRITE_ACTIONS = {
-    "roster_add_person": "往名单里加一个人",
-    "roster_remove_person": "把一个人从名单里移出",
-    "signup_window": "改报名的时间窗与名额",
-    "event_rename": "改活动名称",
+WRITE_ACTIONS = {name: ACTION_LABELS[name] for name in (
+    "roster_add_person",
+    "roster_remove_person",
+    "signup_window",
+    "event_rename",
     # 只动这段对话自己的标题，不碰平台数据；照样走"先问人"
-    "session_title": "改这段对话的标题",
-}
+    "session_title",
+)}
 
 # 会抹掉东西的写动作：批准条与动作提示用强调色标出来，别跟只读的混在一起
 DESTRUCTIVE = {"roster_remove_person"}
@@ -92,4 +112,10 @@ def visible(account):
 
 
 def describe(action):
+    """动作的正式名称（写动作在批准条上与拒绝回话里用它）。"""
     return WRITE_ACTIONS.get(action, "")
+
+
+def label_of(action):
+    """任何动作的正式名称；表里没有就退回工具名本身。"""
+    return ACTION_LABELS.get(action) or action

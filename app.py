@@ -69,7 +69,7 @@ PAGES_DIR = os.path.join(BASE_DIR, "pages")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.6.115"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.7.116"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -2862,6 +2862,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True, "config": assistant.config_of(acc),
                                "tools": sorted(policy.visible(acc)),
                                "writes": sorted(policy.WRITE_ACTIONS),
+                               # 动作的正式名称：过程标签与批准条都用这一份，别各写一套
+                               "labels": dict(policy.ACTION_LABELS),
                                # 还挂着等人点头的对话：侧栏与会话卡片上的小红点靠它
                                "pending": sorted(assistant.pending_sessions(acc))})
 

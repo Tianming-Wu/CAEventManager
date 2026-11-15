@@ -4899,6 +4899,8 @@
     "最近谁改过东西？有没有异常"
   ];
 
+  /* 动作的正式名称由服务端给（policy.ACTION_LABELS）：批准条、过程标签共用一份。
+     下面这份只是断网或旧服务端时的兜底，别在两边各写一套说法 */
   var STEP_LABEL = {
     list_events: "读取活动列表",
     event_board: "读取活动数据",
@@ -4906,7 +4908,7 @@
     roster_entries: "读取名单成员",
     list_signups: "读取报名列表",
     signup_entries: "读取报名记录",
-    search_people: "检索人员库",
+    search_people: "检索人员",
     recent_audit: "读取审计日志",
     host_stats: "读取服务器状态",
     list_docs: "读取文档清单",
@@ -4917,6 +4919,11 @@
     event_rename: "修改活动名称",
     session_title: "修改会话标题"
   };
+
+  function toolLabel(name) {
+    var fromServer = S.assistantLabels || {};
+    return fromServer[name] || STEP_LABEL[name] || name;
+  }
 
   /* 会真的改数据的动作：标签用强调色，跟只读的那些分开 */
   var WRITE_TOOLS = {
@@ -4938,7 +4945,7 @@
     });
     return order.map(function (name) {
       var g = group[name];
-      var label = STEP_LABEL[g.tool] || g.tool;
+      var label = toolLabel(g.tool);
       if (g.n > 1) label += " ×" + g.n;
       return { label: label, ok: g.ok, write: !!WRITE_TOOLS[g.tool] };
     });
@@ -4965,6 +4972,7 @@
     return PX.api("/assistant")
       .then(function (d) {
         S.assistantCfg = d.config || { ready: false };
+        S.assistantLabels = d.labels || {};
         adoptPendingServer(d.pending || []);
         drawAssistant();
       })
@@ -5602,17 +5610,39 @@
     }).catch(function () { /* 名字只是好看，取不到就算了 */ });
   }
 
-  /* 输入框上方那一条：「助手想执行「往名单里加一个人」：把 张三（2024001）加进名单 #3」 */
+  /* 输入框上方那一条：「助手要执行「写入名单」：把 张三（2024001）加进名单 #3」。
+     右边 [详情] 展开这次调用的参数（JSON），再点一次收起 */
   function showApproval(pending) {
     S.assistantPending = pending || null;
     var bar = $("#asApproval");
     if (!bar) return;
     if (!pending) { bar.hidden = true; return; }
-    $("#asApprovalText").textContent = "助手想执行「" + (pending.label || "改动") + "」：" +
+    $("#asApprovalText").textContent = "助手要执行「" + (pending.label || "改动") + "」：" +
       (pending.summary || "");
+    showApprovalArgs(pending.args, false);
     bar.hidden = false;
     markSessionPending(true);
     $("#asApprovalYes").focus();
+  }
+
+  function showApprovalArgs(args, open) {
+    var box = $("#asApprovalArgs");
+    var more = $("#asApprovalMore");
+    if (!box || !more) return;
+    var text = "";
+    if (args && typeof args === "object" && Object.keys(args).length) {
+      try { text = JSON.stringify(args, null, 2); } catch (e) { text = ""; }
+    }
+    box.textContent = text;
+    box.hidden = !(open && text);
+    more.hidden = !text;             // 没有参数就别摆一个按不动的键
+    more.setAttribute("aria-expanded", open && !!text ? "true" : "false");
+  }
+
+  function toggleApprovalArgs() {
+    var box = $("#asApprovalArgs");
+    if (!box || !box.textContent) return;
+    showApprovalArgs(S.assistantPending ? S.assistantPending.args : null, !!box.hidden);
   }
 
   /* 收起那一条。`done` 为真表示这一次已经点了批准或拒绝（这份挂起没了）；
@@ -5621,6 +5651,7 @@
     S.assistantPending = null;
     var bar = $("#asApproval");
     if (bar) bar.hidden = true;
+    showApprovalArgs(null, false);   // 参数面板收回去，别带到下一次
     if (done) markSessionPending(false);
   }
 
@@ -6312,6 +6343,7 @@
   $("#asDrawerNew").addEventListener("click", startNewSession);
   $("#asApprovalYes").addEventListener("click", function () { answerApproval(true); });
   $("#asApprovalNo").addEventListener("click", function () { answerApproval(false); });
+  $("#asApprovalMore").addEventListener("click", toggleApprovalArgs);
   $("#asSessionBar").addEventListener("click", openAssistantDrawer);
   $("#asDrawerClose").addEventListener("click", closeAssistantDrawer);
   $("#asDrawerBody").addEventListener("click", assistantDrawerClick);

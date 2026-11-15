@@ -42,9 +42,28 @@ TITLE_MAX = 24
 # 目前是 deepseek-flash 与 deepseek-v4-pro。旧的 deepseek-chat 已经下线。
 DEFAULT_BASE = "https://api.deepseek.com"
 DEFAULT_MODEL = "deepseek-flash"
-# 上下文窗口的缺省估算值（tokens）：各家不一样，界面上的环只表示"大概还剩多少"，
-# 各账号可以在模型设置里改成自己那家的实际值
+# 上下文窗口的缺省估算值（tokens）。OpenAI 兼容接口不告诉我们这个数，
+# 所以按模型名给一张小表；表里没有的用 DEFAULT_CONTEXT，各账号还能在
+# 模型设置里按自己那家的实际值覆盖（存 accounts.model_ctx）
 DEFAULT_CONTEXT = 128000
+MODEL_CONTEXT = {
+    # DeepSeek 现役模型是 1M 上下文
+    "deepseek-flash": 1000000,
+    "deepseek-v4-pro": 1000000,
+    "deepseek-chat": 128000,
+    "deepseek-reasoner": 128000,
+}
+
+
+def model_context(model):
+    """这张表认得就给它那个数，认不得就缺省。"""
+    name = str(model or "").strip().lower()
+    if name in MODEL_CONTEXT:
+        return MODEL_CONTEXT[name]
+    for key, value in MODEL_CONTEXT.items():          # 带日期后缀之类的变体
+        if name.startswith(key):
+            return value
+    return DEFAULT_CONTEXT
 
 
 def estimate_tokens(text):
@@ -81,9 +100,10 @@ def config_of(acc):
             "ready": bool(key),
             "defaultBase": DEFAULT_BASE,
             "defaultModel": DEFAULT_MODEL,
-            # 上下文窗口：0 表示用缺省值，界面上显示的永远是实际用的那个数
-            "context": ctx or DEFAULT_CONTEXT,
-            "defaultContext": DEFAULT_CONTEXT,
+            # 上下文窗口：0 表示没设过，按模型名查表；界面上显示的永远是实际用的那个数
+            "context": ctx or model_context(stored_model or DEFAULT_MODEL),
+            "defaultContext": model_context(stored_model or DEFAULT_MODEL),
+            "storedContext": ctx,
             # 从侧栏进来时：接着上次那段，还是开一段新的
             "resume": resume}
 
@@ -1105,7 +1125,7 @@ def context_stats(acc, cfg, messages, version=""):
     for m in (messages or [])[-20:]:
         if m.get("role") in ("user", "assistant") and (m.get("content") or "").strip():
             msg_tokens += estimate_tokens(str(m["content"])[:4000]) + 4
-    window = int((cfg or {}).get("context") or DEFAULT_CONTEXT)
+    window = int((cfg or {}).get("context") or model_context((cfg or {}).get("model")))
     used = sys_tokens + tools_tokens + msg_tokens
     percent = int(round(100.0 * used / window)) if window else 0
     return {"used": used, "window": window, "percent": min(percent, 999),

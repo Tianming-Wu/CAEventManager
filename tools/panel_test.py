@@ -2008,9 +2008,14 @@ def main():
     check("会话变长，用量跟着涨",
           call(owner, "/api/panel/assistant/context?session=%d" % sid)["used"]
           > 0, ctx)
-    post(owner, "/api/panel/assistant/config", {"context": 0})
+    post(owner, "/api/panel/assistant/config", {"context": 0, "model": "deepseek-flash"})
     back_ctx = call(owner, "/api/panel/assistant/context?session=%d" % sid)
-    check("0 就是回到缺省值", back_ctx.get("window") == 128000, back_ctx)
+    check("0 就是按模型名查表（deepseek-flash 是 1M）",
+          back_ctx.get("window") == 1000000, back_ctx)
+    post(owner, "/api/panel/assistant/config", {"model": "some-local-model"})
+    other = call(owner, "/api/panel/assistant/context?session=%d" % sid)
+    check("表里没有的模型退回 128000", other.get("window") == 128000, other)
+    post(owner, "/api/panel/assistant/config", {"model": "deepseek-flash"})
 
     # 配额是平台资源：超管调别人的配额要留痕
     target_id = [a for a in call(owner, "/api/panel/accounts")["accounts"]

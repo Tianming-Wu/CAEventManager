@@ -1201,6 +1201,14 @@ def assistant_page(page):
     }""")
     check("输入框常驻在页面底部", box["bottomGap"] <= 40, box)
     check("发送按钮嵌在框内，而且是圆的", box["insideSend"] and box["round"], box)
+    arrow = page.evaluate("""() => {
+        const send = document.getElementById('assistantSend').getBoundingClientRect();
+        const path = document.querySelector('.as-ic-send path').getBoundingClientRect();
+        return {dx: +(path.left + path.width / 2 - (send.left + send.width / 2)).toFixed(2),
+                dy: +(path.top + path.height / 2 - (send.top + send.height / 2)).toFixed(2)};
+    }""")
+    check("发送按钮里的箭头在正中",
+          abs(arrow["dx"]) <= 1 and abs(arrow["dy"]) <= 1, arrow)
     check("框里有设置与全屏编辑入口", box["expand"] and box["gear"], box)
     rows = page.evaluate("""() => {
         const t = document.getElementById('assistantText');
@@ -1585,7 +1593,12 @@ def assistant_page(page):
               document.querySelector('#assistantLog .as-copy')).opacity""")) > 0.3)
 
     print("== 上下文用量 ==")
-    page.wait_for_timeout(700)
+    # 上限调小一点，百分比才不至于永远是 0（环上那一段弧要看得见）
+    call(owner_opener(), "/api/panel/assistant/config", {"context": 8000})
+    page.evaluate("() => { location.hash = '#/overview'; }")
+    page.wait_for_timeout(300)
+    page.evaluate("() => { location.hash = '#/assistant'; }")
+    page.wait_for_timeout(900)
     ring = page.evaluate("""() => {
         const wrap = document.getElementById('asContextWrap');
         const btn = document.getElementById('asContext');
@@ -1600,8 +1613,25 @@ def assistant_page(page):
     }""")
     check("会话名同一行、右边有上下文环",
           ring["shown"] and ring["sameLine"] and ring["rightOfName"], ring)
+    # 会话名那颗按钮只包住自己的字：悬停高亮不该一路铺到环旁边
+    box = page.evaluate("""() => {
+        const btn = document.getElementById('asSessionBar').getBoundingClientRect();
+        const wrap = document.getElementById('asContextWrap').getBoundingClientRect();
+        const send = document.getElementById('assistantSend').getBoundingClientRect();
+        const form = document.getElementById('assistantForm').getBoundingClientRect();
+        return {btnW: Math.round(btn.width), btnRight: Math.round(btn.right),
+                gap: Math.round(wrap.left - btn.right),
+                ringRight: Math.round(wrap.right), sendRight: Math.round(send.right),
+                formRight: Math.round(form.right), ringH: Math.round(wrap.height)};
+    }""")
+    check("会话名按钮只包住自己的字（悬停不会铺到环左边）",
+          box["btnW"] < 160 and box["gap"] > 20, box)
+    check("环的右边沿与发送键对齐，且不贴输入框边缘",
+          abs(box["ringRight"] - box["sendRight"]) <= 2
+          and box["formRight"] - box["ringRight"] >= 8, box)
+    check("环做得比按钮小一点", box["ringH"] <= 22, box)
     check("环按百分比画了弧，说明也写了",
-          ring["dash"].split(" ")[0] not in ("", "0.00") and ring["aria"] == "上下文用量",
+          float(ring["dash"].split(" ")[0] or 0) > 1 and ring["aria"] == "上下文用量",
           ring)
     page.hover("#asContext")
     page.wait_for_timeout(700)
@@ -1619,9 +1649,43 @@ def assistant_page(page):
           and "/" in pop["figures"], pop)
     check("分项是 系统提示词 / 工具 / 对话消息",
           pop["rows"] == ["系统提示词", "工具", "对话消息"] and pop["segs"] >= 2, pop)
+    check("明细里的色点真的有颜色",
+          page.evaluate("""() => Array.from(document.querySelectorAll('.as-ctx-swatch'))
+              .every(s => getComputedStyle(s).backgroundColor !== 'rgba(0, 0, 0, 0)')"""))
     page.mouse.move(6, 6)
     page.wait_for_timeout(400)
     check("移开就收起", page.locator("#asContextPanel").is_hidden())
+
+    print("== 回到最新 ==")
+    # 先造一段够长的对话，否则会话区根本滚不动
+    long_msgs = []
+    for i in range(12):
+        long_msgs.append({"role": "user", "content": "问题 %d：把会话撑长。" % i,
+                          "ts": now})
+        long_msgs.append({"role": "assistant", "ts": now,
+                          "content": "回答 %d：一段够长的说明，用来把会话区撑出滚动条。" % i})
+    long_sid = (call(owner_opener(), "/api/panel/assistant/session/save",
+                     {"id": 0, "title": "长对话", "messages": long_msgs}) or {}).get("id")
+    page.evaluate("""(sid) => {
+        localStorage.setItem('as:lastSession', String(sid));
+        location.hash = '#/overview';
+    }""", long_sid)
+    page.wait_for_timeout(300)
+    page.evaluate("() => { location.hash = '#/assistant'; }")
+    page.wait_for_timeout(900)
+    check("在底部时不显示",
+          page.locator("#asToBottom").is_hidden())
+    page.evaluate("() => { document.getElementById('assistantScroll').scrollTop = 30; }")
+    page.wait_for_timeout(400)
+    check("往上滚了才出现", page.locator("#asToBottom").is_visible())
+    page.click("#asToBottom")
+    page.wait_for_timeout(700)
+    bottom = page.evaluate("""() => {
+        const box = document.getElementById('assistantScroll');
+        return {far: Math.round(box.scrollHeight - box.scrollTop - box.clientHeight),
+                hidden: document.getElementById('asToBottom').hidden};
+    }""")
+    check("点一下回到底部并自己收起来", bottom["far"] <= 4 and bottom["hidden"], bottom)
 
     print("== 手机上的可读宽度 ==")
     wide = page.evaluate("""() => getComputedStyle(

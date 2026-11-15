@@ -5026,7 +5026,7 @@
       '<div class="field" style="margin-top:14px"><label for="asCtx">上下文上限</label>' +
       '<input id="asCtx" type="text" inputmode="numeric" style="max-width:160px" value="' +
       PX.esc(String(cfg.context || cfg.defaultContext || 128000)) + '">' +
-      '<p class="hint">按 tokens 填（例如 128000 或 1000000），只用来算右边那条环的百分比</p></div>' +
+      '<p class="hint">按 tokens 填；留 0 就按模型名猜（deepseek-flash 这类是 1000000，其余 128000），只用来算那条环的百分比</p></div>' +
       '<label class="switch" id="asResumeRow" style="margin-top:14px">' +
       '<input type="checkbox" id="asResume"' +
       ((cfg.resume === false) ? "" : " checked") + '>' +
@@ -5222,6 +5222,7 @@
       drawAssistant();
       drawAssistantQuota();
       loadContext();
+      syncToBottom();
       restorePending(id);
     }).catch(function () {
       S.assistantSessionId = 0;
@@ -5571,6 +5572,16 @@
   function scrollAssistant() {
     var box = $("#assistantScroll");
     if (box) box.scrollTop = box.scrollHeight;
+    syncToBottom();
+  }
+
+  /* 「回到最新」：离开底部时才出现，点了滑回最下面 */
+  function syncToBottom() {
+    var btn = $("#asToBottom");
+    var box = $("#assistantScroll");
+    if (!btn || !box) return;
+    var far = box.scrollHeight - box.scrollTop - box.clientHeight;
+    btn.hidden = far <= 40;
   }
 
   /* 正在思考：动态的三个点，写在对话流末尾，回答落地时移除。
@@ -6536,6 +6547,14 @@
   $("#asApprovalNo").addEventListener("click", function () { answerApproval(false); });
   $("#asApprovalMore").addEventListener("click", toggleApprovalArgs);
   $("#asSessionBar").addEventListener("click", openAssistantDrawer);
+  $("#assistantScroll").addEventListener("scroll", syncToBottom);
+  $("#asToBottom").addEventListener("click", function () {
+    var box = $("#assistantScroll");
+    if (!box) return;
+    if (box.scrollTo) box.scrollTo({ top: box.scrollHeight, behavior: "smooth" });
+    else box.scrollTop = box.scrollHeight;
+    setTimeout(syncToBottom, 320);
+  });
 
   /* 上下文环：桌面指上去就出明细，触屏点一下（再点或点外面收起） */
   function ctxHasHover() {

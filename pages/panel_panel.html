@@ -381,14 +381,22 @@
       </header>
 
       <div class="assistant-shell">
-        <div class="assistant-scroll" id="assistantScroll">
-          <div class="as-loading" id="assistantLoading" hidden>正在加载对话</div>
-          <div class="assistant-log" id="assistantLog"></div>
-          <div class="assistant-empty" id="assistantEmpty">
-            <p class="assistant-lead">平台上的事，也可以让我替你查。</p>
-            <div class="assistant-asks" id="assistantAsks"></div>
-            <p class="hint" id="asKeepNote">对话会存档在账户上，下次回来接着聊。</p>
+        <div class="assistant-stage">
+          <div class="assistant-scroll" id="assistantScroll">
+            <div class="as-loading" id="assistantLoading" hidden>正在加载对话</div>
+            <div class="assistant-log" id="assistantLog"></div>
+            <div class="assistant-empty" id="assistantEmpty">
+              <p class="assistant-lead">平台上的事，也可以让我替你查。</p>
+              <div class="assistant-asks" id="assistantAsks"></div>
+              <p class="hint" id="asKeepNote">对话会存档在账户上，下次回来接着聊。</p>
+            </div>
           </div>
+          <button class="as-tobottom" id="asToBottom" type="button"
+                  title="回到最新" aria-label="回到最新" hidden>
+            <svg viewBox="0 0 20 20" aria-hidden="true">
+              <path d="M5.6 7.8l4.4 4.4 4.4-4.4"/>
+            </svg>
+          </button>
         </div>
 
         <div class="as-sessionbar">

@@ -5644,10 +5644,12 @@
         return '<span class="as-step' + (s.write ? " is-write" : "") + '"' + tip +
           ">" + PX.esc(s.label) + "</span>";
       }).join("");
-      // 胶囊放进气泡里：它不许超过气泡的右边缘，放进去就自然被约束住了
+      // 胶囊放进气泡里：它不许超过气泡的右边缘，放进去就自然被约束住了；
+      // 有胶囊时下面压一条分隔线，把"做过什么"和"说了什么"分开
       return '<div class="as-msg as-bot"><div class="as-body">' +
         '<div class="as-text md">' +
-        (steps ? '<div class="as-steps">' + steps + "</div>" : "") +
+        (steps ? '<div class="as-steps">' + steps + "</div>" +
+                 '<div class="as-divider"></div>' : "") +
         PX.md(m.content || "") + "</div>" + foot + "</div></div>";
     }).join("");
     if (thinkingOn) paintThinking();   // 重画之后把"正在…"那一行补回去
@@ -5938,9 +5940,22 @@
       el.innerHTML = '<div class="as-body"><div class="as-text md"></div></div>';
       log.appendChild(el);
     }
-    el.querySelector(".as-text").innerHTML = PX.md(state.text) +
-      '<span class="as-caret"></span>';
+    var box = el.querySelector(".as-text");
+    box.innerHTML = PX.md(state.text);
+    attachCaret(box);
     followStream(el);
+  }
+
+  /* 光标要落在文字末尾：一直往下钻到最后那个元素里再挂，
+     直接 append 在 markdown 后面会被块级元素顶到下一行 */
+  function attachCaret(box) {
+    var caret = document.createElement("span");
+    caret.className = "as-caret";
+    var node = box.lastElementChild;
+    while (node && node.lastElementChild && node.tagName !== "PRE") {
+      node = node.lastElementChild;
+    }
+    (node || box).appendChild(caret);
   }
 
   /* 滚动：贴着底部时跟着走；这一段比一屏还长就停在它的顶部，

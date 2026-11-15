@@ -3354,8 +3354,14 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
 }
 /* 胶囊在气泡里面（第一行），所以天生不会超出气泡的右边缘；放不下就换行 */
 .as-bot { max-width: 100%; }
-.as-steps { margin: 0 0 8px; }
+.as-steps { margin: 0 0 7px; }
 .as-text.md > .as-steps:last-child { margin-bottom: 0; }
+/* 胶囊与正文之间压一条细线，横穿整块（吃掉气泡的内边距） */
+.as-text.md > .as-divider {
+  height: 0;
+  margin: 0 -12px 8px;
+  border-top: 1px solid var(--line);
+}
 .as-step {
   max-width: 100%;
   overflow: hidden;

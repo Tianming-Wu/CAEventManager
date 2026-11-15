@@ -1372,6 +1372,14 @@ def assistant_page(page):
     check("胶囊在气泡里，不超出气泡右边缘，放不下就换行",
           not fit["overflow"] and fit["wrap"] == "wrap" and fit["inside"], fit)
     check("每颗胶囊都带着自己的摘要", fit["tips"] == 4, fit)
+    check("胶囊与正文之间有一条分隔线，横穿整块", page.evaluate("""() => {
+        const d = document.querySelector('#assistantLog .as-divider');
+        const chips = document.querySelector('#assistantLog .as-steps');
+        if (!d || !chips) return false;
+        const cs = getComputedStyle(d);
+        return parseFloat(cs.borderTopWidth) >= 1
+            && d.getBoundingClientRect().width >= chips.getBoundingClientRect().width;
+    }"""))
     page.hover('#assistantLog .as-step[data-step-tip="0"]')
     page.wait_for_timeout(500)
     tip = page.evaluate("""() => {

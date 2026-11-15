@@ -4933,24 +4933,78 @@
     session_title: 1
   };
 
-  /* 一步一行会刷出一串重复标签：同一轮里连调两次名单就并成「读取名单成员 ×2」 */
+  /* 一步一行会刷出一串重复标签：同一轮里连调两次名单就并成「读取名单成员 ×2」。
+     每个标签背后还留着这几次调用的摘要（悬停时看） */
+  var STEP_TIPS = [];          // [{tool, calls: [{args, result, ok}]}]
+
   function stepChips(steps) {
     var order = [], group = {};
     (steps || []).forEach(function (s) {
       if (!s || !s.tool) return;
       if (!group[s.tool]) {
-        group[s.tool] = { tool: s.tool, ok: true, n: 0 };
+        group[s.tool] = { tool: s.tool, ok: true, n: 0, calls: [] };
         order.push(s.tool);
       }
       group[s.tool].n += 1;
       if (!s.ok) group[s.tool].ok = false;
+      group[s.tool].calls.push({ args: (s.detail && s.detail.args) || {},
+                                 result: (s.detail && s.detail.result) || "",
+                                 ok: !!s.ok });
     });
     return order.map(function (name) {
       var g = group[name];
       var label = toolLabel(g.tool);
       if (g.n > 1) label += " ×" + g.n;
-      return { label: label, ok: g.ok, write: !!WRITE_TOOLS[g.tool] };
+      STEP_TIPS.push({ tool: g.tool, calls: g.calls });
+      return { label: label, ok: g.ok, write: !!WRITE_TOOLS[g.tool],
+               tip: STEP_TIPS.length - 1 };
     });
+  }
+
+  /* 胶囊的悬停摘要：这一步调了什么、拿到了几条。指上去出来，触屏点一下，点外面收 */
+  function stepTipHtml(item) {
+    var head = '<div class="as-tip-head">' + PX.esc(toolLabel(item.tool)) + "</div>";
+    var blocks = item.calls.slice(0, 4).map(function (call) {
+      var keys = Object.keys(call.args || {});
+      var lines = keys.slice(0, 6).map(function (k) {
+        return '<div class="as-tip-row"><span>' + PX.esc(k) + "</span><b>" +
+          PX.esc(String(call.args[k])) + "</b></div>";
+      });
+      if (call.result) {
+        lines.push('<div class="as-tip-row"><span>结果</span><b>' +
+                   PX.esc(call.result) + "</b></div>");
+      }
+      if (!lines.length) lines.push('<div class="as-tip-row"><span>无参数</span></div>');
+      return '<div class="as-tip-block">' + lines.join("") + "</div>";
+    });
+    if (item.calls.length > 4) {
+      blocks.push('<div class="as-tip-more">还有 ' + (item.calls.length - 4) +
+                  " 次</div>");
+    }
+    return head + blocks.join("");
+  }
+
+  function openStepTip(chip) {
+    var idx = Number(chip.getAttribute("data-step-tip"));
+    var item = STEP_TIPS[idx];
+    var tip = $("#asStepTip");
+    if (!item || !tip) return;
+    tip.innerHTML = stepTipHtml(item);
+    tip.hidden = false;
+    var box = chip.getBoundingClientRect();
+    var size = tip.getBoundingClientRect();
+    var left = Math.min(Math.max(8, box.left), window.innerWidth - size.width - 8);
+    var top = box.top - size.height - 8;
+    if (top < 8) top = box.bottom + 8;
+    tip.style.left = left + "px";
+    tip.style.top = top + "px";
+    S.stepTipFor = idx;
+  }
+
+  function closeStepTip() {
+    var tip = $("#asStepTip");
+    if (tip) tip.hidden = true;
+    S.stepTipFor = null;
   }
 
   /* 时间戳：当天只给时分秒；同年补日期；跨年再补年份 */
@@ -5037,9 +5091,9 @@
       '<input type="checkbox" id="asResume"' +
       ((cfg.resume === false) ? "" : " checked") + '>' +
       '<span class="track"></span>' +
-      '<span class="switch-text">进入时接着上次的会话</span></label>' +
+      '<span class="switch-text">进入时继续上次的会话</span></label>' +
       '<div class="row" style="margin-top:16px;justify-content:flex-end">' +
-      '<button class="btn" id="asClearKey" type="button">清除密钥</button>' +
+      '<button class="btn danger" id="asClearKey" type="button">清除密钥</button>' +
       '<button class="btn" data-close-overlay="1" type="button">取消</button>' +
       '<button class="btn primary" id="asSave" type="button">保存</button></div>');
     showKeyMask(cfg);
@@ -5057,14 +5111,19 @@
       if (btn) pickAssistantModel(btn.getAttribute("data-model"));
     });
     $("#asClearKey").addEventListener("click", function () {
-      PX.api("/assistant/config", { method: "POST", body: { clear: true } })
-        .then(function (d) {
-          S.assistantCfg = d.config || S.assistantCfg;
-          showKeyMask(S.assistantCfg);
-          drawAssistant();
-          PX.toast("密钥已清除");
-        })
-        .catch(function (e) { PX.toast(PX.esc(e.message), true); });
+      // 清掉之后助手就不能用了，要重填：先问一句，不用密码
+      confirmHighRisk("清除密钥", "清除之后助手就不能用了，要重新填一把。",
+                      "清除", true, function () {
+        PX.api("/assistant/config", { method: "POST", body: { clear: true } })
+          .then(function (d) {
+            S.assistantCfg = d.config || S.assistantCfg;
+            showKeyMask(S.assistantCfg);
+            drawAssistant();
+            drawContext(null);
+            PX.toast("密钥已清除");
+          })
+          .catch(function (e) { PX.toast(PX.esc(e.message), true); });
+      }, { noSudo: true, keepUnder: true });
     });
     // 星号是假的：一聚焦就清掉，让人能直接覆盖
     $("#asKey").addEventListener("focus", function () {
@@ -5285,8 +5344,9 @@
       return v >= 100 ? String(Math.round(v)) : String(Math.round(v * 10) / 10);
     }
     if (n < 1000) return String(n);
-    if (n < 1e6) return "~" + one(n / 1e3) + "K";
-    return "~" + one(n / 1e6) + "M";
+    // 正好是整千/整百万就不带"~"：1000000 是 1M，999999 才是 ~1M
+    if (n < 1e6) return (n % 1e3 === 0 ? "" : "~") + one(n / 1e3) + "K";
+    return (n % 1e6 === 0 ? "" : "~") + one(n / 1e6) + "M";
   }
 
   function drawContext(stats) {
@@ -5559,6 +5619,8 @@
   function drawAssistantLog() {
     var log = $("#assistantLog");
     if (!log) return;
+    STEP_TIPS = [];
+    closeStepTip();
     log.innerHTML = (S.assistantMsgs || []).map(function (m, idx) {
       var when = messageTime(m.ts);
       // 时间那一行：[复制] [时间]。抄的只是这一段话本身，不含上面那几枚动作标签
@@ -5574,12 +5636,13 @@
           PX.esc(m.content).replace(/\n/g, "<br>") + "</div>" + foot + "</div></div>";
       }
       var steps = stepChips(m.steps).map(function (s) {
+        var tip = ' data-step-tip="' + s.tip + '"';
         if (!s.ok) {
-          return '<span class="as-step bad" title="没有执行">' +
+          return '<span class="as-step bad" title="没有执行"' + tip + ">" +
             PX.esc(s.label) + "</span>";
         }
-        return '<span class="as-step' + (s.write ? " is-write" : "") + '">' +
-          PX.esc(s.label) + "</span>";
+        return '<span class="as-step' + (s.write ? " is-write" : "") + '"' + tip +
+          ">" + PX.esc(s.label) + "</span>";
       }).join("");
       return '<div class="as-msg as-bot">' +
         (steps ? '<div class="as-steps">' + steps + "</div>" : "") +
@@ -6591,6 +6654,30 @@
   });
   $("#asContextWrap").addEventListener("mouseenter", function () {
     if (ctxHasHover()) showContextPanel(true);
+  });
+  /* 动作胶囊：指上去看这一步调了什么；触屏点一下开关，点外面收起 */
+  $("#assistantLog").addEventListener("mouseover", function (e) {
+    var chip = e.target.closest ? e.target.closest("[data-step-tip]") : null;
+    if (chip && ctxHasHover()) openStepTip(chip);
+  });
+  $("#assistantLog").addEventListener("mouseout", function (e) {
+    var chip = e.target.closest ? e.target.closest("[data-step-tip]") : null;
+    if (chip && ctxHasHover()) closeStepTip();
+  });
+  $("#assistantLog").addEventListener("click", function (e) {
+    var chip = e.target.closest ? e.target.closest("[data-step-tip]") : null;
+    if (!chip) return;
+    e.stopPropagation();
+    var idx = Number(chip.getAttribute("data-step-tip"));
+    if (S.stepTipFor === idx) closeStepTip();
+    else openStepTip(chip);
+  });
+  document.addEventListener("pointerdown", function (e) {
+    var tip = $("#asStepTip");
+    if (!tip || tip.hidden) return;
+    if (e.target && e.target.closest &&
+        (e.target.closest("[data-step-tip]") || e.target.closest("#asStepTip"))) return;
+    closeStepTip();
   });
   $("#asContextWrap").addEventListener("mouseleave", function () {
     if (ctxHasHover()) showContextPanel(false);

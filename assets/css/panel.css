@@ -2867,7 +2867,8 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
 .content.is-chat { overflow: hidden; display: flex; flex-direction: column; }
 .content.is-chat > .page { flex: 1 1 auto; min-height: 0; }
 /* 标题一行到底：图标按钮钉在右边，不去挤副标题 */
-.assistant-page .page-head { flex-wrap: nowrap; align-items: center; gap: 10px; }
+/* baseline：和别的页面同一套对齐，切页时标题不会上下跳 3px */
+.assistant-page .page-head { flex-wrap: nowrap; align-items: baseline; gap: 10px; }
 .assistant-page .page-head h1 { flex: 0 0 auto; }
 .assistant-page .page-sub {
   flex: 1 1 auto;
@@ -3340,7 +3341,41 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   border: 1px solid var(--line);
   color: var(--muted);
 }
+/* 胶囊不许撑出边界：一行放不下就换行，单个太长的截断 */
+.as-bot { max-width: 100%; }
+.as-steps { max-width: 100%; }
+.as-step {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: default;
+}
 .as-step.bad { border-color: var(--danger-line); color: var(--danger); }
+/* 胶囊的悬停摘要：fixed 定位，跟着那颗胶囊算位置；不吃鼠标事件，免得自己把自己关掉 */
+.as-step-tip {
+  position: fixed;
+  z-index: 60;
+  min-width: 160px;
+  max-width: 300px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  color: var(--muted);
+  font-size: .74rem;
+  line-height: 1.6;
+  pointer-events: none;
+}
+.as-step-tip[hidden] { display: none; }
+.as-tip-head { color: var(--text); font-weight: 650; margin-bottom: 2px; }
+.as-tip-block { padding: 3px 0; }
+.as-tip-block + .as-tip-block { border-top: 1px solid var(--line-soft); }
+.as-tip-row { display: flex; gap: 8px; justify-content: space-between; }
+.as-tip-row span { color: var(--dim); }
+.as-tip-row b { color: var(--text); font-weight: 500; word-break: break-all; }
+.as-tip-more { color: var(--dim); padding-top: 3px; }
 /* 写动作：强调色。真的改过数据的那些一眼看得出来，与只读的分开 */
 .as-step.is-write {
   border-color: var(--accent-line);

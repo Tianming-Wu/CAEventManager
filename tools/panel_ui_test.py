@@ -1242,11 +1242,22 @@ def assistant_page(page):
                  {"id": 0, "title": "中间态测试",
                   "messages": [{"role": "user", "content": "你好", "ts": now},
                                {"role": "assistant", "content": "在", "ts": now,
-                                "steps": [{"tool": "roster_entries", "ok": True},
-                                          {"tool": "roster_entries", "ok": True},
-                                          {"tool": "roster_add_person", "ok": True},
-                                          {"tool": "session_title", "ok": True},
-                                          {"tool": "list_rosters", "ok": False}]}]})
+                                "steps": [
+                                    {"tool": "roster_entries", "ok": True,
+                                     "detail": {"args": {"roster_id": "3", "q": "张"},
+                                                "result": "6 条"}},
+                                    {"tool": "roster_entries", "ok": True,
+                                     "detail": {"args": {"roster_id": "3"},
+                                                "result": "2 条"}},
+                                    {"tool": "roster_add_person", "ok": True,
+                                     "detail": {"args": {"sid": "2024001", "name": "张三"},
+                                                "result": "完成"}},
+                                    {"tool": "session_title", "ok": True,
+                                     "detail": {"args": {"title": "报名核查"},
+                                                "result": "完成"}},
+                                    {"tool": "list_rosters", "ok": False,
+                                     "detail": {"args": {},
+                                                "result": "这一步没有权限"}}]}]})
     sid = (saved or {}).get("id")
     check("先存下一段对话", bool(sid), saved)
 
@@ -1345,6 +1356,45 @@ def assistant_page(page):
     check("不再用“看了…”这种说法",
           not any(t.startswith("看了") or t.startswith("查了")
                   for t in [c["text"] for c in chips]), chips)
+
+    print("== 动作胶囊：不出界、悬停看摘要 ==")
+    fit = page.evaluate("""() => {
+        const log = document.getElementById('assistantLog');
+        const steps = log.querySelector('.as-steps');
+        const chips = Array.from(log.querySelectorAll('.as-step'));
+        const right = log.getBoundingClientRect().right;
+        return {overflow: chips.some(c => c.getBoundingClientRect().right > right + 1),
+                wrap: getComputedStyle(steps).flexWrap,
+                tips: chips.filter(c => c.hasAttribute('data-step-tip')).length};
+    }""")
+    check("胶囊不超出消息区，超了就换行",
+          not fit["overflow"] and fit["wrap"] == "wrap", fit)
+    check("每颗胶囊都带着自己的摘要", fit["tips"] == 4, fit)
+    page.hover('#assistantLog .as-step[data-step-tip="0"]')
+    page.wait_for_timeout(500)
+    tip = page.evaluate("""() => {
+        const t = document.getElementById('asStepTip');
+        return {open: !t.hidden, text: t.innerText,
+                rows: t.querySelectorAll('.as-tip-row').length,
+                blocks: t.querySelectorAll('.as-tip-block').length};
+    }""")
+    check("指上去出现这一步调了什么", tip["open"] and "读取名单成员" in tip["text"]
+          and "roster_id" in tip["text"], tip)
+    check("同一个工具调两次，摘要分两段", tip["blocks"] == 2, tip)
+    page.mouse.move(6, 6)
+    page.wait_for_timeout(400)
+    check("移开就收起", page.locator("#asStepTip").is_hidden())
+    # 触屏：点一下开、点外面关
+    page.evaluate("""() => {
+        const chip = document.querySelector('#assistantLog .as-step[data-step-tip="1"]');
+        chip.dispatchEvent(new MouseEvent('click', {bubbles: true}));
+    }""")
+    page.wait_for_timeout(300)
+    check("点一下也能看", page.locator("#asStepTip").is_visible()
+          and "写入名单" in page.inner_text("#asStepTip"), page.inner_text("#asStepTip")[:60])
+    page.click(".assistant-page .page-head h1")     # 点页面别处（标题）也算"外面"
+    page.wait_for_timeout(300)
+    check("点外面收起", page.locator("#asStepTip").is_hidden())
 
     print("== 会话列表：整卡片高亮与边距 ==")
     # 再来一段对话，才有一张"不是当前这段"的卡片可以量悬停底色
@@ -1847,8 +1897,18 @@ def assistant_page(page):
     page.wait_for_timeout(300)
     again = page.evaluate("() => document.getElementById('asKey').value")
     check("再保存一次也不会把密钥弄丢", again and set(again) == {"•"}, again[:12])
+    # 清除密钥是危险操作：红键 + 先问一句
+    check("清除密钥是红色危险键",
+          page.evaluate("""() => document.getElementById('asClearKey')
+              .classList.contains('danger')"""))
     page.click("#asClearKey")
-    page.wait_for_timeout(600)
+    page.wait_for_timeout(400)
+    check("点它先问一句",
+          "清除密钥" in page.inner_text("#overlayTitle")
+          and "不能用了" in page.inner_text("#overlayBody"),
+          (page.inner_text("#overlayTitle"), page.inner_text("#overlayBody")[:60]))
+    page.click("#confirmGo")
+    page.wait_for_timeout(700)
     check("清除密钥后回到未配置",
           "密钥" in page.inner_text("#assistantSub"), page.inner_text("#assistantSub"))
     page.evaluate("() => document.getElementById('overlayClose').click()")
@@ -2168,7 +2228,9 @@ def assistant_drawer(browser):
 def title_row(page):
     print("== page titles sit at the same height everywhere ==")
     tops = {}
-    for route in ("overview", "events", "users", "all-events", "server", "account"):
+    # 运维助手是另一套骨架（固定标题 + 常驻输入框），标题更得跟别页对齐
+    for route in ("overview", "events", "users", "all-events", "server", "account",
+                  "assistant"):
         page.goto(BASE + "/panel#/" + route)
         page.wait_for_timeout(260)
         tops[route] = page.evaluate(
@@ -4391,6 +4453,11 @@ def main():
                     if WITH_ACCOUNTS and [g for g in ONLY if g in NEEDS_ACCOUNTS]:
                         seed_accounts()
                     ui_login(page)
+                    # 运维助手先跑：它要求干净的落地状态（抽屉收着、没有弹窗），
+                    # 侧栏那几段会动导航与焦点，放在后面
+                    if want("assistant"):
+                        assistant_page(page)
+                        assistant_drawer(browser)
                     if want("shell"):
                         routes_page(page)
                         title_row(page)
@@ -4407,7 +4474,7 @@ def main():
                     group_page(page)
                     nav_keys_page(page)
                     crumb_motion(browser)
-                if want("assistant"):
+                if want("assistant") and not ONLY:
                     assistant_page(page)
                     assistant_drawer(browser)
                 if want("ops"):

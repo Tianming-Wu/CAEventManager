@@ -1049,6 +1049,40 @@ def _pending_view(token, call):
             "args": args}
 
 
+def _step_detail(name, args, result):
+    """给界面的"这一步到底干了什么"：参数留几个短的键，结果给条数或错误。
+
+    这些跟着那一步存进对话里，界面上悬停胶囊就能看到；所以只留摘要，不留全量。
+    """
+    keep = {}
+    for key, value in (args or {}).items():
+        if str(key).startswith("_"):
+            continue
+        if isinstance(value, (str, int, float, bool)) and str(value).strip():
+            keep[str(key)] = str(value)[:60]
+        if len(keep) >= 6:
+            break
+    out = {"args": keep}
+    data = result or {}
+    err = str(data.get("error") or data.get("refused") or "")
+    if err:
+        out["result"] = err[:80]
+        return out
+    for key in ("count", "total"):
+        if isinstance(data.get(key), int):
+            out["result"] = "%d 条" % data[key]
+            return out
+    for key in ("entries", "rows", "people", "events", "rosters", "signups",
+                "docs", "winners", "prizes", "titles"):
+        value = data.get(key)
+        if isinstance(value, list):
+            out["result"] = "%d 条" % len(value)
+            return out
+    if data.get("ok"):
+        out["result"] = "完成"
+    return out
+
+
 def _call_tool(acc, client, call, session=0):
     """执行一个工具调用，返回给模型看的结果（写动作也是从这里走的，只是在批准之后）。"""
     fn = (call.get("function") or {})
@@ -1102,7 +1136,8 @@ def _drive(acc, cfg, client, convo, steps, version, calls, session=0):
             say_progress(acc, session, "tools", policy.label_of(name))
             name, _args, result = _call_tool(acc, client, call, session)
             steps.append({"tool": name, "ok": "error" not in result,
-                          "note": result.get("error") or ""})
+                          "note": result.get("error") or "",
+                          "detail": _step_detail(name, _args, result)})
             convo.append({"role": "tool", "tool_call_id": call.get("id") or name,
                           "content": _clip(json.dumps(result, ensure_ascii=False), 6000)})
             calls = calls[1:]
@@ -1162,6 +1197,7 @@ def approve(acc, token, allow):
     call = calls[0]
     fn = (call.get("function") or {})
     name = fn.get("name") or ""
+    _args = _parse_arguments(fn.get("arguments"))
     if allow:
         say_progress(acc, grip.get("session") or 0, "tools", policy.label_of(name))
         name, _args, result = _call_tool(acc, grip["client"], call,
@@ -1170,7 +1206,8 @@ def approve(acc, token, allow):
         result = {"ok": False, "refused": "用户拒绝了这一步，没有执行"}
     grip["steps"].append({"tool": name, "ok": "error" not in result
                           and not result.get("refused"),
-                          "note": result.get("error") or ("已拒绝" if not allow else "")})
+                          "note": result.get("error") or ("已拒绝" if not allow else ""),
+                          "detail": _step_detail(name, _args, result)})
     grip["convo"].append({"role": "tool", "tool_call_id": call.get("id") or name,
                           "content": _clip(json.dumps(result, ensure_ascii=False), 6000)})
     try:

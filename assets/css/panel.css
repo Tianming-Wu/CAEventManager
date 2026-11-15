@@ -3222,7 +3222,8 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
 
 /* 会话列表（弹窗里） */
 .as-slist { display: flex; flex-direction: column; gap: 4px; max-height: min(52vh, 420px); overflow-y: auto; }
-/* 悬停高亮整张卡片（含右边两个按钮），不是只亮标题那一块；右边留出边距，删除键别贴到边 */
+/* 悬停高亮整张卡片（含右边两个按钮），不是只亮标题那一块；右边留出边距，删除键别贴到边。
+   底色用 surface-3：抽屉本身是 surface，差一档的 surface-2 贴在白底上几乎看不出来 */
 .as-srow {
   position: relative;
   display: flex; align-items: center; gap: 4px;
@@ -3230,7 +3231,7 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   border-radius: var(--radius-sm);
   transition: background .12s;
 }
-.as-srow:hover { background: var(--surface-2); }
+.as-srow:hover { background: var(--surface-3); }
 .as-srow.on, .as-srow.on:hover { background: var(--accent-soft); }
 /* 这段对话还挂着一个等批准的动作：卡片右上角一个小红点，压在按钮上方也不挡点击 */
 .as-wait {
@@ -3253,7 +3254,8 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
 }
 .as-sicon svg { width: 14px; height: 14px; fill: none; stroke: currentColor;
   stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
-.as-sicon:hover { background: var(--surface-3); color: var(--text); }
+/* 按钮自己的圆形底色比卡片浅一档：卡片已经是 surface-3 了，再深就看不出是按钮 */
+.as-sicon:hover { background: var(--surface-2); color: var(--text); }
 .as-sicon.danger:hover { color: var(--danger); background: var(--danger-soft); }
 
 /* ---------- 服务已更新 ---------- */

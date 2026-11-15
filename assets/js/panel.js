@@ -5294,6 +5294,11 @@
     var open = e.target.closest("[data-as-open]");
     if (open) {
       var id = Number(open.getAttribute("data-as-open"));
+      // 点的就是手头这一段：什么都不做，别把它从服务端重新读一遍
+      if (id === S.assistantSessionId) {
+        closeAssistantDrawer();
+        return;
+      }
       var want = "#/assistant/" + id;
       closeAssistantDrawer();
       // 换一页会走 onRoute；同一条会话就把地址省了，直接打开
@@ -6238,10 +6243,15 @@
   // 运维助手：输入框常驻底部，设置与全屏编辑都在框里
   $("#asSettings").addEventListener("click", assistantConfigDialog);
   $("#asExpand").addEventListener("click", assistantFullscreenDialog);
-  $("#assistantReset").addEventListener("click", function () {
+  /* 开一段新对话：页面右上角那颗按钮与会话抽屉里的「新建」走同一条路 */
+  function startNewSession() {
+    closeAssistantDrawer();
     location.hash = "#/assistant";      // 新会话：点开就是初始页，发消息才落库
     openAssistantSession(0);
-  });
+  }
+
+  $("#assistantReset").addEventListener("click", startNewSession);
+  $("#asDrawerNew").addEventListener("click", startNewSession);
   $("#asApprovalYes").addEventListener("click", function () { answerApproval(true); });
   $("#asApprovalNo").addEventListener("click", function () { answerApproval(false); });
   $("#asSessionBar").addEventListener("click", openAssistantDrawer);

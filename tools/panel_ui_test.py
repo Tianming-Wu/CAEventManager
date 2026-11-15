@@ -1291,6 +1291,12 @@ def assistant_page(page):
             document.querySelector('#asDrawerBody .as-srow:not(.on)')).backgroundColor""")
 
     idle_bg = row_bg()
+    drawer_bg = page.evaluate("""() => getComputedStyle(
+        document.getElementById('asDrawer')).backgroundColor""")
+
+    def rgb(text):
+        return [int(n) for n in re.findall(r"\d+", text)[:3]]
+
     # 悬停在标题上、悬停在删除键上：整张卡片都应该亮起来，而且是同一种底色
     open_box = page.locator("#asDrawerBody .as-srow:not(.on) .as-sopen").first.bounding_box()
     page.mouse.move(open_box["x"] + 20, open_box["y"] + open_box["height"] / 2)
@@ -1302,11 +1308,49 @@ def assistant_page(page):
     page.wait_for_timeout(250)
     on_del = row_bg()
     check("悬停标题时整张卡片高亮", on_title != idle_bg, (idle_bg, on_title))
+    # 高亮要看得出来：与抽屉底色至少差一档（差得太近等于没有）
+    delta = max(abs(a - b) for a, b in zip(rgb(on_title), rgb(drawer_bg)))
+    check("高亮与抽屉底色拉得开（不是看不见的一档）",
+          delta >= 8, (on_title, drawer_bg, delta))
     check("悬停按钮时卡片底色不变（高亮覆盖整个卡片）",
           on_del == on_title, (on_title, on_del))
     page.mouse.move(4, 4)
-    page.click("#asDrawerClose")
-    page.wait_for_timeout(400)
+    page.wait_for_timeout(200)
+
+    # 点当前这一段：抽屉收起来，但别把它从服务端重新读一遍
+    reads = []
+    page.on("request", lambda r: reads.append(r.url))
+    reads.clear()
+    page.click("#asDrawerBody .as-srow.on .as-sopen")
+    page.wait_for_timeout(600)
+    reloaded = [u for u in reads if "/assistant/session?id=" in u]
+    check("点当前会话什么也不做，不重新读一遍",
+          not reloaded
+          and not page.locator("#asDrawer").is_visible(), (reloaded, reads[:4]))
+
+    # 抽屉头上、叉的左边有个「新建会话」
+    page.click("#asSessionBar")
+    page.wait_for_timeout(700)
+    head = page.evaluate("""() => {
+        const neu = document.getElementById('asDrawerNew');
+        const close = document.getElementById('asDrawerClose');
+        if (!neu || !close) return {there: false};
+        const n = neu.getBoundingClientRect(), c = close.getBoundingClientRect();
+        return {there: true, leftOfClose: n.right <= c.left + 1,
+                label: neu.getAttribute('aria-label'),
+                round: Math.round(n.width) === Math.round(n.height)};
+    }""")
+    check("会话抽屉里有个新建会话按钮，排在叉的左边",
+          head.get("there") and head.get("leftOfClose")
+          and head.get("label") == "新建会话", head)
+    page.click("#asDrawerNew")
+    page.wait_for_timeout(700)
+    check("点它开一段新对话",
+          page.locator("#assistantEmpty").is_visible()
+          and page.inner_text("#asSessionName") == "新会话"
+          and not page.locator("#asDrawer").is_visible(),
+          (page.inner_text("#asSessionName"),
+           page.locator("#assistantEmpty").is_visible()))
 
     print("== 待批准的小红点 ==")
     dots = page.evaluate("""() => {

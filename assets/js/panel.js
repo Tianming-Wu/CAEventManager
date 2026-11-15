@@ -136,6 +136,8 @@
   var ICON_RECLAIM = '<svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4.2 10a5.8 5.8 0 0 1 10-4"/><path d="M14.2 3.6v2.8h-2.8"/><path d="M15.8 10a5.8 5.8 0 0 1-10 4"/><path d="M5.8 16.4v-2.8h2.8"/></svg>';
   var ICON_ARCHIVE = '<svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3.4 6.4h13.2v9a1.6 1.6 0 0 1-1.6 1.6H5a1.6 1.6 0 0 1-1.6-1.6v-9Z"/><path d="M2.6 3.4h14.8v3H2.6zM8 10h4"/></svg>';
   var ICON_TRASH = '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 5.6h12M8 3.4h4M6.2 5.6l.7 9.4a1.6 1.6 0 0 0 1.6 1.5h3a1.6 1.6 0 0 0 1.6-1.5l.7-9.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  var ICON_COPY = '<svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="7.3" y="7.3" width="8.4" height="8.4" rx="1.6"/><path d="M12.7 4.3H5.9a1.6 1.6 0 0 0-1.6 1.6v6.8"/></svg>';
+  var ICON_CHECK = '<svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.8 10.6l3.3 3.3 7.1-7.8"/></svg>';
 
   /* ---------------------------------------------------------------- helpers */
   function rank(role) {
@@ -5458,13 +5460,19 @@
   function drawAssistantLog() {
     var log = $("#assistantLog");
     if (!log) return;
-    log.innerHTML = (S.assistantMsgs || []).map(function (m) {
+    log.innerHTML = (S.assistantMsgs || []).map(function (m, idx) {
       var when = messageTime(m.ts);
-      var stamp = when ? '<span class="as-time">' + PX.esc(when) + "</span>" : "";
+      // 时间那一行：[复制] [时间]。抄的只是这一段话本身，不含上面那几枚动作标签
+      var foot = '<div class="as-foot">' +
+        '<button class="as-copy" type="button" data-copy-msg="' + idx +
+        '" title="复制这段话" aria-label="复制这段话">' +
+        '<span class="i-copy">' + ICON_COPY + "</span>" +
+        '<span class="i-check">' + ICON_CHECK + "</span></button>" +
+        (when ? '<span class="as-time">' + PX.esc(when) + "</span>" : "") + "</div>";
       if (m.role === "user") {
         return '<div class="as-msg as-user"><div class="as-body">' +
           '<div class="as-text">' +
-          PX.esc(m.content).replace(/\n/g, "<br>") + "</div>" + stamp + "</div></div>";
+          PX.esc(m.content).replace(/\n/g, "<br>") + "</div>" + foot + "</div></div>";
       }
       var steps = stepChips(m.steps).map(function (s) {
         if (!s.ok) {
@@ -5477,7 +5485,7 @@
       return '<div class="as-msg as-bot">' +
         (steps ? '<div class="as-steps">' + steps + "</div>" : "") +
         '<div class="as-body"><div class="as-text md">' + PX.md(m.content || "") +
-        "</div>" + stamp + "</div></div>";
+        "</div>" + foot + "</div></div>";
     }).join("");
     if (thinkingOn) paintThinking();   // 重画之后把"正在…"那一行补回去
     scrollAssistant();
@@ -6224,6 +6232,24 @@
       e.stopPropagation();
       closeCardMenu();
       return copyText(copyBtn.getAttribute("data-copy"), copyBtn);
+    }
+
+    // 回答里代码块右上角那颗：抄的是同一段 <pre><code> 的文字，不用把代码再塞进属性里
+    var codeBtn = t.closest("[data-copy-code]");
+    if (codeBtn) {
+      e.stopPropagation();
+      var block = codeBtn.closest(".md-code");
+      var pre = block ? block.querySelector("pre code") || block.querySelector("pre") : null;
+      return copyText(pre ? pre.textContent : "", codeBtn);
+    }
+
+    // 每一段对话下面那颗：抄原文（助手的回答抄 Markdown 源，粘出去还能用）
+    var msgBtn = t.closest("[data-copy-msg]");
+    if (msgBtn) {
+      e.stopPropagation();
+      var idx = Number(msgBtn.getAttribute("data-copy-msg"));
+      var msg = (S.assistantMsgs || [])[idx];
+      return copyText(msg ? String(msg.content || "") : "", msgBtn);
     }
 
     var openLink = t.closest("[data-open-link]");

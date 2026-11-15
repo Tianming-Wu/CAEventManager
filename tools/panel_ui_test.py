@@ -1408,6 +1408,139 @@ def assistant_page(page):
           dots["there"] and dots["nav"] and dots["hidden"], dots)
     check("红点很小、不带数字", dots["w"] in ("7px", "6px", "8px") and dots["bg"] != "", dots)
 
+    print("== Markdown 渲染 ==")
+    md_sample = "\n".join([
+        "# 一级标题",
+        "## 二级标题",
+        "###### 六级标题",
+        "",
+        "**粗体** 与 *斜体* 与 ~~删除~~ 与 `code`，按键 <kbd>Ctrl</kbd>+<kbd>C</kbd>，"
+        "水的分子式 H<sub>2</sub>O，平方 x<sup>2</sup>。",
+        "",
+        "转义：\\*不是斜体\\*、\\`不是代码\\`、\\\\ 是一个反斜杠。",
+        "",
+        "> 一层引用",
+        "> > 二层引用",
+        "",
+        "- 甲",
+        "  - 甲一",
+        "    - 甲一一",
+        "- 乙",
+        "",
+        "1. 第一",
+        "2. 第二",
+        "",
+        "- [ ] 没做",
+        "- [x] 做完了",
+        "",
+        "| 学号 | 姓名 |",
+        "| --- | ---: |",
+        "| 2024001 | 张三 |",
+        "",
+        "---",
+        "",
+        "```python",
+        "print('hi')",
+        "```",
+    ])
+    md_saved = call(owner_opener(), "/api/panel/assistant/session/save",
+                    {"id": 0, "title": "Markdown 测试",
+                     "messages": [{"role": "user", "content": "渲染一下", "ts": now},
+                                  {"role": "assistant", "content": md_sample,
+                                   "ts": now}]})
+    md_sid = (md_saved or {}).get("id")
+    page.evaluate("""(sid) => {
+        localStorage.setItem('as:lastSession', String(sid));
+        location.hash = '#/overview';
+    }""", md_sid)
+    page.wait_for_timeout(300)
+    page.evaluate("() => { location.hash = '#/assistant'; }")
+    page.wait_for_timeout(900)
+    md = page.evaluate("""() => {
+        const log = document.getElementById('assistantLog');
+        const text = log.innerText;
+        const css = el => el ? getComputedStyle(el) : null;
+        const h1 = log.querySelector('h1.md-h1'), h2 = log.querySelector('h2.md-h2');
+        const h6 = log.querySelector('h6.md-h6');
+        const quotes = Array.from(log.querySelectorAll('blockquote'));
+        const boxes = Array.from(log.querySelectorAll('.md-box'));
+        const code = log.querySelector('.md-code');
+        const table = log.querySelector('.md-table');
+        const td = table ? table.querySelectorAll('tbody td') : [];
+        return {
+            text: text,
+            h1: h1 ? h1.textContent.trim() : '',
+            h2: h2 ? h2.textContent.trim() : '',
+            h6: h6 ? h6.textContent.trim() : '',
+            h1Size: h1 ? parseFloat(css(h1).fontSize) : 0,
+            h6Size: h6 ? parseFloat(css(h6).fontSize) : 0,
+            em: log.querySelector('em') ? log.querySelector('em').textContent : '',
+            strong: log.querySelector('strong') ? log.querySelector('strong').textContent : '',
+            del: log.querySelector('del') ? log.querySelector('del').textContent : '',
+            kbd: log.querySelectorAll('kbd').length,
+            sup: log.querySelectorAll('sup').length,
+            sub: log.querySelectorAll('sub').length,
+            quotes: quotes.length,
+            nestedQuote: !!log.querySelector('blockquote blockquote'),
+            deepList: !!log.querySelector('ul ul ul li'),
+            boxes: boxes.length,
+            checked: Array.from(log.querySelectorAll('.md-box')).filter(
+                b => b.classList.contains('on')).length,
+            table: !!table,
+            th: table ? table.querySelectorAll('thead th').length : 0,
+            td: td.length,
+            rightAligned: td.length ? td[1].style.textAlign : '',
+            hr: log.querySelectorAll('hr').length,
+            lang: code ? code.querySelector('.md-code-lang').textContent.trim() : '',
+            codeText: code ? code.querySelector('pre code').textContent : '',
+            copyBtn: !!(code && code.querySelector('[data-copy-code]')),
+            msgCopy: log.querySelectorAll('[data-copy-msg]').length,
+            times: log.querySelectorAll('.as-time').length,
+            rawAsterisk: text.indexOf('\\u0001') < 0 && text.indexOf('\\\\*') < 0,
+        };
+    }""")
+    check("多级标题各自成级，字号拉得开",
+          md["h1"] == "一级标题" and md["h2"] == "二级标题" and md["h6"] == "六级标题"
+          and md["h1Size"] - md["h6Size"] >= 2, (md["h1Size"], md["h6Size"]))
+    check("斜体、粗体、删除线都生效",
+          md["em"] == "斜体" and md["strong"] == "粗体" and md["del"] == "删除", md)
+    check("<kbd>、上下标生效",
+          md["kbd"] == 2 and md["sup"] == 1 and md["sub"] == 1, md)
+    check("反斜杠转义：星号与反引号变回字面量，且不残留反斜杠",
+          "*不是斜体*" in md["text"] and "`不是代码`" in md["text"]
+          and md["rawAsterisk"], md["text"][-160:])
+    check("引用可以嵌套", md["quotes"] == 2 and md["nestedQuote"], md["quotes"])
+    check("列表能嵌套到第三层", md["deepList"] and "甲一一" in md["text"], md["text"][:200])
+    check("任务框：[ ] 空着、[x] 打勾", md["boxes"] == 2 and md["checked"] == 1,
+          (md["boxes"], md["checked"]))
+    check("表格有表头与单元格，右对齐照分隔行",
+          md["table"] and md["th"] == 2 and md["td"] == 2
+          and md["rightAligned"] == "right", md)
+    check("分隔线生效", md["hr"] == 1, md["hr"])
+    check("代码块带语言、内容原样、有复制键",
+          md["lang"] == "python" and "print('hi')" in md["codeText"] and md["copyBtn"],
+          (md["lang"], md["codeText"]))
+    check("每段对话下面都有复制键，时间还在它右边",
+          md["msgCopy"] == 2 and md["times"] == 2, (md["msgCopy"], md["times"]))
+
+    # 复制：点代码块的键与消息上的键，都应该真的抄到剪贴板
+    try:
+        page.context.grant_permissions(["clipboard-read", "clipboard-write"])
+    except Exception:
+        pass
+    page.click(".md-code [data-copy-code]")
+    page.wait_for_timeout(400)
+    code_copied = page.evaluate("""() => navigator.clipboard.readText()
+        .then(t => t).catch(() => '')""")
+    check("代码块的复制键抄到的是那段代码", "print('hi')" in (code_copied or ""),
+          code_copied)
+    page.click('#assistantLog [data-copy-msg="1"]')
+    page.wait_for_timeout(400)
+    msg_copied = page.evaluate("""() => navigator.clipboard.readText()
+        .then(t => t).catch(() => '')""")
+    check("消息的复制键抄到的是 Markdown 原文",
+          "# 一级标题" in (msg_copied or ""), (msg_copied or "")[:60])
+
     print("== 写动作的批准条与会话名位置 ==")
     layout = page.evaluate("""() => {
         const bar = document.getElementById('asApproval');

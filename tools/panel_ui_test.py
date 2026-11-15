@@ -30,6 +30,30 @@ LOGIN = sys.argv[3] if len(sys.argv) > 3 and not sys.argv[3].startswith("--") \
     else "owner"
 WITH_ACCOUNTS = "--accounts" in sys.argv
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# 只跑其中一部分：`--only=assistant` 这类。动哪一块就只验哪一块，
+# 免得为了改运维助手把整页面板重跑一遍。分组与「依赖」写在这儿：
+#   assistant  运维助手（一条对话、批准条、抽屉、Markdown）——只要壳子能登录就行
+#   shell      侧栏、路由表、导航键、面包屑、布局档、触屏
+#   data       名单与报名（含打印、二维码、xlsx）——这几步互相用对方造的数据
+#   mods       模块（现场说明、导入、加载态）
+#   admin      账号（资料、删除、角色、越权）
+#   ops        服务器、sudo、审计、弹窗、主题、搜索、通知、展示屏幕、活动
+#   all / 不写 全套
+ONLY = []
+for _arg in sys.argv[3:]:
+    if _arg.startswith("--only="):
+        ONLY += [x for x in _arg.split("=", 1)[1].split(",") if x]
+if "all" in ONLY:
+    ONLY = []
+
+
+def want(group):
+    return not ONLY or group in ONLY
+
+
+# 这两组会用到"别人"的账号（转移拥有者、角色矩阵），只跑其中一组时先造几个
+NEEDS_ACCOUNTS = ("data", "admin")
 sys.path.insert(0, ROOT_DIR)
 sys.path.insert(0, os.path.join(ROOT_DIR, "core"))
 import xlsx  # noqa: E402  xlsx 用例要用同一份实现写测试文件
@@ -62,6 +86,22 @@ def call(opener, path, body=None):
         headers={"X-Requested-With": "CAEventManager", "Content-Type": "application/json"})
     with opener.open(req) if opener else urllib.request.urlopen(req) as res:
         return json.loads(res.read().decode())
+
+
+def seed_accounts(count=2):
+    """不经过界面，直接注册几个已通过的账号：转移拥有者之类要有个"别人"可选。"""
+    opener = owner_opener()
+    made = []
+    for i in range(count):
+        user = "seeded%d%s" % (i, TAG)
+        call(opener, "/api/panel/register",
+             {"username": user, "name": "备用%d" % i, "password": "seeded-pass-1",
+              "note": ""})
+        made.append(user)
+    for a in call(opener, "/api/panel/accounts?limit=200")["accounts"]:
+        if a["username"] in made and a["status"] == "pending":
+            call(opener, "/api/panel/account/decide", {"id": a["id"], "action": "approve"})
+    return made
 
 
 def drop_signup(opener, sid):
@@ -248,8 +288,8 @@ def shell_page(page):
     check("「我的名单」「我的报名」都在",
           page.locator("#statRosters").count() == 1 and page.locator("#statSignups").count() == 1)
     check("它们能点去各自的页面", page.evaluate(
-        """() => { const a = document.querySelector('.stat[href="#/rosters"]');
-                   const b = document.querySelector('.stat[href="#/signups"]');
+        """() => { const a = document.querySelector('.stat[data-href="#/rosters"]');
+                   const b = document.querySelector('.stat[data-href="#/signups"]');
                    return !!a && !!b; }"""))
     check("站长看得到账号总数", page.locator("#statAccountsBox").is_visible())
     check("版本号是四段", len(page.inner_text(".brand-ver").strip().lstrip("v").split(".")) == 4,
@@ -473,7 +513,7 @@ def signup_page(page, browser):
     check("creating a signup opens it",
           "UI 报名" in page.inner_text("#signupTitle"), page.inner_text("#signupTitle"))
     check("the page carries a breadcrumb back to the list",
-          page.locator('.page[data-page="signup"] .crumb[href="#/signups"]').count() == 1)
+          page.locator('.page[data-page="signup"] .crumb[data-href="#/signups"]').count() == 1)
     check("the public link is selectable text, not an input",
           page.locator("#signupUrl").evaluate("el => el.tagName") == "DIV")
     check("a QR code is drawn next to it",
@@ -1661,6 +1701,24 @@ def assistant_page(page):
           'href="https://' in page.evaluate("() => PX.md('[a](https://e.com)')")
           and "href" not in page.evaluate("() => PX.md('[a](javascript:alert(1))')"))
 
+    # 助手实际会写的那一行：中文标点里夹着各种行内格式
+    line_html = page.evaluate(r"""() => PX.md(
+        "普通：**粗体**、*斜体*、***粗斜体***、~~删除~~、`代码`、" +
+        "<kbd>Ctrl</kbd>+<kbd>S</kbd>、转义 \\*不该斜\\*、上标 x^2^ 与下标 H~2~O、" +
+        "脚注[^1]、自动链接 <https://example.com>。")""")
+    check("斜体在顿号后面也认",
+          "<em>斜体</em>" in line_html and "*斜体*" not in line_html, line_html[:160])
+    check("粗斜体两头都上",
+          "<em><strong>粗斜体</strong></em>" in line_html
+          or "<strong><em>粗斜体</em></strong>" in line_html, line_html[:200])
+    check("插入符与波浪线写成上下标",
+          "<sup>2</sup>" in line_html and "<sub>2</sub>" in line_html
+          and "~~删除~~" not in line_html, line_html[:200])
+    check("转义过的星号不变斜体，也不留反斜杠",
+          "*不该斜*" in line_html and "\\*" not in line_html, line_html[:200])
+    check("没有语言标注的代码块写 plain text",
+          "plain text" in page.evaluate("() => PX.md('```\\nraw\\n```')"))
+
 
 CRUMB_SAMPLER = r"""
 window.__crumb = null;
@@ -1907,6 +1965,13 @@ def assistant_drawer(browser):
         page.click('#asDrawerBody .as-srow[data-sid="%d"] [data-as-del]' % sid)
         page.wait_for_timeout(350)
         check("删除先问一句", page.locator("#overlay").is_visible())
+        body_text = page.inner_text("#overlayBody")
+        row_title = page.inner_text('#asDrawerBody .as-srow[data-sid="%d"] .as-sopen' % sid)
+        check("删除的那一句点名是哪段会话，并说明无法恢复",
+              "确定要删除「" in body_text and "吗？" in body_text
+              and "无法恢复" in body_text
+              and row_title.split("\n")[0].strip() in body_text,
+              (body_text, row_title[:40]))
         page.click("#asDelGo")
         page.wait_for_timeout(700)
         check("删掉的会话不在列表里了",
@@ -4133,65 +4198,93 @@ def sudo_expiry(browser):
 
 
 def main():
+    started = time.time()
     with sync_playwright() as pw:
         browser = pw.chromium.launch(channel="msedge", headless=True)
         try:
             ctx, page = new_page(browser)
             try:
-                if WITH_ACCOUNTS:
-                    register_page(page)
-                login_page(page)
-                shell_page(page)
-                routes_page(page)
-                title_row(page)
-                group_page(page)
-                nav_keys_page(page)
-                assistant_page(page)
-                assistant_drawer(browser)
-                crumb_motion(browser)
-                screens_page(page)
-                roster_page(page)
-                signup_page(page, browser)
-                print_page(browser)
-                xlsx_page(browser)
-                qr_formats(browser)
-                notice_page(page)
-                card_page(page)
-                create_page(browser)
-                leave_guard_page(browser)
-                module_refresh_page(browser)
-                loading_states_page(browser)
-                roster_admin_page(browser)
-                module_install_page(browser)
-                archived_delete_page(browser)
-                account_delete_page(browser)
-                # profile_page edits the signed-in account, so it only runs on a
-                # throw-away instance
-                if WITH_ACCOUNTS:
-                    profile_page(page)
-                users_table(page)
-                events_table(page)
-                dialog_page(page)
-                theme_page(page)
-                audit_page(page)
-                server_page(page)
-                search_page(page)
-                check("no javascript error on the owner's session", not page._errors,
-                      "; ".join(page._errors)[:200])
+                # 只跑一部分时，先把这个壳子立起来（登录 + 首屏），后面各组都靠它
+                if ONLY:
+                    print("== 只跑：%s ==" % ", ".join(ONLY))
+                    if WITH_ACCOUNTS and [g for g in ONLY if g in NEEDS_ACCOUNTS]:
+                        seed_accounts()
+                    ui_login(page)
+                    if want("shell"):
+                        routes_page(page)
+                        title_row(page)
+                        group_page(page)
+                        nav_keys_page(page)
+                        crumb_motion(browser)
+                else:
+                    if WITH_ACCOUNTS:
+                        register_page(page)
+                    login_page(page)
+                    shell_page(page)
+                    routes_page(page)
+                    title_row(page)
+                    group_page(page)
+                    nav_keys_page(page)
+                    crumb_motion(browser)
+                if want("assistant"):
+                    assistant_page(page)
+                    assistant_drawer(browser)
+                if want("ops"):
+                    screens_page(page)
+                if want("data"):
+                    roster_page(page)
+                    signup_page(page, browser)
+                    print_page(browser)
+                    xlsx_page(browser)
+                    qr_formats(browser)
+                if want("ops"):
+                    notice_page(page)
+                    card_page(page)
+                    create_page(browser)
+                    leave_guard_page(browser)
+                if want("mods"):
+                    module_refresh_page(browser)
+                    loading_states_page(browser)
+                if want("admin"):
+                    roster_admin_page(browser)
+                if want("mods"):
+                    module_install_page(browser)
+                if want("admin"):
+                    archived_delete_page(browser)
+                    account_delete_page(browser)
+                    # profile_page edits the signed-in account, so it only runs on a
+                    # throw-away instance
+                    if WITH_ACCOUNTS:
+                        profile_page(page)
+                    users_table(page)
+                if want("ops"):
+                    events_table(page)
+                    dialog_page(page)
+                    theme_page(page)
+                    audit_page(page)
+                    server_page(page)
+                    search_page(page)
+                if not ONLY:
+                    check("no javascript error on the owner's session", not page._errors,
+                          "; ".join(page._errors)[:200])
             finally:
                 ctx.close()
 
-            layout_page(browser)
-            touch_page(browser)
-            mount_page(browser)
-            sudo_expiry(browser)
-            if WITH_ACCOUNTS:
+            if want("shell"):
+                layout_page(browser)
+                touch_page(browser)
+            if want("ops"):
+                mount_page(browser)
+                sudo_expiry(browser)
+            if want("admin") and WITH_ACCOUNTS:
                 role_page(browser)
                 denied_flow(browser)
         finally:
             browser.close()
 
     print()
+    print("用时 %.1f 秒%s" % (time.time() - started,
+                             ("（只跑了 %s）" % ", ".join(ONLY)) if ONLY else ""))
     if problems:
         print("FAILED %d check(s):" % len(problems))
         for p in problems:

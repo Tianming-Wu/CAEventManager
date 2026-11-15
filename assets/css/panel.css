@@ -1238,6 +1238,9 @@ table.tbl tr.is-muted td { color: var(--dim); }
   text-decoration: none;
 }
 .crumb:hover { color: var(--accent-strong); text-decoration: none; }
+/* 页内跳转的链接不带 href：浏览器就不会在左下角弹一串地址。
+   代价是少了 UA 给的指针样式，这里补回来 */
+[data-href] { cursor: pointer; }
 .crumb-sep { color: var(--dim); font-weight: 400; }
 
 /* ---------- create an activity ---------- */
@@ -2972,30 +2975,32 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
-  padding: 2px 2px 4px;
+  padding: 4px 8px 10px;
 }
 .assistant-log { display: flex; flex-direction: column; gap: 10px; }
 .assistant-log:empty { display: none; }
 .as-msg { display: flex; min-width: 0; }
 .as-user { justify-content: flex-end; }
-/* 气泡与它下面的时间戳叠成一列；用户靠右，助手靠左 */
+/* 气泡与它下面的时间戳叠成一列；用户靠右，助手靠左。
+   行宽给到会话区的 78%：太窄会浪费横向空间，太长又不好读 */
 .as-body {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 5px;
   min-width: 0;
-  max-width: min(100%, 620px);
+  max-width: 78%;
 }
 .as-user .as-body { align-items: flex-end; }
 .as-bot .as-body { align-items: flex-start; }
-/* 时间那一行：[复制] [时间]。复制键平时淡着，指到这条上才亮；触摸屏上没有悬停，常亮 */
-.as-foot { display: flex; align-items: center; gap: 6px; min-height: 14px; }
+/* 时间那一行：[复制] [时间]。复制键平时淡着，指到这条上才亮；触摸屏上没有悬停，常亮。
+   键面按 22px 做：13px 的图标加一圈留白，鼠标够得着，又不把时间挤走 */
+.as-foot { display: flex; align-items: center; gap: 6px; min-height: 22px; }
 .as-copy {
   appearance: none;
   display: grid;
   place-items: center;
-  width: 18px;
-  height: 18px;
+  width: 22px;
+  height: 22px;
   padding: 0;
   border: 0;
   border-radius: 999px;
@@ -3005,7 +3010,7 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   opacity: 0;
   transition: opacity .12s, color .12s, background .12s;
 }
-.as-copy svg { width: 13px; height: 13px; display: block; }
+.as-copy svg { width: 14px; height: 14px; display: block; }
 .as-copy .i-check { display: none; }
 .as-copy.copied .i-copy { display: none; }
 .as-copy.copied .i-check { display: block; }
@@ -3100,9 +3105,9 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   border-left: 3px solid var(--line);
   color: var(--muted);
 }
+/* 再深一层只把竖线调淡，字色不再跟着退：套三四层之后要还能读 */
 .as-text.md blockquote blockquote {
   border-left-color: var(--line-soft);
-  color: var(--dim);
 }
 .as-text.md blockquote p { margin: 0 0 4px; }
 .as-text.md ul ul, .as-text.md ul ol,

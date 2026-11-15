@@ -144,11 +144,16 @@
     // 粗体先于斜体：**x** 里那两颗星不会再被当成斜体
     out = out.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
              .replace(/([^_\w])__([^_]+)__(?!\w)/g, "$1<strong>$2</strong>");
-    out = out.replace(/(^|[\s(（【、，。：；])\*([^*\s][^*]*?)\*(?=$|[\s)）】.,;:!?，。；：！？])/g,
-                      "$1<em>$2</em>")
-             .replace(/(^|[\s(（【、，。：；])_([^_\s][^_]*?)_(?=$|[\s)）】.,;:!?，。；：！？])/g,
-                      "$1<em>$2</em>");
+    // 斜体只看两端是不是星号，不要求前后有空格或西文标点——
+    // 中文里「*斜体*、」这种后面紧跟顿号的写法，以前整条都匹配不上
+    out = out.replace(/\*([^*\s](?:[^*]*[^*\s])?)\*/g, "<em>$1</em>");
+    // 下划线式的斜体要认词边界，否则 roster_add_person 这种标识符会被拆开
+    out = out.replace(/(^|[^\w])_([^_\s](?:[^_]*[^_\s])?)_(?!\w)/g, "$1<em>$2</em>");
+    // 删除线先于下标：~~x~~ 不能被当成 ~x~ 再套一层
     out = out.replace(/~~([^~]+)~~/g, "<del>$1</del>");
+    // 上下标：模型习惯写 x^2^ 与 H~2~O
+    out = out.replace(/\^([^\^\s]+)\^/g, "<sup>$1</sup>");
+    out = out.replace(/~([^~\s]+)~/g, "<sub>$1</sub>");
     out = out.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
       '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
     return out.replace(/\u0001(\d+)\u0001/g, function (all, i) {
@@ -168,12 +173,13 @@
     return (String(line).match(/^[ \t]*/)[0] || "").replace(/\t/g, "    ").length;
   }
 
-  /* 代码块：带一行小标题写语言，右边一颗复制键（点击的活儿在 panel.js 里） */
+  /* 代码块：带一行小标题写语言，右边一颗复制键（点击的活儿在 panel.js 里）。
+     没标语言就写 plain text——中文在这条等宽小字里会掉进中文字体，观感不齐 */
   function mdCode(lang, code) {
     var cls = lang ? ' class="language-' + esc(lang) + '"' : "";
     return '<div class="md-code">' +
       '<div class="md-code-head"><span class="md-code-lang">' +
-      (lang ? esc(lang) : "代码") + "</span>" +
+      (lang ? esc(lang) : "plain text") + "</span>" +
       '<button class="md-copy" type="button" data-copy-code="1" ' +
       'aria-label="复制这段代码">复制</button></div>' +
       "<pre><code" + cls + ">" + esc(code) + "</code></pre></div>";

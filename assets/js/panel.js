@@ -2534,12 +2534,12 @@
     if (!crumb) return;
     var parent = routeParent(wanted);
     if (parent) {
-      crumb.setAttribute("href", parent.href);
+      crumb.setAttribute("data-href", parent.href);
       crumb.textContent = parent.label;
       return;
     }
     if (S.explicitBack) {
-      crumb.setAttribute("href", "#" + S.explicitBack);
+      crumb.setAttribute("data-href", "#" + S.explicitBack);
       crumb.textContent = "返回";
     }
   }
@@ -5389,8 +5389,11 @@
   }
 
   function deleteSession(id) {
+    var row = ((S.assistantList || []).filter(function (s) { return s.id === id; })[0]) || {};
+    var name = (row.title || "").trim() || "这段会话";
     openOverlay("as-del", "删除会话",
-      '<p class="page-sub">删掉之后这段对话就找不回来了。</p>' +
+      '<p class="page-sub">确定要删除「' + PX.esc(name) + '」吗？</p>' +
+      '<p class="page-sub">会话删除后将无法恢复。</p>' +
       '<div class="row" style="margin-top:18px;justify-content:flex-end">' +
       '<button class="btn" data-close-overlay="1" type="button">取消</button>' +
       '<button class="btn danger" id="asDelGo" type="button">删除</button></div>');
@@ -6097,6 +6100,20 @@
   document.addEventListener("click", function (e) {
     var t = e.target;
     if (!t || !t.closest) return;
+
+    // 页内跳转的链接不上 href：浏览器会在左下角弹一串地址（鼠标一过就闪），
+    // 那是给外链用的提示，页内切页不需要。Ctrl/⌘ 点仍按"新开一个"处理。
+    var navLink = t.closest("[data-href]");
+    if (navLink) {
+      var where = navLink.getAttribute("data-href");
+      e.preventDefault();
+      if (e.metaKey || e.ctrlKey || e.shiftKey) {
+        window.open(location.pathname + where, "_blank", "noopener");
+        return;
+      }
+      if (location.hash !== where) location.hash = where;
+      return;
+    }
 
     var dec = t.closest("[data-decide]");
     if (dec) return decide(Number(dec.getAttribute("data-id")),
@@ -7094,6 +7111,15 @@
       e.preventDefault();
       e.stopPropagation();
       closeAlert(false);
+    }
+    // 没有 href 的页内链接要自己认键盘：Enter / 空格跟点击一样
+    if (e.key === "Enter" || e.key === " ") {
+      var keyLink = e.target && e.target.closest ? e.target.closest("[data-href]") : null;
+      if (keyLink && e.target === keyLink) {
+        e.preventDefault();
+        var where = keyLink.getAttribute("data-href");
+        if (location.hash !== where) location.hash = where;
+      }
     }
   }, true);
   $("#noticeReadAll").addEventListener("click", function () { markNotices([]); });

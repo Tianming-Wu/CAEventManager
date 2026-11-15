@@ -18,10 +18,29 @@
 ## 改动之后
 
 ```powershell
+python tools/run_suites.py changed                                   # 按改动挑最小的那几套
 python tools/run_suites.py unit panel_test panel_ui_test smoke ui safemode modules   # 全套件
 python tools/normalize_eol.py                                        # 行尾统一为 LF
 python tools/bump_version.py                                         # 推进版本号
 ```
+
+**开发中间用 `changed`，提交之前跑一次全套。** 它会看 `git status` 里改过的文件：
+
+- 只动了某个区域（`core/assistant.py` / 名单数据层 / 模块 / 文档……）→ 只跑那几套，
+  页面测试也只跑对应那一组
+- 动了共用件（`assets/js/panel.js`、`assets/css/panel.css`、`pages/`、`app.py`、`tools/`），
+  或者说不清影响范围 → 退回全套。**这些文件是真共用的，别拿"应该没事"去赌**
+
+页面测试可以自己指定分组，省掉整套 `panel_ui_test`（一次全套约三分钟，单组二十几秒）：
+
+```powershell
+python tools/run_suites.py panel_ui_test --only=assistant     # 运维助手：对话、批准条、抽屉、Markdown
+python tools/run_suites.py panel_ui_test --only=shell         # 侧栏、路由、导航键、面包屑、布局档
+python tools/run_suites.py panel_ui_test --only=data,ops      # 名单报名 + 服务器/审计/主题/弹窗
+```
+
+分组是 `assistant` / `shell` / `data` / `mods` / `admin` / `ops`；不写或写 `all` 就是全套。
+每组打印自己的用时，`run_suites.py` 最后再报一遍合计，慢在哪儿一眼能看出来。
 
 ## 版本号
 

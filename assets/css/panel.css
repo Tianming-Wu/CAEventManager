@@ -3232,7 +3232,9 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   transition: background .12s;
 }
 .as-srow:hover { background: var(--surface-3); }
-.as-srow.on, .as-srow.on:hover { background: var(--accent-soft); }
+.as-srow.on { background: var(--accent-soft); }
+/* 当前这一段本来就有底气色：悬停时再深一档。少了这一条，点自己那一段像没反应 */
+.as-srow.on:hover { background: var(--accent-line); }
 /* 这段对话还挂着一个等批准的动作：卡片右上角一个小红点，压在按钮上方也不挡点击 */
 .as-wait {
   position: absolute; top: 4px; right: 5px;

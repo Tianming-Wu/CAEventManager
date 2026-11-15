@@ -1314,6 +1314,18 @@ def assistant_page(page):
           delta >= 8, (on_title, drawer_bg, delta))
     check("悬停按钮时卡片底色不变（高亮覆盖整个卡片）",
           on_del == on_title, (on_title, on_del))
+
+    # 当前这一段本来就有底气色（强调色那一档）：悬停也得看得出来，而且不是同一档
+    cur_idle = page.evaluate("""() => getComputedStyle(
+        document.querySelector('#asDrawerBody .as-srow.on')).backgroundColor""")
+    cur_box = page.locator("#asDrawerBody .as-srow.on .as-sopen").first.bounding_box()
+    page.mouse.move(cur_box["x"] + 20, cur_box["y"] + cur_box["height"] / 2)
+    page.wait_for_timeout(250)
+    cur_hover = page.evaluate("""() => getComputedStyle(
+        document.querySelector('#asDrawerBody .as-srow.on')).backgroundColor""")
+    cur_delta = max(abs(a - b) for a, b in zip(rgb(cur_idle), rgb(cur_hover)))
+    check("当前会话那张卡片悬停也有指示",
+          cur_idle != cur_hover and cur_delta >= 8, (cur_idle, cur_hover, cur_delta))
     page.mouse.move(4, 4)
     page.wait_for_timeout(200)
 

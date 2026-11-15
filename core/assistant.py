@@ -881,6 +881,36 @@ def suggest_title(cfg, text):
 PENDING_TTL = 300
 _PENDING = {}
 
+# 这一轮走到哪儿了：界面每隔一会儿问一句，好把"正在思考"换成更具体的那一步。
+# 一轮问答是一次请求，中间没有推送通道，所以用这张小表 + 轮询代替流式。
+# 键是 (账号, 会话)：开两个标签页时各看各的。
+PROGRESS_TTL = 180
+_PROGRESS = {}
+
+
+def _drop_stale_progress():
+    now = time.time()
+    for key in [k for k, v in _PROGRESS.items() if now - v["at"] > PROGRESS_TTL]:
+        _PROGRESS.pop(key, None)
+
+
+def say_progress(acc, session, phase, label=""):
+    """记一笔：think（想下一步）/ tools（正在跑某个工具）/ write（正在写回答）/ done。"""
+    who = acc["id"] if acc is not None else None
+    if who is None:
+        return
+    _PROGRESS[(who, int(session or 0))] = {"phase": phase, "label": label or "",
+                                          "at": time.time()}
+
+
+def progress_of(acc, session):
+    _drop_stale_progress()
+    who = acc["id"] if acc is not None else None
+    item = _PROGRESS.get((who, int(session or 0))) or {}
+    if item.get("phase") == "done":
+        return {"phase": "", "label": ""}
+    return {"phase": item.get("phase") or "", "label": item.get("label") or ""}
+
 
 def _drop_stale():
     now = time.time()
@@ -1005,6 +1035,8 @@ def _drive(acc, cfg, client, convo, steps, version, calls, session=0):
     """跑模型这一轮。``calls`` 非空表示从"已经问过模型、手上还有几个调用"接着跑。"""
     for _ in range(MAX_STEPS):
         if calls is None:
+            # 头一次问模型是在想下一步；跑过工具之后再问，是在写回答
+            say_progress(acc, session, "think" if not steps else "write")
             payload = _post_chat(cfg, convo, account=acc)
             msg = ((payload.get("choices") or [{}])[0].get("message") or {})
             calls = msg.get("tool_calls") or []
@@ -1023,6 +1055,7 @@ def _drive(acc, cfg, client, convo, steps, version, calls, session=0):
                 token = _stash(acc, cfg, client, convo, steps, calls, version, session)
                 return {"reply": "", "steps": steps,
                         "pending": _pending_view(token, call)}
+            say_progress(acc, session, "tools", policy.label_of(name))
             name, _args, result = _call_tool(acc, client, call, session)
             steps.append({"tool": name, "ok": "error" not in result,
                           "note": result.get("error") or ""})
@@ -1044,7 +1077,10 @@ def run(conn, acc, client, cfg, messages, log=print, version="", session=0):
             convo.append({"role": role, "content": str(m["content"])[:4000]})
     if not convo or convo[-1]["role"] != "user":
         raise ValueError("最后一句应该是用户的话")
-    return _drive(acc, cfg, client, convo, [], version, None, session)
+    try:
+        return _drive(acc, cfg, client, convo, [], version, None, session)
+    finally:
+        say_progress(acc, session, "done")
 
 
 def approve(acc, token, allow):
@@ -1061,6 +1097,7 @@ def approve(acc, token, allow):
     fn = (call.get("function") or {})
     name = fn.get("name") or ""
     if allow:
+        say_progress(acc, grip.get("session") or 0, "tools", policy.label_of(name))
         name, _args, result = _call_tool(acc, grip["client"], call,
                                         grip.get("session") or 0)
     else:
@@ -1070,5 +1107,8 @@ def approve(acc, token, allow):
                           "note": result.get("error") or ("已拒绝" if not allow else "")})
     grip["convo"].append({"role": "tool", "tool_call_id": call.get("id") or name,
                           "content": _clip(json.dumps(result, ensure_ascii=False), 6000)})
-    return _drive(acc, grip["cfg"], grip["client"], grip["convo"], grip["steps"],
-                  grip["version"], calls[1:], grip.get("session") or 0)
+    try:
+        return _drive(acc, grip["cfg"], grip["client"], grip["convo"], grip["steps"],
+                      grip["version"], calls[1:], grip.get("session") or 0)
+    finally:
+        say_progress(acc, grip.get("session") or 0, "done")

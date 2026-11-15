@@ -5479,6 +5479,7 @@
         '<div class="as-body"><div class="as-text md">' + PX.md(m.content || "") +
         "</div>" + stamp + "</div></div>";
     }).join("");
+    if (thinkingOn) paintThinking();   // 重画之后把"正在…"那一行补回去
     scrollAssistant();
   }
 
@@ -5487,19 +5488,82 @@
     if (box) box.scrollTop = box.scrollHeight;
   }
 
-  /* 正在思考：动态的三个点，写在对话流末尾，回答落地时移除 */
-  function showThinking() {
+  /* 正在思考：动态的三个点，写在对话流末尾，回答落地时移除。
+     文字会随着服务端的进度换：思考 → 执行某个工具 → 生成回答。
+     这一行不在 S.assistantMsgs 里，所以整段重画之后要自己补回去——写动作会触发
+     一次数据重载，重载会把对话重画，不补就出现"什么都不显示"的空档 */
+  var thinkingOn = false;
+  var thinkingText = "正在思考";
+
+  function paintThinking() {
     var log = $("#assistantLog");
-    if (!log || $("#asThinking")) return;
+    if (!log) return;
+    var old = $("#asThinking");
+    if (old) old.remove();
+    if (!thinkingOn) return;
     var el = document.createElement("div");
     el.className = "as-msg as-bot";
     el.id = "asThinking";
-    el.innerHTML = '<span class="as-thinking">正在思考<i></i><i></i><i></i></span>';
+    el.innerHTML = '<span class="as-thinking">' +
+      '<span class="as-thinking-label">' + PX.esc(thinkingText) +
+      "</span><i></i><i></i><i></i></span>";
     log.appendChild(el);
     scrollAssistant();
   }
 
+  function showThinking() {
+    thinkingOn = true;
+    thinkingText = "正在思考";
+    paintThinking();
+  }
+
+  /* 这一轮走到哪一步：think / tools / write，说给用户听 */
+  var PHASE_TEXT = { think: "正在思考", write: "正在生成回答" };
+
+  function phaseText(phase, label) {
+    if (phase === "tools") {
+      return label ? "正在执行「" + toolLabel(label) + "」" : "正在执行";
+    }
+    return PHASE_TEXT[phase] || "";
+  }
+
+  function setThinkingLabel(text) {
+    if (!text || text === thinkingText) return;
+    thinkingText = text;
+    var el = $("#asThinking");
+    if (!el) return;                 // 眼下没有那一行：下次重画会按新文字带上
+    var label = el.querySelector(".as-thinking-label");
+    if (label) {
+      label.textContent = text;
+      scrollAssistant();
+    }
+  }
+
+  /* 一轮问答是一次请求，中间没有推送：等的时候隔一会儿问一句进度，
+     好让"正在思考"能换成"正在执行某个工具""正在生成回答" */
+  function startAssistantPulse() {
+    stopAssistantPulse();
+    var tick = function () {
+      PX.api("/assistant/progress?session=" + (S.assistantSessionId || 0))
+        .then(function (d) {
+          var text = phaseText(d.phase, d.label);
+          if (text) setThinkingLabel(text);
+        })
+        .catch(function () { /* 问不到就一直是"正在思考" */ });
+    };
+    S.assistantPulse = setInterval(tick, 500);
+    tick();
+  }
+
+  function stopAssistantPulse() {
+    if (S.assistantPulse) {
+      clearInterval(S.assistantPulse);
+      S.assistantPulse = null;
+    }
+  }
+
   function hideThinking() {
+    thinkingOn = false;
     var el = $("#asThinking");
     if (el) el.remove();
   }
@@ -5559,6 +5623,7 @@
     setAssistantRunning(true);
     hideApproval(true);            // 这一轮开始时，本会话原来挂着的那个作废
     showThinking();
+    startAssistantPulse();
     var controller = window.AbortController ? new AbortController() : null;
     S.assistantAbort = controller;
     if (controller) body.signal = controller.signal;
@@ -5586,6 +5651,7 @@
       }
     }).then(function () {
       S.assistantAbort = null;
+      stopAssistantPulse();
       hideThinking();
       setAssistantRunning(false);
       drawAssistant();
@@ -5633,10 +5699,13 @@
     if (args && typeof args === "object" && Object.keys(args).length) {
       try { text = JSON.stringify(args, null, 2); } catch (e) { text = ""; }
     }
+    var shown = !!(open && text);
     box.textContent = text;
-    box.hidden = !(open && text);
+    box.hidden = !shown;
     more.hidden = !text;             // 没有参数就别摆一个按不动的键
-    more.setAttribute("aria-expanded", open && !!text ? "true" : "false");
+    // 键面就写「详情 / 收起」：不做按下态，按下去的样式在这条上不好看也不好认
+    more.textContent = shown ? "收起" : "详情";
+    more.setAttribute("aria-expanded", shown ? "true" : "false");
   }
 
   function toggleApprovalArgs() {

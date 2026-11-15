@@ -2944,10 +2944,6 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   tab-size: 2;
 }
 .as-args[hidden] { display: none; }
-.as-approval-acts #asApprovalMore[aria-expanded="true"] {
-  background: var(--surface-2);
-  color: var(--text);
-}
 .as-sessionbar svg { width: 14px; height: 14px; flex: none; }
 .as-sessionbar span {
   overflow: hidden;

@@ -759,6 +759,30 @@ def main():
         bad = [v for v in app.policy.ACTION_LABELS.values()
                if len(v) > 8 or "看" in v or "查" in v or "把" in v]
         check("名称简短、书面语，不出现“看了/查了/把…”", not bad, bad)
+
+        # 这一轮走到哪儿了：界面靠它把"正在思考"换成具体那一步
+        seen = []
+        real_progress = a.say_progress
+        a.say_progress = lambda acc_, sid, phase, label="": (
+            seen.append((phase, label)), real_progress(acc_, sid, phase, label))[1]
+        a._PENDING.clear()
+        add_plan[:] = [{"tool_calls": [{"id": "c8", "function": {
+            "name": "list_rosters", "arguments": "{}"}}]}, {"content": "你有两份名单"}]
+        try:
+            a.run(None, acc, FakeClient(), {"ready": True},
+                  [{"role": "user", "content": "我有几份名单"}], session=7)
+        finally:
+            a.say_progress = real_progress
+        phases = [p for p, _ in seen]
+        check("一轮里依次是 思考 → 执行工具 → 生成回答 → 收尾",
+              phases[:1] == ["think"] and "tools" in phases and "write" in phases
+              and phases[-1] == "done", seen)
+        check("执行工具那一步带上了正式名称",
+              ("tools", "读取名单列表") in seen, seen)
+        check("收尾之后进度清空", a.progress_of(acc, 7) == {"phase": "", "label": ""},
+              a.progress_of(acc, 7))
+        check("别的会话看不到这段进度", a.progress_of(acc, 8) == {"phase": "", "label": ""},
+              a.progress_of(acc, 8))
     finally:
         a._post_chat = real_post
     print("== SQL 拼接审计 ==")

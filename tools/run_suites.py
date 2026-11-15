@@ -169,6 +169,8 @@ AREAS = [
      (["unit", "panel_test", "panel_ui_test"], ["data", "admin"], "名单/账号的数据层")),
     (("builtin/modules/", "core/modules.py"),
      (["unit", "modules", "panel_ui_test"], ["mods"], "模块")),
+    (("assets/js/docs.js", "assets/css/docs.css", "pages/docs.html"),
+     (["unit", "panel_ui_test"], ["docs"], "使用文档页")),
     (("theme/", "assets/css/app.css"),
      (["unit", "ui"], [], "外观包与大屏样式")),
     (("doc/", "README.md", "ROADMAP.md"),

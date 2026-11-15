@@ -1241,6 +1241,29 @@ table.tbl tr.is-muted td { color: var(--dim); }
 /* 页内跳转的链接不带 href：浏览器就不会在左下角弹一串地址。
    代价是少了 UA 给的指针样式，这里补回来 */
 [data-href] { cursor: pointer; }
+/* 「使用文档」那一项是新标签页：右边挂一枚"开新窗口"小标记 */
+/* 带图标的按钮：图标跟在文字后面，与文字同色同基线 */
+.btn-icon svg {
+  width: 14px;
+  height: 14px;
+  margin-left: 4px;
+  vertical-align: -2px;
+}
+.nav-ext-mark {
+  margin-left: auto;
+  flex: none;
+  width: 12px;
+  height: 12px;
+  opacity: .55;
+}
+.nav-ext:hover /* 带图标的按钮：图标跟在文字后面，与文字同色同基线 */
+.btn-icon svg {
+  width: 14px;
+  height: 14px;
+  margin-left: 4px;
+  vertical-align: -2px;
+}
+.nav-ext-mark { opacity: .9; }
 .crumb-sep { color: var(--dim); font-weight: 400; }
 
 /* ---------- create an activity ---------- */

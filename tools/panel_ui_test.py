@@ -1178,6 +1178,112 @@ def routes_page(page):
         check("%-16s -> %s" % (route, title), expect in title, title)
 
 
+def docs_page(browser):
+    """使用文档：侧栏那一项是新标签页，那一页自带一套骨架。"""
+    print("== 使用文档（独立页面）==")
+    owner = owner_opener()
+    ctx, page = new_page(browser, 1280, 820)
+    try:
+        ui_login(page)
+        item = page.evaluate("""() => {
+            const a = document.querySelector('.nav-ext');
+            if (!a) return {none: true};
+            const mark = a.querySelector('.nav-ext-mark');
+            return {href: a.getAttribute('href'), target: a.getAttribute('target'),
+                    rel: a.getAttribute('rel') || '', text: a.innerText.trim(),
+                    mark: !!mark};
+        }""")
+        check("侧栏里有「使用文档」，点了开新标签页",
+              item.get("text") == "使用文档" and item.get("target") == "_blank"
+              and item.get("href", "").endswith("docs")
+              and "noopener" in item.get("rel", ""), item)
+        check("它右边有一枚开新窗口的标记", item.get("mark"), item)
+
+        page.goto(BASE + "/docs", wait_until="domcontentloaded")
+        page.wait_for_timeout(1200)
+        info = page.evaluate("""() => {
+            const art = document.getElementById('docsArticle');
+            return {groups: document.querySelectorAll('.tree-group').length,
+                    docs: document.querySelectorAll('.tree-doc').length,
+                    h1: (art.querySelector('h1') || {}).innerText || '',
+                    crumb: document.getElementById('docsCrumb').innerText,
+                    hash: location.hash,
+                    panelChrome: !!document.querySelector('.sidebar')
+                                  || !!document.getElementById('shell')};
+        }""")
+        check("文档页不带面板外壳", not info["panelChrome"], info)
+        check("左边是按目录分组的树", info["groups"] >= 2 and info["docs"] >= 5, info)
+        check("默认打开第一篇并渲染出正文",
+              bool(info["h1"]) and bool(info["crumb"]) and info["hash"].startswith("#"),
+              info)
+        check("正文用的是同一套 Markdown 渲染",
+              page.evaluate("""() => !!document.querySelector('#docsArticle h1')
+                  && !!document.querySelector('#docsArticle p')"""))
+
+        # 换一篇：分组可以收起再展开
+        page.click(".tree-group:nth-child(2) .tree-doc")
+        page.wait_for_timeout(700)
+        second = page.evaluate("""() => ({
+            hash: location.hash,
+            h1: (document.querySelector('#docsArticle h1') || {}).innerText || '',
+            on: document.querySelectorAll('.tree-doc.on').length})""")
+        check("点另一条就换一篇，选中态跟着走",
+              bool(second["h1"]) and second["on"] == 1, second)
+        page.click(".tree-group:nth-child(2) .tree-head")
+        page.wait_for_timeout(300)
+        check("分组能收起", not page.evaluate(
+            "() => document.querySelector('.tree-group:nth-child(2)').classList.contains('open')"))
+        page.click(".tree-group:nth-child(2) .tree-head")
+        page.wait_for_timeout(200)
+
+        # 深浅色：存在本机，键名与面板分开；第一次进来沿用面板的选择
+        before = page.evaluate(
+            "() => document.documentElement.getAttribute('data-theme')")
+        page.click("#docsTheme")
+        page.wait_for_timeout(300)
+        after = page.evaluate("""() => ({
+            theme: document.documentElement.getAttribute('data-theme'),
+            docs: localStorage.getItem('xl.docs.theme'),
+            panel: localStorage.getItem('xl.panel.theme')})""")
+        check("右上角那颗切换深浅色",
+              after["theme"] != before and after["docs"] in ("dark", "light"), after)
+        page.reload(wait_until="domcontentloaded")
+        page.wait_for_timeout(900)
+        check("刷新之后还是刚才那个色",
+              page.evaluate("() => document.documentElement.getAttribute('data-theme')")
+              == after["theme"], after)
+        # 第一次进来（docs 的键还没有）时沿用面板的设置
+        page.evaluate("""(theme) => {
+            localStorage.removeItem('xl.docs.theme');
+            localStorage.setItem('xl.panel.theme', theme);
+        }""", "dark" if after["theme"] == "light" else "light")
+        page.reload(wait_until="domcontentloaded")
+        page.wait_for_timeout(900)
+        inherited = page.evaluate("""() => ({
+            theme: document.documentElement.getAttribute('data-theme'),
+            docs: localStorage.getItem('xl.docs.theme')})""")
+        check("第一次进文档页时沿用面板的深浅色",
+              inherited["docs"] in ("dark", "light")
+              and inherited["theme"] == inherited["docs"], inherited)
+
+        # 白名单：不认清单之外的路径
+        try:
+            bad = call(owner, "/api/docs/doc?path=" +
+                       urllib.request.quote("../../etc/passwd"))
+            check("只认清单里出现过的文档", bad.get("ok") is False, bad)
+        except urllib.error.HTTPError as exc:
+            check("只认清单里出现过的文档", exc.code == 404, exc.code)
+        check("这一段没有 javascript 错误", not page._errors,
+              "; ".join(page._errors)[:200])
+    finally:
+        try:
+            page.evaluate("() => { localStorage.removeItem('xl.docs.theme');"
+                          "localStorage.setItem('xl.panel.theme', 'auto'); }")
+        except Exception:
+            pass
+        ctx.close()
+
+
 def assistant_page(page):
     print("== 运维助手 ==")
     page.goto(BASE + "/panel#/assistant")
@@ -4468,6 +4574,8 @@ def main():
                     if want("assistant"):
                         assistant_page(page)
                         assistant_drawer(browser)
+                    if want("docs"):
+                        docs_page(browser)
                     if want("shell"):
                         routes_page(page)
                         title_row(page)
@@ -4484,6 +4592,8 @@ def main():
                     group_page(page)
                     nav_keys_page(page)
                     crumb_motion(browser)
+                if want("docs") and not ONLY:
+                    docs_page(browser)
                 if want("assistant") and not ONLY:
                     assistant_page(page)
                     assistant_drawer(browser)

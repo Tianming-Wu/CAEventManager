@@ -37,9 +37,10 @@ python tools/bump_version.py                                         # 推进版
 python tools/run_suites.py panel_ui_test --only=assistant     # 运维助手：对话、批准条、抽屉、Markdown
 python tools/run_suites.py panel_ui_test --only=shell         # 侧栏、路由、导航键、面包屑、布局档
 python tools/run_suites.py panel_ui_test --only=data,ops      # 名单报名 + 服务器/审计/主题/弹窗
+python tools/run_suites.py panel_ui_test --only=docs          # 使用文档那一页（独立骨架）
 ```
 
-分组是 `assistant` / `shell` / `data` / `mods` / `admin` / `ops`；不写或写 `all` 就是全套。
+分组是 `assistant` / `docs` / `shell` / `data` / `mods` / `admin` / `ops`；不写或写 `all` 就是全套。
 每组打印自己的用时，`run_suites.py` 最后再报一遍合计，慢在哪儿一眼能看出来。
 
 ## 版本号

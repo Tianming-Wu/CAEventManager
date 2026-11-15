@@ -136,6 +136,7 @@
   var ICON_RECLAIM = '<svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4.2 10a5.8 5.8 0 0 1 10-4"/><path d="M14.2 3.6v2.8h-2.8"/><path d="M15.8 10a5.8 5.8 0 0 1-10 4"/><path d="M5.8 16.4v-2.8h2.8"/></svg>';
   var ICON_ARCHIVE = '<svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3.4 6.4h13.2v9a1.6 1.6 0 0 1-1.6 1.6H5a1.6 1.6 0 0 1-1.6-1.6v-9Z"/><path d="M2.6 3.4h14.8v3H2.6zM8 10h4"/></svg>';
   var ICON_TRASH = '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 5.6h12M8 3.4h4M6.2 5.6l.7 9.4a1.6 1.6 0 0 0 1.6 1.5h3a1.6 1.6 0 0 0 1.6-1.5l.7-9.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  var ICON_EXT = '<svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3.8H5.4a1.6 1.6 0 0 0-1.6 1.6v9.2a1.6 1.6 0 0 0 1.6 1.6h9.2a1.6 1.6 0 0 0 1.6-1.6V11"/><path d="M10 10l6.2-6.2M11.8 3.8h4.4v4.4"/></svg>';
   var ICON_COPY = '<svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="7.3" y="7.3" width="8.4" height="8.4" rx="1.6"/><path d="M12.7 4.3H5.9a1.6 1.6 0 0 0-1.6 1.6v6.8"/></svg>';
   var ICON_CHECK = '<svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.8 10.6l3.3 3.3 7.1-7.8"/></svg>';
 
@@ -677,7 +678,7 @@
       ICON_STAR + "保存为预设</button>" +
       '<div class="menu-sep"></div>' +
       '<a role="menuitem" class="menu-link" href="' + PX.esc(e.admin) +
-      '" target="_blank" rel="noopener">' + ICON_GEAR + "活动设置 ↗</a>" +
+      '" target="_blank" rel="noopener">' + ICON_GEAR + "活动设置 " + ICON_EXT + "</a>" +
       (e.role === "owner"
         ? '<div class="menu-sep"></div>' +
           '<button type="button" role="menuitem" data-rotate="' + e.seq + '">' +
@@ -855,7 +856,7 @@
     ];
     var acts = [];
     if (!archived) {
-      acts.push({ text: "打开活动设置 ↗", kind: "ghost", primary: true,
+      acts.push({ text: "打开活动设置", icon: ICON_EXT, kind: "ghost", primary: true,
                   run: function () { window.open(e.admin, "_blank"); } });
     }
     if (archived) {
@@ -873,8 +874,10 @@
     var rest = acts.filter(function (a) { return !a.primary; });
     function buttons(list, offset) {
       return list.map(function (a, i) {
-        return '<button class="btn ' + a.kind + '" type="button" data-detail-act="' +
-          (i + offset) + '">' + PX.esc(a.text) + "</button>";
+        // 带图标的动作（打开活动设置、打开）把图标放在文字后面，尺寸交给 CSS
+        return '<button class="btn ' + a.kind + (a.icon ? " btn-icon" : "") +
+          '" type="button" data-detail-act="' + (i + offset) + '">' +
+          PX.esc(a.text) + (a.icon || "") + "</button>";
       }).join("");
     }
     var html = '<dl class="kv">' + rows.map(function (r) {
@@ -4277,7 +4280,7 @@
     var acts = [];
     if (!isArchived) {
       acts.push({
-        text: "打开 ↗", kind: "ghost", primary: true,
+        text: "打开", icon: ICON_EXT, kind: "ghost", primary: true,
         run: function () {
           var url = String(location.href).split("#")[0] +
             (kind === "roster" ? "#/roster/" + row.id : "#/signup/" + row.id);

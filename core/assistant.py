@@ -420,6 +420,33 @@ def doc_entries():
     return out
 
 
+# 文档页左边那列的树：先按目录分组，模块自己的 doc.md 各自一组
+DOC_GROUPS = (("doc/usage/", "使用说明"), ("doc/reference/", "参考"),
+              ("doc/dev/", "开发"), ("doc/ops/", "运维"), ("doc/", "其它文档"))
+
+
+def doc_tree():
+    """把 doc_entries() 那份清单按目录分好组。"""
+    groups, order = {}, []
+    for item in doc_entries():
+        path = item["path"]
+        key, label = "other", "其它文档"
+        for prefix, name in DOC_GROUPS:
+            if path.startswith(prefix):
+                key, label = prefix.strip("/").replace("/", "-"), name
+                break
+        else:
+            if path.endswith("/doc.md") and path.count("/") == 2:
+                module = path.split("/")[1]
+                kind = "内建模块" if path.startswith("builtin/") else "自装模块"
+                key, label = "module-" + module, "%s · %s" % (kind, module)
+        if key not in groups:
+            groups[key] = {"key": key, "label": label, "docs": []}
+            order.append(key)
+        groups[key]["docs"].append(item)
+    return [groups[k] for k in order]
+
+
 def _doc_rank(rel):
     for i, prefix in enumerate(DOC_ALLOWED):
         if rel.startswith(prefix):

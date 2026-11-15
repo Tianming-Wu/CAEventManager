@@ -69,7 +69,7 @@ PAGES_DIR = os.path.join(BASE_DIR, "pages")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.12.16.125"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.13.0.126"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -1292,6 +1292,29 @@ class Handler(BaseHTTPRequestHandler):
                 ctype += "; charset=utf-8"
             return self._send(200, body, ctype, [("Cache-Control", "public, max-age=60")])
 
+        # ---- 使用文档：自带一套骨架，接口只有两个 ----
+        if route.startswith("/api/docs/"):
+            if method != "GET":
+                return self._err("method not allowed", 405)
+            acc = panel.session_account(conn, self._panel_token())
+            if acc is None:
+                raise model.ApiError("未登录或登录已过期", 401)
+            if route == "/api/docs/tree":
+                return self._json({"ok": True, "groups": assistant.doc_tree()})
+            if route == "/api/docs/doc":
+                want = (query.get("path") or [""])[0]
+                text, err = assistant.read_doc(want)
+                if err:
+                    return self._err(err, 404)
+                title = ""
+                for group in assistant.doc_tree():
+                    for item in group["docs"]:
+                        if item["path"] == want:
+                            title = item["title"]
+                return self._json({"ok": True, "path": want, "title": title,
+                                   "text": text})
+            return self._err("not found", 404)
+
         if not route.startswith("/api/panel/"):
             if method != "GET":
                 return self._err("method not allowed", 405)
@@ -1308,7 +1331,7 @@ class Handler(BaseHTTPRequestHandler):
             if acc is not None and route in ("/", "/register", "/login"):
                 back = (query.get("s_return") or [""])[0]
                 return self._redirect(_return_to(back, home) or (home + "/panel") or "panel")
-            if acc is None and route == "/panel":
+            if acc is None and route in ("/panel", "/docs"):
                 return self._redirect((home + "/login") or "login")
             return self._serve_panel_page(name)
 

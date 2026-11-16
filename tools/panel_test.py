@@ -1955,7 +1955,7 @@ def main():
         tool_msgs = [m for m in (stub.requests[before + 1]["body"].get("messages") or [])
                      if m.get("role") == "tool"]
         check("读回来的正文进了上下文",
-              tool_msgs and "开始用" in (tool_msgs[-1].get("content") or ""),
+              tool_msgs and "开始使用" in (tool_msgs[-1].get("content") or ""),
               (tool_msgs[-1].get("content") or "")[:80] if tool_msgs else first[:1])
 
         print("== 平台自己的提示词：数据目录里放一份 markdown ==")
@@ -1981,7 +1981,7 @@ def main():
         check("没有剩下没换的占位符", "${user." not in body and "${panel." not in body,
               body[-160:])
         check("系统提示里写明了是谁在用",
-              "当前使用者：站长（owner）" in body, body[:400])
+              "当前用户：站长（owner）" in body, body[:400])
         os.remove(prompt_file)
         before = len(stub.requests)
         post(owner, "/api/panel/assistant/chat",

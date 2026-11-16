@@ -69,7 +69,7 @@ PAGES_DIR = os.path.join(BASE_DIR, "pages")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.13.5.131"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.13.6.132"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -1483,10 +1483,14 @@ class Handler(BaseHTTPRequestHandler):
                     _note_register_hit(ip)
                 raise model.ApiError(problem, 400 if problem != panel.USERNAME_TAKEN else 409)
             if not name:
-                raise model.ApiError("请填写称呼")
+                raise model.ApiError("请填写显示名")
             if len(password) < 8:
                 raise model.ApiError("密码至少 8 位")
             with panel.tx() as tx:
+                # 名额先看：关闭注册时不必再透露登录名占不占用
+                if panel.account_cap_reached(
+                        tx, localconfig.static_limit(LOCAL_CFG, "max_accounts")):
+                    raise model.ApiError(panel.ACCOUNT_FULL, 403)
                 # 被占用与被保留是同一句话：注册口不该成为"哪些名字存在"的探针
                 if panel.username_taken(tx, username):
                     _note_register_hit(ip)
@@ -1720,13 +1724,17 @@ class Handler(BaseHTTPRequestHandler):
                                "offset": offset, "limit": limit,
                                "quotaDefault": panel.CHAT_QUOTA_DEFAULT,
                                "quotaMax": panel.CHAT_QUOTA_MAX,
+                               # 账号总数与静态设置的上限：用户管理页据此提示"还剩多少名额"
+                               "allTotal": panel.account_count(conn),
+                               "maxAccounts": localconfig.static_limit(LOCAL_CFG,
+                                                                       "max_accounts"),
                                "accounts": _accounts_with_usage(
                                    conn, rows,
                                    localconfig.static_limit(LOCAL_CFG,
                                                             "delete_account_after_days"))})
 
         if path == "/people" and method == "GET":
-            # 「选人」的唯一数据源：只回编号、称呼与头像。登录名是凭据，一个都不给。
+            # 「选人」的唯一数据源：只回编号、显示名与头像。登录名是凭据，一个都不给。
             # scene 决定"谁能查谁"——转移负责人、名单授权、邀请成员各有各的门槛，
             # 界面那边是同一份弹窗（assets/js/people.js）。
             scene = (query.get("scene") or [""])[0].strip()

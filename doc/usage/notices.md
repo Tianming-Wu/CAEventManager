@@ -46,5 +46,5 @@ python tools/notify.py "你的名单已批" --account laffey
 
 ## 相关文档
 
-- [开始用](start.md)
+- [开始使用](start.md)
 - [服务有效性接口](../reference/api-service.md)

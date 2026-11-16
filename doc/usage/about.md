@@ -17,9 +17,9 @@ CAEventManager 是学生社团活动管理服务平台：一套服务同时承�
 源码在 GitHub：[Tianming-Wu/CAEventManager](https://github.com/Tianming-Wu/CAEventManager)
 
 - 许可证：MIT，见仓库里的 `LICENSE`
-- 结构：入口是根目录的 `app.py`，程序模块在 `core/`，脚本在 `bin/`，静态资源在 `assets/`，
-  页面外壳在 `pages/`，内建模块在 `builtin/`
-- 文档都在 `doc/` 下，索引见仓库里的 `doc/README.md`
+- 结构：入口为根目录 `app.py`，程序位于 `core/`，脚本位于 `bin/`，静态资源位于 `assets/`，
+  页面外壳位于 `pages/`，内建资源（模块、静态资源）位于 `builtin/`
+- 文档位于 `doc/` 下，索引位于 `doc/README.md`
 - 计划与取舍记在仓库的 `ROADMAP.md` 里，包括明确不做的部分
 
 ## 作者与维护
@@ -31,12 +31,12 @@ CAEventManager 是学生社团活动管理服务平台：一套服务同时承�
 ## 反馈
 
 - 缺陷与建议提到仓库的 issue：[提交 issue](https://github.com/Tianming-Wu/CAEventManager/issues)
-- 提问前先看 [开始用](start.md) 与 [术语表](../reference/glossary.md)；
+- 提问前先看 [开始使用](start.md) 与 [术语表](../reference/glossary.md)；
   装机、备份这类事问维护这台机器的人
-- 线上实例的问题由该实例的站长处理：账号、权限与数据都在自己那套服务里，仓库不接触
+- 线上部署实例的问题由该实例的站长处理：账号、权限与数据都在部署实例中，不进入仓库
 
 ## 相关文档
 
-- [开始用](start.md)
+- [开始使用](start.md)
 - [术语表](../reference/glossary.md)
 - [服务器与审计](server.md)

@@ -3918,7 +3918,7 @@
     renderInviteChips();
   }
 
-  /* 草稿里只存了账号 id：拿回来时把称呼与头像补上（/people 给的就是这些） */
+  /* 草稿里只存了账号 id：拿回来时把显示名与头像补上（/people 给的就是这些） */
   function loadPeople(ids) {
     var keep = (ids || []).filter(function (x) { return x; });
     if (!keep.length) return Promise.resolve({});
@@ -4003,7 +4003,15 @@
       more.textContent = left > 0 ? "再显示 " + Math.min(50, left) + " 个" : "加载更多";
     }
     var count = $("#usersCount");
-    if (count) count.textContent = S.accountsTotal ? "共 " + S.accountsTotal + " 个账号" : "";
+    if (count) {
+      var text = S.accountsTotal ? "共 " + S.accountsTotal + " 个账号" : "";
+      // 上限写在配置文件里：到了之后注册口会拒绝，这里让人提前看见还剩多少
+      if (S.maxAccounts && !S.userFilter.trim()) {
+        text += (text ? "，" : "") + "上限 " + S.maxAccounts +
+          ((S.accountsAll || 0) >= S.maxAccounts ? "（已满）" : "");
+      }
+      count.textContent = text;
+    }
   }
 
   function loadAccountsPage(reset) {
@@ -4023,6 +4031,8 @@
         S.me = d.me || S.me;
         S.accounts = S.accounts.concat(d.accounts || []);
         S.accountsTotal = d.total || 0;
+        S.accountsAll = d.allTotal || 0;
+        S.maxAccounts = d.maxAccounts || 0;
         markLoaded("accounts");
         if (d.quotaDefault) S.quotaDefault = d.quotaDefault;
         if (d.quotaMax) S.quotaMax = d.quotaMax;
@@ -4044,7 +4054,7 @@
     var rows = [
       ["编号", "#" + (a.uid || 0)],
       ["用户名", a.username],
-      ["称呼", a.name || "—"],
+      ["显示名", a.name || "—"],
       ["角色", a.roleLabel],
       ["状态", a.statusLabel],
       ["存档配额", quotaText(a)],

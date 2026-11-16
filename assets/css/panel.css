@@ -179,14 +179,16 @@ svg {
   gap: 8px;
   min-width: 0;
 }
+/* 标志本身是描边图形（票券加对勾），颜色与线条都由 SVG 自己带，这里只管格子与着色 */
 .brand-mark {
   width: 18px;
   height: 18px;
-  border-radius: 6px;
-  background: var(--accent);
-  box-shadow: inset 0 0 0 1px var(--accent-strong);
+  display: grid;
+  place-items: center;
+  color: var(--accent-strong);
   flex: 0 0 auto;
 }
+.brand-mark svg { display: block; width: 18px; height: 18px; }
 .brand-name { font-weight: 700; letter-spacing: -.01em; }
 .brand-ver { font-size: .72rem; color: var(--dim); }
 .titlebar-gap { flex: 1 1 auto; min-width: 8px; }

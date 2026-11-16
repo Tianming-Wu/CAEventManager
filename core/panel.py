@@ -352,6 +352,22 @@ def username_taken(conn, name, skip_id=0):
     return row is not None
 
 
+# 账号总数到了静态设置的上限（``config.json`` 的 ``max_accounts``）时的说法。
+# 只拦注册口：已经在库里的人（包括待审核的那些）不受影响。
+ACCOUNT_FULL = "这个实例的账号数量已达上限，请联系管理员"
+
+
+def account_count(conn):
+    """账号总数：待审核、已停用、已封禁的也算在内，删掉才腾出位置。"""
+    return int(conn.execute("SELECT COUNT(*) AS n FROM accounts").fetchone()["n"] or 0)
+
+
+def account_cap_reached(conn, cap):
+    """``cap`` 为 0 表示不限；否则总数到了就返回真。"""
+    cap = int(cap or 0)
+    return cap > 0 and account_count(conn) >= cap
+
+
 # 老库（单活动时代）迁移时只有一个模块，这里写死；新活动一律由建活动时选定
 DEFAULT_KIND = "nwuca.lottery"   # audit-ignore
 
@@ -609,7 +625,7 @@ def member_of(conn, seq, account_id):
 
 
 def public_name(name, uid):
-    """界面上给别人看的名字：称呼优先，其次账号编号。
+    """界面上给别人看的名字：显示名优先，其次账号编号。
 
     登录名是登录用的凭据，不拿来当显示名，也不做兜底——那等于把凭据发给别人。
     """
@@ -620,7 +636,7 @@ def public_name(name, uid):
 
 
 def person_view(row):
-    """选人弹窗要的全部字段：编号、称呼、头像。登录名不进这里，永远。"""
+    """选人弹窗要的全部字段：编号、显示名、头像。登录名不进这里，永远。"""
     uid = int(row["uid"] or 0) if "uid" in row.keys() else 0
     return {
         "id": row["id"],

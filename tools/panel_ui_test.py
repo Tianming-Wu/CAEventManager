@@ -296,7 +296,6 @@ def shell_page(page):
     check("站长看得到账号总数", page.locator("#statAccountsBox").is_visible())
     check("版本号是四段", len(page.inner_text(".brand-ver").strip().lstrip("v").split(".")) == 4,
           page.inner_text(".brand-ver"))
-
     print("== the title bar keeps its right side free ==")
     bar = page.evaluate("""() => {
         const title = document.querySelector('.titlebar');
@@ -1446,6 +1445,25 @@ def docs_page(browser):
         check("两颗图标的视觉重心都在格子中央",
               len(centers) == 2 and all(abs(c[0] - 10) <= 0.9 and abs(c[1] - 10) <= 0.9
                                         for c in centers), centers)
+
+        # 侧栏顶上那个标志：与面板标题栏同一个（票券加对勾），灰度配色下跟正文色走
+        logo = page.evaluate("""() => {
+            const box = document.querySelector('.docs-logo');
+            const svg = box && box.querySelector('svg');
+            if (!svg) return null;
+            const b = svg.getBBox();
+            return {paths: svg.querySelectorAll('path').length,
+                    w: Math.round(box.getBoundingClientRect().width),
+                    bg: getComputedStyle(box).backgroundColor,
+                    center: [Math.round((b.x + b.width / 2) * 100) / 100,
+                             Math.round((b.y + b.height / 2) * 100) / 100]};
+        }""")
+        check("文档页顶上也是同一个标志，不是占位方块",
+              logo is not None and logo["paths"] >= 2 and logo["w"] >= 12
+              and logo["bg"] in ("rgba(0, 0, 0, 0)", "transparent"), logo)
+        check("标志的重心落在格子中央",
+              logo is not None and abs(logo["center"][0] - 10) <= 0.9
+              and abs(logo["center"][1] - 10) <= 0.9, logo)
 
         # 地址里的 ~锚点真的会滚到那一节，而且同一篇里换锚点不重取正文
         page.goto(BASE + "/docs#/usage/assistant.md~" +
@@ -2668,6 +2686,40 @@ def title_row(page):
     check("one title height for pages with and without a button",
           len(heights) == 1, tops)
 
+    print("== 标题栏左上角的标志 ==")
+    # 票券加对勾，两处（面板标题栏、使用文档页侧栏）共用同一个；不再是纯色方块占位
+    mark = page.evaluate("""() => {
+        const box = document.querySelector('.brand-mark');
+        const svg = box && box.querySelector('svg');
+        if (!svg) return null;
+        const b = svg.getBBox();
+        const cs = getComputedStyle(box);
+        return {w: Math.round(box.getBoundingClientRect().width),
+                center: [Math.round((b.x + b.width / 2) * 100) / 100,
+                         Math.round((b.y + b.height / 2) * 100) / 100],
+                bg: cs.backgroundColor,
+                paths: svg.querySelectorAll('path').length};
+    }""")
+    check("标志是真图形，不再是占位方块",
+          mark is not None and mark["paths"] >= 2
+          and mark["bg"] in ("rgba(0, 0, 0, 0)", "transparent"), mark)
+    check("标志占满 18px 格子，重心落在正中",
+          mark is not None and mark["w"] == 18
+          and abs(mark["center"][0] - 10) <= 0.9
+          and abs(mark["center"][1] - 10) <= 0.9, mark)
+    check("标志的颜色跟着主题走", page.evaluate("""() => {
+        const box = document.querySelector('.brand-mark');
+        const root = document.documentElement;
+        const was = root.getAttribute('data-theme');
+        root.setAttribute('data-theme', 'light');
+        const light = getComputedStyle(box).color;
+        root.setAttribute('data-theme', 'dark');
+        const dark = getComputedStyle(box).color;
+        if (was === null) root.removeAttribute('data-theme');
+        else root.setAttribute('data-theme', was);
+        return light !== dark;
+    }"""))
+
 
 def group_page(page):
     print("== the collapsible group ==")
@@ -3492,7 +3544,7 @@ def leave_guard_page(browser):
         check("一打开就有人可选，不用先打字",
               page.locator(".pp-tile").count() >= 2, page.locator(".pp-tile").count())
         shown = page.inner_text(".pp-card")
-        check("只写称呼，不写登录名",
+        check("只写显示名，不写登录名",
               "guard" not in shown and "user0" not in shown, shown[:120])
         check("搜索框没有标签，只有占位词",
               page.locator(".pp-card label").count() == 0

@@ -125,6 +125,44 @@ def migrate_events():
             os.environ["LOTTERY_DATA_DIR"] = previous
 
 
+def account_cap():
+    """账号总数上限：静态设置 max_accounts，0 表示不限；待审核的账号也占名额。"""
+    import localconfig
+    import panel
+
+    root = tempfile.mkdtemp(prefix="panel-cap-")
+    previous = os.environ.get("LOTTERY_DATA_DIR")
+    os.environ["LOTTERY_DATA_DIR"] = root
+    try:
+        panel.init_db()
+        conn = panel.connect()
+        check("空库里没有账号，上限 0 表示不限",
+              panel.account_count(conn) == 0
+              and not panel.account_cap_reached(conn, 0), panel.account_count(conn))
+        for i in range(2):
+            with panel.tx() as tx:
+                tx.execute(
+                    "INSERT INTO accounts (uid, username, name, role, status, pass, note,"
+                    " created_at) VALUES (?,?,?,?,?,?,?,?)",
+                    (panel.next_uid(tx), "user%d" % i, "用户%d" % i, "admin", "pending",
+                     "x", "", time.time()))
+        conn = panel.connect()
+        check("待审核的账号也算在名额里",
+              panel.account_count(conn) == 2 and panel.account_cap_reached(conn, 2),
+              panel.account_count(conn))
+        check("没到上限还能再注册", not panel.account_cap_reached(conn, 3))
+        check("默认配置不限数量",
+              localconfig.static_limit({}, "max_accounts") == 0
+              and localconfig.STATIC_DEFAULTS["max_accounts"] == 0)
+        check("上限写成别的值时按默认（不限）处理",
+              localconfig.static_limit({"max_accounts": "many"}, "max_accounts") == 0)
+    finally:
+        if previous is None:
+            os.environ.pop("LOTTERY_DATA_DIR", None)
+        else:
+            os.environ["LOTTERY_DATA_DIR"] = previous
+
+
 BAD_EXPRESSIONS = [
     '__import__("os")',
     "open",
@@ -491,6 +529,9 @@ def main():
     print("== 登录名与令牌 ==")
     accounts_and_tokens()
 
+    print("== 账号总数上限 ==")
+    account_cap()
+
     print("== 服务日志轮转 ==")
     with tempfile.TemporaryDirectory() as box:
         path = os.path.join(box, "service.log")
@@ -737,6 +778,11 @@ def main():
               a.outbound_links())
         check("提示词交代了站外只给白名单里的地址",
               "GitHub 仓库" in a.SYSTEM_PROMPT, a.SYSTEM_PROMPT[:80])
+        # 过程与"没改数据"这类声明都写在用户看得到的地方，不必再复述一遍
+        check("提示词要求不复述过程、不声明没改数据、不解释渲染",
+              "过程不要写进回答" in a.SYSTEM_PROMPT
+              and "没有写入" in a.SYSTEM_PROMPT
+              and "回答里不要解释" in a.SYSTEM_PROMPT, a.SYSTEM_PROMPT[:80])
 
         # 改当前这段对话的标题：会话 id 由平台注入，模型不必知道自己在哪一段里
         a._PENDING.clear()

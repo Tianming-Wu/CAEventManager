@@ -52,6 +52,8 @@ STATIC_DEFAULTS = {
     "safe_mode": False,
     # 账号彻底删除的门槛：停用满这么多天的账号才允许删（防止手一抖把刚停的人删掉）
     "delete_account_after_days": 3,
+    # 这个实例最多能有多少个账号，0 表示不限；满了之后注册口直接拒绝
+    "max_accounts": 0,
 }
 
 SECRET_LEN = 32

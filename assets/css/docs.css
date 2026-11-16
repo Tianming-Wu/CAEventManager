@@ -96,14 +96,18 @@ a { color: var(--link); }
   margin-bottom: 8px;
 }
 
+/* 与面板标题栏同一个标志：描边图形，颜色跟正文走（这一页是灰度配色） */
 .docs-logo {
-  width: 9px;
-  height: 9px;
-  border-radius: 2px;
-  background: var(--text);
+  width: 15px;
+  height: 15px;
+  display: grid;
+  place-items: center;
+  color: var(--text);
   flex: none;
   align-self: center;
 }
+
+.docs-logo svg { display: block; width: 15px; height: 15px; }
 
 .docs-brand-text { font-weight: 650; font-size: .95rem; letter-spacing: .01em; }
 

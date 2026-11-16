@@ -3,7 +3,7 @@
  * 两个表面各有一套运行库（主站 PX、活动族 LT），也各有自己的接口前缀，所以这里
  * 不碰任何一边的 api，只要求调用方把 search() 交进来，结果形如
  *   {id, uid, label, avatar, avatarAt}
- * 命名规则在服务端（panel.person_view）：有称呼用称呼，没有就用账号编号。
+ * 命名规则在服务端（panel.person_view）：有显示名用显示名，没有就用账号编号。
  *
  *   PeoplePicker.open({
  *     title: "邀请成员",
@@ -48,7 +48,7 @@
     var results = [];
     var seq = 0;                // 只认最后一次搜索的回答：慢的那个不许盖住新的
 
-    // 头像：有图用图（远程链接直接用），没有就用称呼的第一个字
+    // 头像：有图用图（远程链接直接用），没有就用显示名的第一个字
     function avatarHtml(p) {
       var label = labelOf(p);
       var url = "";

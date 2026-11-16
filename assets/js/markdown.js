@@ -285,10 +285,15 @@ function escAttr(text) {
     .replace(/"/g, "&quot;");
 }
 
-/* 文档里的相对路径归一成 doc/ 根下的键：`a/../b`、`./x` 都算干净 */
+/* 文档里的相对路径归一成清单里的键（形如 `usage/rosters.md`，不带 doc/ 前缀）：
+   `a/../b`、`./x` 都算干净；写成 `doc/usage/x.md` 时按文档根算，不接当前目录 */
 function resolveDocPath(target, base) {
   var raw = String(target || "").trim();
   if (!raw) return "";
+  if (/^\/?doc\//.test(raw)) {
+    raw = raw.replace(/^\/?doc\//, "");
+    base = "";
+  }
   var full = raw.charAt(0) === "/" ? raw.slice(1) : (base ? base + "/" + raw : raw);
   var out = [];
   full.split("/").forEach(function (part) {
@@ -297,6 +302,17 @@ function resolveDocPath(target, base) {
     out.push(part);
   });
   return out.join("/");
+}
+
+/* 键对上清单：先按整条路径对；只写了文件名（`assistant.md`）时按文件名对一次，
+   重名（各模块的 doc.md）就当作对不上，别猜是哪一份 */
+function findDoc(key, docs) {
+  if (docs.indexOf(key) >= 0) return key;
+  if (key.indexOf("/") >= 0) return "";
+  var hits = docs.filter(function (p) {
+    return p.slice(-(key.length + 1)) === "/" + key;
+  });
+  return hits.length === 1 ? hits[0] : "";
 }
 
 /* 一条链接该渲染成什么——判定只有这一处：
@@ -319,8 +335,8 @@ function resolveLink(target, opts) {
   var cut = t.indexOf("#");
   var anchor = cut < 0 ? "" : t.slice(cut + 1);
   var path = resolveDocPath(cut < 0 ? t : t.slice(0, cut), opts.base);
-  var key = /\.md$/i.test(path) ? path : path + ".md";
-  if (opts.docs.indexOf(key) < 0) return {broken: true};
+  var key = findDoc(/\.md$/i.test(path) ? path : path + ".md", opts.docs);
+  if (!key) return {broken: true};
   return {href: typeof opts.href === "function" ? opts.href(key, anchor) : "#/" + key,
           doc: key, target: opts.target || ""};
 }

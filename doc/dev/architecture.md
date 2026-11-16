@@ -5,11 +5,11 @@
 
 ## 进程与路由
 
-一个 `ThreadingHTTPServer` 同时服务两类东西：**主面板**（账号、活动列表、名单、报名、审批）
-与**每场活动的 token 段**（公示页、大屏、签到、活动后台）。新增活动不改变路径结构。
+一个 `ThreadingHTTPServer` 同时服务两类东西：**主面板**（账号、活动列表、名单、报名、审批、
+使用文档）与**每场活动的 token 段**（公示页、大屏、签到、活动后台）。新增活动不改变路径结构。
 
 ```
-app.py            入口与 HTTP 层；两族：(面板 /api/panel/*) 与 (活动 /<token>/*)
+app.py            入口与 HTTP 层；两族：(面板 /api/panel/*、文档 /api/docs/*) 与 (活动 /<token>/*)
 core/             程序模块，导入时把 core/ 加进 sys.path
 core/paths.py     应用根目录；模块与资源的位置一律从这里算
 bin/              service.sh、run.sh（服务管理）、deploy.ps1（部署）
@@ -151,7 +151,8 @@ SQLite 开 WAL；写入统一走事务包装（`tx()`），一次写入成功之
 ## 前端
 
 - `assets/`：全部静态资源，按类型分（`css/`、`js/`、`img/`），面板与活动族共用同一份；
-  两份运行时库是 `js/common.js`（主站）与 `js/event.js`（活动族）
+  两份运行时库是 `js/common.js`（主站）与 `js/event.js`（活动族）；`js/markdown.js` 是
+  两边共用的 Markdown 渲染（`window.MD`），`js/docs.js` 只给使用文档页用
 - `pages/`：页面骨架，服务端只做 `{{VERSION}}`、`{{FOOTER}}`、`{{SAFE_MODE}}` 这类替换
 - `theme/`：外观包（默认 `classic`），活动配置里挑一份
 - 没有框架：`PX` 提供 `api` / `toast` / `esc` / `md` / `when` 这几个常用件，其余按页面写

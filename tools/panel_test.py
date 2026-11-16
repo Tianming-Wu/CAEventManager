@@ -1779,12 +1779,10 @@ def main():
                     body = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
                     stub.requests.append({"auth": self.headers.get("Authorization"),
                                           "body": body})
-                    system = " ".join(m.get("content") or ""
-                                      for m in body.get("messages", [])
-                                      if m.get("role") == "system")
                     tool_msgs = [m for m in body.get("messages", [])
                                  if m.get("role") == "tool"]
-                    if "标题" in system:
+                    # 认工具表而不是认提示词里的字：提示词改一句话不该把桩带翻
+                    if not body.get("tools"):
                         # 起名字那一路：不给工具，只要一句短标题
                         message = {"role": "assistant", "content": "活动报名排查。"}
                     elif "文档" in " ".join(m.get("content") or ""

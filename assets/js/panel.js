@@ -4926,7 +4926,7 @@
   };
 
   /* 助手回答里的链接：站内文档（[审批](usage/approval.md)）在新标签页打开那一篇，
-     站外的 http(s) 照常开；别的路径只当文字，不给死链 */
+     后面接 #标题 就落在那一节；站外的 http(s) 照常开；别的路径只当文字，不给死链 */
   function assistantMdOpts() {
     var docs = S.assistantDocs || [];
     return {
@@ -4935,7 +4935,9 @@
           docs: docs,
           base: "",
           target: 'target="_blank" rel="noopener"',
-          href: function (path) { return PX.PREFIX + "/docs#/" + path; }
+          href: function (path, anchor) {
+            return PX.PREFIX + "/docs#/" + path + (anchor ? "~" + anchor : "");
+          }
         });
       }
     };

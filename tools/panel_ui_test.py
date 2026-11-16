@@ -17,10 +17,12 @@ import os
 import random
 import re
 import shutil
+import struct
 import sys
 import time
 import urllib.request
 import zipfile
+import zlib
 
 from playwright.sync_api import sync_playwright
 
@@ -1309,22 +1311,31 @@ def docs_page(browser):
 
         # 链接解析：只认白名单里的文档，站外与不认的路径退化成普通文字
         links = page.evaluate("""() => {
-            const docs = ['usage/approval.md', 'reference/glossary.md'];
-            const render = t => MD.render(t, {
-                docs: docs, base: 'usage', anchors: true,
-                link: target => MD.resolveLink(target, {
-                    docs: docs, base: 'usage',
-                    href: (path, anchor) => '#/' + path + (anchor ? '~' + anchor : ''),
-                    selfAnchor: anchor => '#/usage/approval.md~' + anchor
-                })
+            const docs = ['usage/approval.md', 'reference/glossary.md',
+                          'builtin/modules/a/doc.md', 'builtin/modules/b/doc.md'];
+            const at = (target, base) => MD.resolveLink(target, {
+                docs: docs, base: base,
+                href: (path, anchor) => '#/' + path + (anchor ? '~' + anchor : ''),
+                selfAnchor: anchor => '#/usage/approval.md~' + anchor
+            });
+            const render = (t, base) => MD.render(t, {
+                docs: docs, base: base, anchors: true, link: target => at(target, base)
             });
             const box = document.createElement('div');
             box.innerHTML = render('[审批](approval.md) 和 [词表](../reference/glossary.md) 和 ' +
-                '[没了](nope.md) 和 [站外](https://example.com)');
+                '[没了](nope.md) 和 [站外](https://example.com)', 'usage');
             const a = Array.from(box.querySelectorAll('a'));
-            const same = render('[跳到某节](#登录名)');
+            const same = render('[跳到某节](#登录名)', 'usage');
             const jump = document.createElement('div');
             jump.innerHTML = same;
+            // 助手那边没有「当前目录」，路径从文档根算：这四种写法都该认
+            const forms = ['../usage/approval.md', 'usage/approval.md',
+                           'doc/usage/approval.md', 'approval.md#注册申请']
+                .map(t => {
+                    const hit = at(t, '');
+                    return hit ? (hit.broken ? 'broken' : hit.href) : 'text';
+                });
+            const ambiguous = at('doc.md', '');
             return {count: a.length,
                     first: a[0] ? a[0].getAttribute('data-doc-link') : '',
                     second: a[1] ? a[1].getAttribute('href') : '',
@@ -1333,7 +1344,9 @@ def docs_page(browser):
                     broken: box.querySelector('.md-broken')
                             ? box.querySelector('.md-broken').innerText.trim() : '',
                     anchorHref: jump.querySelector('a')
-                            ? jump.querySelector('a').getAttribute('href') : ''};
+                            ? jump.querySelector('a').getAttribute('href') : '',
+                    forms: forms,
+                    ambiguous: ambiguous && ambiguous.broken ? 'broken' : 'hit'};
         }""")
         check("相对链接认得清单里的文档（同目录、上级目录都行）",
               links["first"] == "usage/approval.md"
@@ -1343,6 +1356,12 @@ def docs_page(browser):
         check("清单外的写成红色断链", links["broken"] == "没了（链接已断）", links)
         check("同一篇里的锚点也能跳", links["anchorHref"].endswith("~登录名"),
               links["anchorHref"])
+        check("四种写法都认：相对、清单原文、带 doc/ 前缀、只写文件名加锚点",
+              links["forms"] == ["#/usage/approval.md", "#/usage/approval.md",
+                                 "#/usage/approval.md", "#/usage/approval.md~注册申请"],
+              links["forms"])
+        check("只写文件名而重名的当作断链，不猜是哪一份",
+              links["ambiguous"] == "broken", links["ambiguous"])
         anchors = page.evaluate("""() => {
             const box = document.createElement('div');
             box.innerHTML = MD.render('## 登录名\\n\\n正文', {anchors: true});
@@ -1364,6 +1383,39 @@ def docs_page(browser):
         }""")
         check("图片：给了地址才渲染，没给就留原样",
               imgs["src"] == "api/docs/img?path=pic.png" and imgs["literal"], imgs)
+
+        # 真放一张图进去看能不能显示：文档与图都放在临时命名下，验完删掉
+        pic = os.path.join(ROOT_DIR, "doc", "usage", "_probe-shot.png")
+        shot_doc = os.path.join(ROOT_DIR, "doc", "usage", "_probe-shot.md")
+
+        def tiny_png():
+            def chunk(tag, data):
+                return (struct.pack(">I", len(data)) + tag + data +
+                        struct.pack(">I", zlib.crc32(tag + data) & 0xffffffff))
+            return (b"\x89PNG\r\n\x1a\n" +
+                    chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)) +
+                    chunk(b"IDAT", zlib.compress(b"\x00\x00\x00\x00")) +
+                    chunk(b"IEND", b""))
+
+        try:
+            with open(pic, "wb") as fh:
+                fh.write(tiny_png())
+            with open(shot_doc, "w", encoding="utf-8") as fh:
+                fh.write("# 图 - 正文里的一张图\n\n![示意](_probe-shot.png)\n")
+            page.goto(BASE + "/docs#/usage/_probe-shot.md", wait_until="domcontentloaded")
+            page.wait_for_selector("#docsArticle img.md-img", timeout=8000)
+            page.wait_for_timeout(400)
+            shot = page.evaluate("""() => {
+                const img = document.querySelector('#docsArticle img.md-img');
+                return {src: img.getAttribute('src'), w: img.naturalWidth,
+                        h: img.naturalHeight};
+            }""")
+            check("文档里的图真的显示出来",
+                  shot["w"] > 0 and "api/docs/img" in shot["src"], shot)
+        finally:
+            for one in (pic, shot_doc):
+                if os.path.exists(one):
+                    os.remove(one)
         stats = page.evaluate("""() => {
             const sizes = ['#docsBack', '#docsTheme'].map(sel => {
                 const r = document.querySelector(sel).getBoundingClientRect();
@@ -2230,6 +2282,44 @@ def assistant_page(page):
           "*不该斜*" in line_html and "\\*" not in line_html, line_html[:200])
     check("没有语言标注的代码块写 plain text",
           "plain text" in page.evaluate("() => PX.md('```\\nraw\\n```')"))
+
+    print("== 回答里的链接 ==")
+    # 存一段带链接的回答，看真渲染：站内文档开新标签页并带上那一节，站外照常，清单外断链
+    now = int(time.time())
+    link_sid = (call(owner_opener(), "/api/panel/assistant/session/save",
+                     {"id": 0, "title": "链接测试",
+                      "messages": [
+                          {"role": "user", "content": "看文档", "ts": now},
+                          {"role": "assistant", "ts": now,
+                           "content": "见 [它会查文档](usage/assistant.md#它会查文档)、"
+                                      "[外站](https://example.com)、[断链](nope.md)"}]})
+                or {}).get("id")
+    check("存下一段带链接的回答", bool(link_sid), link_sid)
+    if link_sid:
+        page.evaluate("""(sid) => {
+            localStorage.setItem('as:lastSession', String(sid));
+            location.hash = '#/overview';
+        }""", link_sid)
+        page.wait_for_timeout(300)
+        page.evaluate("() => { location.hash = '#/assistant'; }")
+        page.wait_for_selector("#assistantLog a", timeout=8000)
+        page.wait_for_timeout(300)
+        got = page.evaluate("""() => {
+            const log = document.getElementById('assistantLog');
+            const a = Array.from(log.querySelectorAll('a'));
+            const broken = log.querySelector('.md-broken');
+            return {hrefs: a.map(x => x.getAttribute('href')),
+                    targets: a.map(x => x.getAttribute('target') || ''),
+                    icons: a.filter(x => x.querySelector('.md-doc-ico')).length,
+                    broken: broken ? broken.innerText.trim() : ''};
+        }""")
+        check("站内文档链接在新标签页打开，还带着那一节",
+              bool(got["hrefs"]) and got["hrefs"][0].endswith(
+                  "/docs#/usage/assistant.md~它会查文档")
+              and got["targets"][0] == "_blank", got)
+        check("文档链接带图标，站外链接照常可点",
+              got["icons"] == 1 and "https://example.com" in got["hrefs"], got)
+        check("清单外的写成断链", got["broken"] == "断链（链接已断）", got)
 
 
 CRUMB_SAMPLER = r"""

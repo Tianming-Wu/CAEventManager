@@ -718,6 +718,11 @@ def main():
         check("提示词要求在当轮重新取数，不吃上一轮的结论",
               "每一轮都重新取数" in a.SYSTEM_PROMPT
               and "不能当成结论" in a.SYSTEM_PROMPT, a.SYSTEM_PROMPT[-160:])
+        check("提示词写了回答的 Markdown 语法与站内链接怎么写",
+              "[文字](路径)" in a.SYSTEM_PROMPT
+              and "usage/rosters.md" in a.SYSTEM_PROMPT
+              and "assistant.md#它会查文档" in a.SYSTEM_PROMPT
+              and "图片不渲染" in a.SYSTEM_PROMPT, a.SYSTEM_PROMPT[:80])
 
         # 改当前这段对话的标题：会话 id 由平台注入，模型不必知道自己在哪一段里
         a._PENDING.clear()
@@ -849,6 +854,27 @@ def main():
     check("读文档对所有角色开放",
           app.policy.verdict({"role": "admin"}, "read_doc", {})[0]
           and app.policy.verdict({"role": "owner"}, "list_docs", {})[0])
+
+    # 图片：文档页给的路径与文档键同一套（usage/x.png），要和 /api/docs/doc 一样补前缀
+    pic = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                       "doc", "usage", "_probe-pic.png")
+    try:
+        with open(pic, "wb") as fh:
+            fh.write(b"\x89PNG\r\n\x1a\n")
+        full, why = app.assistant.doc_image("usage/_probe-pic.png")
+        check("图片路径按 doc/ 补全", bool(full) and os.path.basename(full) == "_probe-pic.png",
+              why)
+        check("带上 doc/ 前缀也认",
+              app.assistant.doc_image("doc/usage/_probe-pic.png")[0] == full)
+        check("图片只认那几种格式", bool(app.assistant.doc_image("usage/_probe-pic.md")[1]))
+        check("跳出文档目录的图片拒掉",
+              bool(app.assistant.doc_image("../app.py")[1])
+              and bool(app.assistant.doc_image("usage/../../app.py")[1]))
+        check("没有这张图就说没有",
+              bool(app.assistant.doc_image("usage/_probe-none.png")[1]))
+    finally:
+        if os.path.exists(pic):
+            os.remove(pic)
 
     print("== 模块动作的声明 ==")
     errs = []

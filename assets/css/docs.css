@@ -46,6 +46,13 @@ html[data-theme="dark"] {
 
 * { box-sizing: border-box; }
 
+/* 深浅色切换：整体交叉淡入，比逐个属性加 transition 稳（后者文字会闪） */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: .22s;
+  animation-timing-function: ease;
+}
+
 html, body { height: 100%; }
 
 body {
@@ -371,7 +378,30 @@ html[data-theme="dark"] .docs-act .i-sun { display: block; }
   line-height: 1.5;
 }
 
-/* 站内文档链接：[审批](@usage/approval) */
+/* 正文里的图、文内链接、跳到某一节 */
+.md img.md-img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 14px 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.md .md-link { color: var(--link); }
+
+/* 跳到某一节时闪一下，让人看清落在哪 */
+.md h1.is-flash, .md h2.is-flash, .md h3.is-flash,
+.md h4.is-flash, .md h5.is-flash, .md h6.is-flash {
+  animation: docs-flash 1.2s ease;
+}
+
+@keyframes docs-flash {
+  0% { background: var(--surface-2); }
+  100% { background: transparent; }
+}
+
 .md .md-doc {
   display: inline-flex;
   align-items: center;
@@ -394,7 +424,7 @@ html[data-theme="dark"] .docs-act .i-sun { display: block; }
   top: -.5px;
 }
 
-.md .md-doc.broken {
+.md .md-broken {
   display: inline;
   padding: 0;
   background: transparent;

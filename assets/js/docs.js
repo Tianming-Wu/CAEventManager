@@ -2,8 +2,8 @@
    这一页自己一套骨架，不加载面板的脚本；接口只有 /api/docs/tree 与 /api/docs/doc。
    深浅色存在本机（键名与面板分开），第一次进来时沿用面板那一次的选择。
 
-   地址里省掉 doc/ 前缀：docs#/usage/approval.md；正文里的 [审批](@usage/approval)
-   走的也是这一套键。 */
+   地址里省掉 doc/ 前缀：docs#/usage/approval.md，后面接 ~标题 就是跳到某一节；
+   正文里的 [审批](approval.md) 也按相对这一篇的路径算。 */
 (function () {
   "use strict";
 
@@ -43,6 +43,34 @@
     return at < 0 ? "" : path.slice(0, at);
   }
 
+  /* 链接与图片的判定：只认白名单里的文档与本地图片，站外与不认的路径退化成文字。
+     判定本身在 markdown.js 里（面板那边也用同一份）。 */
+  function mdOpts() {
+    return {
+      docs: S.docs,
+      base: dirOf(S.path),
+      anchors: true,
+      link: function (target) {
+        return window.MD.resolveLink(target, {
+          docs: S.docs,
+          base: dirOf(S.path),
+          href: function (path, anchor) {
+            return "#/" + path + (anchor ? "~" + anchor : "");
+          },
+          selfAnchor: function (anchor) {
+            return "#/" + S.path + "~" + anchor;
+          }
+        });
+      },
+      image: function (target) {
+        var t = String(target || "").trim();
+        if (/^https?:\/\//i.test(t)) return null;      // 站外的图先不认
+        var path = window.MD.resolveDocPath(t, dirOf(S.path));
+        return "api/docs/img?path=" + encodeURIComponent(path);
+      }
+    };
+  }
+
   /* ---------------- 深浅色 ---------------- */
   function prefersDark() {
     return !!(window.matchMedia &&
@@ -73,8 +101,21 @@
 
   function toggleTheme() {
     var dark = document.documentElement.getAttribute("data-theme") === "dark";
-    applyTheme(!dark);
-    store(DOCS_THEME, !dark ? "dark" : "light");
+    var next = !dark;
+    var commit = function () {
+      applyTheme(next);
+      store(DOCS_THEME, next ? "dark" : "light");
+    };
+    // 两帧交叉淡入；不喜欢动画（系统设了减少动效）就直接换
+    var calm = window.matchMedia &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (!calm && document.startViewTransition) {
+      try {
+        document.startViewTransition(commit);
+        return;
+      } catch (e) { /* 老浏览器：落下去直接换 */ }
+    }
+    commit();
   }
 
   /* ---------------- 目录树 ---------------- */
@@ -108,15 +149,30 @@
     }).join("");
   }
 
-  function pathFromHash() {
+  /* 地址：docs#/usage/approval.md 或 docs#/usage/approval.md~某个标题 */
+  function hashParts() {
     var raw = (location.hash || "").replace(/^#\/?/, "");
-    try { return shortPath(decodeURI(raw)); } catch (e) { return shortPath(raw); }
+    try { raw = decodeURI(raw); } catch (e) { /* 原样用 */ }
+    var at = raw.indexOf("~");
+    return {path: shortPath(at < 0 ? raw : raw.slice(0, at)),
+            anchor: at < 0 ? "" : raw.slice(at + 1)};
   }
 
   function setHash(path) {
     var want = "#/" + encodeURI(path);
     if (location.hash === want) return;
     location.hash = want;
+  }
+
+  /* 跳到某一节：标题上的 id 就是 Markdown 里的 slug */
+  function jumpToAnchor(anchor) {
+    if (!anchor) { window.scrollTo(0, 0); return; }
+    var el = document.getElementById(anchor);
+    if (!el) { window.scrollTo(0, 0); return; }
+    var top = el.getBoundingClientRect().top + window.pageYOffset - 64;
+    window.scrollTo(0, Math.max(0, top));
+    el.classList.add("is-flash");
+    setTimeout(function () { el.classList.remove("is-flash"); }, 1200);
   }
 
   /* ---------------- 正文 ---------------- */
@@ -173,6 +229,7 @@
     var article = $("#docsArticle");
     var empty = $("#docsEmpty");
     S.path = path || "";
+    S.anchor = hashParts().anchor;
     drawTree();
     drawCrumb();
     closeNav();
@@ -200,15 +257,11 @@
       var parts = splitTitle(data.text);
       var title = parts.title || data.title || S.path;
       var meta = data.updated ? "上次更新 " + stampDate(data.updated) : "";
-      var body = window.MD.render(parts.body, {
-        docs: S.docs,
-        base: dirOf(S.path),
-        href: function (p) { return "#/" + p; }
-      });
+      var body = window.MD.render(parts.body, mdOpts());
       article.innerHTML = "<h1>" + esc(title) + "</h1>" +
         (meta ? '<p class="docs-meta">' + esc(meta) + "</p>" : "") + body;
       document.title = title + " · 使用文档";
-      window.scrollTo(0, 0);
+      jumpToAnchor(S.anchor);
     }).catch(function (e) {
       setBusy(false);
       article.innerHTML = '<p class="docs-empty">读不到这篇：' + esc(e.message) + "</p>";
@@ -275,7 +328,7 @@
       if (docLink) {
         e.preventDefault();
         closeNav();
-        setHash(docLink.getAttribute("data-doc-link"));
+        location.hash = docLink.getAttribute("href");
         return;
       }
       var doc = t.closest("[data-doc]");
@@ -294,7 +347,16 @@
     if (menu) menu.addEventListener("click", openNav);
     var theme = $("#docsTheme");
     if (theme) theme.addEventListener("click", toggleTheme);
-    window.addEventListener("hashchange", function () { openDoc(pathFromHash()); });
+    // 同一篇里换锚点不必重取正文，直接滚过去
+    window.addEventListener("hashchange", function () {
+      var parts = hashParts();
+      if (parts.path && parts.path === S.path) {
+        S.anchor = parts.anchor;
+        jumpToAnchor(parts.anchor);
+        return;
+      }
+      openDoc(parts.path);
+    });
 
     fetch("api/docs/tree", {
       credentials: "same-origin",
@@ -309,16 +371,20 @@
       S.groups.forEach(function (g) {
         g.docs.forEach(function (d) { S.docs.push(shortPath(d.path)); });
       });
-      var want = pathFromHash();
-      if (S.docs.indexOf(want) < 0) want = S.docs.length ? S.docs[0] : "";
+      // 地址里的锚点留着：补全成规范写法时别把要跳的那一节抹掉
+      var parts = hashParts();
+      var want = parts.path;
+      if (S.docs.indexOf(want) < 0) { want = S.docs.length ? S.docs[0] : ""; parts.anchor = ""; }
       if (!want) {
         drawTree();
         openDoc("");
         return;
       }
       S.path = want;
-      if (location.hash !== "#/" + encodeURI(want)) {
-        try { history.replaceState(null, "", "#/" + encodeURI(want)); } catch (err) {}
+      var canon = "#/" + encodeURI(want) +
+        (parts.anchor ? "~" + encodeURIComponent(parts.anchor) : "");
+      if (location.hash !== canon) {
+        try { history.replaceState(null, "", canon); } catch (err) {}
       }
       return openDoc(want);
     }).catch(function (e) {

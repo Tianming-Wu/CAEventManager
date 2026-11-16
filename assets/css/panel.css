@@ -3240,7 +3240,7 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   position: relative;
   top: -.5px;
 }
-.as-text.md .md-doc.broken {
+.as-text.md .md-broken {
   display: inline;
   padding: 0;
   background: transparent;

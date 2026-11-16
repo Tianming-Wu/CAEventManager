@@ -2,8 +2,9 @@
    只认下面这些语法，规矩是"先转义、再套样式"——模型或文档里写出来的 HTML 不会变成 DOM。
    认的标签只有 <kbd> <sup> <sub>，它们的内容照样转义。
 
-      window.MD.render(text)  ->  HTML 片段
-      window.MD.esc(text)     ->  转义后的纯文本
+      window.MD.render(text, opts)  ->  HTML 片段
+      window.MD.esc(text)           ->  转义后的纯文本
+      window.MD.resolveLink(...)    ->  一条链接该渲染成什么（文档页与面板共用一份判定）
 */
 window.MD = (function () {
 function esc(s) {
@@ -17,8 +18,8 @@ function esc(s) {
    规矩仍是"先转义、再套样式"：除了下面这些，别的都当纯文本——模型吐出来的 HTML
    不会变成 DOM。认的标签只有 <kbd> <sup> <sub>，它们的内容照样转义。
 
-   链接与图片这一版**不渲染**：要做成能点的东西，得先把协议白名单、外链提示、
-   图片要不要走代理想清楚（ROADMAP 四e 记着）。 */
+   链接与图片不自己判：给不给得出来源由调用方决定（opts.link / opts.image），
+   判不出来就留成纯文本——这里不认识协议，也不该认识。 */
 
 var MD_INLINE_TAGS = { kbd: 1, sup: 1, sub: 1 };
 
@@ -57,22 +58,27 @@ function mdInline(text) {
   // 上下标：模型习惯写 x^2^ 与 H~2~O
   out = out.replace(/\^([^\^\s]+)\^/g, "<sup>$1</sup>");
   out = out.replace(/~([^~\s]+)~/g, "<sub>$1</sub>");
-  // 站内文档链接：[审批](@usage/approval) —— 只认清单里有的那几篇，
-  // 同目录可以只写文件名：[审批](@approval)。清单外的一律渲染成断链，不可点
-  out = out.replace(/\[([^\]]+)\]\(@([^\s)]*)\)/g, function (all, label, target) {
-    // 手上没有清单（比如还没拿到文档列表）：当普通文字，别冤枉成断链
-    if (!OPTS || !OPTS.docs || !OPTS.docs.length) return label;
-    var path = docLink(target);
-    if (!path) {
-      return '<span class="md-doc broken">' + label + "（链接已断）</span>";
-    }
-    return '<a class="md-doc" href="' + escAttr(docHref(path)) + '"' +
-      (OPTS && OPTS.target ? " " + OPTS.target : "") +
-      ' data-doc-link="' + escAttr(path) + '">' + MD_DOC_ICON +
-      "<span>" + label + "</span></a>";
+  // 图片：只看调用方给不给得出来源（文档页只认本地的图，且在白名单里）
+  out = out.replace(/!\[([^\]]*)\]\(([^\s)]+)\)/g, function (all, alt, target) {
+    var src = OPTS && typeof OPTS.image === "function" ? OPTS.image(target) : null;
+    if (!src) return hold(all);                 // 给不出来：原样留着，别让下面的链接规则啃掉
+    return '<img class="md-img" src="' + escAttr(src) + '" alt="' + escAttr(alt) +
+      '" loading="lazy">';
   });
-  out = out.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
-    '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+  // 链接：交给调用方判——站内文档、外链、还是当普通文字 / 断链。
+  // 没人接手时只认外链，别的路径留成文字，不给死链接
+  out = out.replace(/\[([^\]]+)\]\(([^\s)]+)\)/g, function (all, label, target) {
+    var hit = OPTS && typeof OPTS.link === "function"
+      ? OPTS.link(target) : resolveLink(target, {});
+    if (!hit) return label;                     // 不认的链接：只留文字
+    if (hit.broken) {
+      return '<span class="md-broken">' + label + "（链接已断）</span>";
+    }
+    return '<a class="' + (hit.doc ? "md-doc" : "md-link") + '" href="' +
+      escAttr(hit.href) + '"' + (hit.target ? " " + hit.target : "") +
+      (hit.doc ? ' data-doc-link="' + escAttr(hit.doc) + '"' : "") + ">" +
+      (hit.doc ? MD_DOC_ICON : "") + "<span>" + label + "</span></a>";
+  });
   return out.replace(/\u0001(\d+)\u0001/g, function (all, i) {
     return holds[Number(i)] || "";
   });
@@ -197,8 +203,10 @@ function mdBlocks(lines) {
     m = line.match(MD_ATX);
     if (m) {
       var lv = m[1].length;
-      out.push("<h" + lv + ' class="md-h' + lv + '">' + mdInline(m[2]) +
-               "</h" + lv + ">");
+      // 标题带锚点：别的文章可以直接跳到这一节（#/path~slug）
+      var anchor = OPTS && OPTS.anchors ? ' id="' + escAttr(slug(m[2])) + '"' : "";
+      out.push("<h" + lv + ' class="md-h' + lv + '"' + anchor + ">" +
+               mdInline(m[2]) + "</h" + lv + ">");
       i++;
       continue;
     }
@@ -277,25 +285,53 @@ function escAttr(text) {
     .replace(/"/g, "&quot;");
 }
 
-/* `@` 后面那一截 → 清单里的键；找不到就是 null（渲染成断链） */
-function docLink(target) {
-  if (!OPTS || !OPTS.docs || !OPTS.docs.length) return null;
-  var t = String(target || "").trim().replace(/^\/+/, "");
-  if (!t) return null;
-  var list = OPTS.docs;
-  var named = /\.md$/i.test(t) ? t : t + ".md";
-  var tried = [];
-  if (t.indexOf("/") < 0 && OPTS.base) tried.push(OPTS.base + "/" + named);
-  tried.push(named);
-  for (var i = 0; i < tried.length; i++) {
-    if (list.indexOf(tried[i]) >= 0) return tried[i];
-  }
-  return null;
+/* 文档里的相对路径归一成 doc/ 根下的键：`a/../b`、`./x` 都算干净 */
+function resolveDocPath(target, base) {
+  var raw = String(target || "").trim();
+  if (!raw) return "";
+  var full = raw.charAt(0) === "/" ? raw.slice(1) : (base ? base + "/" + raw : raw);
+  var out = [];
+  full.split("/").forEach(function (part) {
+    if (!part || part === ".") return;
+    if (part === "..") { out.pop(); return; }
+    out.push(part);
+  });
+  return out.join("/");
 }
 
-function docHref(path) {
-  if (OPTS && typeof OPTS.href === "function") return OPTS.href(path);
-  return "#" + path;
+/* 一条链接该渲染成什么——判定只有这一处：
+     {href, target?, doc?}  可点的链接（doc 表示是站内文档）
+     {broken: true}         指向了不存在的文档（渲染成红色断链）
+     null                   不认：只留文字，不给死链接
+   opts: {docs:[键], base:"usage", href(path, anchor), target, external, selfAnchor(anchor)} */
+function resolveLink(target, opts) {
+  opts = opts || {};
+  var t = String(target || "").trim();
+  if (!t) return null;
+  if (/^https?:\/\//i.test(t) || /^mailto:/i.test(t)) {
+    return opts.external === false ? null
+      : {href: t, target: 'target="_blank" rel="noopener noreferrer"'};
+  }
+  if (t.charAt(0) === "#") {
+    return opts.selfAnchor ? {href: opts.selfAnchor(t.slice(1))} : null;
+  }
+  if (!opts.docs || !opts.docs.length) return null;
+  var cut = t.indexOf("#");
+  var anchor = cut < 0 ? "" : t.slice(cut + 1);
+  var path = resolveDocPath(cut < 0 ? t : t.slice(0, cut), opts.base);
+  var key = /\.md$/i.test(path) ? path : path + ".md";
+  if (opts.docs.indexOf(key) < 0) return {broken: true};
+  return {href: typeof opts.href === "function" ? opts.href(key, anchor) : "#/" + key,
+          doc: key, target: opts.target || ""};
+}
+
+/* 标题的锚点：与 GitHub 的做法一致一点——去标点、空格换连字符、转小写。
+   中文标题照原样留着，地址里会被 encodeURIComponent 编掉。 */
+function slug(text) {
+  return String(text || "").trim().toLowerCase()
+    .replace(/[\s]+/g, "-")
+    .replace(/[!"#$%&'()*+,./:;<=>?@\[\\\]^`{|}~，。、；：！？（）《》【】“”‘’…—]/g, "")
+    .replace(/-+/g, "-");
 }
 
 function md(text, opts) {
@@ -308,5 +344,6 @@ function md(text, opts) {
     OPTS = prev;
   }
 }
-  return {render: md, esc: esc};
+  return {render: md, esc: esc, resolveLink: resolveLink,
+          resolveDocPath: resolveDocPath, slug: slug};
 })();

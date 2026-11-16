@@ -428,7 +428,7 @@ DOC_GROUPS = (("doc/usage/", "使用说明"), ("doc/reference/", "参考"),
 def doc_links():
     """站内文档链接认的键：去掉 doc/ 前缀的路径，例如 ``usage/approval.md``。
 
-    模型回答里写 ``[审批](@usage/approval)`` 时，只有在这里面出现过的才算数。
+    模型回答里写 ``[审批](usage/approval.md)`` 时，只有在这里面出现过的才算数。
     """
     keys = []
     for item in doc_entries():
@@ -464,6 +464,31 @@ def _doc_rank(rel):
         if rel.startswith(prefix):
             return i
     return len(DOC_ALLOWED)
+
+
+DOC_IMG_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg")
+DOC_IMG_MAX = 2 * 1024 * 1024          # 一张图 2 MB 封顶
+
+
+def doc_image(rel):
+    """(绝对路径, 说明)。只认文档目录里的图片：不认 ..、不认目录外的路径。"""
+    want = (rel or "").strip().replace("\\", "/").lstrip("/")
+    if not want:
+        return None, "需要 path"
+    if ".." in want.split("/"):
+        return None, "路径不对"
+    if not want.lower().endswith(DOC_IMG_EXTS):
+        return None, "只认 png / jpg / webp / gif / svg"
+    if not (want.startswith("doc/") or want.startswith("builtin/modules/")
+            or want.startswith("modules/")):
+        return None, "图片要放在文档目录里"
+    full = os.path.abspath(os.path.join(_docs_base(), want))
+    root = os.path.abspath(_docs_base())
+    if not full.startswith(root + os.sep):
+        return None, "路径不对"
+    if not os.path.isfile(full):
+        return None, "没有这张图"
+    return full, ""
 
 
 def doc_updated(rel):

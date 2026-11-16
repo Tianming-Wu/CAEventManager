@@ -1238,13 +1238,7 @@ def docs_page(browser):
         check("标题下面写着上次更新日期",
               re.fullmatch(r"上次更新 \d{4}/\d{2}/\d{2}", head["meta"] or "") is not None,
               head["meta"])
-        sizes = page.evaluate("""() => {
-            const a = document.getElementById('docsBack').getBoundingClientRect();
-            const b = document.getElementById('docsTheme').getBoundingClientRect();
-            return {a: [Math.round(a.width), Math.round(a.height), Math.round(a.top)],
-                    b: [Math.round(b.width), Math.round(b.height), Math.round(b.top)]};
-        }""")
-        check("右上角两颗按钮一样大、一条水平线上", sizes["a"] == sizes["b"], sizes)
+
         tones = page.evaluate("""() => {
             const el = document.querySelector('#docsArticle .md-table th')
                     || document.querySelector('#docsArticle .md-table');
@@ -1313,29 +1307,119 @@ def docs_page(browser):
               inherited["docs"] in ("dark", "light")
               and inherited["theme"] == inherited["docs"], inherited)
 
-        # 站内文档链接：@usage/xxx 走白名单，断链渲染成红色不可点
+        # 链接解析：只认白名单里的文档，站外与不认的路径退化成普通文字
         links = page.evaluate("""() => {
-            const opts = {docs: ['usage/approval.md', 'reference/glossary.md'],
-                          base: 'usage', href: p => '#/' + p};
-            const good = MD.render('[审批](@approval) 和 [词表](@reference/glossary) 和' +
-                                   ' [没了](@nope)', opts);
+            const docs = ['usage/approval.md', 'reference/glossary.md'];
+            const render = t => MD.render(t, {
+                docs: docs, base: 'usage', anchors: true,
+                link: target => MD.resolveLink(target, {
+                    docs: docs, base: 'usage',
+                    href: (path, anchor) => '#/' + path + (anchor ? '~' + anchor : ''),
+                    selfAnchor: anchor => '#/usage/approval.md~' + anchor
+                })
+            });
             const box = document.createElement('div');
-            box.innerHTML = good;
-            const a = box.querySelectorAll('a.md-doc');
-            const bad = box.querySelector('.md-doc.broken');
-            return {ok: a.length, first: a.length ? a[0].getAttribute('data-doc-link') : '',
-                    second: a.length > 1 ? a[1].getAttribute('href') : '',
-                    icon: a.length ? !!a[0].querySelector('.md-doc-ico') : false,
-                    broken: bad ? bad.innerText.trim() : ''};
+            box.innerHTML = render('[审批](approval.md) 和 [词表](../reference/glossary.md) 和 ' +
+                '[没了](nope.md) 和 [站外](https://example.com)');
+            const a = Array.from(box.querySelectorAll('a'));
+            const same = render('[跳到某节](#登录名)');
+            const jump = document.createElement('div');
+            jump.innerHTML = same;
+            return {count: a.length,
+                    first: a[0] ? a[0].getAttribute('data-doc-link') : '',
+                    second: a[1] ? a[1].getAttribute('href') : '',
+                    third: a[2] ? a[2].getAttribute('href') : '',
+                    icon: a[0] ? !!a[0].querySelector('.md-doc-ico') : false,
+                    broken: box.querySelector('.md-broken')
+                            ? box.querySelector('.md-broken').innerText.trim() : '',
+                    anchorHref: jump.querySelector('a')
+                            ? jump.querySelector('a').getAttribute('href') : ''};
         }""")
-        check("站内链接认得清单里的两篇（同目录可以只写文件名）",
-              links["ok"] == 2 and links["first"] == "usage/approval.md"
+        check("相对链接认得清单里的文档（同目录、上级目录都行）",
+              links["first"] == "usage/approval.md"
               and links["second"] == "#/reference/glossary.md", links)
         check("链接前面带一枚文档图标", links["icon"], links)
-        check("清单外的写成红色断链",
-              links["broken"] == "没了（链接已断）", links["broken"])
-        plain = page.evaluate("() => MD.render('[审批](@usage/approval)')")
-        check("没有清单时不硬造链接", "md-doc" not in plain, plain[:60])
+        check("站外链接照常可点", links["third"] == "https://example.com", links)
+        check("清单外的写成红色断链", links["broken"] == "没了（链接已断）", links)
+        check("同一篇里的锚点也能跳", links["anchorHref"].endswith("~登录名"),
+              links["anchorHref"])
+        anchors = page.evaluate("""() => {
+            const box = document.createElement('div');
+            box.innerHTML = MD.render('## 登录名\\n\\n正文', {anchors: true});
+            const h = box.querySelector('h2');
+            const off = document.createElement('div');
+            off.innerHTML = MD.render('## 登录名', {});
+            return {id: h ? h.id : '', plainId: off.querySelector('h2').id};
+        }""")
+        check("标题带锚点 id（不给 anchors 就不带）",
+              anchors["id"] == "登录名" and anchors["plainId"] == "", anchors)
+        imgs = page.evaluate("""() => {
+            const ok = MD.render('![图](pic.png)', {image: t => 'api/docs/img?path=' + t});
+            const no = MD.render('![图](pic.png)', {});
+            const box = document.createElement('div');
+            box.innerHTML = ok;
+            return {src: (box.querySelector('img') || {}).getAttribute
+                            ? box.querySelector('img').getAttribute('src') : '',
+                    literal: no.indexOf('<img') < 0};
+        }""")
+        check("图片：给了地址才渲染，没给就留原样",
+              imgs["src"] == "api/docs/img?path=pic.png" and imgs["literal"], imgs)
+        stats = page.evaluate("""() => {
+            const sizes = ['#docsBack', '#docsTheme'].map(sel => {
+                const r = document.querySelector(sel).getBoundingClientRect();
+                return [Math.round(r.width), Math.round(r.height)];
+            });
+            const svg = document.getElementById('docsTheme').querySelector('svg');
+            const cs = svg ? getComputedStyle(svg) : null;
+            return {sizes: sizes, icon: cs ? cs.width : ''};
+        }""")
+        check("右上角两颗按钮同尺寸", stats["sizes"][0] == stats["sizes"][1], stats)
+        # "测量"要有意义：量的是图形本身在 20×20 里占的框，重心得落在正中
+        centers = page.evaluate("""() => {
+            // 太阳/月亮两颗里只量当时看得见的那一颗
+            return Array.from(document.querySelectorAll('.docs-acts svg'))
+                .filter(svg => svg.getBoundingClientRect().width > 0)
+                .map(svg => {
+                    const b = svg.getBBox();
+                    return [Math.round((b.x + b.width / 2) * 100) / 100,
+                            Math.round((b.y + b.height / 2) * 100) / 100];
+                });
+        }""")
+        check("两颗图标的视觉重心都在格子中央",
+              len(centers) == 2 and all(abs(c[0] - 10) <= 0.9 and abs(c[1] - 10) <= 0.9
+                                        for c in centers), centers)
+
+        # 地址里的 ~锚点真的会滚到那一节，而且同一篇里换锚点不重取正文
+        page.goto(BASE + "/docs#/usage/assistant.md~" +
+                  urllib.request.quote("它会查文档"), wait_until="domcontentloaded")
+        page.wait_for_selector("#docsArticle h1", timeout=8000)
+        page.wait_for_timeout(700)
+        jump = page.evaluate("""() => {
+            const want = document.getElementById('它会查文档');
+            window.__keepNode = document.getElementById('docsArticle').firstChild;
+            return want ? {top: Math.round(want.getBoundingClientRect().top),
+                           scrolled: Math.round(window.scrollY)} : null;
+        }""")
+        check("地址里的锚点会滚到那一节",
+              jump is not None and jump["scrolled"] > 1000
+              and 0 <= jump["top"] <= 120, jump)
+        page.evaluate("""() => {
+            location.hash = '#/usage/assistant.md~' +
+                            encodeURIComponent('它也能替你改但要你点头');
+        }""")
+        page.wait_for_timeout(500)
+        again = page.evaluate("""() => {
+            const el = document.getElementById('它也能替你改但要你点头');
+            return {top: el ? Math.round(el.getBoundingClientRect().top) : -1,
+                    scrolled: Math.round(window.scrollY),
+                    kept: document.getElementById('docsArticle').firstChild ===
+                          window.__keepNode,
+                    busy: document.querySelector('.docs-body')
+                          .classList.contains('is-busy')};
+        }""")
+        check("同一篇里换锚点也能跳，而且不重取正文",
+              again["kept"] and not again["busy"] and 0 <= again["top"] <= 120
+              and again["scrolled"] < jump["scrolled"], again)
 
         # 白名单：不认清单之外的路径
         try:

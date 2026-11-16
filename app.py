@@ -69,7 +69,7 @@ PAGES_DIR = os.path.join(BASE_DIR, "pages")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.13.1.127"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.13.2.128"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -1301,6 +1301,23 @@ class Handler(BaseHTTPRequestHandler):
                 raise model.ApiError("未登录或登录已过期", 401)
             if route == "/api/docs/tree":
                 return self._json({"ok": True, "groups": assistant.doc_tree()})
+            if route == "/api/docs/img":
+                # 文档里的图：只认 doc/ 与模块目录下的图片文件，防穿越
+                want = (query.get("path") or [""])[0].strip().lstrip("/")
+                full, why = assistant.doc_image(want)
+                if not full:
+                    return self._err(why or "没有这张图", 404)
+                try:
+                    with open(full, "rb") as fh:
+                        body = fh.read(assistant.DOC_IMG_MAX + 1)
+                except OSError:
+                    return self._err("没有这张图", 404)
+                if len(body) > assistant.DOC_IMG_MAX:
+                    return self._err("这张图太大了", 413)
+                ctype = mimetypes.guess_type(full)[0] or "application/octet-stream"
+                return self._send(200, body, ctype,
+                                  [("Cache-Control", "public, max-age=300")])
+
             if route == "/api/docs/doc":
                 # 地址里可以省掉 doc/ 前缀：usage/approval.md 与 doc/usage/approval.md 都认
                 want = (query.get("path") or [""])[0].strip().lstrip("/")
@@ -2895,7 +2912,7 @@ class Handler(BaseHTTPRequestHandler):
                                "writes": sorted(policy.WRITE_ACTIONS),
                                # 动作的正式名称：过程标签与批准条都用这一份，别各写一套
                                "labels": dict(policy.ACTION_LABELS),
-                               # 站内文档链接认的键（回答里写 [审批](@usage/approval) 用）
+                               # 站内文档链接认的键（回答里写 [审批](usage/approval.md) 用）
                                "docs": assistant.doc_links(),
                                # 还挂着等人点头的对话：侧栏与会话卡片上的小红点靠它
                                "pending": sorted(assistant.pending_sessions(acc))})

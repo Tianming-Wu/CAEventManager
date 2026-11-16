@@ -4925,12 +4925,19 @@
     session_title: "修改会话标题"
   };
 
-  /* 助手回答里的站内文档链接：认的键由服务端给，点了就在新标签页打开那一篇 */
+  /* 助手回答里的链接：站内文档（[审批](usage/approval.md)）在新标签页打开那一篇，
+     站外的 http(s) 照常开；别的路径只当文字，不给死链 */
   function assistantMdOpts() {
+    var docs = S.assistantDocs || [];
     return {
-      docs: S.assistantDocs || [],
-      href: function (p) { return PX.PREFIX + "/docs#/" + p; },
-      target: 'target="_blank" rel="noopener"'
+      link: function (target) {
+        return window.MD.resolveLink(target, {
+          docs: docs,
+          base: "",
+          target: 'target="_blank" rel="noopener"',
+          href: function (path) { return PX.PREFIX + "/docs#/" + path; }
+        });
+      }
     };
   }
 

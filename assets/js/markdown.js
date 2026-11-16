@@ -57,6 +57,20 @@ function mdInline(text) {
   // 上下标：模型习惯写 x^2^ 与 H~2~O
   out = out.replace(/\^([^\^\s]+)\^/g, "<sup>$1</sup>");
   out = out.replace(/~([^~\s]+)~/g, "<sub>$1</sub>");
+  // 站内文档链接：[审批](@usage/approval) —— 只认清单里有的那几篇，
+  // 同目录可以只写文件名：[审批](@approval)。清单外的一律渲染成断链，不可点
+  out = out.replace(/\[([^\]]+)\]\(@([^\s)]*)\)/g, function (all, label, target) {
+    // 手上没有清单（比如还没拿到文档列表）：当普通文字，别冤枉成断链
+    if (!OPTS || !OPTS.docs || !OPTS.docs.length) return label;
+    var path = docLink(target);
+    if (!path) {
+      return '<span class="md-doc broken">' + label + "（链接已断）</span>";
+    }
+    return '<a class="md-doc" href="' + escAttr(docHref(path)) + '"' +
+      (OPTS && OPTS.target ? " " + OPTS.target : "") +
+      ' data-doc-link="' + escAttr(path) + '">' + MD_DOC_ICON +
+      "<span>" + label + "</span></a>";
+  });
   out = out.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
     '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
   return out.replace(/\u0001(\d+)\u0001/g, function (all, i) {
@@ -247,9 +261,52 @@ function mdBlocks(lines) {
   return out.join("\n");
 }
 
-function md(text) {
-  return mdBlocks(String(text === null || text === undefined ? "" : text)
-    .replace(/\r\n?/g, "\n").split("\n"));
+/* 渲染时的上下文：站内文档清单（`usage/approval.md` 这种键）、当前文档所在目录、
+   以及"这一篇的地址怎么拼"。没有清单就把 @ 链接当普通文字，不硬造链接。 */
+var OPTS = null;
+
+var MD_DOC_ICON = '<svg class="md-doc-ico" viewBox="0 0 20 20" aria-hidden="true" ' +
+  'fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" ' +
+  'stroke-linejoin="round"><path d="M4.6 3.4h6.2a1.6 1.6 0 0 1 1.6 1.6v10.4a1.2 1.2 0 0 1-1.2 ' +
+  '1.2H4.6a1.2 1.2 0 0 1-1.2-1.2V4.6a1.2 1.2 0 0 1 1.2-1.2Z"/><path d="M7 7.2h3.2M7 10h3.2' +
+  'M7 12.8h2"/></svg>';
+
+function escAttr(text) {
+  return String(text === null || text === undefined ? "" : text)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/* `@` 后面那一截 → 清单里的键；找不到就是 null（渲染成断链） */
+function docLink(target) {
+  if (!OPTS || !OPTS.docs || !OPTS.docs.length) return null;
+  var t = String(target || "").trim().replace(/^\/+/, "");
+  if (!t) return null;
+  var list = OPTS.docs;
+  var named = /\.md$/i.test(t) ? t : t + ".md";
+  var tried = [];
+  if (t.indexOf("/") < 0 && OPTS.base) tried.push(OPTS.base + "/" + named);
+  tried.push(named);
+  for (var i = 0; i < tried.length; i++) {
+    if (list.indexOf(tried[i]) >= 0) return tried[i];
+  }
+  return null;
+}
+
+function docHref(path) {
+  if (OPTS && typeof OPTS.href === "function") return OPTS.href(path);
+  return "#" + path;
+}
+
+function md(text, opts) {
+  var prev = OPTS;
+  OPTS = opts || null;
+  try {
+    return mdBlocks(String(text === null || text === undefined ? "" : text)
+      .replace(/\r\n?/g, "\n").split("\n"));
+  } finally {
+    OPTS = prev;
+  }
 }
   return {render: md, esc: esc};
 })();

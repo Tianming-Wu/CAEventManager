@@ -4925,6 +4925,15 @@
     session_title: "修改会话标题"
   };
 
+  /* 助手回答里的站内文档链接：认的键由服务端给，点了就在新标签页打开那一篇 */
+  function assistantMdOpts() {
+    return {
+      docs: S.assistantDocs || [],
+      href: function (p) { return PX.PREFIX + "/docs#/" + p; },
+      target: 'target="_blank" rel="noopener"'
+    };
+  }
+
   function toolLabel(name) {
     var fromServer = S.assistantLabels || {};
     return fromServer[name] || STEP_LABEL[name] || name;
@@ -5032,6 +5041,7 @@
       .then(function (d) {
         S.assistantCfg = d.config || { ready: false };
         S.assistantLabels = d.labels || {};
+        S.assistantDocs = d.docs || [];
         adoptPendingServer(d.pending || []);
         drawAssistant();
       })
@@ -5653,7 +5663,7 @@
         '<div class="as-text md">' +
         (steps ? '<div class="as-steps">' + steps + "</div>" +
                  '<div class="as-divider"></div>' : "") +
-        PX.md(m.content || "") + "</div>" + foot + "</div></div>";
+        PX.md(m.content || "", assistantMdOpts()) + "</div>" + foot + "</div></div>";
     }).join("");
     if (thinkingOn) paintThinking();   // 重画之后把"正在…"那一行补回去
     scrollAssistant();
@@ -5944,7 +5954,7 @@
       log.appendChild(el);
     }
     var box = el.querySelector(".as-text");
-    box.innerHTML = PX.md(state.text);
+    box.innerHTML = PX.md(state.text, assistantMdOpts());
     attachCaret(box);
     followStream(el);
   }

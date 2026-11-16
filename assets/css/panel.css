@@ -1002,7 +1002,12 @@ a.stat:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 }
 .detail-actions .btn { width: auto; }
 /* 最上面那行只放「打开活动设置」这类无框按钮，自己占一行 */
-.detail-actions-top { margin-top: 14px; margin-bottom: 2px; }
+/* 顶上那一行（打开活动设置）跟下面那排按钮一样靠右 */
+.detail-actions-top {
+  margin-top: 14px;
+  margin-bottom: 2px;
+  justify-content: flex-end;
+}
 
 .detail-btn {
   appearance: none;
@@ -1241,29 +1246,24 @@ table.tbl tr.is-muted td { color: var(--dim); }
 /* 页内跳转的链接不带 href：浏览器就不会在左下角弹一串地址。
    代价是少了 UA 给的指针样式，这里补回来 */
 [data-href] { cursor: pointer; }
-/* 「使用文档」那一项是新标签页：右边挂一枚"开新窗口"小标记 */
-/* 带图标的按钮：图标跟在文字后面，与文字同色同基线 */
+/* 带图标的按钮：图标跟在文字后面，比字略小一点，落在字的视觉中线上 */
 .btn-icon svg {
-  width: 14px;
-  height: 14px;
-  margin-left: 4px;
-  vertical-align: -2px;
+  width: 12px;
+  height: 12px;
+  margin-left: 5px;
+  vertical-align: -1px;
 }
+/* 「使用文档」那一项是新标签页：右边挂一枚"开新窗口"小标记 */
 .nav-ext-mark {
   margin-left: auto;
   flex: none;
   width: 12px;
   height: 12px;
   opacity: .55;
+  position: relative;
+  top: 1px;
 }
-.nav-ext:hover /* 带图标的按钮：图标跟在文字后面，与文字同色同基线 */
-.btn-icon svg {
-  width: 14px;
-  height: 14px;
-  margin-left: 4px;
-  vertical-align: -2px;
-}
-.nav-ext-mark { opacity: .9; }
+.nav-ext:hover .nav-ext-mark { opacity: .9; }
 .crumb-sep { color: var(--dim); font-weight: 400; }
 
 /* ---------- create an activity ---------- */
@@ -3220,6 +3220,35 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
 }
 .as-text.md pre code { padding: 0; background: transparent; font-size: .84rem; }
 .as-text.md a { color: var(--accent-strong); }
+/* 站内文档链接：[审批](@usage/approval) → 蓝色带文件图标；断链是红的、不可点 */
+.as-text.md .md-doc {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 5px 0 4px;
+  border-radius: 5px;
+  background: var(--surface-2);
+  color: var(--accent-strong);
+  text-decoration: none;
+  font-weight: 500;
+}
+.as-text.md .md-doc:hover { text-decoration: underline; }
+.as-text.md .md-doc-ico {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  position: relative;
+  top: -.5px;
+}
+.as-text.md .md-doc.broken {
+  display: inline;
+  padding: 0;
+  background: transparent;
+  color: var(--danger);
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+  cursor: default;
+}
 
 /* ---- 回答里的 Markdown：标题分六级、引用、分隔线、表格、任务框、代码块 ---- */
 /* 正在写的那一段末尾的光标 */

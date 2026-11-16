@@ -1216,22 +1216,69 @@ def docs_page(browser):
         check("默认打开第一篇并渲染出正文",
               bool(info["h1"]) and bool(info["crumb"]) and info["hash"].startswith("#"),
               info)
+        check("地址里省掉了 doc/ 前缀",
+              info["hash"].startswith("#/") and "/doc/" not in info["hash"]
+              and "doc/" not in info["hash"].lstrip("#/"), info["hash"])
+        tree = page.evaluate("""() => ({
+            open: document.querySelectorAll('.tree-group.open').length,
+            withOn: Array.from(document.querySelectorAll('.tree-group')).filter(
+                g => g.querySelector('.tree-doc.on')).length})""")
+        check("默认只展开当前这一篇所在的那一组",
+              tree["open"] == 1 and tree["withOn"] == 1, tree)
+        head = page.evaluate("""() => {
+            const h1 = document.querySelector('.docs-article > h1');
+            const meta = document.querySelector('.docs-meta');
+            const first = document.querySelector('#docsArticle .md h1');
+            return {title: h1 ? h1.innerText.trim() : '',
+                    meta: meta ? meta.innerText.trim() : '',
+                    dupTitle: !!first};
+        }""")
+        check("大标题提出来单独显示，正文里不再重复",
+              bool(head["title"]) and not head["dupTitle"], head)
+        check("标题下面写着上次更新日期",
+              re.fullmatch(r"上次更新 \d{4}/\d{2}/\d{2}", head["meta"] or "") is not None,
+              head["meta"])
+        sizes = page.evaluate("""() => {
+            const a = document.getElementById('docsBack').getBoundingClientRect();
+            const b = document.getElementById('docsTheme').getBoundingClientRect();
+            return {a: [Math.round(a.width), Math.round(a.height), Math.round(a.top)],
+                    b: [Math.round(b.width), Math.round(b.height), Math.round(b.top)]};
+        }""")
+        check("右上角两颗按钮一样大、一条水平线上", sizes["a"] == sizes["b"], sizes)
+        tones = page.evaluate("""() => {
+            const el = document.querySelector('#docsArticle .md-table th')
+                    || document.querySelector('#docsArticle .md-table');
+            const line = document.querySelector('#docsArticle .md-meta, .docs-meta');
+            const cs = el ? getComputedStyle(el) : null;
+            return {table: cs ? cs.borderTopColor : '',
+                    line: line ? getComputedStyle(line).borderBottomColor : ''};
+        }""")
+        def grey(rgb):
+            nums = [int(n) for n in re.findall(r"\d+", rgb)[:3]]
+            return len(nums) == 3 and max(nums) - min(nums) <= 6
+        check("表格与分隔线走灰度，不带主站那种暖色",
+              grey(tones["table"]) or not tones["table"], tones)
         check("正文用的是同一套 Markdown 渲染",
               page.evaluate("""() => !!document.querySelector('#docsArticle h1')
                   && !!document.querySelector('#docsArticle p')"""))
 
-        # 换一篇：分组可以收起再展开
+        # 换一篇：另一组默认是收着的，先展开再点
+        page.click(".tree-group:nth-child(2) .tree-head")
+        page.wait_for_timeout(300)
+        check("点分组标题能展开", page.evaluate(
+            "() => document.querySelector('.tree-group:nth-child(2)').classList.contains('open')"))
         page.click(".tree-group:nth-child(2) .tree-doc")
         page.wait_for_timeout(700)
         second = page.evaluate("""() => ({
             hash: location.hash,
             h1: (document.querySelector('#docsArticle h1') || {}).innerText || '',
-            on: document.querySelectorAll('.tree-doc.on').length})""")
+            on: document.querySelectorAll('.tree-doc.on').length,
+            open: document.querySelectorAll('.tree-group.open').length})""")
         check("点另一条就换一篇，选中态跟着走",
               bool(second["h1"]) and second["on"] == 1, second)
         page.click(".tree-group:nth-child(2) .tree-head")
         page.wait_for_timeout(300)
-        check("分组能收起", not page.evaluate(
+        check("再点一下能收起", not page.evaluate(
             "() => document.querySelector('.tree-group:nth-child(2)').classList.contains('open')"))
         page.click(".tree-group:nth-child(2) .tree-head")
         page.wait_for_timeout(200)
@@ -1265,6 +1312,30 @@ def docs_page(browser):
         check("第一次进文档页时沿用面板的深浅色",
               inherited["docs"] in ("dark", "light")
               and inherited["theme"] == inherited["docs"], inherited)
+
+        # 站内文档链接：@usage/xxx 走白名单，断链渲染成红色不可点
+        links = page.evaluate("""() => {
+            const opts = {docs: ['usage/approval.md', 'reference/glossary.md'],
+                          base: 'usage', href: p => '#/' + p};
+            const good = MD.render('[审批](@approval) 和 [词表](@reference/glossary) 和' +
+                                   ' [没了](@nope)', opts);
+            const box = document.createElement('div');
+            box.innerHTML = good;
+            const a = box.querySelectorAll('a.md-doc');
+            const bad = box.querySelector('.md-doc.broken');
+            return {ok: a.length, first: a.length ? a[0].getAttribute('data-doc-link') : '',
+                    second: a.length > 1 ? a[1].getAttribute('href') : '',
+                    icon: a.length ? !!a[0].querySelector('.md-doc-ico') : false,
+                    broken: bad ? bad.innerText.trim() : ''};
+        }""")
+        check("站内链接认得清单里的两篇（同目录可以只写文件名）",
+              links["ok"] == 2 and links["first"] == "usage/approval.md"
+              and links["second"] == "#/reference/glossary.md", links)
+        check("链接前面带一枚文档图标", links["icon"], links)
+        check("清单外的写成红色断链",
+              links["broken"] == "没了（链接已断）", links["broken"])
+        plain = page.evaluate("() => MD.render('[审批](@usage/approval)')")
+        check("没有清单时不硬造链接", "md-doc" not in plain, plain[:60])
 
         # 白名单：不认清单之外的路径
         try:

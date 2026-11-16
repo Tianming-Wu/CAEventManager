@@ -425,6 +425,18 @@ DOC_GROUPS = (("doc/usage/", "使用说明"), ("doc/reference/", "参考"),
               ("doc/dev/", "开发"), ("doc/ops/", "运维"), ("doc/", "其它文档"))
 
 
+def doc_links():
+    """站内文档链接认的键：去掉 doc/ 前缀的路径，例如 ``usage/approval.md``。
+
+    模型回答里写 ``[审批](@usage/approval)`` 时，只有在这里面出现过的才算数。
+    """
+    keys = []
+    for item in doc_entries():
+        path = item["path"]
+        keys.append(path[4:] if path.startswith("doc/") else path)
+    return keys
+
+
 def doc_tree():
     """把 doc_entries() 那份清单按目录分好组。"""
     groups, order = {}, []
@@ -452,6 +464,14 @@ def _doc_rank(rel):
         if rel.startswith(prefix):
             return i
     return len(DOC_ALLOWED)
+
+
+def doc_updated(rel):
+    """这份文档最后一次改动的时间（epoch 秒）。读不到就是 0。"""
+    try:
+        return os.path.getmtime(os.path.join(_docs_base(), rel))
+    except OSError:
+        return 0
 
 
 def read_doc(rel):

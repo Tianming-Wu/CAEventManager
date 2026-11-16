@@ -1473,6 +1473,35 @@ def docs_page(browser):
               again["kept"] and not again["busy"] and 0 <= again["top"] <= 120
               and again["scrolled"] < jump["scrolled"], again)
 
+        # 触屏：点一下不该留下系统那层蓝色方框，也不该把悬停底色粘在按钮上
+        tctx, tpage = new_page(browser, 390, 844, touch=True, mobile=True, dpr=3)
+        try:
+            ui_login(tpage)
+            tpage.goto(BASE + "/docs", wait_until="domcontentloaded")
+            tpage.wait_for_timeout(900)
+            media = tpage.evaluate("""() => ({
+                noHover: matchMedia('(hover: none)').matches,
+                tap: getComputedStyle(document.body).webkitTapHighlightColor})""")
+            check("这一路是「没有悬停」的触屏", media["noHover"], media)
+            check("系统那层点击高亮已经关掉（安卓会画成蓝方框）",
+                  media["tap"] in ("transparent", "rgba(0, 0, 0, 0)"), media)
+            tpage.tap("#docsTheme")
+            tpage.wait_for_timeout(500)
+            after = tpage.evaluate("""() => {
+                const b = document.getElementById('docsTheme');
+                return {bg: getComputedStyle(b).backgroundColor,
+                        theme: document.documentElement.getAttribute('data-theme')};
+            }""")
+            check("点完深浅色换了，按钮上不留一块粘住的底色",
+                  after["theme"] == "dark" and after["bg"] == "rgba(0, 0, 0, 0)", after)
+            tpage.tap("#docsMenu")
+            tpage.wait_for_timeout(400)
+            check("触屏上抽屉还能开",
+                  tpage.evaluate("() => document.getElementById('docsShell')"
+                                 ".classList.contains('nav-open')"))
+        finally:
+            tctx.close()
+
         # 白名单：不认清单之外的路径
         try:
             bad = call(owner, "/api/docs/doc?path=" +

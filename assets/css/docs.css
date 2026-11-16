@@ -44,7 +44,9 @@ html[data-theme="dark"] {
   --shadow: 0 8px 24px rgba(0, 0, 0, .5);
 }
 
-* { box-sizing: border-box; }
+/* 触屏上点一下会盖一层系统高亮（安卓是蓝色的方框，边角也不跟着元素走），这里关掉：
+   要反馈就靠 :active 与切换本身的动画 */
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
 /* 深浅色切换：整体交叉淡入，比逐个属性加 transition 稳（后者文字会闪） */
 ::view-transition-old(root),
@@ -130,7 +132,20 @@ a { color: var(--link); }
   cursor: pointer;
 }
 
-.tree-head:hover { background: var(--surface-2); color: var(--text); }
+/* 触屏没有悬停：按下时的反馈统一交给 :active，系统那层高亮上面已经关掉 */
+.tree-head:active,
+.tree-doc:active,
+.docs-act:active,
+.docs-menu:active,
+.md .md-copy:active {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+/* 悬停反馈只在真能悬停的设备上给：触屏点完不会留下一块粘住的底色 */
+@media (hover: hover) {
+  .tree-head:hover { background: var(--surface-2); color: var(--text); }
+}
 
 .tree-head svg {
   width: 12px;
@@ -172,7 +187,9 @@ a { color: var(--link); }
   white-space: nowrap;
 }
 
-.tree-doc:hover { background: var(--surface-2); color: var(--text); }
+@media (hover: hover) {
+  .tree-doc:hover { background: var(--surface-2); color: var(--text); }
+}
 
 .tree-doc.on {
   background: var(--surface-2);
@@ -227,7 +244,9 @@ a { color: var(--link); }
   cursor: pointer;
 }
 
-.docs-act:hover { background: var(--surface-2); color: var(--text); }
+@media (hover: hover) {
+  .docs-act:hover { background: var(--surface-2); color: var(--text); }
+}
 
 .docs-act svg {
   display: block;
@@ -523,7 +542,9 @@ html[data-theme="dark"] .docs-act .i-sun { display: block; }
   cursor: pointer;
 }
 
-.md .md-copy:hover { background: var(--surface-2); color: var(--text); }
+@media (hover: hover) {
+  .md .md-copy:hover { background: var(--surface-2); color: var(--text); }
+}
 .md .md-copy.copied { color: var(--text); font-weight: 600; }
 
 .md .md-code pre {

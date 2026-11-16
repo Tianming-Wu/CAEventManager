@@ -11,6 +11,7 @@ Feeding it a fake ``/proc`` exercises the real code path on any platform.
 """
 import json
 import os
+import re
 import sys
 import tempfile
 import time
@@ -723,6 +724,19 @@ def main():
               and "usage/rosters.md" in a.SYSTEM_PROMPT
               and "assistant.md#它会查文档" in a.SYSTEM_PROMPT
               and "图片不渲染" in a.SYSTEM_PROMPT, a.SYSTEM_PROMPT[:80])
+        # 站外白名单：模型的输出不可信，只有确知的地址才让界面渲染成链接
+        allow = [re.compile(p) for p in a.outbound_links()]
+        hit = lambda u: any(p.match(u) for p in allow)
+        check("白名单放行仓库与作者主页",
+              hit("https://github.com/Tianming-Wu/CAEventManager")
+              and hit("https://github.com/Tianming-Wu/CAEventManager/issues")
+              and hit("https://github.com/Tianming-Wu"), a.outbound_links())
+        check("白名单外的地址不放行",
+              not hit("https://example.com") and not hit("https://github.com/x/y")
+              and not hit("https://github.com/Tianming-Wu.evil.com/x"),
+              a.outbound_links())
+        check("提示词交代了站外只给白名单里的地址",
+              "GitHub 仓库" in a.SYSTEM_PROMPT, a.SYSTEM_PROMPT[:80])
 
         # 改当前这段对话的标题：会话 id 由平台注入，模型不必知道自己在哪一段里
         a._PENDING.clear()
@@ -830,6 +844,8 @@ def main():
           and "doc/README.md" not in paths, paths)
     check("模块自己的说明也在清单里",
           "builtin/modules/nwuca.lottery/doc.md" in paths, paths[-3:])
+    check("「关于」那一份助手读得到（仓库、作者与版本都在里面）",
+          "doc/usage/about.md" in paths, paths[:3])
     check("每份都有标题、有大小",
           all(r["title"] and r["size"] > 0 for r in rows))
     text, err = app.assistant.read_doc("doc/usage/start.md")

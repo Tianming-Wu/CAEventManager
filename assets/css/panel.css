@@ -973,6 +973,14 @@ a.stat:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .card-menu .menu-link:hover { background: var(--surface-2); }
 /* 图标与文字同一个中线：定死尺寸，别让每颗 SVG 自己撑高度 */
 .card-menu svg { width: 16px; height: 16px; flex: 0 0 auto; }
+/* 行尾那枚"在新窗口打开"：比字略小，贴到右边，别挤在文字后面 */
+.card-menu .menu-link .menu-ext {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  color: var(--dim);
+}
+.card-menu .menu-link .menu-ext svg { width: 12px; height: 12px; }
 .card-menu button:disabled { color: var(--dim); cursor: default; }
 .card-menu button.danger { color: var(--danger); }
 .card-menu button.danger:hover:not(:disabled) { background: var(--danger-soft); }
@@ -1570,6 +1578,8 @@ a.crumb, a.crumb:hover, .nav-item, .nav-item:hover { text-decoration: none; }
   cursor: pointer;
 }
 .icon-btn:hover { background: var(--surface-2); color: var(--text); }
+.icon-btn:disabled { color: var(--dim); opacity: .45; cursor: default; }
+.icon-btn:hover:disabled { background: transparent; color: var(--dim); }
 .icon-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
 .only-narrow { display: none; }
@@ -3220,7 +3230,21 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
 }
 .as-text.md pre code { padding: 0; background: transparent; font-size: .84rem; }
 .as-text.md a { color: var(--accent-strong); }
-/* 站内文档链接：[审批](@usage/approval) → 蓝色带文件图标；断链是红的、不可点 */
+/* 站外地址：白名单里那几个，开新标签页，前面一枚"开新窗口"的小箭头 */
+.as-text.md .md-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.as-text.md .md-ext-ico {
+  width: 11px;
+  height: 11px;
+  flex: none;
+  position: relative;
+  top: -.5px;
+  opacity: .75;
+}
+/* 站内文档链接：[审批](usage/approval.md) → 蓝色带文件图标；断链是红的、不可点 */
 .as-text.md .md-doc {
   display: inline-flex;
   align-items: center;
@@ -3463,22 +3487,9 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   font-size: .88rem;
 }
 .as-loading[hidden] { display: none; }
-.assistant-empty { display: flex; flex-direction: column; gap: 10px; }
+.assistant-empty { display: flex; flex-direction: column; gap: 6px; }
 .assistant-lead { margin: 0; font-weight: 650; }
-.assistant-asks { display: flex; flex-wrap: wrap; gap: 8px; }
-.assistant-ask {
-  appearance: none;
-  text-align: left;
-  padding: 8px 12px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  color: var(--text);
-  font: inherit;
-  font-size: .84rem;
-  cursor: pointer;
-}
-.assistant-ask:hover { background: var(--surface-2); border-color: var(--accent-line); }
+.assistant-lead-sub { margin: 0; color: var(--muted); }
 
 /* 正在思考：三个点依次亮，比"按钮变成思考中"安静也更像在干活 */
 .as-thinking {

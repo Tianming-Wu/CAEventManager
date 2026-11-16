@@ -408,7 +408,22 @@ html[data-theme="dark"] .docs-act .i-sun { display: block; }
   background: var(--surface);
 }
 
-.md .md-link { color: var(--link); }
+/* 站外地址：蓝色下划线，前面一枚"开新窗口"的小箭头，点了在新标签页打开 */
+.md .md-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--link);
+}
+
+.md .md-ext-ico {
+  width: 11px;
+  height: 11px;
+  flex: none;
+  position: relative;
+  top: -.5px;
+  opacity: .75;
+}
 
 /* 跳到某一节时闪一下，让人看清落在哪 */
 .md h1.is-flash, .md h2.is-flash, .md h3.is-flash,

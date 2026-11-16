@@ -678,7 +678,8 @@
       ICON_STAR + "保存为预设</button>" +
       '<div class="menu-sep"></div>' +
       '<a role="menuitem" class="menu-link" href="' + PX.esc(e.admin) +
-      '" target="_blank" rel="noopener">' + ICON_GEAR + "活动设置 " + ICON_EXT + "</a>" +
+      '" target="_blank" rel="noopener">' + ICON_GEAR + "活动设置" +
+      '<span class="menu-ext">' + ICON_EXT + "</span></a>" +
       (e.role === "owner"
         ? '<div class="menu-sep"></div>' +
           '<button type="button" role="menuitem" data-rotate="' + e.seq + '">' +
@@ -4897,12 +4898,6 @@
   /* ---------------------------------------------------------------- 运维助手 --- */
   /* 对话按会话存进数据库（有配额），地址里带着会话 id；
      模型配置在账号上，密钥只写不读——画面上永远只有"已配置"。 */
-  var ASSISTANT_ASKS = [
-    "我最近的活动为什么没人报名？帮我看看名单与报名的情况",
-    "这台机器现在有多少人、有几个活动在开？",
-    "帮我查一下某个学号在不在某份名单里",
-    "最近谁改过东西？有没有异常"
-  ];
 
   /* 动作的正式名称由服务端给（policy.ACTION_LABELS）：批准条、过程标签共用一份。
      下面这份只是断网或旧服务端时的兜底，别在两边各写一套说法 */
@@ -4926,14 +4921,17 @@
   };
 
   /* 助手回答里的链接：站内文档（[审批](usage/approval.md)）在新标签页打开那一篇，
-     后面接 #标题 就落在那一节；站外的 http(s) 照常开；别的路径只当文字，不给死链 */
+     后面接 #标题 就落在那一节；站外只认白名单里的站点（服务端给的 patterns），
+     名单外的一律当文字；别的路径也不给死链 */
   function assistantMdOpts() {
     var docs = S.assistantDocs || [];
+    var allow = S.assistantLinks || [];
     return {
       link: function (target) {
         return window.MD.resolveLink(target, {
           docs: docs,
           base: "",
+          allowExternal: allow,
           target: 'target="_blank" rel="noopener"',
           href: function (path, anchor) {
             return PX.PREFIX + "/docs#/" + path + (anchor ? "~" + anchor : "");
@@ -5051,6 +5049,7 @@
         S.assistantCfg = d.config || { ready: false };
         S.assistantLabels = d.labels || {};
         S.assistantDocs = d.docs || [];
+        S.assistantLinks = d.links || [];
         adoptPendingServer(d.pending || []);
         drawAssistant();
       })
@@ -5601,7 +5600,7 @@
 
   function exportAssistantSession() {
     if (!S.assistantSessionId) {
-      PX.toast("这段对话还没有存档", true);
+      PX.toast("新会话还没有存档", true);
       return;
     }
     window.open(PX.PREFIX + "/api/panel/assistant/session/export?id=" +
@@ -5615,11 +5614,13 @@
     if (sub && !S.assistantQuota && !cfg.ready) {
       sub.textContent = "还没有密钥：点页面右上角的模型设置按钮填写，地址与模型有默认值";
     }
-    var asks = $("#assistantAsks");
-    if (asks && !asks.children.length) {
-      asks.innerHTML = ASSISTANT_ASKS.map(function (q) {
-        return '<button class="assistant-ask" type="button">' + PX.esc(q) + "</button>";
-      }).join("");
+    // 新会话没有存档可导：按钮灰掉，说明写在 title 上
+    var exp = $("#asExport");
+    if (exp) {
+      exp.disabled = !S.assistantSessionId;
+      var label = exp.disabled ? "新会话还没有存档，暂时不能导出" : "导出这段对话";
+      exp.title = label;
+      exp.setAttribute("aria-label", label);
     }
     // 正在读存档对话时，中间的"正在加载对话"顶掉"新对话"那一页：
     // 不然会先看见欢迎语与几个问法，再被历史消息替换掉
@@ -5628,12 +5629,6 @@
     if (loadingView) loadingView.hidden = !busy;
     var empty = $("#assistantEmpty");
     if (empty) empty.hidden = busy || (S.assistantMsgs || []).length > 0;
-    var keep = $("#asKeepNote");
-    if (keep) {
-      keep.textContent = ((S.assistantCfg || {}).resume === false)
-        ? "这段对话不存档，刷新后即消失。"
-        : "对话会存档在账户上，下次回来接着聊。";
-    }
     drawAssistantLog();
     growAssistantBox();
   }
@@ -6866,10 +6861,6 @@
   $("#asDrawerClose").addEventListener("click", closeAssistantDrawer);
   $("#asDrawerBody").addEventListener("click", assistantDrawerClick);
   $("#asExport").addEventListener("click", exportAssistantSession);
-  $("#assistantAsks").addEventListener("click", function (e) {
-    var btn = e.target.closest(".assistant-ask");
-    if (btn) sendAssistant(btn.textContent);
-  });
   $("#assistantForm").addEventListener("submit", function (e) {
     e.preventDefault();
     // 正在等回答时这颗按钮是"停止"

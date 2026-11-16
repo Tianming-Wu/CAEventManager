@@ -76,8 +76,10 @@ function mdInline(text) {
     }
     return '<a class="' + (hit.doc ? "md-doc" : "md-link") + '" href="' +
       escAttr(hit.href) + '"' + (hit.target ? " " + hit.target : "") +
+      (hit.ext ? ' title="在新标签页打开"' : "") +
       (hit.doc ? ' data-doc-link="' + escAttr(hit.doc) + '"' : "") + ">" +
-      (hit.doc ? MD_DOC_ICON : "") + "<span>" + label + "</span></a>";
+      (hit.doc ? MD_DOC_ICON : (hit.ext ? MD_EXT_ICON : "")) +
+      "<span>" + label + "</span></a>";
   });
   return out.replace(/\u0001(\d+)\u0001/g, function (all, i) {
     return holds[Number(i)] || "";
@@ -279,6 +281,12 @@ var MD_DOC_ICON = '<svg class="md-doc-ico" viewBox="0 0 20 20" aria-hidden="true
   '1.2H4.6a1.2 1.2 0 0 1-1.2-1.2V4.6a1.2 1.2 0 0 1 1.2-1.2Z"/><path d="M7 7.2h3.2M7 10h3.2' +
   'M7 12.8h2"/></svg>';
 
+/* 站外地址：开新标签页，所以带上那枚"开新窗口"的小箭头（与侧栏的「使用文档」同一形状） */
+var MD_EXT_ICON = '<svg class="md-ext-ico" viewBox="0 0 20 20" aria-hidden="true" ' +
+  'fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" ' +
+  'stroke-linejoin="round"><path d="M9 3.8H5.4a1.6 1.6 0 0 0-1.6 1.6v9.2a1.6 1.6 0 0 0 ' +
+  '1.6 1.6h9.2a1.6 1.6 0 0 0 1.6-1.6V11"/><path d="M10 10l6.2-6.2M11.8 3.8h4.4v4.4"/></svg>';
+
 function escAttr(text) {
   return String(text === null || text === undefined ? "" : text)
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
@@ -315,18 +323,37 @@ function findDoc(key, docs) {
   return hits.length === 1 ? hits[0] : "";
 }
 
+/* 站外地址要不要放行：调用方给一个判定函数，或者一串正则（字符串也行）。
+   不给就是都放行——我们自己的文档不必过白名单，模型写出来的地址要过 */
+function externalAllowed(url, allow) {
+  if (!allow) return true;
+  if (typeof allow === "function") return !!allow(url);
+  var list = allow || [];
+  for (var i = 0; i < list.length; i++) {
+    try {
+      if (list[i] instanceof RegExp ? list[i].test(url) : new RegExp(list[i]).test(url)) {
+        return true;
+      }
+    } catch (e) { /* 写错的正则当没写 */ }
+  }
+  return false;
+}
+
 /* 一条链接该渲染成什么——判定只有这一处：
-     {href, target?, doc?}  可点的链接（doc 表示是站内文档）
+     {href, target?, doc?, ext?}  可点的链接（doc 是站内文档，ext 是站外地址，两者都开新标签页）
      {broken: true}         指向了不存在的文档（渲染成红色断链）
      null                   不认：只留文字，不给死链接
-   opts: {docs:[键], base:"usage", href(path, anchor), target, external, selfAnchor(anchor)} */
+   opts: {docs:[键], base:"usage", href(path, anchor), target, external,
+          allowExternal(地址 → 布尔 或 正则串数组), selfAnchor(anchor)} */
 function resolveLink(target, opts) {
   opts = opts || {};
   var t = String(target || "").trim();
   if (!t) return null;
   if (/^https?:\/\//i.test(t) || /^mailto:/i.test(t)) {
-    return opts.external === false ? null
-      : {href: t, target: 'target="_blank" rel="noopener noreferrer"'};
+    if (opts.external === false) return null;
+    if (!externalAllowed(t, opts.allowExternal)) return null;
+    return {href: t, target: 'target="_blank" rel="noopener noreferrer"',
+            ext: /^https?:\/\//i.test(t)};
   }
   if (t.charAt(0) === "#") {
     return opts.selfAnchor ? {href: opts.selfAnchor(t.slice(1))} : null;

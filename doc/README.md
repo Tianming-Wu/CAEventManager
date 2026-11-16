@@ -19,6 +19,7 @@
 
 | 文件 | 一句话 |
 | --- | --- |
+| [usage/about.md](usage/about.md) | 关于：版本号怎么读、仓库与许可证、作者与反馈 |
 | [usage/start.md](usage/start.md) | 开始用：注册与审核、侧栏有哪些页、顶栏、手机上 |
 | [usage/account.md](usage/account.md) | 账号与角色：三种角色、登录名、账户信息、敏感操作、界面设置 |
 | [usage/events.md](usage/events.md) | 活动：我的活动、创建、邀请成员、移出、存档、活动后台 |

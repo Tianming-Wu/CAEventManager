@@ -1341,6 +1341,9 @@ def docs_page(browser):
                     second: a[1] ? a[1].getAttribute('href') : '',
                     third: a[2] ? a[2].getAttribute('href') : '',
                     icon: a[0] ? !!a[0].querySelector('.md-doc-ico') : false,
+                    extIcon: a[2] ? !!a[2].querySelector('.md-ext-ico') : false,
+                    extTarget: a[2] ? a[2].getAttribute('target') : '',
+                    extTitle: a[2] ? a[2].getAttribute('title') : '',
                     broken: box.querySelector('.md-broken')
                             ? box.querySelector('.md-broken').innerText.trim() : '',
                     anchorHref: jump.querySelector('a')
@@ -1353,6 +1356,9 @@ def docs_page(browser):
               and links["second"] == "#/reference/glossary.md", links)
         check("链接前面带一枚文档图标", links["icon"], links)
         check("站外链接照常可点", links["third"] == "https://example.com", links)
+        check("站外链接带开新窗口的图标，在新标签页打开",
+              links["extIcon"] and links["extTarget"] == "_blank"
+              and "在新标签页打开" in links["extTitle"], links)
         check("清单外的写成红色断链", links["broken"] == "没了（链接已断）", links)
         check("同一篇里的锚点也能跳", links["anchorHref"].endswith("~登录名"),
               links["anchorHref"])
@@ -1528,9 +1534,28 @@ def assistant_page(page):
     check("没配密钥时说清楚该去配什么",
           "密钥" in page.inner_text("#assistantSub"),
           page.inner_text("#assistantSub"))
-    check("给了几个可以直接点的问法",
-          page.locator(".assistant-ask").count() >= 3,
-          page.locator(".assistant-ask").count())
+
+    # 新会话那一页：两行欢迎语 + 一行存档说明，不放示例问题；导出键灰着
+    page.click("#assistantReset")
+    page.wait_for_timeout(600)
+    empty = page.evaluate("""() => {
+        const box = document.getElementById('assistantEmpty');
+        const exp = document.getElementById('asExport');
+        return {shown: !box.hidden,
+                lead: box.querySelector('.assistant-lead').innerText.trim(),
+                sub: box.querySelector('.assistant-lead-sub').innerText.trim(),
+                note: document.getElementById('asKeepNote').innerText.trim(),
+                asks: box.querySelectorAll('.assistant-ask').length,
+                expDisabled: exp.disabled, expTitle: exp.title};
+    }""")
+    check("新会话写着两行欢迎语",
+          empty["shown"] and empty["lead"] == "你好，我是 CAEventManager 运维助手。"
+          and empty["sub"] == "我可以帮你查数据和执行操作。关于平台的问题也可以问我。", empty)
+    check("下面那行说明不带句号，讲的是存档与漫游",
+          empty["note"] == "对话会存档在账户上，可在设备间漫游", empty)
+    check("新会话不放示例问题", empty["asks"] == 0, empty)
+    check("新会话的导出键灰着，title 说明原因",
+          empty["expDisabled"] and "还没有存档" in empty["expTitle"], empty)
     box = page.evaluate("""() => {
         const form = document.getElementById('assistantForm');
         const r = form.getBoundingClientRect();
@@ -2321,7 +2346,8 @@ def assistant_page(page):
                           {"role": "user", "content": "看文档", "ts": now},
                           {"role": "assistant", "ts": now,
                            "content": "见 [它会查文档](usage/assistant.md#它会查文档)、"
-                                      "[外站](https://example.com)、[断链](nope.md)"}]})
+                                      "[仓库](https://github.com/Tianming-Wu/CAEventManager)、"
+                                      "[别处](https://example.com)、[断链](nope.md)"}]})
                 or {}).get("id")
     check("存下一段带链接的回答", bool(link_sid), link_sid)
     if link_sid:
@@ -2340,15 +2366,27 @@ def assistant_page(page):
             return {hrefs: a.map(x => x.getAttribute('href')),
                     targets: a.map(x => x.getAttribute('target') || ''),
                     icons: a.filter(x => x.querySelector('.md-doc-ico')).length,
-                    broken: broken ? broken.innerText.trim() : ''};
+                    ext: a.filter(x => x.querySelector('.md-ext-ico')).length,
+                    titles: a.map(x => x.getAttribute('title') || ''),
+                    broken: broken ? broken.innerText.trim() : '',
+                    text: log.innerText};
         }""")
         check("站内文档链接在新标签页打开，还带着那一节",
               bool(got["hrefs"]) and got["hrefs"][0].endswith(
                   "/docs#/usage/assistant.md~它会查文档")
               and got["targets"][0] == "_blank", got)
-        check("文档链接带图标，站外链接照常可点",
-              got["icons"] == 1 and "https://example.com" in got["hrefs"], got)
+        check("文档链接带文件图标",
+              got["icons"] == 1, got)
+        check("白名单里的站外链接可点，带开新窗口的图标与 title",
+              "https://github.com/Tianming-Wu/CAEventManager" in got["hrefs"]
+              and got["ext"] == 1
+              and any("_blank" == t for t in got["targets"])
+              and "在新标签页打开" in got["titles"], got)
+        check("白名单外的地址只当文字",
+              "https://example.com" not in got["hrefs"] and "别处" in got["text"], got)
         check("清单外的写成断链", got["broken"] == "断链（链接已断）", got)
+        check("读回来的对话是可以导出的",
+              not page.evaluate("() => document.getElementById('asExport').disabled"))
 
 
 CRUMB_SAMPLER = r"""
@@ -2884,6 +2922,22 @@ def card_page(page):
         ".filter(b => b.disabled).length") == 0)
     check("活动设置 opens the activity's own page", page.evaluate(
         "() => !!document.querySelector('.card-menu .menu-link[href]')"))
+    # 行尾那枚"在新窗口打开"：贴右边、比字小，别挤在文字后面
+    mark = page.evaluate("""() => {
+        const link = document.querySelector('.card-menu .menu-link');
+        const ext = link.querySelector('.menu-ext');
+        const svg = ext && ext.querySelector('svg');
+        if (!svg) return null;
+        const row = link.getBoundingClientRect();
+        const box = svg.getBoundingClientRect();
+        return {gapRight: Math.round(row.right - box.right),
+                icon: Math.round(box.width * 10) / 10,
+                font: parseFloat(getComputedStyle(link).fontSize),
+                text: link.innerText.trim()};
+    }""")
+    check("活动设置行尾那枚箭头贴右侧、比文字略小",
+          mark is not None and mark["text"] == "活动设置"
+          and mark["gapRight"] <= 14 and mark["icon"] < mark["font"], mark)
     check("the menu stays inside the window", page.evaluate("""() => {
         const m = document.querySelector('.card-menu').getBoundingClientRect();
         return m.left >= 0 && m.right <= window.innerWidth

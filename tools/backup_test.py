@@ -195,22 +195,25 @@ def main():
         items = [{"name": "d%d" % i, "created": stamp, "bytes": 1000, "kind": "auto"}
                  for i, stamp in enumerate(stamps)]
         kept, drop = backup.prune_plan(
-            items, {"retention": {"daily": 7, "weekly": 4, "monthly": 6, "maxBytes": 0}})
+            items, {"retention": {"daily": 7, "weekly": 4, "monthly": 6, "maxBytes": 0}},
+            now=noon)
         names = {item["name"] for item in kept}
         check("最近 7 天每天留一份",
               {"d%d" % i for i in range(7)} <= names, sorted(names))
         check("更早的按周/月各留一份，不是全清",
               len(names) > 7 and "d%d" % 19 not in names, sorted(names))
+        check("最近 24 小时内的备份不删（手动做的多半是马上要用）",
+              {"d0"} <= names, sorted(names))
         pad = [{"name": "pre", "created": stamps[-1], "bytes": 10,
                 "kind": "pre-restore"}]
         kept2, drop2 = backup.prune_plan(
             pad + items, {"retention": {"daily": 1, "weekly": 0, "monthly": 0,
-                                        "maxBytes": 0}})
+                                        "maxBytes": 0}}, now=noon)
         check("恢复前那份永远不删",
               "pre" in {item["name"] for item in kept2}, [i["name"] for i in drop2])
         kept3, drop3 = backup.prune_plan(
             items, {"retention": {"daily": 20, "weekly": 0, "monthly": 0,
-                                  "maxBytes": 3500}})
+                                  "maxBytes": 3500}}, now=noon)
         check("总字节上限比档位更狠时按字节删到够",
               sum(i["bytes"] for i in kept3) <= 3500 and bool(drop3),
               (sum(i["bytes"] for i in kept3), len(drop3)))

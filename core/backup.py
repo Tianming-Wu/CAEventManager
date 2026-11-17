@@ -398,18 +398,29 @@ def _bucket(stamp, kind):
     return time.strftime("%Y-%m", time.localtime(stamp))
 
 
-def prune_plan(items, cfg=None):
+def prune_plan(items, cfg=None, now=None):
     """(留, 删)。
 
     分三档：最近 N 天每天留最新一份、最近 N 周每周留一份、最近 N 月每月留一份，
-    三档取并集。**`pre-restore` 永远不删**（恢复前的安全垫）。最后再过一道总字节上限：
-    超了就从最老的开始删，连三档保下来的也删。
+    三档取并集。两条硬规矩：
+
+    - **`pre-restore` 永远不删**（恢复前的安全垫）
+    - **最近 24 小时内的备份不删**：刚做的那份多半是"正要动大手术"的人留的，
+      按天分档会把它跟当天的自动备份挤到一起
+
+    最后再过一道总字节上限：超了就从最老的开始删（24 小时内的与 `pre-restore` 除外）。
     """
     cfg = cfg if cfg is not None else settings()
+    now = now if now is not None else time.time()
     retention = cfg.get("retention") or {}
     cap_bytes = int(retention.get("maxBytes") or 0)
     ordered = sorted(items, key=lambda item: item.get("created") or 0, reverse=True)
-    keep = {item["name"] for item in ordered if item.get("kind") == "pre-restore"}
+    keep, locked = set(), set()
+    for item in ordered:
+        stamp = item.get("created") or 0
+        if item.get("kind") == "pre-restore" or (stamp and stamp > now - 86400):
+            keep.add(item["name"])
+            locked.add(item["name"])
     for kind, key in (("day", "daily"), ("week", "weekly"), ("month", "monthly")):
         want = int(retention.get(key) or 0)
         if want <= 0:
@@ -431,7 +442,9 @@ def prune_plan(items, cfg=None):
         for item in reversed(ordered):
             if total <= cap_bytes:
                 break
-            if item["name"] in keep and item.get("kind") != "pre-restore":
+            if item["name"] in locked:
+                continue
+            if item["name"] in keep:
                 keep.discard(item["name"])
                 total -= item.get("bytes") or 0
     drop = [item for item in ordered if item["name"] not in keep]

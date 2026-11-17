@@ -70,10 +70,13 @@ set -eu
 mkdir -p ~/__DEST__
 cd ~/__DEST__
 # 这次包里没有的旧文件要清掉：改过名、挪过目录的文件否则会一直留着，
-# 变成文档清单里的幽灵条目。data/ 与 config.json 不参与，实例自己装的东西也不参与。
+# 变成文档清单里的幽灵条目。data/、backups/ 与 config.json 不参与，
+# 实例自己装的东西（modules/ templates/ theme/ packs/）也不参与——
+# backups/ 要是不在这儿，每次部署都会把上一份备份删掉。
 tar -tzf __TAR__ | sed -e 's|^\./||' -e '/\/$/d' | sort > /tmp/lottery-incoming.txt
 find . -type f \
-    -not -path './data/*' -not -path './modules/*' -not -path './templates/*' \
+    -not -path './data/*' -not -path './backups/*' \
+    -not -path './modules/*' -not -path './templates/*' \
     -not -path './theme/*' -not -path './packs/*' -not -name 'config.json' \
     | sed 's|^\./||' | sort > /tmp/lottery-present.txt
 comm -23 /tmp/lottery-present.txt /tmp/lottery-incoming.txt > /tmp/lottery-stale.txt || true

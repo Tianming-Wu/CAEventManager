@@ -528,6 +528,18 @@ def load_kind_model(kind_id):
 _MODELS = {}
 
 
+def reload_kind_model(kind_id):
+    """把这个模块的 model.py 重新载一遍；模块内的全局状态就此清掉。
+
+    模块代码跑在服务进程里，没有能杀掉重起的子进程，重载就是它能有的"重启"。
+    载不起来时把异常交给调用方（调用方是保护层，它自己决定怎么办）。
+    """
+    kind_id = str(kind_id or "").strip()
+    _MODELS.pop(kind_id, None)
+    sys.modules.pop("kindmodel_" + kind_id.replace(".", "_").replace("-", "_"), None)
+    return load_kind_model(kind_id)
+
+
 def load_module(folder, version, builtin=False, enabled=True):
     """Read one module directory; raises KindError when it is unusable."""
     meta_path = os.path.join(folder, "module.json")

@@ -69,7 +69,7 @@ PAGES_DIR = os.path.join(BASE_DIR, "pages")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.13.9.135"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.13.10.136"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -499,6 +499,9 @@ def _modules_by_id(conn):
 
 # 模块被停用时，活动接口与页面统一用这一句话说明白（与 pages/module-off.html 同一句）
 MODULE_OFF_MSG = "此活动必需的资源已被管理员停用"
+
+# 意料之外的异常：接口回这一句，服务端日志与审计里另有全栈
+INTERNAL_ERROR_TEXT = "服务器内部错误，已记进服务日志"
 
 
 def _with_stopped(view, stopped):
@@ -1153,8 +1156,9 @@ class Handler(BaseHTTPRequestHandler):
         global EVENT_TOKENS
         parsed = urlparse(self.path)
         query = parse_qs(parsed.query)
-        EVENT_TOKENS = panel.event_tokens()
         try:
+            # 这些也放进 try：面板库坏了的话，读 token 就已经抛异常了
+            EVENT_TOKENS = panel.event_tokens()
             if parsed.path == "/favicon.ico":
                 return self._send(204, b"", "image/x-icon")
 
@@ -1214,8 +1218,33 @@ class Handler(BaseHTTPRequestHandler):
         except BrokenPipeError:
             pass
         except Exception:
+            # 走到这里说明是我们自己的 bug 或数据坏了：服务不能因此倒下，
+            # 日志里留全栈，客户端按它要的东西给——接口回 JSON，页面给一张说明页
             log("ERROR %s %s\n%s" % (method, self.path, traceback.format_exc()))
-            self._err("服务器内部错误,请看服务日志", 500)
+            try:
+                self._fail(parsed, method)
+            except Exception:                          # noqa: BLE001 - 连报错都失败就断了这条请求
+                pass
+
+    def _fail(self, parsed, method):
+        """意外异常的出口。接口一族回 JSON，页面一族回一张能看的说明页。"""
+        if parsed.path.startswith("/api/") or self.headers.get(
+                "X-Requested-With") == "CAEventManager":
+            return self._err(INTERNAL_ERROR_TEXT, 500)
+        try:
+            with open(os.path.join(PAGES_DIR, "500.html"), "rb") as fh:
+                body = substitute_page(fh.read(), {})
+        except OSError:
+            body = ("<h1>服务器内部错误</h1><p>已经记进服务日志，请稍后重试。</p>"
+                    .encode("utf-8"))
+        self.send_response(500)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        if method != "HEAD":
+            self.wfile.write(body)
 
     # ---------------- public signup page ----------------
 

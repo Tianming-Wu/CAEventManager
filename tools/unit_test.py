@@ -177,6 +177,101 @@ def account_cap():
             os.environ["LOTTERY_DATA_DIR"] = previous
 
 
+def module_guard():
+    """模块保护层：兜住异常、第一次失败重载、连续三次停用并发通知。"""
+    import errors
+    import moduleguard
+    import modules
+    import panel
+
+    root = tempfile.mkdtemp(prefix="module-guard-")
+    previous = os.environ.get("LOTTERY_DATA_DIR")
+    os.environ["LOTTERY_DATA_DIR"] = root
+    reloads = []
+    real_reload = modules.reload_kind_model
+    modules.reload_kind_model = lambda kind: reloads.append(kind)
+    try:
+        panel.init_db()
+        moduleguard.reset()
+        kind = "nwuca.broken"
+
+        def boom():
+            raise RuntimeError("模块里炸了")
+
+        def ok():
+            return "fine"
+
+        # 第一次失败：重载一次再试，仍失败 -> 503 而不是 500
+        try:
+            moduleguard.call(kind, "boom", boom)
+            raised = None
+        except Exception as exc:                       # noqa: BLE001
+            raised = exc
+        check("模块抛异常时换成人话，不当成服务器内部错误",
+              isinstance(raised, moduleguard.ModuleCrashed) and raised.code == 503, raised)
+        check("第一次失败会把它重载一遍（相当于重启）", reloads == [kind], reloads)
+        check("失败计数记着", moduleguard.fails(kind) == 2, moduleguard.fails(kind))
+
+        # 第三次失败：停用 + 审计 + 全站通知
+        try:
+            moduleguard.call(kind, "boom", boom)
+        except moduleguard.ModuleCrashed:
+            pass
+        conn = panel.connect()
+        check("连续三次失败就停用这个模块", kind in panel.disabled_modules(conn),
+              panel.disabled_modules(conn))
+        notices = conn.execute("SELECT title, level FROM notices").fetchall()
+        check("发了一条全站通知",
+              any(n["level"] == "critical" and kind in n["title"] for n in notices),
+              [dict(n) for n in notices])
+        rows = conn.execute("SELECT action, target FROM audit WHERE action='module_auto_off'"
+                            ).fetchall()
+        check("审计里留了自动停用这一笔",
+              any(r["target"] == kind for r in rows), [dict(r) for r in rows])
+        check("停用之后计数清零", moduleguard.fails(kind) == 0, moduleguard.fails(kind))
+
+        # 自定义的 ApiError 不算崩溃：原样交上去，不计数
+        moduleguard.reset()
+        try:
+            moduleguard.call(kind, "nope", lambda: (_ for _ in ()).throw(
+                errors.ApiError("参数不对", 400)))
+        except errors.ApiError as exc:
+            check("模块自己抛的 ApiError 原样往上交", exc.code == 400, exc)
+        check("这种不算崩溃，不计数", moduleguard.fails(kind) == 0, moduleguard.fails(kind))
+
+        # 成功一次就把计数清掉
+        try:
+            moduleguard.call(kind, "boom", boom)
+        except moduleguard.ModuleCrashed:
+            pass
+        before = moduleguard.fails(kind)
+        reloads.clear()
+        check("成功会清零", moduleguard.call(kind, "ok", ok) == "fine"
+              and moduleguard.fails(kind) == 0, (before, moduleguard.fails(kind)))
+    finally:
+        modules.reload_kind_model = real_reload
+        moduleguard.reset()
+        if previous is None:
+            os.environ.pop("LOTTERY_DATA_DIR", None)
+        else:
+            os.environ["LOTTERY_DATA_DIR"] = previous
+
+
+def error_page():
+    """500 说明页：占位符都换掉、有重试与回控制台的入口。"""
+    import localconfig
+
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "pages", "500.html")
+    with open(path, encoding="utf-8") as fh:
+        body = fh.read()
+    check("500 页写清了原因与下一步",
+          "服务器内部错误" in body and "重试" in body and "回控制台" in body)
+    check("500 页只留该由服务端填的占位符",
+          body.count("{{") == 2 and "{{FAVICON}}" in body and "{{TITLE}}" in body,
+          [part for part in body.split("{{")[1:] if "}}" in part])
+
+
 BAD_EXPRESSIONS = [
     '__import__("os")',
     "open",
@@ -545,6 +640,12 @@ def main():
 
     print("== 账号总数上限 ==")
     account_cap()
+
+    print("== 模块保护层 ==")
+    module_guard()
+
+    print("== 500 说明页 ==")
+    error_page()
 
     print("== 服务日志轮转 ==")
     with tempfile.TemporaryDirectory() as box:

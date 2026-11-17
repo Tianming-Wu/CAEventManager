@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>服务器内部错误 · {{TITLE}}</title>
+{{FAVICON}}
+<link rel="stylesheet" href="assets/css/app.css">
+</head>
+<body>
+<div class="maint-wrap">
+  <h1>服务器内部错误</h1>
+  <p>这一步没做成，服务本身还在运行，别的事照常可用。</p>
+  <p class="note">原因已经记进服务日志；反复出现就把日志里最后一段回溯发给管理员。</p>
+  <div class="row" style="justify-content:center;gap:10px;margin-top:18px">
+    <button class="btn" id="errRetry" type="button">重试</button>
+    <a class="btn ghost" href="./">回控制台</a>
+  </div>
+  <div class="site-foot">CAEventManager | Powered with ❤ by Tianming &amp; Deepseek ❤🐋</div>
+</div>
+<script>
+(function () {
+  "use strict";
+  document.getElementById("errRetry").addEventListener("click", function () {
+    location.reload();
+  });
+})();
+</script>
+</body>
+</html>

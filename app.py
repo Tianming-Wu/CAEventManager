@@ -63,13 +63,15 @@ import lists
 import model
 import packs
 import panel
+import backup
+import taskguard
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PAGES_DIR = os.path.join(BASE_DIR, "pages")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.13.11.137"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.13.12.138"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -4945,6 +4947,10 @@ def main():
 
     httpd = ThreadingHTTPServer((args.host, args.port), Handler)
     httpd.daemon_threads = True
+    # 备份调度：容器里没有 systemd 也没有 cron，只能进程内定时。每 5 分钟看一次该不该做，
+    # 起来的那一刻先看一次——关机错过的那个窗口在这里补上。整条链路由 taskguard 兜底：
+    # 连续三次失败就停掉这个任务并发出通知，不会静悄悄地死掉
+    taskguard.start("备份调度", 300, lambda: backup.scheduler_step(VERSION))
     log("service v%s" % VERSION)
     log("listening on http://%s:%d" % (args.host, args.port))
     log("public base : %s" % ((LOCAL_CFG.get("public_base_prefix") or "").rstrip("/") or "—"))
@@ -4955,6 +4961,7 @@ def main():
     except KeyboardInterrupt:
         log("bye")
     finally:
+        taskguard.stop_all()
         httpd.server_close()
         if pidfile:
             try:

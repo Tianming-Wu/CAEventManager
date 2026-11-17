@@ -186,7 +186,13 @@ def connect():
     path = db_path()
     conn = getattr(_local, "conn", None)
     if conn is not None and getattr(_local, "path", None) == path:
-        return conn
+        try:
+            conn.execute("SELECT 1")
+            return conn
+        except sqlite3.ProgrammingError:
+            # 缓存里留着一条已经关掉的连接时，后面每次查询都会炸：重新开一条
+            _local.conn = None
+            _local.path = None
     os.makedirs(os.path.dirname(path), exist_ok=True)
     conn = sqlite3.connect(path, timeout=15.0, isolation_level=None)
     conn.row_factory = sqlite3.Row

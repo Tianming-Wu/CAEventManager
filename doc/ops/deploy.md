@@ -169,7 +169,32 @@ python3 bin/backup.py settings set schedule.at=03:30
 python3 bin/backup.py settings set webdav.url=https://dav.example/remote.php/dav/
 ```
 
-自动任务与 WebDAV 上传还没接上，顺序是先本地备份与恢复（现在这一步），再调度与留存，最后 WebDAV。
+### 自动备份
+
+服务进程里有一个调度线程，每 5 分钟看一次"这一轮该不该做"，起来的那一刻也看一次——
+**关机错过的窗口在启动时补上**（补一次，不会连着补三天）。容器里没有 systemd 也没有 cron，
+所以定时只能放在进程内；如果宿主机有 systemd，也可以不用它、改用 timer 调
+`python3 bin/backup.py auto`（同样的判断，到点才做）。
+
+| 设置 | 默认 | 说明 |
+| --- | --- | --- |
+| `enabled` | `true` | 关掉之后只允许手动 `run` |
+| `schedule.mode` | `daily` | `daily` 每天一次；`manual` 完全不自动做 |
+| `schedule.at` | `03:30` | 触发时刻 `HH:MM`；写错了就当没开自动备份，不去猜 |
+| `retention.daily` | `7` | 最近 7 天每天留最新一份 |
+| `retention.weekly` | `4` | 最近 4 周每周留一份 |
+| `retention.monthly` | `6` | 最近 6 个月每月留一份 |
+| `retention.maxBytes` | `0` | 总字节上限，0 表示不限；超了从最老的开始删 |
+
+三档取并集；`pre-restore`（恢复前自动留的那份）**永远不删**。手动看一眼会删哪些：
+
+```sh
+python3 bin/backup.py prune          # 只看
+python3 bin/backup.py prune --yes    # 真删
+```
+
+调度这一段有自己的护栏（`core/taskguard.py`）：任务抛异常就记日志并计一次数，
+**连续三次失败就停掉这个任务**、发一条站内通知、审计记 `task_stopped`——不会静悄悄地死掉。
 
 `./bin/service.sh reset` 会清空活动数据（活动与账号都重建），重置前会要求输入 `yes`，并自动把旧库
 备份成 `data/backup-<时间>-*`。新的站长密码重新写进 `data/owner_password.txt`。

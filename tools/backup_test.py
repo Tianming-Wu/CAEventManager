@@ -37,6 +37,10 @@ def main():
     import eventfs
     import localconfig
     import panel
+    import taskguard
+
+    def step():
+        raise RuntimeError("任务里炸了")
 
     box = tempfile.mkdtemp(prefix="backup-test-")
     data = os.path.join(box, "data")
@@ -152,6 +156,82 @@ def main():
         print("== 体检 ==")
         faces = backup.doctor()
         check("体检跑得出来", isinstance(faces, list) and bool(faces), faces[:2])
+
+        print("== 什么时候该做 ==")
+        check("触发时刻认 HH:MM", backup.parse_at("03:30") == (3, 30)
+              and backup.parse_at("25:00") is None and backup.parse_at("abc") is None)
+        noon = time.mktime((2026, 11, 17, 12, 0, 0, 0, 0, -1))
+        slot = backup.slot_before(noon, (3, 30))
+        check("中午看的是当天凌晨那一轮",
+              time.strftime("%Y-%m-%d %H:%M", time.localtime(slot))
+              == "2026-11-17 03:30", slot)
+        early = time.mktime((2026, 11, 17, 2, 0, 0, 0, 0, -1))
+        check("凌晨两点看的是前一天那一轮",
+              time.strftime("%Y-%m-%d %H:%M",
+                            time.localtime(backup.slot_before(early, (3, 30))))
+              == "2026-11-16 03:30")
+        cfg = {"enabled": True, "schedule": {"mode": "daily", "at": "03:30"}}
+        old = [{"name": "x", "created": noon - 86400, "bytes": 1, "kind": "auto"}]
+        new = [{"name": "x", "created": noon - 60, "bytes": 1, "kind": "auto"}]
+        check("今天还没做过就该做",
+              backup.due_state(noon, cfg, old)["due"] is True,
+              backup.due_state(noon, cfg, old))
+        check("今天做过了就不做",
+              backup.due_state(noon, cfg, new)["due"] is False,
+              backup.due_state(noon, cfg, new))
+        check("调度方式是手动就不自动做",
+              backup.due_state(noon, {"enabled": True,
+                                      "schedule": {"mode": "manual", "at": "03:30"}},
+                               old)["due"] is False)
+        check("关掉备份就什么都不做",
+              backup.due_state(noon, {"enabled": False}, old)["due"] is False)
+        check("时刻写错了也不做（不猜）",
+              backup.due_state(noon, {"enabled": True,
+                                      "schedule": {"mode": "daily", "at": "3点半"}},
+                               old)["due"] is False)
+
+        print("== 留存 ==")
+        stamps = [noon - day * 86400 for day in range(20)]
+        items = [{"name": "d%d" % i, "created": stamp, "bytes": 1000, "kind": "auto"}
+                 for i, stamp in enumerate(stamps)]
+        kept, drop = backup.prune_plan(
+            items, {"retention": {"daily": 7, "weekly": 4, "monthly": 6, "maxBytes": 0}})
+        names = {item["name"] for item in kept}
+        check("最近 7 天每天留一份",
+              {"d%d" % i for i in range(7)} <= names, sorted(names))
+        check("更早的按周/月各留一份，不是全清",
+              len(names) > 7 and "d%d" % 19 not in names, sorted(names))
+        pad = [{"name": "pre", "created": stamps[-1], "bytes": 10,
+                "kind": "pre-restore"}]
+        kept2, drop2 = backup.prune_plan(
+            pad + items, {"retention": {"daily": 1, "weekly": 0, "monthly": 0,
+                                        "maxBytes": 0}})
+        check("恢复前那份永远不删",
+              "pre" in {item["name"] for item in kept2}, [i["name"] for i in drop2])
+        kept3, drop3 = backup.prune_plan(
+            items, {"retention": {"daily": 20, "weekly": 0, "monthly": 0,
+                                  "maxBytes": 3500}})
+        check("总字节上限比档位更狠时按字节删到够",
+              sum(i["bytes"] for i in kept3) <= 3500 and bool(drop3),
+              (sum(i["bytes"] for i in kept3), len(drop3)))
+
+        print("== 后台护栏 ==")
+        taskguard.start("测试任务", 0.01, step)
+        for _ in range(60):
+            info = [t for t in taskguard.status() if t["name"] == "测试任务"]
+            if info and info[0]["stopped"]:
+                break
+            time.sleep(0.05)
+        info = [t for t in taskguard.status() if t["name"] == "测试任务"][0]
+        check("连续三次失败就停掉这个任务", info["stopped"] and info["fails"] == 3, info)
+        conn2 = panel.connect()
+        notes = conn2.execute("SELECT title FROM notices WHERE title LIKE '%后台任务%'"
+                             ).fetchall()
+        check("停掉时发了通知", bool(notes), [dict(n) for n in notes])
+        rows = conn2.execute("SELECT action FROM audit WHERE action='task_stopped'"
+                            ).fetchall()
+        check("审计里留了一笔", bool(rows), [dict(r) for r in rows])
+        taskguard.stop_all()
     finally:
         os.environ.pop("LOTTERY_DATA_DIR", None)
         os.environ.pop("LOTTERY_CONFIG", None)

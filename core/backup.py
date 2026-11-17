@@ -317,6 +317,177 @@ def read_manifest(path):
         return json.loads(member.read().decode("utf-8"))
 
 
+# --------------------------------------------------------------------------- #
+# 什么时候该做（调度）
+# --------------------------------------------------------------------------- #
+def parse_at(text):
+    """`03:30` → (3, 30)；写错了返回 None，调度据此当作"不开自动备份"。"""
+    try:
+        hour, minute = str(text or "").strip().split(":")
+        hour, minute = int(hour), int(minute)
+    except (TypeError, ValueError):
+        return None
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        return None
+    return hour, minute
+
+
+def slot_before(now, at):
+    """离 ``now`` 最近的一次触发时刻（当天还没到就退回昨天）。"""
+    hour, minute = at
+    stamp = time.localtime(now)
+    slot = time.mktime((stamp.tm_year, stamp.tm_mon, stamp.tm_mday, hour, minute,
+                        0, 0, 0, -1))
+    if slot > now:
+        slot -= 86400
+    return slot
+
+
+def last_created(packages=None):
+    """最近一份备份是什么时候做的（手动的也算：那天就不用再做）。
+
+    两种形状都认：``list_backups()`` 给的是 ``{"name", "manifest": {...}}``，
+    而留存与调度内部用的是摊平的 ``{"name", "created", ...}``。
+    """
+    if packages is None:
+        packages = list_backups()
+    stamps = []
+    for item in packages:
+        stamp = item.get("created") or (item.get("manifest") or {}).get("created") or 0
+        if stamp:
+            stamps.append(stamp)
+    return max(stamps) if stamps else 0.0
+
+
+def due_state(now=None, cfg=None, packages=None):
+    """现在该不该做自动备份，以及为什么。"""
+    cfg = cfg if cfg is not None else settings()
+    now = now if now is not None else time.time()
+    schedule = cfg.get("schedule") or {}
+    at = parse_at(schedule.get("at"))
+    last = last_created(packages)
+    out = {"due": False, "slot": 0.0, "last": last, "reason": ""}
+    if not cfg.get("enabled"):
+        out["reason"] = "备份功能关着"
+        return out
+    if str(schedule.get("mode") or "daily") != "daily":
+        out["reason"] = "调度方式是手动"
+        return out
+    if at is None:
+        out["reason"] = "触发时刻没写对（要 HH:MM）"
+        return out
+    slot = slot_before(now, at)
+    out["slot"] = slot
+    if last >= slot:
+        out["reason"] = "这一轮已经做过了"
+        return out
+    out["due"] = True
+    out["reason"] = "错过 %s 这一轮" % time.strftime("%Y-%m-%d %H:%M",
+                                                    time.localtime(slot))
+    return out
+
+
+# --------------------------------------------------------------------------- #
+# 留存
+# --------------------------------------------------------------------------- #
+def _bucket(stamp, kind):
+    if kind == "day":
+        return time.strftime("%Y-%m-%d", time.localtime(stamp))
+    if kind == "week":
+        return time.strftime("%G-W%V", time.localtime(stamp))
+    return time.strftime("%Y-%m", time.localtime(stamp))
+
+
+def prune_plan(items, cfg=None):
+    """(留, 删)。
+
+    分三档：最近 N 天每天留最新一份、最近 N 周每周留一份、最近 N 月每月留一份，
+    三档取并集。**`pre-restore` 永远不删**（恢复前的安全垫）。最后再过一道总字节上限：
+    超了就从最老的开始删，连三档保下来的也删。
+    """
+    cfg = cfg if cfg is not None else settings()
+    retention = cfg.get("retention") or {}
+    cap_bytes = int(retention.get("maxBytes") or 0)
+    ordered = sorted(items, key=lambda item: item.get("created") or 0, reverse=True)
+    keep = {item["name"] for item in ordered if item.get("kind") == "pre-restore"}
+    for kind, key in (("day", "daily"), ("week", "weekly"), ("month", "monthly")):
+        want = int(retention.get(key) or 0)
+        if want <= 0:
+            continue
+        seen = set()
+        for item in ordered:
+            stamp = item.get("created") or 0
+            if not stamp:
+                continue
+            bucket = _bucket(stamp, kind)
+            if bucket in seen:
+                continue
+            seen.add(bucket)
+            if len(seen) > want:
+                break
+            keep.add(item["name"])
+    if cap_bytes > 0:
+        total = sum(item.get("bytes") or 0 for item in ordered)
+        for item in reversed(ordered):
+            if total <= cap_bytes:
+                break
+            if item["name"] in keep and item.get("kind") != "pre-restore":
+                keep.discard(item["name"])
+                total -= item.get("bytes") or 0
+    drop = [item for item in ordered if item["name"] not in keep]
+    kept = [item for item in ordered if item["name"] in keep]
+    return kept, drop
+
+
+def prune(apply=False):
+    """按留存策略清理。返回 (留下的, 删掉的)；`apply=False` 只看不删。"""
+    packages = []
+    for item in list_backups():
+        manifest = item.get("manifest") or {}
+        packages.append({"name": item["name"], "path": item["path"],
+                         "bytes": item["bytes"], "kind": manifest.get("kind") or "",
+                         "created": manifest.get("created") or 0})
+    kept, drop = prune_plan(packages)
+    if apply:
+        for item in drop:
+            try:
+                os.remove(item["path"])
+            except OSError:
+                pass
+    return kept, drop
+
+
+# --------------------------------------------------------------------------- #
+# 自动跑
+# --------------------------------------------------------------------------- #
+def auto(version="", now=None):
+    """到点就做一份，随后按留存清一遍。没到点返回 None。"""
+    state = due_state(now)
+    if not state["due"]:
+        return None
+    path, manifest = run(version=version, kind="auto")
+    kept, drop = prune(apply=True)
+    print("自动备份：%s（%s），留存 %d 份，清掉 %d 份"
+          % (path, _human(os.path.getsize(path)), len(kept), len(drop)))
+    return path, manifest, kept, drop
+
+
+def scheduler_step(version=""):
+    """交给后台护栏循环调用的那一步：只看该不该做，不做长活。"""
+    state = due_state()
+    if not state["due"]:
+        return
+    auto(version=version)
+
+
+def _human(size):
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024 or unit == "GB":
+            return ("%d %s" % (size, unit)) if unit == "B" else ("%.1f %s" % (size, unit))
+        size /= 1024.0
+    return "%d B" % size
+
+
 def list_backups():
     """现有备份，按时间从新到旧。"""
     root = backups_dir()

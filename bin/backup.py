@@ -3,6 +3,8 @@
 """本地备份的运维入口。
 
     python3 bin/backup.py run [--note 说明]     立刻做一份
+    python3 bin/backup.py auto                  到点就做（给 cron 用；服务里也会自己跑）
+    python3 bin/backup.py prune [--yes]         按留存策略清理（不带 --yes 只看）
     python3 bin/backup.py list                  列出备份（时间、体积、含哪些活动）
     python3 bin/backup.py verify <包|最新>       对一遍 sha256 与库完整性
     python3 bin/backup.py restore <包|最新> [--with-identity] [--yes]
@@ -64,6 +66,35 @@ def cmd_run(args):
         "、".join("%s %d" % (k, v) for k, v in sorted(shapes.items())) or "无"))
     print("  身份文件：%s（恢复默认不写回）"
           % ("、".join(manifest["identity"]) or "无"))
+    return 0
+
+
+def cmd_auto(args):
+    state = backup.due_state()
+    print("这一轮：%s（最近一份 %s）" % (
+        state["reason"] or "该做了",
+        stamp(state["last"]) if state["last"] else "还没有"))
+    if not state["due"]:
+        return 0
+    out = backup.auto(version=app.VERSION)
+    if not out:
+        return 0
+    path, _manifest, kept, drop = out
+    print("已做：%s（%s）；留存 %d 份，清掉 %d 份"
+          % (path, human(os.path.getsize(path)), len(kept), len(drop)))
+    return 0
+
+
+def cmd_prune(args):
+    kept, drop = backup.prune(apply=args.yes)
+    print("留下 %d 份、清掉 %d 份%s" % (
+        len(kept), len(drop), "" if args.yes else "（只是看一眼，加 --yes 才删）"))
+    for item in drop:
+        print("  删 %-26s %8s  %s" % (item["name"], human(item["bytes"] or 0),
+                                    stamp(item["created"])))
+    for item in kept:
+        print("  留 %-26s %8s  %s" % (item["name"], human(item["bytes"] or 0),
+                                    stamp(item["created"])))
     return 0
 
 
@@ -149,6 +180,13 @@ def main(argv):
 
     one = subs.add_parser("list", help="列出备份")
     one.set_defaults(func=cmd_list)
+
+    one = subs.add_parser("auto", help="到点就做一份（服务里也会自己跑）")
+    one.set_defaults(func=cmd_auto)
+
+    one = subs.add_parser("prune", help="按留存策略清理")
+    one.add_argument("--yes", action="store_true")
+    one.set_defaults(func=cmd_prune)
 
     one = subs.add_parser("verify", help="校验一份备份")
     one.add_argument("package")

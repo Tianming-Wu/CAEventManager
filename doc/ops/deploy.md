@@ -196,6 +196,37 @@ python3 bin/backup.py prune --yes    # 真删
 调度这一段有自己的护栏（`core/taskguard.py`）：任务抛异常就记日志并计一次数，
 **连续三次失败就停掉这个任务**、发一条站内通知、审计记 `task_stopped`——不会静悄悄地死掉。
 
+### 推到 WebDAV
+
+异地那一份用 WebDAV 送出去（坚果云、Nextcloud、群晖都行）。填好这一段再测一下：
+
+```sh
+python3 bin/backup.py settings set webdav.enabled=true
+python3 bin/backup.py settings set webdav.url=https://dav.example/remote.php/dav/files/me/cae
+python3 bin/backup.py settings set webdav.username=me
+python3 bin/backup.py settings set webdav.password=应用密码
+python3 bin/backup.py webdav test          # 连得上、目录建得出、写得进、删得掉
+```
+
+| 设置 | 默认 | 说明 |
+| --- | --- | --- |
+| `webdav.enabled` | `false` | 关着就只做本地备份 |
+| `webdav.url` | — | 集合地址（走到放备份的那个目录为止），必须 `http(s)` 开头 |
+| `webdav.path` | `/` | 在集合下面再套一层目录；不存在会自动 MKCOL 出来 |
+| `webdav.username` / `password` | — | Basic 认证。密码建议用服务商给的**应用密码** |
+| `webdav.verify` | `true` | 上传后 HEAD 一次，比对远端大小 |
+| `webdav.prune` | `true` | 远端只留本地还留着的那些，多出来的删掉 |
+
+怎么做的：
+
+- 每次自动备份之后把这一份 PUT 上去，然后让**远端与本地留存一致**——远端只留本地还留着的包名，
+  多出来的删掉；**只删我们自己命名的文件**（`YYYYMMDD-HHMMSS-<种类>.tar.gz`），
+  同一个目录里别人放的东西一概不碰
+- **上传失败不影响本地备份**：本地的包已经落盘，远端只是异地那一份。失败写进日志与审计
+  （`backup_upload_failed`），用 `webdav test` 与 `webdav list` 排查
+- TLS 证书照常校验，自签证书请先在这台机器上装好；不支持明文以外的降级
+- 手动推一次：`python3 bin/backup.py webdav push 最新`；清远端：`webdav prune`；看远端：`webdav list`
+
 `./bin/service.sh reset` 会清空活动数据（活动与账号都重建），重置前会要求输入 `yes`，并自动把旧库
 备份成 `data/backup-<时间>-*`。新的站长密码重新写进 `data/owner_password.txt`。
 

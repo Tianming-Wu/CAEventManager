@@ -19,14 +19,20 @@
 各库的行数、每个活动是快照还是归档包。``verify`` 就是拿它对一遍。
 """
 
+import base64
 import hashlib
 import json
 import os
+import re
 import shutil
 import sqlite3
 import tarfile
 import tempfile
 import time
+import urllib.error
+import urllib.request
+from urllib.parse import quote, unquote
+from xml.etree import ElementTree
 
 import db
 import eventfs
@@ -36,6 +42,7 @@ FORMAT = 1
 SETTINGS_NAME = "backup_settings.json"
 IDENTITY_FILES = ("config.json", "assistant_prompt.md")
 SKIP_DIRS = ("__pycache__",)
+UA = "CAEventManager-backup/1"
 
 # 设置文件放数据目录里，位置固定：包按 backups_dir 走，设置要是也跟着走就成了
 # "得先读设置才知道设置在哪"
@@ -44,7 +51,7 @@ DEFAULTS = {
     "schedule": {"mode": "daily", "at": "03:30"},
     "retention": {"daily": 7, "weekly": 4, "monthly": 6, "maxBytes": 0},
     "webdav": {"enabled": False, "url": "", "username": "", "password": "",
-               "path": "/", "verify": True},
+               "path": "/", "verify": True, "prune": True},
     "encrypt": {"enabled": False, "method": "none"},
 }
 
@@ -474,7 +481,7 @@ def prune(apply=False):
 # 自动跑
 # --------------------------------------------------------------------------- #
 def auto(version="", now=None):
-    """到点就做一份，随后按留存清一遍。没到点返回 None。"""
+    """到点就做一份，随后按留存清一遍，再镜像到 WebDAV（开了的话）。没到点返回 None。"""
     state = due_state(now)
     if not state["due"]:
         return None
@@ -482,7 +489,42 @@ def auto(version="", now=None):
     kept, drop = prune(apply=True)
     print("自动备份：%s（%s），留存 %d 份，清掉 %d 份"
           % (path, _human(os.path.getsize(path)), len(kept), len(drop)))
+    mirror_remote(path, kept)
     return path, manifest, kept, drop
+
+
+def mirror_remote(path, kept=None):
+    """把刚做的那份推上去，并让远端只留本地还留着的那些。
+
+    **上传失败不影响本地备份**：本地的包已经落盘了，远端只是异地那一份；
+    失败写进日志与审计，`doctor` 与 `webdav test` 用它排查。
+    """
+    cfg = settings()
+    dav, problem = webdav_config(cfg)
+    if problem:
+        return None
+    try:
+        name = dav_upload(path, cfg)
+        keep_names = ({item["name"] for item in kept} if kept is not None
+                      else {item["name"] for item in list_backups()})
+        _kept, dropped = dav_prune(keep_names, cfg)
+        print("已上传到 WebDAV：%s%s" % (name, ("；远端清掉 %d 份" % len(dropped))
+                                       if dropped else ""))
+        return name
+    except BackupError as exc:
+        print("WebDAV 这一步没成（本地备份照旧留着）：%s" % exc)
+        _audit_failure("backup_upload_failed", str(exc)[:200])
+        return None
+
+
+def _audit_failure(action, reason):
+    try:
+        import panel
+        with panel.tx() as tx:
+            panel.audit(tx, "system", action, "backup",
+                        panel.audit_note(reason=reason))
+    except Exception:                                   # noqa: BLE001 - 记不上也不该抛
+        pass
 
 
 def scheduler_step(version=""):
@@ -742,3 +784,165 @@ def doctor():
     if not out:
         out.append(("正常", "没发现问题"))
     return out
+
+
+# --------------------------------------------------------------------------- #
+# WebDAV：把包推到远端，并让远端的留存跟本地一致
+# --------------------------------------------------------------------------- #
+# 只认我们自己起的名字：远端的清理不会碰别人放在同一个目录里的东西
+PACKAGE_RE = re.compile(r"^\d{8}-\d{6}-[a-z-]+\.tar\.gz$")
+DAV_NS = "{DAV:}"
+DAV_TIMEOUT = 60
+CHUNK = 256 * 1024
+
+
+def webdav_config(cfg=None):
+    """取出 WebDAV 那一段并检查够不够用；返回 (dict, 问题说明)。"""
+    cfg = cfg if cfg is not None else settings()
+    dav = dict((cfg.get("webdav") or {}))
+    url = str(dav.get("url") or "").strip().rstrip("/")
+    if not dav.get("enabled"):
+        return dav, "WebDAV 没开"
+    if not url:
+        return dav, "没填地址"
+    if not (url.startswith("http://") or url.startswith("https://")):
+        return dav, "地址要 http(s) 开头"
+    dav["url"] = url
+    dav["path"] = "/" + str(dav.get("path") or "").strip().strip("/")
+    return dav, ""
+
+
+def _dav_url(dav, name=""):
+    base = dav["url"] + ("" if dav.get("path") in ("", "/") else dav["path"])
+    if not name:
+        return base.rstrip("/") + "/"
+    return base.rstrip("/") + "/" + quote(name)
+
+
+def dav_request(dav, method, url, data=None, headers=None, depth=None):
+    """发一个 DAV 请求，返回 (状态码, 响应体, 响应头)。
+
+    只做 Basic 认证：填了用户名就用它。TLS 证书照常校验——自签证书请先在机器上装好。
+    """
+    head = {"User-Agent": UA}
+    if dav.get("username"):
+        token = ("%s:%s" % (dav.get("username"), dav.get("password") or "")).encode("utf-8")
+        head["Authorization"] = "Basic " + base64.b64encode(token).decode("ascii")
+    if depth is not None:
+        head["Depth"] = str(depth)
+    head.update(headers or {})
+    req = urllib.request.Request(url, data=data, headers=head, method=method)
+    body, resp_headers = b"", {}
+    try:
+        with urllib.request.urlopen(req, timeout=DAV_TIMEOUT) as res:
+            body = res.read()
+            resp_headers = dict(res.headers)
+            status = res.status
+    except urllib.error.HTTPError as exc:
+        body = exc.read()
+        resp_headers = dict(exc.headers or {})
+        status = exc.code
+    except (urllib.error.URLError, OSError) as exc:
+        raise BackupError("连不上 WebDAV：%s" % exc)
+    return status, body, resp_headers
+
+
+def dav_ensure_collection(dav):
+    """确保远端那个目录在：先 PROPFIND，404 就逐级 MKCOL（405 表示已经有了）。"""
+    url = _dav_url(dav)
+    status, _body, _headers = dav_request(dav, "PROPFIND", url, depth=0)
+    if status in (200, 207):
+        return
+    if status not in (404, 403, 409):
+        raise BackupError("远端目录探不动：HTTP %d" % status)
+    base = dav["url"]
+    parts = [p for p in (dav.get("path") or "").split("/") if p]
+    here = base
+    for part in parts:
+        here = here.rstrip("/") + "/" + quote(part)
+        status, _body, _headers = dav_request(dav, "MKCOL", here)
+        if status not in (201, 204, 405):
+            raise BackupError("建不了远端目录 %s：HTTP %d" % (part, status))
+
+
+def dav_upload(path, cfg=None):
+    """把一个包 PUT 上去；开了 `verify` 就回读一次大小。返回远端名字。"""
+    dav, problem = webdav_config(cfg)
+    if problem:
+        raise BackupError(problem)
+    name = os.path.basename(path)
+    dav_ensure_collection(dav)
+    size = os.path.getsize(path)
+    url = _dav_url(dav, name)
+    with open(path, "rb") as fh:
+        data = fh.read()
+    status, body, _headers = dav_request(dav, "PUT", url, data=data,
+                                         headers={"Content-Type": "application/gzip"})
+    if status not in (200, 201, 204):
+        raise BackupError("上传失败：HTTP %d %s"
+                          % (status, body[:120].decode("utf-8", "replace")))
+    if dav.get("verify", True):
+        status, _body, headers = dav_request(dav, "HEAD", url)
+        remote = headers.get("Content-Length") or headers.get("content-length")
+        if status == 200 and remote and int(remote) != size:
+            raise BackupError("远端大小对不上：本地 %d、远端 %s" % (size, remote))
+    return name
+
+
+def dav_list(cfg=None):
+    """远端目录里的备份包名（只认我们自己起的那种名字）。"""
+    dav, problem = webdav_config(cfg)
+    if problem:
+        raise BackupError(problem)
+    status, body, _headers = dav_request(dav, "PROPFIND", _dav_url(dav), depth=1)
+    if status not in (200, 207):
+        raise BackupError("列不出远端目录：HTTP %d" % status)
+    names = []
+    try:
+        tree = ElementTree.fromstring(body or b"<multistatus/>")
+    except ElementTree.ParseError as exc:
+        raise BackupError("远端返回的不是 PROPFIND 的 XML：%s" % exc)
+    for node in tree.iter(DAV_NS + "href"):
+        text = (node.text or "").strip().rstrip("/")
+        if not text:
+            continue
+        name = unquote(text.rsplit("/", 1)[-1])
+        if PACKAGE_RE.match(name):
+            names.append(name)
+    return sorted(set(names))
+
+
+def dav_prune(keep=None, cfg=None):
+    """远端只留本地还留着的那些包：多出来的删掉（只删我们自己命名的文件）。"""
+    dav, problem = webdav_config(cfg)
+    if problem:
+        raise BackupError(problem)
+    if not dav.get("prune", True):
+        return [], []
+    if keep is None:
+        keep = {item["name"] for item in list_backups()}
+    remote = dav_list(cfg)
+    drop = [name for name in remote if name not in keep]
+    for name in drop:
+        status, body, _headers = dav_request(dav, "DELETE", _dav_url(dav, name))
+        if status not in (200, 204, 404):
+            raise BackupError("远端删不掉 %s：HTTP %d %s"
+                              % (name, status, body[:80].decode("utf-8", "replace")))
+    return sorted(keep & set(remote)), drop
+
+
+def dav_self_check(cfg=None):
+    """`webdav test` 用：能不能连、目录在不在、能不能写一个零字节的东西再删掉。"""
+    dav, problem = webdav_config(cfg)
+    if problem:
+        raise BackupError(problem)
+    dav_ensure_collection(dav)
+    probe = ".caeventmanager-probe"
+    url = _dav_url(dav, probe)
+    status, body, _headers = dav_request(dav, "PUT", url, data=b"",
+                                         headers={"Content-Type": "text/plain"})
+    if status not in (200, 201, 204):
+        raise BackupError("写不进去：HTTP %d %s"
+                          % (status, body[:120].decode("utf-8", "replace")))
+    dav_request(dav, "DELETE", url)
+    return dav["url"] + ("" if dav.get("path") in ("", "/") else dav["path"])

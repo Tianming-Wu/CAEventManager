@@ -66,7 +66,38 @@ def cmd_run(args):
         "、".join("%s %d" % (k, v) for k, v in sorted(shapes.items())) or "无"))
     print("  身份文件：%s（恢复默认不写回）"
           % ("、".join(manifest["identity"]) or "无"))
+    if getattr(args, "upload", False):
+        backup.mirror_remote(path)
     return 0
+
+
+def cmd_webdav(args):
+    cfg = backup.settings()
+    if args.action == "test":
+        print("能连上、能写：%s" % backup.dav_self_check(cfg))
+        return 0
+    if args.action == "list":
+        names = backup.dav_list(cfg)
+        print("远端 %d 份" % len(names))
+        for name in names:
+            print("  %s" % name)
+        return 0
+    if args.action == "push":
+        path = pick(args.package) if args.package else None
+        if path is None:
+            found = backup.list_backups()
+            if not found:
+                raise backup.BackupError("还没有备份")
+            path = found[0]["path"]
+        print("上传：%s" % backup.dav_upload(path, cfg))
+        return 0
+    if args.action == "prune":
+        kept, dropped = backup.dav_prune(cfg=cfg)
+        print("远端留下 %d 份，清掉 %d 份" % (len(kept), len(dropped)))
+        for name in dropped:
+            print("  删 %s" % name)
+        return 0
+    raise backup.BackupError("不认识的动作：%s" % args.action)
 
 
 def cmd_auto(args):
@@ -176,6 +207,7 @@ def main(argv):
     one = subs.add_parser("run", help="立刻做一份备份")
     one.add_argument("--note", default="")
     one.add_argument("--kind", default="manual")
+    one.add_argument("--upload", action="store_true", help="顺带推到 WebDAV")
     one.set_defaults(func=cmd_run)
 
     one = subs.add_parser("list", help="列出备份")
@@ -187,6 +219,12 @@ def main(argv):
     one = subs.add_parser("prune", help="按留存策略清理")
     one.add_argument("--yes", action="store_true")
     one.set_defaults(func=cmd_prune)
+
+    one = subs.add_parser("webdav", help="WebDAV：测试连接、上传、列远端、清远端")
+    one.add_argument("action", nargs="?", default="test",
+                     choices=("test", "list", "push", "prune"))
+    one.add_argument("package", nargs="?", default="")
+    one.set_defaults(func=cmd_webdav)
 
     one = subs.add_parser("verify", help="校验一份备份")
     one.add_argument("package")

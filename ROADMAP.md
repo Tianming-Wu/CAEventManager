@@ -547,9 +547,18 @@ colspan 单元格会把表头重新分配一遍，一有数据表头又跳回来
   不会静悄悄地死掉
 - `bin/backup.py` 多了 `auto`（到点才做，给宿主机的 cron/systemd 用）与 `prune`（先看后删）
 
+**异地那一份**：
+
+- 自动备份之后把这一份 PUT 到 WebDAV（Basic 认证，地址 + 子目录，子目录不存在就 MKCOL），
+  开了 `verify` 再 HEAD 一次比对大小
+- 远端留存跟本地一致：只留本地还留着的包名，**只删我们自己命名的文件**，
+  同一个目录里别人的东西一概不碰
+- 上传失败不影响本地备份（本地已落盘），失败写日志与审计 `backup_upload_failed`；
+  `bin/backup.py webdav test|list|push|prune` 用来排查与手动补推
+- TLS 照常校验，不做降级；凭据只写在 `data/backup_settings.json`（600），接口不回传明文
+
 **待做**：
 
-- WebDAV 上传与远端留存清理（`webdav` 那段设置已经留好，含凭据，任何接口都不回传明文）
 - 面板里的配置界面（站长操作；先有 `data/backup_settings.json`，界面之后做）
 - 加密：暂不引入（`encrypt` 段先占位）。要做靠部署侧 `age`/`gpg` 套一层，
   不值得为 AES 给仓库带预编译二进制或引入一整个 C++ 库

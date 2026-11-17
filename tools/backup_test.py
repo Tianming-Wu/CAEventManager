@@ -31,6 +31,73 @@ def check(name, ok, detail=None):
         FAILS.append(name)
 
 
+def dav_stub():
+    """一个够用的 WebDAV：PUT / MKCOL / HEAD / DELETE / PROPFIND，数据放内存里。"""
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    files = {}
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def _empty(self, code):
+            self.send_response(code)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def do_MKCOL(self):
+            self._empty(201)
+
+        def do_PUT(self):
+            size = int(self.headers.get("Content-Length") or 0)
+            files[self.path] = self.rfile.read(size)
+            self._empty(201)
+
+        def do_DELETE(self):
+            files.pop(self.path, None)
+            self._empty(204)
+
+        def do_HEAD(self):
+            body = files.get(self.path)
+            if body is None:
+                return self._empty(404)
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+
+        def do_PROPFIND(self):
+            rows = ['<?xml version="1.0" encoding="utf-8"?>',
+                    '<d:multistatus xmlns:d="DAV:">',
+                    "<d:response><d:href>%s</d:href></d:response>" % self.path]
+            if self.headers.get("Depth") == "1":
+                for path in sorted(files):
+                    if path.rstrip("/").startswith(self.path.rstrip("/")):
+                        rows.append("<d:response><d:href>%s</d:href></d:response>" % path)
+            rows.append("</d:multistatus>")
+            body = "".join(rows).encode("utf-8")
+            self.send_response(207)
+            self.send_header("Content-Type", "application/xml; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+
+    class Stub:
+        base = "http://127.0.0.1:%d" % server.server_address[1]
+        data = files
+
+        @staticmethod
+        def stop():
+            server.shutdown()
+            server.server_close()
+
+    return Stub
+
+
 def main():
     import backup
     import db
@@ -217,6 +284,35 @@ def main():
         check("总字节上限比档位更狠时按字节删到够",
               sum(i["bytes"] for i in kept3) <= 3500 and bool(drop3),
               (sum(i["bytes"] for i in kept3), len(drop3)))
+
+        print("== WebDAV ==")
+        dav = dav_stub()
+        try:
+            cfg = backup.settings()
+            cfg["webdav"].update({"enabled": True, "url": dav.base, "path": "/bkups/",
+                                  "username": "u", "password": "p"})
+            backup.save_settings(cfg)
+            check("填齐了就认得这份设置", backup.webdav_config(backup.settings())[1] == "")
+            name = backup.mirror_remote(path)
+            check("上传成功，远端有了这一份",
+                  name == os.path.basename(path) and any(k.endswith(name) for k in dav.data),
+                  list(dav.data))
+            dav.data["/bkups/20200101-000000-auto.tar.gz"] = b"x"
+            dav.data["/bkups/别人的东西.txt"] = b"x"
+            kept_dav, dropped = backup.dav_prune(cfg=backup.settings())
+            check("远端只留本地还留着的那些",
+                  dropped == ["20200101-000000-auto.tar.gz"], dropped)
+            check("别人放在同一目录里的文件一概不碰",
+                  "/bkups/别人的东西.txt" in dav.data, list(dav.data))
+            cfg["webdav"]["url"] = "http://127.0.0.1:1/nowhere"
+            backup.save_settings(cfg)
+            check("WebDAV 挂了不影响本地备份",
+                  backup.mirror_remote(path) is None and os.path.isfile(path))
+            rows = panel.connect().execute(
+                "SELECT action FROM audit WHERE action='backup_upload_failed'").fetchall()
+            check("上传失败写进审计", bool(rows), [dict(r) for r in rows])
+        finally:
+            dav.stop()
 
         print("== 后台护栏 ==")
         taskguard.start("测试任务", 0.01, step)

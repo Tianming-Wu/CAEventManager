@@ -2111,6 +2111,45 @@ def main():
           not [s for s in call(owner, "/api/panel/assistant/sessions")["sessions"]
                if s["id"] == sid])
 
+    print("== 备份：设置、手动做一份、WebDAV 未开 ==")
+    state = call(owner, "/api/panel/backup")
+    check("站长看得到备份状态", state.get("ok") and "settings" in state, list(state)[:6])
+    check("设置里带默认的调度与留存",
+          (state.get("settings") or {}).get("schedule", {}).get("at") == "03:30"
+          and (state.get("settings") or {}).get("retention", {}).get("daily") == 7,
+          state.get("settings"))
+    check("不回传 WebDAV 密码，只说配没配",
+          "password" not in ((state.get("settings") or {}).get("webdav") or {})
+          and "passwordSet" in ((state.get("settings") or {}).get("webdav") or {}),
+          state.get("settings", {}).get("webdav"))
+    check("备份目录指向 backups/", (state.get("dir") or "").endswith("backups"),
+          state.get("dir"))
+
+    # 前面的用例可能已经提过权：先退出来，才能验"改设置要重输密码"
+    post(owner, "/api/panel/sudo/exit", {})
+    refused = call(owner, "/api/panel/backup/settings",
+                   {"retention": {"daily": 5}}, expect=403)
+    check("改设置要重输一次密码", refused and refused.get("sudoRequired") is True, refused)
+    post(owner, "/api/panel/sudo", {"password": owner_password()})
+    saved = post(owner, "/api/panel/backup/settings", {"retention": {"daily": 5}})
+    check("提权之后能存", saved and saved.get("ok"), saved)
+    again = call(owner, "/api/panel/backup")
+    check("存下来的留存读得回来",
+          (again.get("settings") or {}).get("retention", {}).get("daily") == 5,
+          again.get("settings", {}).get("retention"))
+
+    made = post(owner, "/api/panel/backup/run", {})
+    check("点了立即备份就真的有一份",
+          made and made.get("ok") and (made.get("bytes") or 0) > 0, made)
+    after = call(owner, "/api/panel/backup")
+    check("列表里能看到刚做的那一份",
+          any(b["name"] == made.get("name") for b in (after.get("backups") or [])),
+          [b["name"] for b in (after.get("backups") or [])][:3])
+
+    dav = call(owner, "/api/panel/backup/webdav_test", {}, expect=400)
+    check("WebDAV 没开时测试按钮说清楚",
+          dav and "WebDAV" in (dav.get("error") or ""), dav)
+
     print("== event pages still reachable ==")
     token = events[0]["id"]
     board = call(anon, "/%s/api/board" % token)

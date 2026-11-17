@@ -4558,6 +4558,138 @@
     $("#srvInfo").innerHTML = rows.map(function (r) {
       return "<dt>" + PX.esc(r[0]) + "</dt><dd>" + PX.esc(r[1]) + "</dd>";
     }).join("");
+    loadBackup();
+  }
+
+  /* ---------------------------------------------------------------- 备份 --- */
+  /* 设置写 data/backup_settings.json，包放 backups/；恢复只走命令行（要停服务） */
+  function loadBackup() {
+    return PX.api("/backup").then(function (d) {
+      S.backup = d || null;
+      drawBackup();
+    }).catch(function (e) { PX.toast(PX.esc(e.message), true); });
+  }
+
+  function fmtBytes(n) {
+    n = Number(n) || 0;
+    if (n < 1024) return n + " B";
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+    return (n / 1048576).toFixed(1) + " MB";
+  }
+
+  var BACKUP_KIND = { manual: "手动", auto: "自动", "pre-restore": "恢复前" };
+
+  function drawBackup() {
+    var d = S.backup;
+    if (!d) return;
+    var cfg = d.settings || {};
+    var schedule = cfg.schedule || {};
+    var ret = cfg.retention || {};
+    var dav = cfg.webdav || {};
+    if ($("#bkEnabled")) $("#bkEnabled").checked = !!cfg.enabled;
+    if ($("#bkMode")) $("#bkMode").value = schedule.mode || "daily";
+    if ($("#bkAt")) $("#bkAt").value = schedule.at || "03:30";
+    if ($("#bkDaily")) $("#bkDaily").value = ret.daily === undefined ? 7 : ret.daily;
+    if ($("#bkWeekly")) $("#bkWeekly").value = ret.weekly === undefined ? 4 : ret.weekly;
+    if ($("#bkMonthly")) $("#bkMonthly").value = ret.monthly === undefined ? 6 : ret.monthly;
+    if ($("#bkBytes")) $("#bkBytes").value = ret.maxBytes || 0;
+    if ($("#bkDavEnabled")) $("#bkDavEnabled").checked = !!dav.enabled;
+    if ($("#bkDavUrl")) $("#bkDavUrl").value = dav.url || "";
+    if ($("#bkDavPath")) $("#bkDavPath").value = dav.path || "/";
+    if ($("#bkDavUser")) $("#bkDavUser").value = dav.username || "";
+    if ($("#bkDavPass")) {
+      $("#bkDavPass").value = "";
+      $("#bkDavPass").placeholder = dav.passwordSet ? "已保存（要改就重填）" : "应用密码";
+    }
+    if ($("#bkDavVerify")) $("#bkDavVerify").checked = dav.verify !== false;
+    if ($("#bkDavPrune")) $("#bkDavPrune").checked = dav.prune !== false;
+    if ($("#backupDir")) $("#backupDir").textContent = d.dir || "backups/";
+
+    var due = d.due || {};
+    var last = due.last ? PX.when(due.last) : "还没有";
+    if ($("#backupState")) {
+      $("#backupState").textContent = !cfg.enabled
+        ? "自动备份关着；现在是手动模式。最近一份：" + last
+        : (due.due
+            ? "这一轮还没做（" + (due.reason || "") + "）。最近一份：" + last
+            : "已排好。" + (due.reason || "") + "。最近一份：" + last);
+    }
+    var hints = $("#backupHints");
+    if (hints) {
+      var items = d.hints || [];
+      hints.hidden = !items.length;
+      hints.innerHTML = items.map(function (h) {
+        return "<dt>" + PX.esc(h.level) + "</dt><dd>" + PX.esc(h.text) + "</dd>";
+      }).join("");
+    }
+    var body = $("#backupTable tbody");
+    if (body) {
+      var rows = d.backups || [];
+      body.innerHTML = rows.length ? rows.map(function (b) {
+        return "<tr><td class=\"mono\">" + PX.esc(b.name) + "</td>" +
+          "<td>" + PX.esc(PX.when(b.created)) + "</td>" +
+          "<td class=\"mono\">" + PX.esc(fmtBytes(b.bytes)) + "</td>" +
+          "<td>" + PX.esc(BACKUP_KIND[b.kind] || b.kind || "—") + "</td>" +
+          "<td class=\"mono\">" + PX.esc(String(b.events)) + "</td></tr>";
+      }).join("") : rowsOrEmpty(5, "backup", "还没有备份");
+    }
+  }
+
+  function saveBackup() {
+    var wear = function (sel) { return ($(sel) && $(sel).value || "").trim(); };
+    var body = {
+      enabled: !!($("#bkEnabled") && $("#bkEnabled").checked),
+      schedule: { mode: wear("#bkMode") || "daily", at: wear("#bkAt") || "03:30" },
+      retention: {
+        daily: wear("#bkDaily") || 0,
+        weekly: wear("#bkWeekly") || 0,
+        monthly: wear("#bkMonthly") || 0,
+        maxBytes: wear("#bkBytes") || 0
+      },
+      webdav: {
+        enabled: !!($("#bkDavEnabled") && $("#bkDavEnabled").checked),
+        url: wear("#bkDavUrl"),
+        path: wear("#bkDavPath") || "/",
+        username: wear("#bkDavUser"),
+        verify: !!($("#bkDavVerify") && $("#bkDavVerify").checked),
+        prune: !!($("#bkDavPrune") && $("#bkDavPrune").checked)
+      }
+    };
+    var pass = $("#bkDavPass") ? $("#bkDavPass").value : "";
+    if (pass) body.webdav.password = pass;      // 留空表示不改
+    // 改这里要重输一次密码：它决定备份放哪、凭据是什么
+    apiSudo("/backup/settings", { method: "POST", body: body },
+            "修改备份设置", "备份的位置、留存与 WebDAV 凭据都会按新的来")
+      .then(function () {
+        PX.toast("已保存");
+        if ($("#bkDavPass")) $("#bkDavPass").value = "";
+        loadBackup();
+      })
+      .catch(function (e) { PX.toast(PX.esc(e.message), true); });
+  }
+
+  function runBackup() {
+    var btn = $("#backupRun");
+    if (btn) btn.disabled = true;
+    PX.api("/backup/run", { method: "POST", body: {} })
+      .then(function (d) {
+        PX.toast("已备份 " + fmtBytes(d.bytes));
+        return loadBackup();
+      })
+      .catch(function (e) { PX.toast(PX.esc(e.message), true); })
+      .then(function () { if (btn) btn.disabled = false; });
+  }
+
+  function testBackupDav() {
+    var note = $("#bkDavNote");
+    if (note) note.textContent = "正在试…";
+    PX.api("/backup/webdav_test", { method: "POST", body: {} })
+      .then(function (d) {
+        if (note) note.textContent = "连得上，能写：" + (d.where || "");
+      })
+      .catch(function (e) {
+        if (note) note.textContent = "没成：" + e.message;
+      });
   }
 
   function humanUptime(sec) {
@@ -6765,6 +6897,9 @@
 
   $("#safeModeBtn").addEventListener("click", toggleSafeMode);
   $("#serviceRestartBtn").addEventListener("click", restartService);
+  $("#backupSave").addEventListener("click", saveBackup);
+  $("#backupRun").addEventListener("click", runBackup);
+  $("#bkDavTest").addEventListener("click", testBackupDav);
 
   $("#pwBtn").addEventListener("click", function () {
     var err = $("#pwErr");

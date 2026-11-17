@@ -3832,3 +3832,32 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   color: var(--accent-strong);
   font-size: .72rem;
 }
+/* ---------- 备份卡片（服务器管理页） ---------- */
+/* 两列表单格子：字段多但每条都短，平铺比一行一行的竖排省地方 */
+.as-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px 16px;
+  margin-top: 14px;
+}
+.as-form-grid .field { margin: 0; }
+.backup-dav {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line-soft);
+}
+.backup-dav > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: .84rem;
+  list-style: none;
+}
+.backup-dav > summary::-webkit-details-marker { display: none; }
+.backup-dav > summary::before { content: "▸ "; }
+.backup-dav[open] > summary::before { content: "▾ "; }
+.backup-dav > summary:hover { color: var(--text); }
+
+/* 开关放进 .field 里时会被 `.field label { display: block }` 盖掉，这里补回弹性盒子：
+   不然那一条会变成 0 高，开关看不见 */
+.as-form-grid .switch { display: inline-flex; align-items: center; margin-top: 6px; }
+.backup-dav .switch { display: inline-flex; align-items: center; margin-top: 6px; }

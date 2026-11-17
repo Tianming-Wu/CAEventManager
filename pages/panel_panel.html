@@ -1362,6 +1362,113 @@
           <span class="note" id="safeModeNote"></span>
         </div>
       </div>
+
+      <!-- 备份：设置写 data/backup_settings.json，包放 backups/ -->
+      <div class="card">
+        <div class="card-head">
+          <h2>备份</h2>
+          <div class="spacer"></div>
+          <button class="btn sm" id="backupRun" type="button">立即备份</button>
+        </div>
+        <p class="note" id="backupState">正在读取…</p>
+        <dl class="kv" id="backupHints" hidden></dl>
+
+        <div class="as-form-grid">
+          <div class="field">
+            <label for="bkEnabled">自动备份</label>
+            <label class="switch" style="margin-top:6px">
+              <input type="checkbox" id="bkEnabled"><span class="track"></span>
+            </label>
+          </div>
+          <div class="field">
+            <label for="bkMode">方式</label>
+            <select id="bkMode">
+              <option value="daily">每天</option>
+              <option value="manual">手动（不自动做）</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="bkAt">触发时刻</label>
+            <input id="bkAt" type="time" step="60">
+          </div>
+          <div class="field">
+            <label for="bkDaily">留存：天</label>
+            <input id="bkDaily" inputmode="numeric" type="text">
+          </div>
+          <div class="field">
+            <label for="bkWeekly">留存：周</label>
+            <input id="bkWeekly" inputmode="numeric" type="text">
+          </div>
+          <div class="field">
+            <label for="bkMonthly">留存：月</label>
+            <input id="bkMonthly" inputmode="numeric" type="text">
+          </div>
+          <div class="field">
+            <label for="bkBytes">总字节上限</label>
+            <input id="bkBytes" inputmode="numeric" type="text" placeholder="0 表示不限">
+          </div>
+        </div>
+
+        <details class="backup-dav" id="bkDavBox">
+          <summary>WebDAV（异地那一份）</summary>
+          <div class="as-adv-body">
+            <div class="as-form-grid">
+              <div class="field">
+                <label for="bkDavEnabled">启用</label>
+                <label class="switch" style="margin-top:6px">
+                  <input type="checkbox" id="bkDavEnabled"><span class="track"></span>
+                </label>
+              </div>
+              <div class="field">
+                <label for="bkDavUrl">集合地址</label>
+                <input id="bkDavUrl" type="text" placeholder="https://dav.example/remote.php/dav/files/me/cae">
+              </div>
+              <div class="field">
+                <label for="bkDavPath">子目录</label>
+                <input id="bkDavPath" type="text" placeholder="/">
+              </div>
+              <div class="field">
+                <label for="bkDavUser">用户名</label>
+                <input id="bkDavUser" type="text" autocomplete="off">
+              </div>
+              <div class="field">
+                <label for="bkDavPass">密码</label>
+                <input id="bkDavPass" type="password" autocomplete="new-password">
+              </div>
+              <div class="field">
+                <label for="bkDavVerify">上传后校验大小</label>
+                <label class="switch" style="margin-top:6px">
+                  <input type="checkbox" id="bkDavVerify"><span class="track"></span>
+                </label>
+              </div>
+              <div class="field">
+                <label for="bkDavPrune">远端跟着本地清理</label>
+                <label class="switch" style="margin-top:6px">
+                  <input type="checkbox" id="bkDavPrune"><span class="track"></span>
+                </label>
+              </div>
+            </div>
+            <div class="row" style="margin-top:10px">
+              <button class="btn sm" id="bkDavTest" type="button">测试 WebDAV</button>
+              <span class="note" id="bkDavNote"></span>
+            </div>
+          </div>
+        </details>
+
+        <div class="row" style="margin-top:12px">
+          <button class="btn primary" id="backupSave" type="button">保存设置</button>
+          <span class="note">备份包放在 <code id="backupDir">backups/</code>；恢复要先停服务，走命令行</span>
+        </div>
+
+        <div class="tblwrap" style="margin-top:14px">
+          <table class="tbl fixed" id="backupTable">
+            <thead><tr>
+              <th>备份</th><th>时间</th><th>大小</th><th>种类</th><th>活动</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
     </section>
 
     <!-- ====================================================== 审计日志 -->

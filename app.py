@@ -71,7 +71,7 @@ PAGES_DIR = os.path.join(BASE_DIR, "pages")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.13.14.140"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.13.15.141"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -2929,6 +2929,109 @@ class Handler(BaseHTTPRequestHandler):
                 restart_after_response()
             return self._json({"ok": True, "restarting": can_restart,
                                "supervised": can_restart})
+
+        if path == "/backup" and method == "GET":
+            # 备份是整台机器的事：只有站长看得到。密码只回一个"有没有配"，不回明文
+            need("owner")
+            cfg = backup.settings()
+            dav = dict(cfg.get("webdav") or {})
+            dav["passwordSet"] = bool(dav.pop("password", ""))
+            state = backup.due_state(cfg=cfg)
+            items = []
+            for item in backup.list_backups():
+                manifest = item.get("manifest") or {}
+                items.append({"name": item["name"], "bytes": item["bytes"],
+                              "created": manifest.get("created") or 0,
+                              "kind": manifest.get("kind") or "",
+                              "version": manifest.get("version") or "",
+                              "events": len(manifest.get("events") or [])})
+            return self._json({
+                "ok": True, "dir": backup.backups_dir(),
+                "settings": {"enabled": bool(cfg.get("enabled")),
+                             "schedule": cfg.get("schedule") or {},
+                             "retention": cfg.get("retention") or {},
+                             "webdav": dav,
+                             "encrypt": cfg.get("encrypt") or {}},
+                "due": {"due": state["due"], "reason": state["reason"],
+                        "slot": state["slot"], "last": state["last"]},
+                "backups": items,
+                "hints": [{"level": level, "text": text}
+                          for level, text in backup.doctor()]})
+
+        if path == "/backup/settings" and method == "POST":
+            # 改备份设置：站长 + 重输密码，跟别的静态那一档一致
+            need("owner")
+            need_sudo()
+            data = body()
+            cfg = backup.settings()
+            if "enabled" in data:
+                cfg["enabled"] = bool(data.get("enabled"))
+            schedule = data.get("schedule") or {}
+            if schedule:
+                mode = str(schedule.get("mode") or cfg["schedule"].get("mode"))
+                if mode not in ("daily", "manual"):
+                    raise model.ApiError("调度方式只有「每天」或「手动」")
+                at = str(schedule.get("at") or cfg["schedule"].get("at") or "")
+                if mode == "daily" and backup.parse_at(at) is None:
+                    raise model.ApiError("触发时刻写成 HH:MM，例如 03:30")
+                cfg["schedule"] = {"mode": mode, "at": at}
+            retention = data.get("retention") or {}
+            if retention:
+                for key in ("daily", "weekly", "monthly", "maxBytes"):
+                    if key in retention:
+                        try:
+                            cfg["retention"][key] = max(0, int(retention[key]))
+                        except (TypeError, ValueError):
+                            raise model.ApiError("留存要填整数")
+            dav_in = data.get("webdav") or {}
+            if dav_in:
+                dav = dict(cfg["webdav"])
+                if "enabled" in dav_in:
+                    dav["enabled"] = bool(dav_in.get("enabled"))
+                for key in ("url", "username", "path"):
+                    if key in dav_in:
+                        dav[key] = str(dav_in.get(key) or "").strip()
+                for key in ("verify", "prune"):
+                    if key in dav_in:
+                        dav[key] = bool(dav_in.get(key))
+                if dav_in.get("password"):
+                    dav["password"] = str(dav_in.get("password"))
+                if dav["enabled"]:
+                    _dav, problem = backup.webdav_config(
+                        {"webdav": dict(dav, enabled=True)})
+                    if problem:
+                        raise model.ApiError("WebDAV 还差点：%s" % problem)
+                cfg["webdav"] = dav
+            backup.save_settings(cfg)
+            with panel.tx() as tx:
+                panel.audit(tx, acc["username"], "backup_settings", "backup",
+                            panel.audit_note(
+                                enabled=cfg.get("enabled"),
+                                at=(cfg.get("schedule") or {}).get("at"),
+                                webdav=bool((cfg.get("webdav") or {}).get("enabled"))))
+            return self._json({"ok": True})
+
+        if path == "/backup/run" and method == "POST":
+            # 立刻做一份：不做破坏性的事，站长点了就做，记一条审计
+            need("owner")
+            target, manifest = backup.run(version=VERSION, kind="manual",
+                                          note="面板上手动做的")
+            with panel.tx() as tx:
+                panel.audit(tx, acc["username"], "backup_run", "backup",
+                            panel.audit_note(file=os.path.basename(target)))
+            return self._json({"ok": True, "name": os.path.basename(target),
+                               "bytes": os.path.getsize(target),
+                               "events": len(manifest.get("events") or [])})
+
+        if path == "/backup/webdav_test" and method == "POST":
+            need("owner")
+            try:
+                where = backup.dav_self_check()
+            except backup.BackupError as exc:
+                raise model.ApiError(str(exc), 400)
+            with panel.tx() as tx:
+                panel.audit(tx, acc["username"], "backup_webdav_test", "backup")
+            return self._json({"ok": True, "where": where})
 
         if path == "/notices/read" and method == "POST":
             data = body()

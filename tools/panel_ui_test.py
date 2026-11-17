@@ -4109,6 +4109,42 @@ def server_page(page):
     check("服务信息里没有单独的安全模式一行",
           "安全模式" not in page.inner_text("#srvInfo"), page.inner_text("#srvInfo"))
 
+    print("== 备份卡片 ==")
+    page.wait_for_timeout(600)
+    card = page.evaluate("""() => ({
+        state: document.getElementById('backupState').innerText,
+        enabled: document.getElementById('bkEnabled').checked,
+        mode: document.getElementById('bkMode').value,
+        at: document.getElementById('bkAt').value,
+        daily: document.getElementById('bkDaily').value,
+        dav: !!document.getElementById('bkDavEnabled'),
+        dir: document.getElementById('backupDir').innerText,
+        switchW: Math.round(document.querySelector('#bkEnabled')
+                   .closest('.switch').getBoundingClientRect().width),
+        cols: getComputedStyle(document.querySelector('.as-form-grid'))
+                .gridTemplateColumns.split(' ').filter(Boolean).length,
+    })""")
+    check("备份卡片读到了设置",
+          card["enabled"] is True and card["mode"] == "daily"
+          and card["at"] == "03:30" and card["daily"] == "7", card)
+    check("开关画得出来（不是零宽的隐形元素）", card["switchW"] >= 36, card)
+    check("表单铺成多列，不是一条一行", card["cols"] >= 2, card)
+    check("写明了备份放在哪", card["dir"].endswith("backups"), card["dir"])
+    check("WebDAV 那一段折在里面", card["dav"])
+
+    made = page.evaluate("""() => new Promise(resolve => {
+        PX.api("/backup/run", { method: "POST", body: {} })
+          .then(d => resolve({ok: true, name: d.name}))
+          .catch(e => resolve({ok: false, error: e.message}));
+    })""")
+    check("接口层面能立刻做一份", made.get("ok"), made)
+    page.reload(wait_until="domcontentloaded")
+    page.wait_for_timeout(1500)
+    rows = page.evaluate("""() => Array.from(
+        document.querySelectorAll('#backupTable tbody tr')).map(tr => tr.innerText)""")
+    check("列表里能看到刚做的那一份",
+          any((made.get("name") or "") in row for row in rows), rows[:2])
+
 
 def sudo_page(page):
     """The elevated mode: what it looks like, what it says, and how it ends."""

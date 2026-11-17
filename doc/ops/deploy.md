@@ -118,26 +118,57 @@ python tools/bump_version.py --show
 服务是 `>>data/service.log` 起的，所以轮转是把同名文件重新开一份挂到 fd 1 上；日志写不出去不会
 让请求失败。`LOTTERY_LOG_MAX` 改上限（字节），`0` 关掉轮转。
 
-## 备份与还原
+## 备份与恢复
 
-需要备份的是整个 `data/` 目录，其中：
+备份由 `bin/backup.py` 做，包放在 `backups/`（不是 `data/` 里——备份不能跟被备份的数据一起被
+`reset` 清掉）。默认取一份这样：
+
+```sh
+python3 bin/backup.py run          # 立刻做一份
+python3 bin/backup.py list         # 有哪些、多大、含几个活动
+python3 bin/backup.py verify 最新    # 对一遍 sha256 与条目
+python3 bin/backup.py doctor       # 备份多久没做、活动有没有坏形态
+```
+
+包里有什么：
 
 | 内容 | 说明 |
 | --- | --- |
-| `panel.sqlite3` | 账号、活动索引、名单与报名索引、令牌、助手存档 |
-| `lists.sqlite3` | 名单与人员库 |
-| `events/<活动号>/data.sqlite3` | 这个活动的业务库 |
-| `events/<活动号>/audit.sqlite3` | 这个活动的审计日志，只追加 |
-| `events/<活动号>/meta.json` | 活动名、开始时间、用的模块 |
-| `owner_password.txt` | 首次启动生成的站长密码 |
-| `avatars/` | 头像 |
+| `db/panel.sqlite3` | 账号、活动索引、名单与报名索引、令牌、助手存档、平台审计 |
+| `db/lists.sqlite3` | 名单与人员库 |
+| `events/<号>/data.sqlite3`、`audit.sqlite3`、`meta.json` | 在跑的活动的业务库与审计（一致快照） |
+| `events/<号>/archive.tar.gz`、`meta.json` | 已归档的活动：带它的冻结件，不展开 |
+| `files/avatars/`、`files/modules/`、`files/theme/` | 头像与实例自己导入的模块、屏幕包 |
+| `identity/config.json`、`identity/assistant_prompt.md` | 身份信息：**进包但不自动恢复** |
+| `manifest.json` | 格式版本、应用版本、时间、每个条目的 sha256、各库行数 |
 
-活动**没有删除操作**，只有存档：存档之后数据库文件不动，随时可以查。所以备份就是复制 `data/`。
+库一律用 SQLite 的在线备份 API 取快照：事务一致、不含 WAL、体积就是主干那么大（本机是百人量级，
+全部库的快照加起来不到 1 MB）。**日志与 `-wal`/`-shm`、`service.pid` 这类运行时文件不进包**；
+`data/backup_settings.json`（备份自己的配置）也不进包——恢复数据不该把调度、留存与 WebDAV 凭据
+一起倒回去。
 
-一个活动就是一个文件夹：`data/events/<活动号>/` 里的东西自足，把一个文件夹拷走就能单独还原那一场。
+恢复：
 
-还原：停服务 → 用备份覆盖 `data/` → `./bin/service.sh start`。注意 SQLite 的 `-wal` 与 `-shm`
-要和主库一起复制，或者在停服务之后复制（那时 WAL 已经落盘）。
+```sh
+./bin/service.sh stop
+python3 bin/backup.py restore 最新 --yes      # 恢复前会自动把当前状态收一份
+./bin/service.sh start
+```
+
+- 默认只写回**数据**；`config.json` 与 `assistant_prompt.md` 要写回得加 `--with-identity`
+- 恢复之后所有登录会话被清空，所有人要重新登录（否则三天前的 cookie 会跟着旧库一起复活）
+- 恢复前的那份当前状态记成 `pre-restore`，恢复错了还能倒回去
+- 服务还在跑时拒绝恢复：`-wal` 会被旧连接覆盖回去，这一步必须先停服务
+
+设置（调度、留存、WebDAV）在 `data/backup_settings.json`，位置固定，不随 `data_dir` 变：
+
+```sh
+python3 bin/backup.py settings                  # 看一眼（密码打码）
+python3 bin/backup.py settings set schedule.at=03:30
+python3 bin/backup.py settings set webdav.url=https://dav.example/remote.php/dav/
+```
+
+自动任务与 WebDAV 上传还没接上，顺序是先本地备份与恢复（现在这一步），再调度与留存，最后 WebDAV。
 
 `./bin/service.sh reset` 会清空活动数据（活动与账号都重建），重置前会要求输入 `yes`，并自动把旧库
 备份成 `data/backup-<时间>-*`。新的站长密码重新写进 `data/owner_password.txt`。

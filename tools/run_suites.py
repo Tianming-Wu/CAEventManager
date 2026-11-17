@@ -156,6 +156,8 @@ SUITES = {
     "safemode": ([("safemode_test.py", [])], False),
     # 两个玩法完全不同的模块同时跑：讲座（自带页签与公示页）与抽奖
     "modules": ([("modules_test.py", [])], False),
+    # 备份：自己搭临时实例，取快照、打包、校验、恢复一条龙，不需要服务
+    "backup": ([("backup_test.py", [])], False),
 }
 
 # 改了什么 → 跑什么。键是路径前缀，值是 (套件, 页面测试的分组, 说明)。
@@ -169,6 +171,8 @@ AREAS = [
      (["unit", "panel_test", "panel_ui_test"], ["data", "admin"], "名单/账号的数据层")),
     (("builtin/modules/", "core/modules.py"),
      (["unit", "modules", "panel_ui_test"], ["mods"], "模块")),
+    (("core/backup.py", "bin/backup.py", "tools/backup_test.py"),
+     (["unit", "backup"], [], "备份")),
     (("assets/js/docs.js", "assets/css/docs.css", "pages/docs.html"),
      (["unit", "panel_ui_test"], ["docs"], "使用文档页")),
     (("theme/", "assets/css/app.css"),

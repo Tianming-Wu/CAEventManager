@@ -6136,7 +6136,9 @@
         closeOverlay();
         drawAssistant();
         loadContext();                 // 上下文上限改了，环的分母跟着变
-        PX.toast(d.config && d.config.ready ? "已保存" : "已保存，还差密钥", !d.config.ready);
+        // 服务端没回 config 时别去读它的字段：这里以前会抛一句 "reading 'ready'"
+        var ready = !!(d.config && d.config.ready);
+        PX.toast(ready ? "已保存" : "已保存，还差密钥", !ready);
       }).catch(function (e) { PX.toast(PX.esc(e.message), true); });
   }
 

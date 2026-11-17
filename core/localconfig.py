@@ -54,6 +54,10 @@ STATIC_DEFAULTS = {
     "delete_account_after_days": 3,
     # 这个实例最多能有多少个账号，0 表示不限；满了之后注册口直接拒绝
     "max_accounts": 0,
+    # 数据目录与备份目录：空着就用应用根目录下的 data/ 与 backups/，
+    # 相对路径按应用根目录算，绝对路径照用（LOTTERY_DATA_DIR 环境变量仍然优先）
+    "data_dir": "",
+    "backups_dir": "",
 }
 
 SECRET_LEN = 32
@@ -156,3 +160,12 @@ def static_limit(cfg, key):
         return int(cfg.get(key, STATIC_DEFAULTS.get(key, 0)))
     except (TypeError, ValueError):
         return int(STATIC_DEFAULTS.get(key, 0))
+
+
+def static_path(cfg, key, default_name):
+    """静态设置里的目录：空着用应用根目录下 `default_name`，
+    相对路径按应用根目录算，绝对路径照用。"""
+    want = str(cfg.get(key) or "").strip()
+    if not want:
+        return os.path.join(BASE_DIR, default_name)
+    return want if os.path.isabs(want) else os.path.join(BASE_DIR, want)

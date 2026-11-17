@@ -16,6 +16,7 @@
 """
 
 import csv
+import db
 import errors
 import io
 import json
@@ -177,10 +178,8 @@ _initialized = False
 
 
 def db_path():
-    return os.path.join(
-        os.environ.get("LOTTERY_DATA_DIR") or os.path.join(BASE_DIR, "data"),
-        "lists.sqlite3",
-    )
+    # 数据目录认环境变量，也认 config.json 里的 data_dir（见 db.data_dir）
+    return os.path.join(db.data_dir(), "lists.sqlite3")
 
 
 def connect():

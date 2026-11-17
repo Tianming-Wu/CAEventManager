@@ -43,7 +43,8 @@ python3 app.py
 活动的访问地址由「前缀 + 活动自己的 token」组成，token 存在 `panel.sqlite3` 里，不写进配置文件。
 
 静态设置写在同一个文件里，改完要重启服务：`shortlink_per_event`（一个活动最多同时持有多条短链，
-默认 5）、`max_accounts`（账号总数上限，默认 0 即不限）。
+默认 5）、`max_accounts`（账号总数上限，默认 0 即不限）、`data_dir` 与 `backups_dir`
+（数据与备份放在哪，默认是应用根目录下的 `data/` 与 `backups/`）。
 
 环境变量：`LOTTERY_DATA_DIR`、`LOTTERY_PACKS_DIR`、`LOTTERY_HOST`、`LOTTERY_PORT`、
 `LOTTERY_VERSION`、`LOTTERY_LOG_MAX`、`LOTTERY_ASSISTANT_PROMPT`。

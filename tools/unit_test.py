@@ -127,6 +127,7 @@ def migrate_events():
 
 def account_cap():
     """账号总数上限：静态设置 max_accounts，0 表示不限；待审核的账号也占名额。"""
+    import lists
     import localconfig
     import panel
 
@@ -156,6 +157,19 @@ def account_cap():
               and localconfig.STATIC_DEFAULTS["max_accounts"] == 0)
         check("上限写成别的值时按默认（不限）处理",
               localconfig.static_limit({"max_accounts": "many"}, "max_accounts") == 0)
+        # 目录类静态设置：空着用默认位置，相对路径按应用根目录算，绝对路径照用
+        check("目录默认落在应用根目录下",
+              localconfig.static_path({}, "backups_dir", "backups")
+              == os.path.join(localconfig.BASE_DIR, "backups"))
+        check("相对路径按应用根目录算",
+              localconfig.static_path({"data_dir": os.path.join("var", "data")}, "data_dir", "data")
+              == os.path.join(localconfig.BASE_DIR, "var", "data"))
+        check("绝对路径原样用",
+              localconfig.static_path({"data_dir": root}, "data_dir", "data") == root)
+        check("面板库与名单库跟着 data_dir 走",
+              panel.db_path() == os.path.join(root, "panel.sqlite3")
+              and lists.db_path() == os.path.join(root, "lists.sqlite3"),
+              (panel.db_path(), lists.db_path()))
     finally:
         if previous is None:
             os.environ.pop("LOTTERY_DATA_DIR", None)

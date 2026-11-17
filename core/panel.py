@@ -15,6 +15,7 @@ Registration always creates admin + pending; only approval flips it to active.
 """
 
 import base64
+import db
 import errors
 import json
 import os
@@ -243,11 +244,8 @@ _write_lock = threading.Lock()
 
 
 def db_path():
-    return os.path.join(
-        os.environ.get("LOTTERY_DATA_DIR")
-        or os.path.join(BASE_DIR, "data"),
-        "panel.sqlite3",
-    )
+    # 数据目录认环境变量，也认 config.json 里的 data_dir（见 db.data_dir）
+    return os.path.join(db.data_dir(), "panel.sqlite3")
 
 
 def connect():

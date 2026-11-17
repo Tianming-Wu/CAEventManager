@@ -44,6 +44,17 @@ def use_data_dir(path):
     _local.seq = None
 
 
+def data_dir():
+    """当前数据目录：``LOTTERY_DATA_DIR`` 优先（测试与多实例在进程里换目录靠它），
+    否则用 ``main()`` 按 ``config.json`` 的 ``data_dir`` 定下来的那一个。
+
+    面板库与名单库按它定位；活动库与启动自检用模块级的 ``DATA_DIR``，
+    那个值在进程启动时定下来就不再动。
+    """
+    want = os.environ.get("LOTTERY_DATA_DIR")
+    return os.path.abspath(want) if want else DATA_DIR
+
+
 def event_dir(seq):
     """活动的目录；文件夹本身就是归档与备份的单位。"""
     return os.path.join(EVENTS_DIR, str(int(seq)))

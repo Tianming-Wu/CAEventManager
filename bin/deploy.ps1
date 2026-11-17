@@ -31,7 +31,7 @@ $files = @(
 )
 # Collected too: pages / assets / theme / tools - a hand-written list here
 # silently skipped a new asset directory once already.
-$skip = @("data", "tmp", "__pycache__", ".git", ".vscode")
+$skip = @("data", "backups", "tmp", "__pycache__", ".git", ".vscode")
 $dirs = @(Get-ChildItem -Directory | Where-Object { $skip -notcontains $_.Name } |
           Select-Object -ExpandProperty Name)
 

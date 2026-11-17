@@ -168,6 +168,8 @@ python tools/prod_check.py https://example.org/mount <活动 token>   # 线上�
 | `safe_mode` | 静态设置：服务安全模式（默认 `false`），改完重启生效 |
 | `delete_account_after_days` | 静态设置：账号要停用满几天才允许彻底删除（默认 3），改完重启生效 |
 | `max_accounts` | 静态设置：这个实例最多能有多少个账号（默认 0，即不限），改完重启生效 |
+| `data_dir` | 静态设置：数据放在哪（默认应用根目录下的 `data/`）。相对路径按应用根目录算；`LOTTERY_DATA_DIR` 环境变量优先 |
+| `backups_dir` | 静态设置：备份包放在哪（默认应用根目录下的 `backups/`），备份与恢复都用它 |
 
 「静态设置」指写在 `config.json` 里、改完必须重启才生效的项；界面上没有入口（面板里能改的那些
 叫活动设置 / 平台设置，存在库里，立刻生效）。

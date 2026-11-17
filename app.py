@@ -69,7 +69,7 @@ PAGES_DIR = os.path.join(BASE_DIR, "pages")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.13.6.132"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.13.7.133"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -365,13 +365,15 @@ MIME_OVERRIDES = {
     ".woff2": "font/woff2",
 }
 
-FAVICON_CANDIDATES = ("favicon.png", "favicon.svg", "favicon.ico", "favicon.webp")
+# 矢量那份排在前面：现代浏览器取它，16px 下比位图清楚；位图留给老浏览器与 iOS 桌面图标
+FAVICON_CANDIDATES = ("favicon.svg", "favicon.png", "favicon.ico", "favicon.webp")
 FAVICON_TYPES = {
     "favicon.png": "image/png",
     "favicon.svg": "image/svg+xml",
     "favicon.ico": "image/x-icon",
     "favicon.webp": "image/webp",
 }
+FAVICON_SIZES = {"favicon.svg": "any", "favicon.png": "192x192"}
 
 
 def favicon_markup():
@@ -387,7 +389,9 @@ def favicon_markup():
         if not os.path.isfile(os.path.join(ASSETS_DIR, "img", name)):
             continue
         href = "assets/img/" + name
-        links.append('<link rel="icon" type="%s" href="%s">' % (FAVICON_TYPES[name], href))
+        size = FAVICON_SIZES.get(name)
+        links.append('<link rel="icon" type="%s"%s href="%s">' % (
+            FAVICON_TYPES[name], (' sizes="%s"' % size) if size else "", href))
         if name == "favicon.png":
             touch = "assets/img/apple-touch-icon.png"
             if not os.path.isfile(os.path.join(ASSETS_DIR, "img", "apple-touch-icon.png")):

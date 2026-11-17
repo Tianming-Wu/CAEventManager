@@ -2720,6 +2720,25 @@ def title_row(page):
         return light !== dark;
     }"""))
 
+    print("== 标签页图标 ==")
+    # 矢量优先、位图兜底、iOS 触屏各一份，都是从同一个标志渲染出来的
+    icons = page.evaluate("""() => Array.from(document.querySelectorAll(
+        'link[rel="icon"], link[rel="apple-touch-icon"]'))
+        .map(l => l.getAttribute('href') || '')""")
+    check("面板页带着矢量图标与两份位图",
+          any(h.endswith("favicon.svg") for h in icons)
+          and any(h.endswith("favicon.png") for h in icons)
+          and any(h.endswith("apple-touch-icon.png") for h in icons), icons)
+    check("图标不再是空占位（data:）", not any(h.startswith("data:") for h in icons), icons)
+    fetched = page.request.get(BASE + "/assets/img/favicon.svg")
+    check("矢量图标文件拿得到",
+          fetched.status == 200 and "svg" in (fetched.headers.get("content-type") or ""),
+          (fetched.status, fetched.headers.get("content-type")))
+    login_icons = page.request.get(BASE + "/login")
+    check("登录页也带同一套图标",
+          "favicon.svg" in login_icons.text() and "apple-touch-icon" in login_icons.text(),
+          login_icons.status)
+
 
 def group_page(page):
     print("== the collapsible group ==")

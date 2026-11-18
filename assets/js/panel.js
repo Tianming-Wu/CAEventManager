@@ -4611,20 +4611,21 @@
     if ($("#bkDavUser")) $("#bkDavUser").value = dav.username || "";
     if ($("#bkDavPass")) {
       $("#bkDavPass").value = "";
-      $("#bkDavPass").placeholder = dav.passwordSet ? "已保存（要改就重填）" : "应用密码";
+      $("#bkDavPass").placeholder = dav.passwordSet ? "已保存（修改时重填）" : "应用密码";
     }
     if ($("#bkDavVerify")) $("#bkDavVerify").checked = dav.verify !== false;
     if ($("#bkDavPrune")) $("#bkDavPrune").checked = dav.prune !== false;
     if ($("#backupDir")) $("#backupDir").textContent = d.dir || "backups/";
 
     var due = d.due || {};
-    var last = due.last ? PX.when(due.last) : "还没有";
+    var last = due.last ? PX.when(due.last) : "";
     if ($("#backupState")) {
-      $("#backupState").textContent = !cfg.enabled
-        ? "自动备份关着；现在是手动模式。最近一份：" + last
-        : (due.due
-            ? "这一轮还没做（" + (due.reason || "") + "）。最近一份：" + last
-            : "已排好。" + (due.reason || "") + "。最近一份：" + last);
+      var line = last ? "最近一次备份：" + last : "尚无备份";
+      if (cfg.enabled) {
+        var at = "计划时间 " + (schedule.at || "") + " 的备份";
+        line = (due.due ? at + "尚未执行。" : at + "已完成。") + line;
+      }
+      $("#backupState").textContent = line;
     }
     var hints = $("#backupHints");
     if (hints) {
@@ -4643,7 +4644,7 @@
           "<td class=\"mono\">" + PX.esc(fmtBytes(b.bytes)) + "</td>" +
           "<td>" + PX.esc(BACKUP_KIND[b.kind] || b.kind || "—") + "</td>" +
           "<td class=\"mono\">" + PX.esc(String(b.events)) + "</td></tr>";
-      }).join("") : rowsOrEmpty(5, "backup", "还没有备份");
+      }).join("") : rowsOrEmpty(5, "backup", "无备份");
     }
   }
 
@@ -5250,8 +5251,7 @@
       '<div class="field"><label for="asKey">密钥</label>' +
       '<input id="asKey" type="password" autocomplete="off" spellcheck="false">' +
       '<p class="hint">留空表示保持现状；清除请点下面的按钮</p></div>' +
-      '<p class="hint">端点需兼容 OpenAI 的 <code>/chat/completions</code>；' +
-      '地址与模型留空时使用默认值</p>' +
+      '<p class="hint">端点需兼容 OpenAI 的 <code>/chat/completions</code></p>' +
       '<div class="as-adv">' +
       '<button class="as-adv-head" id="asAdvToggle" type="button" aria-expanded="false">' +
       '<svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" ' +
@@ -5411,7 +5411,7 @@
     if (!sub) return;
     var cfg = S.assistantCfg || {};
     if (!cfg.ready) {
-      sub.textContent = "还没有密钥：点页面右上角的模型设置按钮填写，地址与模型有默认值";
+      sub.textContent = "模型端点未配置，点页面右上角的模型设置按钮填写";
       return;
     }
     var bits = ["当前模型：" + (cfg.model || "—")];
@@ -5652,7 +5652,7 @@
           '" title="删除" aria-label="删除">' + ICON_TRASH + "</button>" +
           "</div>";
       }).join("") + "</div>"
-        : '<p class="page-sub">还没有会话。发一条消息就会存下来。</p>';
+        : '<p class="page-sub">无会话</p>';
     }
     var foot = $("#asDrawerFoot");
     if (foot) {
@@ -5766,7 +5766,7 @@
     drawAssistantQuota();
     var sub = $("#assistantSub");
     if (sub && !S.assistantQuota && !cfg.ready) {
-      sub.textContent = "还没有密钥：点页面右上角的模型设置按钮填写，地址与模型有默认值";
+      sub.textContent = "模型端点未配置，点页面右上角的模型设置按钮填写";
     }
     // 新会话没有存档可导：按钮灰掉，说明写在 title 上
     var exp = $("#asExport");
@@ -6524,8 +6524,8 @@
       '<div class="field"><label for="naName">显示名</label>' +
       '<input id="naName" type="text" autocomplete="off" placeholder="例如 李老师"></div>' +
       roleField +
-      '<p class="hint">密码不在这里设：系统会生成一串临时密码，只显示一次。' +
-      "对方第一次登录只能先去重设密码，改完才能进面板。</p>" +
+      '<p class="hint">密码由平台生成，管理员不设定内容；该密码仅显示一次，' +
+      "账号首次登录时须自行设置新密码</p>" +
       '<div class="row" style="margin-top:16px;justify-content:flex-end">' +
       '<button class="btn" data-close-overlay="1" type="button">取消</button>' +
       '<button class="btn primary" id="naGo" type="button">创建</button></div>');
@@ -6536,8 +6536,7 @@
         name: ($("#naName").value || "").trim()
       };
       if ($("#naRole")) body.role = $("#naRole").value;
-      apiSudo("/account/create", { method: "POST", body: body },
-              "新建账号", "会开出一个新账号，并给它一串临时密码")
+      PX.api("/account/create", { method: "POST", body: body })
         .then(function (d) {
           showCreatedAccount(body.username, d);
         })
@@ -6548,8 +6547,8 @@
   /* 开号的结果：临时密码只出现这一次，交代清楚对方第一次登录要做什么 */
   function showCreatedAccount(username, d) {
     openOverlay("account-new-done", "账号已创建",
-      '<p class="page-sub">把登录名与下面这串临时密码交给 ' + PX.esc(username) +
-      "。第一次登录会先让他设新密码，之后这串就作废了。</p>" +
+      '<p class="page-sub">登录名与以下临时密码交由 ' + PX.esc(username) +
+      " 使用。该账号首次登录时须自行设置新密码，此密码随即失效</p>" +
       '<div class="row" style="gap:8px;margin-top:12px;align-items:center">' +
       '<input id="pwdOut" type="text" readonly value="' + PX.esc(d.password || "") + '" ' +
       'style="flex:1;font-family:var(--mono)">' +
@@ -6581,20 +6580,14 @@
     var a = S.accounts.filter(function (x) { return x.id === id; })[0];
     if (!a) return;
     openOverlay("as-pwd", "重置 " + displayName(a) + " 的密码",
-      '<div class="field"><label for="pwdNew">新密码</label>' +
-      '<input id="pwdNew" type="text" autocomplete="off" placeholder="留空就由系统生成一串">' +
-      '</div>' +
-      '<p class="hint">至少 8 位。设好之后这个账号的**登录会话与 API 令牌全部失效**，' +
-      "得用新密码重新登录；密码只显示这一次。</p>" +
+      '<p class="page-sub">密码由平台生成，管理员不设定内容。' +
+      "重置后该账号的登录会话与 API 令牌同时失效，对方需用新密码登录并另行设置自己的密码</p>" +
       '<div class="row" style="margin-top:16px;justify-content:flex-end">' +
       '<button class="btn" data-close-overlay="1" type="button">取消</button>' +
       '<button class="btn primary" id="pwdGo" type="button">重置</button></div>');
-    $("#pwdNew").focus();
     $("#pwdGo").addEventListener("click", function () {
-      var body = { id: a.id };
-      var typed = ($("#pwdNew").value || "").trim();
-      if (typed) body.password = typed;
-      apiSudo("/account/password", { method: "POST", body: body }, "重置账号密码")
+      apiSudo("/account/password", { method: "POST", body: { id: a.id } },
+              "重置账号密码")
         .then(function (d) {
           showNewPassword(a, d);
         })
@@ -6605,18 +6598,17 @@
   /* 新密码只在这里出现一次：一个只读框 + 一颗复制键，关掉就没了 */
   function showNewPassword(a, d) {
     openOverlay("as-pwd-done", "密码已重置",
-      '<p class="page-sub">把下面这串交给 ' + PX.esc(displayName(a)) +
-      "，让他登录后自己改掉。</p>" +
+      '<p class="page-sub">以下临时密码交由 ' + PX.esc(displayName(a)) +
+      " 使用。该账号首次登录时须自行设置新密码</p>" +
       '<div class="row" style="gap:8px;margin-top:12px;align-items:center">' +
       '<input id="pwdOut" type="text" readonly value="' + PX.esc(d.password || "") + '" ' +
       'style="flex:1;font-family:var(--mono)">' +
       '<button class="btn" id="pwdCopy" type="button">复制</button></div>' +
       '<p class="hint" style="margin-top:10px">' +
-      (d.generated ? "这串是系统随机生成的。" : "") +
-      "已经作废 " + (d.sessions || 0) + " 个登录会话、" + (d.tokens || 0) +
-      " 张 API 令牌。这串密码只显示这一次，关掉弹窗之后就看不到了。</p>" +
+      "已失效的登录会话 " + (d.sessions || 0) + " 个、API 令牌 " + (d.tokens || 0) +
+      " 张。临时密码仅在此处显示一次</p>" +
       '<div class="row" style="margin-top:16px;justify-content:flex-end">' +
-      '<button class="btn primary" data-close-overlay="1" type="button">我记下了</button></div>');
+      '<button class="btn primary" data-close-overlay="1" type="button">我已记录</button></div>');
     $("#pwdOut").select();
     $("#pwdCopy").addEventListener("click", function () {
       copyInto($("#pwdOut"), $("#pwdCopy"));

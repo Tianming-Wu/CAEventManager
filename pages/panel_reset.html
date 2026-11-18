@@ -19,29 +19,27 @@
           <path d="m7 10 2 2 4-4"/>
         </svg>
       </span>
-      CAEventManager
+      <span class="brand-name">CAEventManager</span>
     </div>
     <h1>重设密码</h1>
-    <p class="page-sub" id="resetWho">这个账号还在用临时密码，先给自己设一个新密码。</p>
+    <p class="page-sub">继续使用前，需要设置新密码（至少 8 位）</p>
 
     <div class="field">
       <label for="newPass">新密码</label>
-      <input id="newPass" type="password" autocomplete="new-password" placeholder="至少 8 位">
+      <input id="newPass" type="password" autocomplete="new-password" placeholder="输入新密码">
     </div>
     <div class="field">
-      <label for="newPass2">再输一次</label>
-      <input id="newPass2" type="password" autocomplete="new-password" placeholder="两次要一样">
+      <label for="newPass2">再次输入新密码</label>
+      <input id="newPass2" type="password" autocomplete="new-password"
+             placeholder="两次输入需一致">
     </div>
 
     <div class="err" id="err"></div>
     <button class="btn primary block" type="submit" id="go">保存并进入</button>
 
-    <div class="auth-foot"><a href="logout" id="signOut">换个账号登录</a></div>
+    <div class="auth-foot"><a href="logout" id="signOut">切换账号</a></div>
   </form>
 
-  <p class="hint" style="margin-top:16px;text-align:center">
-    临时密码是管理员发给你的一次性口令，设好新密码之后它就作废了
-  </p>
   <div class="site-foot" style="border:0;margin-top:4px;max-width:400px">{{FOOTER}}</div>
 </div>
 <script src="assets/js/markdown.js"></script>

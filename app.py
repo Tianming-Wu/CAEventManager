@@ -71,7 +71,7 @@ PAGES_DIR = os.path.join(BASE_DIR, "pages")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.13.17.143"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.13.18.144"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -1400,6 +1400,10 @@ class Handler(BaseHTTPRequestHandler):
             if (acc is not None and "pass_temp" in acc.keys() and acc["pass_temp"]
                     and route not in ("/reset", "/logout")):
                 return self._redirect((home + "/reset") or "reset")
+            # 状态已正常：重设密码那一页不再可用，回主站
+            if (acc is not None and route == "/reset"
+                    and not ("pass_temp" in acc.keys() and acc["pass_temp"])):
+                return self._redirect((home + "/panel") or "panel")
             return self._serve_panel_page(name)
 
         return self._panel_api(method, route, raw_path, query)
@@ -1761,6 +1765,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/password/reset" and method == "POST":
             # 临时密码的账号在这里重设密码：不用旧密码（它就是那串临时的，人已经用它登录了），
             # 但必须是登录状态，而且只改自己的
+            if not ("pass_temp" in acc.keys() and acc["pass_temp"]):
+                # 状态已经正常：这一页与这个接口都不再可用
+                raise model.ApiError("当前账号无需重设密码", 409)
             data = body()
             new = (data.get("new") or "").strip()
             confirm = (data.get("confirm") or "").strip()
@@ -2062,8 +2069,8 @@ class Handler(BaseHTTPRequestHandler):
                                "uid": target["uid"], "eventsOrphaned": left})
 
         if path == "/account/password" and method == "POST":
-            # 替别人重置密码：用自己的权限动别人的凭据，超管及以上 + sudo。
-            # 不给新密码就由服务端生成一串临时口令，只在这一次的响应里出现
+            # 替别人重置密码：用本人的权限动他人的凭据，超管及以上 + 提权。
+            # 密码由平台生成，管理员不设定内容；它只在这一次的响应里出现
             actor = need("superadmin", "owner")
             need_sudo()
             data = body()
@@ -2075,12 +2082,11 @@ class Handler(BaseHTTPRequestHandler):
                 raise model.ApiError("站长的密码只能在「账户信息」里自己改", 403)
             if actor["role"] == "superadmin" and target["role"] != "admin":
                 raise model.ApiError("超级管理员只能重置普通管理员的密码", 403)
-            password = str(data.get("password") or "")
-            generated = not password
-            if generated:
-                password = panel.temp_password()
-            elif len(password) < panel.PASSWORD_MIN:
-                raise model.ApiError("密码至少 %d 位" % panel.PASSWORD_MIN)
+            if data.get("password"):
+                # 管理员不设定密码内容：给了也不采纳，直接生成
+                raise model.ApiError("密码由平台生成，管理员不设定内容")
+            password = panel.temp_password()
+            generated = True
             with panel.tx() as tx:
                 # 管理员重置出来的一律算"临时密码"：对方下次登录要先自己改掉
                 sessions, tokens = panel.set_password(tx, target["id"], password,
@@ -2094,10 +2100,9 @@ class Handler(BaseHTTPRequestHandler):
                                "sessions": sessions, "tokens": tokens})
 
         if path == "/account/create" and method == "POST":
-            # 管理员手动开号：只给登录名与显示名，密码由系统生成（管理员不设密码）。
-            # 这串密码是"临时密码"：对方第一次登录只能先去重设密码
+            # 管理员手动开号：给登录名与显示名，密码由平台生成（管理员不设定）。
+            # 新开的号不涉及任何已有资产，因此不需要提权，记一条审计即可
             actor = need("superadmin", "owner")
-            need_sudo()
             data = body()
             username = (data.get("username") or "").strip()
             name = (data.get("name") or "").strip()

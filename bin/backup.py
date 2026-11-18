@@ -44,7 +44,7 @@ def pick(name):
     if name in ("最新", "latest", "-"):
         found = backup.list_backups()
         if not found:
-            raise backup.BackupError("还没有备份")
+            raise backup.BackupError("当前没有可用的备份")
         return found[0]["path"]
     if os.path.isfile(name):
         return os.path.abspath(name)
@@ -74,7 +74,7 @@ def cmd_run(args):
 def cmd_webdav(args):
     cfg = backup.settings()
     if args.action == "test":
-        print("能连上、能写：%s" % backup.dav_self_check(cfg))
+        print("连接与写入正常：%s" % backup.dav_self_check(cfg))
         return 0
     if args.action == "list":
         names = backup.dav_list(cfg)
@@ -87,13 +87,13 @@ def cmd_webdav(args):
         if path is None:
             found = backup.list_backups()
             if not found:
-                raise backup.BackupError("还没有备份")
+                raise backup.BackupError("当前没有可用的备份")
             path = found[0]["path"]
         print("上传：%s" % backup.dav_upload(path, cfg))
         return 0
     if args.action == "prune":
         kept, dropped = backup.dav_prune(cfg=cfg)
-        print("远端留下 %d 份，清掉 %d 份" % (len(kept), len(dropped)))
+        print("远端保留 %d 份，删除 %d 份" % (len(kept), len(dropped)))
         for name in dropped:
             print("  删 %s" % name)
         return 0
@@ -102,7 +102,7 @@ def cmd_webdav(args):
 
 def cmd_auto(args):
     state = backup.due_state()
-    print("这一轮：%s（最近一份 %s）" % (
+    print("本次判定：%s（最近一次备份 %s）" % (
         state["reason"] or "该做了",
         stamp(state["last"]) if state["last"] else "还没有"))
     if not state["due"]:
@@ -118,8 +118,8 @@ def cmd_auto(args):
 
 def cmd_prune(args):
     kept, drop = backup.prune(apply=args.yes)
-    print("留下 %d 份、清掉 %d 份%s" % (
-        len(kept), len(drop), "" if args.yes else "（只是看一眼，加 --yes 才删）"))
+    print("保留 %d 份、删除 %d 份%s" % (
+        len(kept), len(drop), "" if args.yes else "（仅预览，加 --yes 才执行删除）"))
     for item in drop:
         print("  删 %-26s %8s  %s" % (item["name"], human(item["bytes"] or 0),
                                     stamp(item["created"])))
@@ -132,7 +132,7 @@ def cmd_prune(args):
 def cmd_list(args):
     found = backup.list_backups()
     if not found:
-        print("备份目录：%s（空）" % backup.backups_dir())
+        print("备份目录：%s（无备份）" % backup.backups_dir())
         return 0
     print("备份目录：%s" % backup.backups_dir())
     for item in found:
@@ -161,7 +161,7 @@ def cmd_restore(args):
         print("恢复会用这份备份覆盖当前数据（身份文件%s写回）：" % (
             "会" if args.with_identity else "不"))
         print("  %s" % path)
-        print("确认之后再加 --yes；恢复前会自动备份当前状态")
+        print("确认后请加 --yes；执行前会自动备份当前状态")
         return 1
     actions = backup.restore(path, with_identity=args.with_identity,
                              version=app.VERSION)

@@ -375,21 +375,21 @@ def due_state(now=None, cfg=None, packages=None):
     last = last_created(packages)
     out = {"due": False, "slot": 0.0, "last": last, "reason": ""}
     if not cfg.get("enabled"):
-        out["reason"] = "备份功能关着"
+        out["reason"] = "备份功能未启用"
         return out
     if str(schedule.get("mode") or "daily") != "daily":
-        out["reason"] = "调度方式是手动"
+        out["reason"] = "调度方式为手动"
         return out
     if at is None:
-        out["reason"] = "触发时刻没写对（要 HH:MM）"
+        out["reason"] = "触发时刻格式不正确，应为 HH:MM"
         return out
     slot = slot_before(now, at)
     out["slot"] = slot
     if last >= slot:
-        out["reason"] = "这一轮已经做过了"
+        out["reason"] = "计划时间内的备份已完成"
         return out
     out["due"] = True
-    out["reason"] = "错过 %s 这一轮" % time.strftime("%Y-%m-%d %H:%M",
+    out["reason"] = "计划时间 %s 的备份尚未执行" % time.strftime("%Y-%m-%d %H:%M",
                                                     time.localtime(slot))
     return out
 
@@ -744,17 +744,17 @@ def doctor():
     out = []
     root = backups_dir()
     if not os.path.isdir(root):
-        out.append(("注意", "还没有备份目录：%s" % root))
+        out.append(("注意", "备份目录不存在：%s" % root))
     else:
         found = list_backups()
         if not found:
-            out.append(("注意", "备份目录里还没有备份"))
+            out.append(("注意", "备份目录为空"))
         else:
             newest = found[0]
             age = (time.time() - newest["manifest"]["created"]) / 86400.0 \
                 if newest.get("manifest") else None
             if age is not None and age > 2:
-                out.append(("注意", "最近一份备份是 %.1f 天前的" % age))
+                out.append(("注意", "最近一次备份距今 %.1f 天" % age))
     conn = None
     try:
         conn = sqlite3.connect(os.path.join(db.data_dir(), "panel.sqlite3"), timeout=10)
@@ -769,20 +769,20 @@ def doctor():
         seq = row["seq"]
         folder = os.path.join(db.EVENTS_DIR, str(seq))
         if not os.path.isdir(folder):
-            out.append(("问题", "活动 #%d 没有目录：%s" % (seq, folder)))
+            out.append(("问题", "活动 #%d 缺少目录：%s" % (seq, folder)))
             continue
         packed = eventfs.is_archived(seq)
         live = eventfs.has_data(seq)
         if not packed and not live:
-            out.append(("问题", "活动 #%d 既没有业务库也没有归档包" % seq))
+            out.append(("问题", "活动 #%d 既无业务库也无归档包" % seq))
         elif packed and live:
             out.append(("问题", "活动 #%d 归档包与业务库同时存在" % seq))
         counts = _row_counts(os.path.join(folder, "data.sqlite3")) if live else {}
         if live and counts and not any(counts.get(k) for k in ("students", "marks", "tickets")):
-            out.append(("提示", "活动 #%d「%s」没有人员数据，像是空活动"
+            out.append(("提示", "活动 #%d「%s」无人员数据，可能为空活动"
                         % (seq, row["title"] or "")))
     if not out:
-        out.append(("正常", "没发现问题"))
+        out.append(("正常", "未发现问题"))
     return out
 
 

@@ -1385,10 +1385,10 @@
             </label>
           </div>
           <div class="field">
-            <label for="bkMode">方式</label>
+            <label for="bkMode">调度方式</label>
             <select id="bkMode">
               <option value="daily">每天</option>
-              <option value="manual">手动（不自动做）</option>
+              <option value="manual">手动</option>
             </select>
           </div>
           <div class="field">
@@ -1396,25 +1396,25 @@
             <input id="bkAt" type="time" step="60">
           </div>
           <div class="field">
-            <label for="bkDaily">留存：天</label>
+            <label for="bkDaily">留存天数</label>
             <input id="bkDaily" inputmode="numeric" type="text">
           </div>
           <div class="field">
-            <label for="bkWeekly">留存：周</label>
+            <label for="bkWeekly">留存周数</label>
             <input id="bkWeekly" inputmode="numeric" type="text">
           </div>
           <div class="field">
-            <label for="bkMonthly">留存：月</label>
+            <label for="bkMonthly">留存月数</label>
             <input id="bkMonthly" inputmode="numeric" type="text">
           </div>
           <div class="field">
             <label for="bkBytes">总字节上限</label>
-            <input id="bkBytes" inputmode="numeric" type="text" placeholder="0 表示不限">
+            <input id="bkBytes" inputmode="numeric" type="text" placeholder="0 表示不限制">
           </div>
         </div>
 
         <details class="backup-dav" id="bkDavBox">
-          <summary>WebDAV（异地那一份）</summary>
+          <summary>WebDAV（异地副本）</summary>
           <div class="as-adv-body">
             <div class="as-form-grid">
               <div class="field">
@@ -1446,7 +1446,7 @@
                 </label>
               </div>
               <div class="field">
-                <label for="bkDavPrune">远端跟着本地清理</label>
+                <label for="bkDavPrune">远端随本地清理</label>
                 <label class="switch" style="margin-top:6px">
                   <input type="checkbox" id="bkDavPrune"><span class="track"></span>
                 </label>
@@ -1461,7 +1461,7 @@
 
         <div class="row" style="margin-top:12px">
           <button class="btn primary" id="backupSave" type="button">保存设置</button>
-          <span class="note">备份包放在 <code id="backupDir">backups/</code>；恢复要先停服务，走命令行</span>
+          <span class="note">备份目录 <code id="backupDir">backups/</code>，恢复需停止服务后从命令行执行</span>
         </div>
 
         <div class="tblwrap" style="margin-top:14px">

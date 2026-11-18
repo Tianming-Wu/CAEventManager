@@ -1549,8 +1549,8 @@ def assistant_page(page):
     page.goto(BASE + "/panel#/assistant")
     page.wait_for_timeout(900)
     check("总览下面有这一页", page.locator('[data-page="assistant"]').is_visible())
-    check("没配密钥时说清楚该去配什么",
-          "密钥" in page.inner_text("#assistantSub"),
+    check("没配端点时说清楚该去配什么",
+          "模型端点未配置" in page.inner_text("#assistantSub"),
           page.inner_text("#assistantSub"))
 
     # 新会话那一页：两行欢迎语 + 一行存档说明，不放示例问题；导出键灰着
@@ -2305,7 +2305,8 @@ def assistant_page(page):
     page.click("#confirmGo")
     page.wait_for_timeout(700)
     check("清除密钥后回到未配置",
-          "密钥" in page.inner_text("#assistantSub"), page.inner_text("#assistantSub"))
+          "模型端点未配置" in page.inner_text("#assistantSub"),
+          page.inner_text("#assistantSub"))
     page.evaluate("() => document.getElementById('overlayClose').click()")
     page.wait_for_timeout(300)
 
@@ -3297,7 +3298,6 @@ def temp_password_page(browser):
     """管理员开的号：临时密码登录 → 只落在重设密码那一页 → 改完才能进面板。"""
     print("== 临时密码：登录后被送去重设密码 ==")
     owner = owner_opener()
-    call(owner, "/api/panel/sudo", {"password": PASSWORD})
     username = "temp" + str(int(time.time()))[-6:]
     made = call(owner, "/api/panel/account/create",
                 {"username": username, "name": "临时密码测试", "role": "admin"})
@@ -3322,6 +3322,26 @@ def temp_password_page(browser):
         check("页面上只有新密码与再输一次，不要旧密码",
               fields["one"] and fields["two"] and not fields["old"], fields)
         check("标题写着重设密码", fields["title"].strip() == "重设密码", fields["title"])
+        check("副标题说要先设置新密码",
+              "设置新密码" in page.inner_text(".page-sub"), page.inner_text(".page-sub"))
+        check("两个输入框各有各的提示语",
+              page.get_attribute("#newPass", "placeholder") == "输入新密码"
+              and page.get_attribute("#newPass2", "placeholder") == "两次输入需一致",
+              (page.get_attribute("#newPass", "placeholder"),
+               page.get_attribute("#newPass2", "placeholder")))
+        check("页脚只留一个切换账号",
+              page.inner_text(".auth-foot").strip() == "切换账号",
+              page.inner_text(".auth-foot"))
+        brand = page.evaluate("""() => {
+            const m = document.querySelector('.auth-card .brand-mark');
+            const n = document.querySelector('.auth-card .brand-name');
+            if (!m || !n) return null;
+            const a = m.getBoundingClientRect(), b = n.getBoundingClientRect();
+            return {sameRow: Math.abs((a.top + a.height / 2) - (b.top + b.height / 2)) < 4,
+                    beside: b.left >= a.right - 1};
+        }""")
+        check("图标与标题在同一行",
+              bool(brand and brand["sameRow"] and brand["beside"]), brand)
 
         page.fill("#newPass", "abc12345")
         page.fill("#newPass2", "abc12399")
@@ -3342,8 +3362,41 @@ def temp_password_page(browser):
         row = [a for a in after["accounts"] if a["username"] == username]
         check("临时密码的标记撤掉了",
               bool(row) and row[0].get("passTemp") is False, row)
+
+        # 改完之后那一页就不该再开得起来：手输地址也送回面板
+        page.goto(BASE + "/reset", wait_until="domcontentloaded")
+        page.wait_for_url("**/panel**", timeout=20000)
+        check("状态正常之后重设页跳回面板", "/panel" in page.url, page.url)
+        gone = page.request.post(
+            BASE + "/api/panel/password/reset",
+            data={"new": "another-pass-1", "confirm": "another-pass-1"},
+            headers={"X-Requested-With": "CAEventManager"})
+        check("重设接口也不给用", gone.status == 409, gone.status)
     finally:
         ctx.close()
+
+    print("== 重设页开着的时候，别处改好了也要自己退出去 ==")
+    username2 = "tmp2" + str(int(time.time()))[-5:]
+    made2 = call(owner, "/api/panel/account/create",
+                 {"username": username2, "name": "第二个临时号", "role": "admin"})
+    check("再开一个临时号", bool(made2 and made2.get("password")), made2)
+    ctx2, page2 = new_page(browser, 1180, 860)
+    try:
+        page2.goto(BASE + "/login", wait_until="domcontentloaded")
+        page2.fill("#username", username2)
+        page2.fill("#password", (made2 or {}).get("password") or "")
+        page2.click("#go")
+        page2.wait_for_url("**/reset", timeout=20000)
+        page2.wait_for_timeout(600)
+        done = page2.request.post(
+            BASE + "/api/panel/password/reset",
+            data={"new": "settled-pass-1", "confirm": "settled-pass-1"},
+            headers={"X-Requested-With": "CAEventManager"})
+        check("同一会话在别处改好了", done.status == 200, done.status)
+        page2.wait_for_url("**/panel**", timeout=20000)
+        check("开着的那一页自己退回面板", "/panel" in page2.url, page2.url)
+    finally:
+        ctx2.close()
 
 
 def users_table(page):
@@ -3393,6 +3446,24 @@ def users_table(page):
     page.wait_for_timeout(900)
     check("填 0 就回到默认", "默认" in page.inner_text("#overlayBody"),
           page.inner_text("#overlayBody")[:160])
+
+    print("== 新建账号：只填登录名、显示名与角色 ==")
+    page.evaluate("() => document.getElementById('overlayClose').click()")
+    page.wait_for_timeout(300)
+    page.click("#newAccountBtn")
+    page.wait_for_timeout(400)
+    new = page.evaluate("""() => ({
+        ids: Array.from(document.querySelectorAll(
+            '#overlayBody input, #overlayBody select')).map(el => el.id),
+        pw: document.querySelectorAll('#overlayBody input[type=password]').length,
+        text: document.getElementById('overlayBody').innerText,
+    })""")
+    check("只有登录名、显示名与角色三项",
+          new["ids"] == ["naUser", "naName", "naRole"], new["ids"])
+    check("没有让人填密码的框", new["pw"] == 0, new["pw"])
+    check("写明密码由平台生成", "平台生成" in new["text"], new["text"][:160])
+    page.evaluate("() => document.getElementById('overlayClose').click()")
+    page.wait_for_timeout(300)
     print("== 重置密码：新密码只显示一次 ==")
     # 上一段（调配额）的弹窗还开着：先关掉，不然它挡着表格
     page.evaluate("() => document.getElementById('overlayClose').click()")
@@ -3414,10 +3485,11 @@ def users_table(page):
     check("账号弹窗里有重置密码", page.locator("[data-pwd]").count() == 1)
     page.click("[data-pwd]")
     page.wait_for_timeout(350)
-    check("先让填新密码，留空就由系统生成",
-          page.locator("#pwdNew").is_visible()
-          and "留空" in (page.get_attribute("#pwdNew", "placeholder") or ""),
-          page.get_attribute("#pwdNew", "placeholder"))
+    check("弹窗里没有让人填密码的框",
+          page.locator("#pwdNew").count() == 0, page.inner_text("#overlayBody")[:160])
+    check("说明密码由平台生成",
+          "平台生成" in page.inner_text("#overlayBody"),
+          page.inner_text("#overlayBody")[:200])
     check("并说明会话与令牌会失效",
           "令牌" in page.inner_text("#overlayBody"), page.inner_text("#overlayBody")[:200])
     page.click("#pwdGo")
@@ -4224,6 +4296,21 @@ def server_page(page):
     check("表单铺成多列，不是一条一行", card["cols"] >= 2, card)
     check("写明了备份放在哪", card["dir"].endswith("backups"), card["dir"])
     check("WebDAV 那一段折在里面", card["dav"])
+    check("状态行说得出最近一次备份是什么时候",
+          "最近一次备份" in card["state"] or "尚无备份" in card["state"], card["state"])
+    labels = page.evaluate("""() => Array.from(
+        document.querySelectorAll('[data-page="server"] .as-form-grid label'))
+        .map(l => l.innerText.trim()).filter(t => t)""")
+    check("备份设置的字段名挨个对得上",
+          all(t in labels for t in ("自动备份", "调度方式", "触发时刻",
+                                    "留存天数", "留存周数", "留存月数", "总字节上限")),
+          labels)
+    check("WebDAV 一段的标题",
+          page.inner_text("#bkDavBox summary").strip() == "WebDAV（异地副本）",
+          page.inner_text("#bkDavBox summary"))
+    modes = page.evaluate("""() => Array.from(
+        document.querySelectorAll('#bkMode option')).map(o => o.textContent.trim())""")
+    check("调度方式只有每天与手动", modes == ["每天", "手动"], modes)
 
     made = page.evaluate("""() => new Promise(resolve => {
         PX.api("/backup/run", { method: "POST", body: {} })

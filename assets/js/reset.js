@@ -1,20 +1,25 @@
-/* 临时密码的账号：登录后落在这里，只做一件事——给自己设一个新密码。 */
+/* 临时密码的账号：登录后落在这里，只做一件事——设置新密码。
+   状态一变（别处已经设过、或者被停用），这一页自己退回主站，停在上面也做不了任何操作。 */
 (function () {
   "use strict";
   var form = document.getElementById("resetForm");
   var go = document.getElementById("go");
   var err = document.getElementById("err");
 
-  // 谁在重设：把名字写在副标题里，免得在别人的机器上改错账号
-  PX.api("/me").then(function (d) {
-    var me = d && d.me;
-    if (!me) { location.href = "login"; return; }
-    var who = document.getElementById("resetWho");
-    if (who) {
-      who.textContent = (me.name || me.username) +
-        " 还在用临时密码，先给自己设一个新密码。";
-    }
-  }).catch(function () { /* 读不到就算了，副标题照旧 */ });
+  function leave(d) {
+    if (!d || !d.authed) { location.replace(PX.PREFIX + "/login"); return; }
+    if (!d.mustReset) { location.replace(PX.PREFIX + "/panel"); }
+  }
+
+  // 一直盯着状态：账号状态一旦正常，这一页立刻失效
+  var watch = function () {
+    PX.api("/me").then(leave).catch(function () { /* 断网就等下一轮 */ });
+  };
+  watch();
+  setInterval(watch, 5000);
+  document.addEventListener("visibilitychange", function () {
+    if (!document.hidden) watch();
+  });
 
   form.addEventListener("submit", function (e) {
     e.preventDefault();
@@ -25,11 +30,10 @@
     if (one !== two) { err.textContent = "两次输入的密码不一致"; return; }
     go.disabled = true;
     PX.api("/password/reset", { method: "POST", body: { new: one, confirm: two } })
-      .then(function () {
-        location.href = "panel";
-      })
+      .then(function () { location.replace(PX.PREFIX + "/panel"); })
       .catch(function (e2) {
-        err.textContent = e2.message || "没改成，稍后再试";
+        if (e2 && e2.status === 409) { location.replace(PX.PREFIX + "/panel"); return; }
+        err.textContent = e2.message || "未能保存，请稍后重试";
         go.disabled = false;
       });
   });

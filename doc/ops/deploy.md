@@ -198,7 +198,7 @@ python3 bin/backup.py prune --yes    # 真删
 
 ### 推到 WebDAV
 
-异地那一份用 WebDAV 送出去（坚果云、Nextcloud、群晖都行）。填好这一段再测一下：
+异地副本用 WebDAV 送出（坚果云、Nextcloud、群晖都行）。填好这一段再测一下：
 
 ```sh
 python3 bin/backup.py settings set webdav.enabled=true
@@ -219,10 +219,10 @@ python3 bin/backup.py webdav test          # 连得上、目录建得出、写�
 
 怎么做的：
 
-- 每次自动备份之后把这一份 PUT 上去，然后让**远端与本地留存一致**——远端只留本地还留着的包名，
+- 每次自动备份之后把新包 PUT 上去，然后让**远端与本地留存一致**——远端只留本地还留着的包名，
   多出来的删掉；**只删我们自己命名的文件**（`YYYYMMDD-HHMMSS-<种类>.tar.gz`），
   同一个目录里别人放的东西一概不碰
-- **上传失败不影响本地备份**：本地的包已经落盘，远端只是异地那一份。失败写进日志与审计
+- **上传失败不影响本地备份**：本地的包已经落盘，远端只是异地副本。失败写进日志与审计
   （`backup_upload_failed`），用 `webdav test` 与 `webdav list` 排查
 - TLS 证书照常校验，自签证书请先在这台机器上装好；不支持明文以外的降级
 - 手动推一次：`python3 bin/backup.py webdav push 最新`；清远端：`webdav prune`；看远端：`webdav list`

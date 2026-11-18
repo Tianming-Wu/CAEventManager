@@ -2209,12 +2209,18 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   padding: 24px;
 }
 .auth-card .brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: .8rem;
   color: var(--dim);
   letter-spacing: .08em;
   text-transform: uppercase;
   margin-bottom: 4px;
 }
+/* 登录 / 重设密码这类卡片上的标志：与标题同一行，别把产品名挤到下一行去 */
+.auth-card .brand-mark { color: var(--accent-strong); }
+.auth-card .brand .brand-name { text-transform: none; letter-spacing: .01em; }
 .auth-card h1 { margin-bottom: 16px; }
 .auth-card .field { margin-bottom: 12px; }
 .hint { font-size: .78rem; color: var(--dim); }

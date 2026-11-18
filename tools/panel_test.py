@@ -120,6 +120,31 @@ def post(opener, path, body=None, expect=200, marker="CAEventManager"):
                 method="POST", marker=marker)
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """页面会把人送去别处：要看见跳转目标，就不能让 urllib 先跟过去。"""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def open_page(opener, path):
+    """取一页，返回 (状态码, 跳转目标)。同一份 cookie 用来判断身份。"""
+    jar = None
+    for handler in opener.handlers:
+        if isinstance(handler, urllib.request.HTTPCookieProcessor):
+            jar = handler.cookiejar
+    probe = urllib.request.build_opener(
+        urllib.request.HTTPCookieProcessor(jar or http.cookiejar.CookieJar()),
+        _NoRedirect())
+    try:
+        with probe.open(ROOT + path, timeout=20) as res:
+            res.read()
+            return res.status, res.geturl()
+    except urllib.error.HTTPError as exc:
+        exc.read()
+        return exc.code, exc.headers.get("Location")
+
+
 def post_bytes(opener, path, data, expect=200, ctype="application/octet-stream"):
     """原样上送一段字节（xlsx 是 zip，不能当 JSON）。"""
     req = urllib.request.Request(
@@ -2174,9 +2199,10 @@ def main():
           refused and refused.get("sudoRequired") is True, refused)
     post(owner, "/api/panel/sudo", {"password": owner_password()})
 
-    short = call(owner, "/api/panel/account/password",
-                 {"id": pid, "password": "123"}, expect=400)
-    check("自己填的密码也要够长", short and "8" in (short.get("error") or ""), short)
+    given = call(owner, "/api/panel/account/password",
+                 {"id": pid, "password": "manager-picked-1"}, expect=400)
+    check("管理员不能自己定密码内容",
+          given and "平台生成" in (given.get("error") or ""), given)
 
     reset = post(owner, "/api/panel/account/password", {"id": pid})
     new_pw = (reset or {}).get("password") or ""
@@ -2202,10 +2228,10 @@ def main():
               denied and "账户信息" in (denied.get("error") or ""), denied)
 
     print("== 管理员手动开号：临时密码 + 登录后只能去重设 ==")
-    post(owner, "/api/panel/sudo", {"password": owner_password()})
+    post(owner, "/api/panel/sudo/exit", {})
     made2 = post(owner, "/api/panel/account/create",
                  {"username": "madebyadmin", "name": "管理员开的号", "role": "admin"})
-    check("建号成功，拿到一串临时密码",
+    check("没提权也能建号，而且拿到一串临时密码",
           made2 and made2.get("ok") and len(made2.get("password") or "") >= 12, made2)
     temp_pw = (made2 or {}).get("password") or ""
     listed = call(owner, "/api/panel/accounts?limit=200")
@@ -2237,6 +2263,23 @@ def main():
     check("临时密码的标记撤掉了",
           bool(row2) and row2[0].get("passTemp") is False, row2)
 
+    again = call(fresh_acc, "/api/panel/password/reset",
+                 {"new": "another-pass-1", "confirm": "another-pass-1"}, expect=409)
+    check("状态正常之后重设接口不再受理",
+          again and "无需重设" in (again.get("error") or ""), again)
+
+    print("== 重设密码页：只对临时密码的账号开 ==")
+    status, where = open_page(anon, "/reset")
+    check("未登录访问重设页先去登录",
+          status in (301, 302, 303) and (where or "").endswith("/login"),
+          (status, where))
+    status, where = open_page(fresh_acc, "/reset")
+    check("状态正常的账号访问重设页回主界面",
+          status in (301, 302, 303) and (where or "").endswith("/panel"),
+          (status, where))
+    status, where = open_page(fresh_acc, "/panel")
+    check("状态正常的账号照常进控制台", status == 200, (status, where))
+
     print("== 自己改密码：别处下线，本机还在 ==")
     here = session()
     post(here, "/api/panel/login",
@@ -2258,11 +2301,30 @@ def main():
     check("新密码能登录", call(fresh2, "/api/panel/me").get("authed") is True)
 
     # 管理员再重置一次：这个账号又回到临时密码状态
-    post(owner, "/api/panel/account/password", {"id": (row2 or [{}])[0].get("id")})
+    post(owner, "/api/panel/sudo", {"password": owner_password()})
+    reset3 = post(owner, "/api/panel/account/password",
+                  {"id": (row2 or [{}])[0].get("id")})
     back = [a for a in call(owner, "/api/panel/accounts?limit=200")["accounts"]
             if a["username"] == "madebyadmin"]
     check("管理员重置之后又标回临时密码",
           bool(back) and back[0].get("passTemp") is True, back)
+
+    print("== 重设密码页：临时密码的账号只能停在这一页 ==")
+    status, where = open_page(anon, "/reset")
+    check("未登录访问重设页先去登录",
+          status in (301, 302, 303) and (where or "").endswith("/login"),
+          (status, where))
+    temp_acc = session()
+    post(temp_acc, "/api/panel/login",
+         {"username": "madebyadmin", "password": (reset3 or {}).get("password")})
+    status, where = open_page(temp_acc, "/reset")
+    check("临时密码的账号能打开重设页", status == 200, (status, where))
+    status, where = open_page(temp_acc, "/panel")
+    check("临时密码的账号进控制台被送回重设页",
+          status in (301, 302, 303) and (where or "").endswith("/reset"),
+          (status, where))
+    status, where = open_page(owner, "/panel")
+    check("别的账号照常进控制台", status == 200, (status, where))
 
     print("== event pages still reachable ==")
     token = events[0]["id"]

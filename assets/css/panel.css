@@ -1788,6 +1788,8 @@ input[type="color"] {
 .tag.owner { border-color: var(--accent-line); background: var(--accent-soft); color: var(--accent-strong); }
 .tag.superadmin { border-color: var(--accent-line); color: var(--accent-strong); }
 .tag.pending { border-color: var(--accent-line); background: var(--accent-soft); color: var(--accent-strong); }
+/* 临时密码：跟"待审核"同一档的提示色——它也是一个"还没到位"的状态 */
+.tag.warn { border-color: var(--accent-line); background: var(--accent-soft); color: var(--accent-strong); }
 .tag.disabled, .tag.rejected { border-color: var(--danger-line); background: var(--danger-soft); color: var(--danger); }
 /* the × inside a 写入权限 tag: a target big enough to hit, not a tiny glyph */
 .tag-x {

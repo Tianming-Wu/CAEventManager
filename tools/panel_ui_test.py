@@ -3293,6 +3293,59 @@ def write_png(path):
                  chunk(b"IDAT", zlib.compress(row * 4)) + chunk(b"IEND", b""))
 
 
+def temp_password_page(browser):
+    """管理员开的号：临时密码登录 → 只落在重设密码那一页 → 改完才能进面板。"""
+    print("== 临时密码：登录后被送去重设密码 ==")
+    owner = owner_opener()
+    call(owner, "/api/panel/sudo", {"password": PASSWORD})
+    username = "temp" + str(int(time.time()))[-6:]
+    made = call(owner, "/api/panel/account/create",
+                {"username": username, "name": "临时密码测试", "role": "admin"})
+    check("管理员开号拿到临时密码",
+          bool(made and made.get("password")), made)
+    temp_pw = (made or {}).get("password") or ""
+
+    ctx, page = new_page(browser, 1180, 860)
+    try:
+        page.goto(BASE + "/login", wait_until="domcontentloaded")
+        page.fill("#username", username)
+        page.fill("#password", temp_pw)
+        page.click("#go")
+        page.wait_for_url("**/reset", timeout=20000)
+        page.wait_for_timeout(500)
+        check("登录后直接落到重设密码页", "/reset" in page.url, page.url)
+        fields = page.evaluate("""() => ({
+            one: !!document.getElementById('newPass'),
+            two: !!document.getElementById('newPass2'),
+            old: !!document.getElementById('oldPass'),
+            title: (document.querySelector('h1') || {}).innerText || ''})""")
+        check("页面上只有新密码与再输一次，不要旧密码",
+              fields["one"] and fields["two"] and not fields["old"], fields)
+        check("标题写着重设密码", fields["title"].strip() == "重设密码", fields["title"])
+
+        page.fill("#newPass", "abc12345")
+        page.fill("#newPass2", "abc12399")
+        page.click("#go")
+        page.wait_for_timeout(400)
+        check("两次不一样就当场说明",
+              "不一致" in page.inner_text("#err"), page.inner_text("#err"))
+
+        page.fill("#newPass", "newpass-8899")
+        page.fill("#newPass2", "newpass-8899")
+        page.click("#go")
+        page.wait_for_url("**/panel**", timeout=20000)
+        page.wait_for_function(
+            "() => document.documentElement.getAttribute('data-booted') === '1'",
+            timeout=25000)
+        check("改完之后进得了面板", "#/reset" not in page.url, page.url)
+        after = call(owner, "/api/panel/accounts?limit=200")
+        row = [a for a in after["accounts"] if a["username"] == username]
+        check("临时密码的标记撤掉了",
+              bool(row) and row[0].get("passTemp") is False, row)
+    finally:
+        ctx.close()
+
+
 def users_table(page):
     print("== a table header must not move when the body empties ==")
     page.goto(BASE + "/panel#/users")
@@ -3340,6 +3393,46 @@ def users_table(page):
     page.wait_for_timeout(900)
     check("填 0 就回到默认", "默认" in page.inner_text("#overlayBody"),
           page.inner_text("#overlayBody")[:160])
+    print("== 重置密码：新密码只显示一次 ==")
+    # 上一段（调配额）的弹窗还开着：先关掉，不然它挡着表格
+    page.evaluate("() => document.getElementById('overlayClose').click()")
+    page.wait_for_timeout(300)
+    # 重置密码要提权：先在页面会话里进 sudo，免得中途被密码框打断
+    page.evaluate("""(pw) => PX.api("/sudo", {method: "POST", body: {password: pw}})""",
+                  PASSWORD)
+    page.wait_for_timeout(300)
+    # 站长的密码不能在用户管理里改：挑一行不是站长的账号来试
+    picked = page.evaluate("""() => {
+        const rows = Array.from(document.querySelectorAll('#accountsTable tbody tr'));
+        const row = rows.find(r => !r.querySelector('.tag.owner') && r.querySelector('[data-acct]'));
+        if (!row) return '';
+        row.querySelector('[data-acct]').click();
+        return row.innerText.trim().split('\\n')[0];
+    }""")
+    check("找到一行不是站长的账号", bool(picked), picked)
+    page.wait_for_timeout(400)
+    check("账号弹窗里有重置密码", page.locator("[data-pwd]").count() == 1)
+    page.click("[data-pwd]")
+    page.wait_for_timeout(350)
+    check("先让填新密码，留空就由系统生成",
+          page.locator("#pwdNew").is_visible()
+          and "留空" in (page.get_attribute("#pwdNew", "placeholder") or ""),
+          page.get_attribute("#pwdNew", "placeholder"))
+    check("并说明会话与令牌会失效",
+          "令牌" in page.inner_text("#overlayBody"), page.inner_text("#overlayBody")[:200])
+    page.click("#pwdGo")
+    page.wait_for_timeout(1200)
+    got = page.evaluate("""() => {
+        const box = document.getElementById('pwdOut');
+        return {value: box ? box.value : '', readOnly: box ? box.readOnly : false,
+                note: document.getElementById('overlayBody').innerText};
+    }""")
+    check("结果页给出了一串新密码", len(got["value"] or "") >= 12, got["value"])
+    check("那串只读，不能误改", got["readOnly"] is True)
+    check("说清了只显示这一次", "一次" in (got["note"] or ""), (got["note"] or "")[:160])
+    page.evaluate("() => document.getElementById('overlayClose').click()")
+    page.wait_for_timeout(300)
+
     page.evaluate("() => document.getElementById('overlayClose').click()")
     page.wait_for_timeout(300)
 
@@ -5060,6 +5153,8 @@ def main():
                     if WITH_ACCOUNTS:
                         profile_page(page)
                     users_table(page)
+                    if WITH_ACCOUNTS:
+                        temp_password_page(browser)
                 if want("ops"):
                     events_table(page)
                     dialog_page(page)

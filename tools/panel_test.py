@@ -2150,6 +2150,120 @@ def main():
     check("WebDAV 没开时测试按钮说清楚",
           dav and "WebDAV" in (dav.get("error") or ""), dav)
 
+    print("== 账号：重置别人的密码 ==")
+    post(owner, "/api/panel/sudo", {"password": owner_password()})
+    made = post(anon, "/api/panel/register",
+                {"username": "pwdprobe", "name": "改密码用的",
+                 "password": "old-password-1"})
+    check("先造一个待审核账号", made and made.get("ok"), made)
+    accounts = call(owner, "/api/panel/accounts?limit=200")
+    probe = [a for a in accounts["accounts"] if a["username"] == "pwdprobe"]
+    check("账号在清单里", bool(probe), [a["username"] for a in accounts["accounts"]][:5])
+    pid = probe[0]["id"] if probe else 0
+    post(owner, "/api/panel/account/decide", {"id": pid, "action": "approve"})
+
+    # 被重置的那个账号先登录一次，用来验证"会话会被踢掉"
+    victim = session()
+    post(victim, "/api/panel/login",
+         {"username": "pwdprobe", "password": "old-password-1"})
+    check("旧密码能登录", call(victim, "/api/panel/me").get("authed") is True)
+
+    post(owner, "/api/panel/sudo/exit", {})
+    refused = call(owner, "/api/panel/account/password", {"id": pid}, expect=403)
+    check("重置别人的密码要重输一次密码",
+          refused and refused.get("sudoRequired") is True, refused)
+    post(owner, "/api/panel/sudo", {"password": owner_password()})
+
+    short = call(owner, "/api/panel/account/password",
+                 {"id": pid, "password": "123"}, expect=400)
+    check("自己填的密码也要够长", short and "8" in (short.get("error") or ""), short)
+
+    reset = post(owner, "/api/panel/account/password", {"id": pid})
+    new_pw = (reset or {}).get("password") or ""
+    check("不给新密码就生成一串",
+          bool(reset and reset.get("generated")) and len(new_pw) >= 12, reset)
+    check("顺手把旧会话作废了", (reset or {}).get("sessions", 0) >= 1, reset)
+    check("被重置的账号现在处于未登录",
+          call(victim, "/api/panel/me").get("authed") is False)
+
+    fresh = session()
+    post(fresh, "/api/panel/login",
+         {"username": "pwdprobe", "password": "old-password-1"}, expect=401)
+    check("旧密码登录不上去了", True)
+    post(fresh, "/api/panel/login", {"username": "pwdprobe", "password": new_pw})
+    check("新密码能登录", call(fresh, "/api/panel/me").get("authed") is True)
+
+    owner_row = [a for a in call(owner, "/api/panel/accounts?limit=200")["accounts"]
+                 if a["role"] == "owner"]
+    if owner_row:
+        denied = call(owner, "/api/panel/account/password",
+                      {"id": owner_row[0]["id"]}, expect=403)
+        check("站长的密码不能在用户管理里改",
+              denied and "账户信息" in (denied.get("error") or ""), denied)
+
+    print("== 管理员手动开号：临时密码 + 登录后只能去重设 ==")
+    post(owner, "/api/panel/sudo", {"password": owner_password()})
+    made2 = post(owner, "/api/panel/account/create",
+                 {"username": "madebyadmin", "name": "管理员开的号", "role": "admin"})
+    check("建号成功，拿到一串临时密码",
+          made2 and made2.get("ok") and len(made2.get("password") or "") >= 12, made2)
+    temp_pw = (made2 or {}).get("password") or ""
+    listed = call(owner, "/api/panel/accounts?limit=200")
+    row = [a for a in listed["accounts"] if a["username"] == "madebyadmin"]
+    check("新账号在清单里，而且标着临时密码",
+          bool(row) and row[0].get("passTemp") is True, row)
+    check("新账号直接是可用状态（不用再审）",
+          bool(row) and row[0].get("status") == "active", row)
+
+    fresh_acc = session()
+    login = post(fresh_acc, "/api/panel/login",
+                 {"username": "madebyadmin", "password": temp_pw})
+    check("临时密码能登录，但登录结果说要重设",
+          login and login.get("mustReset") is True, login)
+    blocked = call(fresh_acc, "/api/panel/accounts", expect=403)
+    check("重设之前别的接口一律不放行",
+          blocked and blocked.get("resetRequired") is True, blocked)
+
+    bad = call(fresh_acc, "/api/panel/password/reset",
+               {"new": "first-new-pass", "confirm": "second-new-pass"}, expect=400)
+    check("两次输的不一样就不收", bad and "不一致" in (bad.get("error") or ""), bad)
+    reset2 = post(fresh_acc, "/api/panel/password/reset",
+                  {"new": "first-new-pass", "confirm": "first-new-pass"})
+    check("重设成功", reset2 and reset2.get("ok"), reset2)
+    check("重设之后能用了",
+          call(fresh_acc, "/api/panel/me").get("mustReset") is False)
+    listed2 = call(owner, "/api/panel/accounts?limit=200")
+    row2 = [a for a in listed2["accounts"] if a["username"] == "madebyadmin"]
+    check("临时密码的标记撤掉了",
+          bool(row2) and row2[0].get("passTemp") is False, row2)
+
+    print("== 自己改密码：别处下线，本机还在 ==")
+    here = session()
+    post(here, "/api/panel/login",
+         {"username": "madebyadmin", "password": "first-new-pass"})
+    other = session()
+    post(other, "/api/panel/login",
+         {"username": "madebyadmin", "password": "first-new-pass"})
+    check("两条会话都在线",
+          call(here, "/api/panel/me").get("authed") is True
+          and call(other, "/api/panel/me").get("authed") is True)
+    changed = post(here, "/api/panel/password",
+                   {"old": "first-new-pass", "new": "brand-new-pass-9"})
+    check("改密码成功", changed and changed.get("ok"), changed)
+    check("改密码的这一台还在线", call(here, "/api/panel/me").get("authed") is True)
+    check("另一台被踢下线", call(other, "/api/panel/me").get("authed") is False)
+    fresh2 = session()
+    post(fresh2, "/api/panel/login",
+         {"username": "madebyadmin", "password": "brand-new-pass-9"})
+    check("新密码能登录", call(fresh2, "/api/panel/me").get("authed") is True)
+
+    # 管理员再重置一次：这个账号又回到临时密码状态
+    post(owner, "/api/panel/account/password", {"id": (row2 or [{}])[0].get("id")})
+    back = [a for a in call(owner, "/api/panel/accounts?limit=200")["accounts"]
+            if a["username"] == "madebyadmin"]
+    check("管理员重置之后又标回临时密码",
+          bool(back) and back[0].get("passTemp") is True, back)
+
     print("== event pages still reachable ==")
     token = events[0]["id"]
     board = call(anon, "/%s/api/board" % token)

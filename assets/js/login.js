@@ -35,7 +35,12 @@
         username: document.getElementById("username").value.trim(),
         password: document.getElementById("password").value
       }
-    }).then(function () {
+    }).then(function (d) {
+      // 临时密码：服务端也拦着，这里直接送去重设密码那一页
+      if (d && d.mustReset) {
+        location.href = PX.PREFIX + "/reset";
+        return;
+      }
       location.href = returnTarget() || PX.PREFIX + "/panel";
     }).catch(function (e) {
       err.textContent = e.message || "登录失败";

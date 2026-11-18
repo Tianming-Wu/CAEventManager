@@ -302,6 +302,9 @@ LATE_COLUMNS = (
     ("accounts", "chat_quota", "INTEGER NOT NULL DEFAULT 0"),
     # 从侧栏进入运维助手时，是否接着上次那段（具体哪一段记在各自设备上）
     ("accounts", "chat_resume", "INTEGER NOT NULL DEFAULT 1"),
+    # 这个账号现在用的是"临时密码"：管理员建的号、或管理员替他重置过密码。
+    # 这种账号登录后只能去重设密码那一页，别的都先不放行
+    ("accounts", "pass_temp", "INTEGER NOT NULL DEFAULT 0"),
     # 上下文窗口的估算上限（tokens）。0 表示用缺省值；只影响那条进度环的百分比
     ("accounts", "model_ctx", "INTEGER NOT NULL DEFAULT 0"),
     ("sessions", "sudo_until", "REAL NOT NULL DEFAULT 0"),
@@ -513,6 +516,67 @@ def verify_password(password, stored):
         "sha256", password.encode("utf-8"), bytes.fromhex(salt_hex), int(iterations)
     )
     return hmac.compare_digest(dk.hex(), dk_hex)
+
+
+# 重置别人密码时由服务端给出的那串口令：去掉容易看错的 0/O/1/l/I，方便口头或抄写转达
+TEMP_PASSWORD_ALPHABET = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+TEMP_PASSWORD_LEN = 12
+PASSWORD_MIN = 8
+
+
+def temp_password(length=TEMP_PASSWORD_LEN):
+    """生成一串临时口令。用平台的随机源，不用 random。"""
+    return "".join(rng.choice(TEMP_PASSWORD_ALPHABET) for _ in range(length))
+
+
+def set_password(tx, account_id, password, keep_token="", revoke_tokens=True,
+                 temp=False):
+    """改密码，并把这个人已经登录的东西作废。
+
+    密码是凭据，换它的意思就是"之前的效果一律不认"：所有会话与 API 令牌一起失效，
+    人得用新密码重新登录。``keep_token`` 用来留住"正在改密码的这一台设备"——
+    自己改自己的密码时不该把自己踢下线；``revoke_tokens=False`` 用于同一种情形：
+    自己的令牌是自己管的，不该因为改密码就全部作废。
+
+    ``temp=True`` 表示这串是"临时密码"：这个账号下次登录只能先去重设密码。
+
+    返回 (被清掉的会话数, 被吊销的令牌数)。
+    """
+    tx.execute("UPDATE accounts SET pass=? WHERE id=?",
+               (hash_password(password), int(account_id)))
+    tx.execute("UPDATE accounts SET pass_temp=? WHERE id=?",
+               (1 if temp else 0, int(account_id)))
+    if keep_token:
+        sessions = tx.execute(
+            "DELETE FROM sessions WHERE account_id=? AND token<>?",
+            (int(account_id), keep_token)).rowcount
+    else:
+        sessions = tx.execute("DELETE FROM sessions WHERE account_id=?",
+                              (int(account_id),)).rowcount
+    tokens = 0
+    if revoke_tokens:
+        tokens = tx.execute(
+            "UPDATE api_tokens SET revoked_at=? WHERE account_id=? AND revoked_at=0",
+            (time.time(), int(account_id))).rowcount
+    return int(sessions or 0), int(tokens or 0)
+
+
+def create_account(tx, username, name, role, password, note="", temp=True,
+                   status="active", actor=""):
+    """开一个账号（管理员手动建的号走这里）。密码由调用方给，通常是系统生成的临时口令。
+
+    ``temp=True`` 会把它标成"临时密码"：这个账号第一次登录只能先去重设密码，
+    别的地方一律不放行。返回 (id, uid)。
+    """
+    uid = next_uid(tx)
+    cur = tx.execute(
+        "INSERT INTO accounts (uid, username, name, role, status, pass, note,"
+        " created_at, pass_temp) VALUES (?,?,?,?,?,?,?,?,?)",
+        (uid, username, name, role, status, hash_password(password), note or "",
+         time.time(), 1 if temp else 0))
+    audit(tx, actor or "system", "account_create", str(uid),
+          audit_note(role=role, temp=bool(temp)))
+    return cur.lastrowid, uid
 
 
 def create_session(conn, account_id, ip=""):
@@ -1239,6 +1303,8 @@ def view(row):
         "decidedBy": row["decided_by"],
         "lastLogin": row["last_login"],
         "banReason": row["ban_reason"] if "ban_reason" in row.keys() else "",
+        # 临时密码：这个账号下次登录只能先去重设密码
+        "passTemp": bool(row["pass_temp"]) if "pass_temp" in row.keys() else False,
         "avatar": row["avatar"] or "",
         "avatarAt": row["avatar_at"] or 0,
         # 0 表示用默认配额；界面据此显示"默认 / 已单独调整"
@@ -1347,6 +1413,8 @@ def bootstrap(cfg, log=print):
 # --------------------------------------------------------------------------- #
 PANEL_PAGES = {"/": "panel_login.html", "/login": "panel_login.html",
                "/register": "panel_register.html", "/panel": "panel_panel.html",
+               # 临时密码的账号登录后落在这里：只改密码，别的页面都进不去
+               "/reset": "panel_reset.html",
                # 打印页：报名表 / 已报名单，只有一张纸，不带面板外壳
                "/print": "panel_print.html",
                # 使用文档：自带一套骨架（自己的导航与主题开关），从侧栏新开一个标签页进来

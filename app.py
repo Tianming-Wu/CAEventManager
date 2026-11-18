@@ -71,7 +71,7 @@ PAGES_DIR = os.path.join(BASE_DIR, "pages")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.13.15.141"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.13.16.142"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -504,6 +504,9 @@ MODULE_OFF_MSG = "此活动必需的资源已被管理员停用"
 
 # 意料之外的异常：接口回这一句，服务端日志与审计里另有全栈
 INTERNAL_ERROR_TEXT = "服务器内部错误，已记进服务日志"
+
+# 还在用临时密码的账号，登录之后只放行这几个接口：其余一律让他先去重设密码
+TEMP_PASSWORD_ALLOWED = ("/me", "/logout", "/password/reset")
 
 
 def _with_stopped(view, stopped):
@@ -1393,6 +1396,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._redirect(_return_to(back, home) or (home + "/panel") or "panel")
             if acc is None and route in ("/panel", "/docs"):
                 return self._redirect((home + "/login") or "login")
+            # 还在用临时密码：除了重设密码那一页，别的页面一律送过去
+            if (acc is not None and "pass_temp" in acc.keys() and acc["pass_temp"]
+                    and route not in ("/reset", "/logout")):
+                return self._redirect((home + "/reset") or "reset")
             return self._serve_panel_page(name)
 
         return self._panel_api(method, route, raw_path, query)
@@ -1448,6 +1455,14 @@ class Handler(BaseHTTPRequestHandler):
                 return {}
             return data if isinstance(data, dict) else {}
 
+        # 临时密码的账号：登录了也哪儿都去不了，先重设密码（前端看到 resetRequired 就跳）
+        _temp_acc = panel.session_account(conn, self._panel_token())
+        if (_temp_acc is not None and "pass_temp" in _temp_acc.keys()
+                and _temp_acc["pass_temp"] and path not in TEMP_PASSWORD_ALLOWED):
+            return self._json({"ok": False,
+                               "error": "这个账号还在用临时密码，请先重设密码",
+                               "resetRequired": True}, 403)
+
         if path == "/stream" and method == "GET":
             acc = panel.session_account(conn, self._panel_token())
             if acc is None:
@@ -1469,6 +1484,9 @@ class Handler(BaseHTTPRequestHandler):
                         panel.touch_token(conn, token_row["id"])
             return self._json({"ok": True, "authed": acc is not None,
                                "me": panel.view(acc) if acc else None,
+                               "mustReset": bool(acc["pass_temp"])
+                               if (acc is not None and "pass_temp" in acc.keys())
+                               else False,
                                "sudoUntil": sudo_until,
                                "sudoTtl": panel.SUDO_TTL,
                                "viaToken": token_row["name"] if token_row else "",
@@ -1576,8 +1594,12 @@ class Handler(BaseHTTPRequestHandler):
                 panel.audit(tx, row["username"], "login", None,
                             panel.audit_note(ip=ip))
             cookie = "%s=%s; Path=%s; HttpOnly; SameSite=Lax; Max-Age=%d" % (
-                panel.COOKIE, token, panel.cookie_path_for(raw_path, route), panel.SESSION_TTL)
-            return self._json({"ok": True, "me": panel.view(row)},
+                panel.COOKIE, token, panel.cookie_path_for(raw_path, route),
+                panel.SESSION_TTL)
+            # 临时密码：会话照发（人家确实登录了），但只能先去重设密码那一页
+            must_reset = bool(row["pass_temp"]) if "pass_temp" in row.keys() else False
+            return self._json({"ok": True, "me": panel.view(row),
+                               "mustReset": must_reset},
                               headers=[("Set-Cookie", cookie)])
 
         if path == "/logout" and method == "POST":
@@ -1724,13 +1746,35 @@ class Handler(BaseHTTPRequestHandler):
             if not panel.verify_password(data.get("old") or "", acc["pass"]):
                 raise model.ApiError("当前密码错误", 403)
             new = (data.get("new") or "").strip()
-            if len(new) < 8:
-                raise model.ApiError("新密码至少 8 位")
+            if len(new) < panel.PASSWORD_MIN:
+                raise model.ApiError("新密码至少 %d 位" % panel.PASSWORD_MIN)
             with panel.tx() as tx:
-                tx.execute("UPDATE accounts SET pass=? WHERE id=?",
-                           (panel.hash_password(new), acc["id"]))
-                panel.audit(tx, acc["username"], "password_change")
-            return self._json({"ok": True})
+                # 自己改自己的：留住正在用的这台设备，别处的登录踢掉；
+                # 自己的 API 令牌是自己管的，不跟着作废
+                others, _tokens = panel.set_password(tx, acc["id"], new,
+                                                     keep_token=sess,
+                                                     revoke_tokens=False)
+                panel.audit(tx, acc["username"], "password_change",
+                            panel.audit_note(sessions=others))
+            return self._json({"ok": True, "sessions": others})
+
+        if path == "/password/reset" and method == "POST":
+            # 临时密码的账号在这里重设密码：不用旧密码（它就是那串临时的，人已经用它登录了），
+            # 但必须是登录状态，而且只改自己的
+            data = body()
+            new = (data.get("new") or "").strip()
+            confirm = (data.get("confirm") or "").strip()
+            if len(new) < panel.PASSWORD_MIN:
+                raise model.ApiError("新密码至少 %d 位" % panel.PASSWORD_MIN)
+            if confirm and confirm != new:
+                raise model.ApiError("两次输入的密码不一致")
+            with panel.tx() as tx:
+                others, _tokens = panel.set_password(tx, acc["id"], new,
+                                                     keep_token=sess,
+                                                     revoke_tokens=False, temp=False)
+                panel.audit(tx, acc["username"], "password_reset_temp",
+                            panel.audit_note(sessions=others))
+            return self._json({"ok": True, "sessions": others})
 
         if path == "/accounts" and method == "GET":
             # 账号清单是超管才看得到的东西：普通管理员不该能枚举全站的人
@@ -2016,6 +2060,73 @@ class Handler(BaseHTTPRequestHandler):
                                              events_orphaned=left))
             return self._json({"ok": True, "deleted": True,
                                "uid": target["uid"], "eventsOrphaned": left})
+
+        if path == "/account/password" and method == "POST":
+            # 替别人重置密码：用自己的权限动别人的凭据，超管及以上 + sudo。
+            # 不给新密码就由服务端生成一串临时口令，只在这一次的响应里出现
+            actor = need("superadmin", "owner")
+            need_sudo()
+            data = body()
+            target = conn.execute("SELECT * FROM accounts WHERE id=?",
+                                  (int(data.get("id") or 0),)).fetchone()
+            if target is None:
+                raise model.ApiError("账号不存在", 404)
+            if target["role"] == "owner":
+                raise model.ApiError("站长的密码只能在「账户信息」里自己改", 403)
+            if actor["role"] == "superadmin" and target["role"] != "admin":
+                raise model.ApiError("超级管理员只能重置普通管理员的密码", 403)
+            password = str(data.get("password") or "")
+            generated = not password
+            if generated:
+                password = panel.temp_password()
+            elif len(password) < panel.PASSWORD_MIN:
+                raise model.ApiError("密码至少 %d 位" % panel.PASSWORD_MIN)
+            with panel.tx() as tx:
+                # 管理员重置出来的一律算"临时密码"：对方下次登录要先自己改掉
+                sessions, tokens = panel.set_password(tx, target["id"], password,
+                                                     temp=True)
+                panel.audit(tx, actor["username"], "account_password",
+                            str(target["uid"]),
+                            panel.audit_note(generated=bool(generated),
+                                             sessions=sessions, tokens=tokens))
+            return self._json({"ok": True, "password": password,
+                               "generated": generated,
+                               "sessions": sessions, "tokens": tokens})
+
+        if path == "/account/create" and method == "POST":
+            # 管理员手动开号：只给登录名与显示名，密码由系统生成（管理员不设密码）。
+            # 这串密码是"临时密码"：对方第一次登录只能先去重设密码
+            actor = need("superadmin", "owner")
+            need_sudo()
+            data = body()
+            username = (data.get("username") or "").strip()
+            name = (data.get("name") or "").strip()
+            role = (data.get("role") or "admin").strip()
+            problem = panel.username_problem(username)
+            if problem:
+                raise model.ApiError(problem,
+                                     400 if problem != panel.USERNAME_TAKEN else 409)
+            if not name:
+                raise model.ApiError("请填写显示名")
+            if len(name) > 24:
+                raise model.ApiError("显示名最长 24 个字")
+            if role not in ("admin", "superadmin"):
+                raise model.ApiError("新账号只能是管理员或超级管理员")
+            if actor["role"] == "superadmin" and role != "admin":
+                raise model.ApiError("超级管理员只能新建普通管理员", 403)
+            password = panel.temp_password()
+            with panel.tx() as tx:
+                if panel.username_taken(tx, username):
+                    raise model.ApiError(panel.USERNAME_TAKEN, 409)
+                limit = localconfig.static_limit(LOCAL_CFG, "max_accounts")
+                if panel.account_cap_reached(tx, limit):
+                    raise model.ApiError(panel.ACCOUNT_FULL, 403)
+                acc_id, uid = panel.create_account(
+                    tx, username, name, role, password,
+                    note=(data.get("note") or "").strip()[:200], temp=True,
+                    actor=actor["username"])
+            return self._json({"ok": True, "id": acc_id, "uid": uid,
+                               "password": password})
 
         if path == "/account/role" and method == "POST":
             actor = need("owner")

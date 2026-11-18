@@ -312,7 +312,12 @@
   }
   function statusTag(a) {
     var cls = a.status === "active" ? "" : a.status;
-    return '<span class="tag ' + cls + '">' + PX.esc(a.statusLabel) + "</span>";
+    var out = '<span class="tag ' + cls + '">' + PX.esc(a.statusLabel) + "</span>";
+    // 临时密码：还没自己改过密码，登录后只能先去重设
+    if (a.passTemp) {
+      out += ' <span class="tag warn" title="还在用临时密码，登录后要先重设">临时密码</span>';
+    }
+    return out;
   }
 
   /* ---------------------------------------------------------------- overlay */
@@ -4062,6 +4067,7 @@
       ["最近登录", PX.when(a.lastLogin)]
     ];
     if (a.banReason) rows.push(["封禁原因", a.banReason]);
+    if (a.passTemp) rows.push(["密码", "临时密码（对方登录后要先重设）"]);
     if (a.decidedBy) rows.push(["上次处理", a.decidedBy + " · " + PX.when(a.decidedAt)]);
     if (a.note) rows.push(["申请说明", a.note]);
 
@@ -4090,6 +4096,12 @@
     }
     if (isSuper()) {
       btns.push('<button class="btn ghost" data-quota="' + a.id + '">调整存档配额</button>');
+    }
+    // 重置密码：超管只能重置普通管理员；站长的密码只能他自己在账户信息里改
+    var canReset = isSuper() && a.role !== "owner"
+      && (isOwner() || a.role === "admin");
+    if (canReset) {
+      btns.push('<button class="btn ghost" data-pwd="' + a.id + '">重置密码</button>');
     }
     // 彻底删除只给"已停用、而且真的能删"的账号：
     // 没停用就根本不出现；停用了还删不掉就做成灰按钮，悬停说出缺什么
@@ -6498,6 +6510,123 @@
     });
   }
 
+  /* 新建账号：管理员只给登录名与显示名，密码由系统生成（临时密码） */
+  function newAccountDialog() {
+    var roleField = isOwner()
+      ? '<div class="field"><label for="naRole">角色</label>' +
+        '<select id="naRole"><option value="admin">管理员</option>' +
+        '<option value="superadmin">超级管理员</option></select></div>'
+      : "";
+    openOverlay("account-new", "新建账号",
+      '<div class="field"><label for="naUser">登录名</label>' +
+      '<input id="naUser" type="text" autocomplete="off" autocapitalize="off" ' +
+      'spellcheck="false" placeholder="3~24 位，字母数字和 . _ -"></div>' +
+      '<div class="field"><label for="naName">显示名</label>' +
+      '<input id="naName" type="text" autocomplete="off" placeholder="例如 李老师"></div>' +
+      roleField +
+      '<p class="hint">密码不在这里设：系统会生成一串临时密码，只显示一次。' +
+      "对方第一次登录只能先去重设密码，改完才能进面板。</p>" +
+      '<div class="row" style="margin-top:16px;justify-content:flex-end">' +
+      '<button class="btn" data-close-overlay="1" type="button">取消</button>' +
+      '<button class="btn primary" id="naGo" type="button">创建</button></div>');
+    $("#naUser").focus();
+    $("#naGo").addEventListener("click", function () {
+      var body = {
+        username: ($("#naUser").value || "").trim(),
+        name: ($("#naName").value || "").trim()
+      };
+      if ($("#naRole")) body.role = $("#naRole").value;
+      apiSudo("/account/create", { method: "POST", body: body },
+              "新建账号", "会开出一个新账号，并给它一串临时密码")
+        .then(function (d) {
+          showCreatedAccount(body.username, d);
+        })
+        .catch(fail);
+    });
+  }
+
+  /* 开号的结果：临时密码只出现这一次，交代清楚对方第一次登录要做什么 */
+  function showCreatedAccount(username, d) {
+    openOverlay("account-new-done", "账号已创建",
+      '<p class="page-sub">把登录名与下面这串临时密码交给 ' + PX.esc(username) +
+      "。第一次登录会先让他设新密码，之后这串就作废了。</p>" +
+      '<div class="row" style="gap:8px;margin-top:12px;align-items:center">' +
+      '<input id="pwdOut" type="text" readonly value="' + PX.esc(d.password || "") + '" ' +
+      'style="flex:1;font-family:var(--mono)">' +
+      '<button class="btn" id="pwdCopy" type="button">复制</button></div>' +
+      '<p class="hint" style="margin-top:10px">只显示这一次，关掉弹窗之后就看不到了；' +
+      "丢了就在账号弹窗里点 [重置密码] 再生成一串。</p>" +
+      '<div class="row" style="margin-top:16px;justify-content:flex-end">' +
+      '<button class="btn primary" data-close-overlay="1" type="button">我记下了</button></div>');
+    $("#pwdOut").select();
+    $("#pwdCopy").addEventListener("click", function () {
+      copyInto($("#pwdOut"), $("#pwdCopy"));
+    });
+    reloadAll().catch(function () {});
+  }
+
+  function copyInto(box, button) {
+    box.select();
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(box.value).then(function () {
+        if (button) button.textContent = "已复制";
+      }).catch(function () { PX.toast("复制不了，手动选中吧", true); });
+    } else {
+      PX.toast("复制不了，手动选中吧", true);
+    }
+  }
+
+  /* 重置别人的密码：留空由服务端生成一串临时口令，只显示这一次 */
+  function passwordDialog(id) {
+    var a = S.accounts.filter(function (x) { return x.id === id; })[0];
+    if (!a) return;
+    openOverlay("as-pwd", "重置 " + displayName(a) + " 的密码",
+      '<div class="field"><label for="pwdNew">新密码</label>' +
+      '<input id="pwdNew" type="text" autocomplete="off" placeholder="留空就由系统生成一串">' +
+      '</div>' +
+      '<p class="hint">至少 8 位。设好之后这个账号的**登录会话与 API 令牌全部失效**，' +
+      "得用新密码重新登录；密码只显示这一次。</p>" +
+      '<div class="row" style="margin-top:16px;justify-content:flex-end">' +
+      '<button class="btn" data-close-overlay="1" type="button">取消</button>' +
+      '<button class="btn primary" id="pwdGo" type="button">重置</button></div>');
+    $("#pwdNew").focus();
+    $("#pwdGo").addEventListener("click", function () {
+      var body = { id: a.id };
+      var typed = ($("#pwdNew").value || "").trim();
+      if (typed) body.password = typed;
+      apiSudo("/account/password", { method: "POST", body: body }, "重置账号密码")
+        .then(function (d) {
+          showNewPassword(a, d);
+        })
+        .catch(fail);
+    });
+  }
+
+  /* 新密码只在这里出现一次：一个只读框 + 一颗复制键，关掉就没了 */
+  function showNewPassword(a, d) {
+    openOverlay("as-pwd-done", "密码已重置",
+      '<p class="page-sub">把下面这串交给 ' + PX.esc(displayName(a)) +
+      "，让他登录后自己改掉。</p>" +
+      '<div class="row" style="gap:8px;margin-top:12px;align-items:center">' +
+      '<input id="pwdOut" type="text" readonly value="' + PX.esc(d.password || "") + '" ' +
+      'style="flex:1;font-family:var(--mono)">' +
+      '<button class="btn" id="pwdCopy" type="button">复制</button></div>' +
+      '<p class="hint" style="margin-top:10px">' +
+      (d.generated ? "这串是系统随机生成的。" : "") +
+      "已经作废 " + (d.sessions || 0) + " 个登录会话、" + (d.tokens || 0) +
+      " 张 API 令牌。这串密码只显示这一次，关掉弹窗之后就看不到了。</p>" +
+      '<div class="row" style="margin-top:16px;justify-content:flex-end">' +
+      '<button class="btn primary" data-close-overlay="1" type="button">我记下了</button></div>');
+    $("#pwdOut").select();
+    $("#pwdCopy").addEventListener("click", function () {
+      copyInto($("#pwdOut"), $("#pwdCopy"));
+    });
+    loadAccountsPage(true).then(function () {
+      renderAccountsTable();
+      afterMutation();
+    }).catch(function () {});
+  }
+
   function quotaDialog(id) {
     var a = S.accounts.filter(function (x) { return x.id === id; })[0];
     if (!a) return;
@@ -6606,6 +6735,9 @@
 
     var quota = t.closest("[data-quota]");
     if (quota) return quotaDialog(Number(quota.getAttribute("data-quota")));
+
+    var pwd = t.closest("[data-pwd]");
+    if (pwd) return passwordDialog(Number(pwd.getAttribute("data-pwd")));
 
     var dropAcct = t.closest("[data-acct-del]");
     if (dropAcct) return deleteAccount(Number(dropAcct.getAttribute("data-acct-del")));
@@ -6897,6 +7029,7 @@
 
   $("#safeModeBtn").addEventListener("click", toggleSafeMode);
   $("#serviceRestartBtn").addEventListener("click", restartService);
+  $("#newAccountBtn").addEventListener("click", newAccountDialog);
   $("#backupSave").addEventListener("click", saveBackup);
   $("#backupRun").addEventListener("click", runBackup);
   $("#bkDavTest").addEventListener("click", testBackupDav);
@@ -7927,6 +8060,11 @@
     PX.api("/me").then(function (d) {
       if (!d.authed) {
         location.href = PX.PREFIX + "/login";
+        return;
+      }
+      // 临时密码：服务端也会把页面拦到 /reset，这里补一道，免得脚本绕过
+      if (d.mustReset) {
+        location.replace(PX.PREFIX + "/reset");
         return;
       }
       S.me = d.me;

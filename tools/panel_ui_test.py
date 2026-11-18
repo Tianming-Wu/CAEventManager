@@ -2847,6 +2847,93 @@ def nav_keys_page(page):
     check("End goes to the last entry", last == "account", last)
 
 
+def field_keys(browser):
+    """表单里上下方向键换框：单行文本才接管，别的输入框照旧用自己的方向键。"""
+    print("== 表单里上下方向键换框 ==")
+    ctx, page = new_page(browser, 1180, 860)
+    try:
+        page.goto(BASE + "/login", wait_until="domcontentloaded")
+        page.wait_for_selector("#loginForm", timeout=20000)
+
+        def active():
+            return page.evaluate("() => (document.activeElement || {}).id || ''")
+
+        page.click("#username")
+        page.keyboard.type("someone")
+        page.keyboard.press("ArrowDown")
+        check("↓ 从登录名走到密码", active() == "password", active())
+        page.keyboard.press("ArrowDown")
+        check("↓ 再从密码走到提交键", active() == "go", active())
+        page.keyboard.press("ArrowUp")
+        check("↑ 回到密码", active() == "password", active())
+        page.keyboard.press("ArrowUp")
+        check("↑ 回到登录名", active() == "username", active())
+        page.keyboard.press("ArrowUp")
+        check("顶格的 ↑ 不会再往别处跑", active() == "username", active())
+        page.keyboard.press("Shift+ArrowDown")
+        check("带 Shift 的 ↓ 不换框", active() == "username", active())
+
+        # 数字、多行文本、下拉、带候选的输入框都不该被接管：各放一个探针在页面上试
+        page.evaluate("""() => {
+            const box = document.createElement('div');
+            box.setAttribute('data-page', 'field-probe');
+            box.innerHTML =
+                '<input id="kNum" type="number" value="1">' +
+                '<textarea id="kArea"></textarea>' +
+                '<select id="kSel"><option>a</option><option>b</option></select>' +
+                '<input id="kList" type="search" list="kDl">' +
+                '<datalist id="kDl"><option value="a"></option></datalist>' +
+                '<input id="kText" type="text"><input id="kNext" type="text">' +
+                '<button id="kPrimary" class="btn primary" type="button">保存</button>';
+            document.body.appendChild(box);
+        }""")
+        page.focus("#kNum")
+        page.keyboard.press("ArrowDown")
+        check("数字框的 ↓ 留给它自己", active() == "kNum", active())
+        page.focus("#kArea")
+        page.keyboard.press("ArrowDown")
+        check("多行文本的 ↓ 留给它自己", active() == "kArea", active())
+        page.focus("#kSel")
+        page.keyboard.press("ArrowDown")
+        check("下拉框的 ↓ 留给它自己", active() == "kSel", active())
+        page.focus("#kList")
+        page.keyboard.press("ArrowDown")
+        check("带候选列表的输入框不接管", active() == "kList", active())
+        page.focus("#kText")
+        page.keyboard.press("ArrowDown")
+        check("普通单行输入框才跳", active() == "kNext", active())
+        page.keyboard.press("ArrowDown")
+        check("最后一格 ↓ 落到主按钮", active() == "kPrimary", active())
+        page.keyboard.press("ArrowUp")
+        check("主按钮上 ↑ 回到上一格", active() == "kNext", active())
+        page.evaluate(
+            "() => document.querySelector('[data-page=\"field-probe\"]').remove()")
+
+        # 弹窗里的一行是弹窗自己，不往身后那一页里跑
+        if WITH_ACCOUNTS:
+            page.goto(BASE + "/login", wait_until="domcontentloaded")
+            page.fill("#username", LOGIN)
+            page.fill("#password", PASSWORD)
+            page.click("#go")
+            page.wait_for_url("**/panel", timeout=20000)
+            page.wait_for_function(
+                "() => document.documentElement.getAttribute('data-booted') === '1'",
+                timeout=25000)
+            page.goto(BASE + "/panel#/users")
+            page.wait_for_timeout(700)
+            page.click("#newAccountBtn")
+            page.wait_for_timeout(400)
+            page.focus("#naUser")
+            page.keyboard.press("ArrowDown")
+            check("弹窗里 ↓ 走到下一格", active() == "naName", active())
+            page.keyboard.press("ArrowUp")
+            check("弹窗里 ↑ 回到上一格", active() == "naUser", active())
+            page.evaluate("() => document.getElementById('overlayClose').click()")
+            page.wait_for_timeout(300)
+    finally:
+        ctx.close()
+
+
 def search_page(page):
     print("== the account search box ==")
     page.goto(BASE + "/panel#/users")
@@ -5197,6 +5284,7 @@ def main():
                         group_page(page)
                         nav_keys_page(page)
                         crumb_motion(browser)
+                        field_keys(browser)
                 else:
                     if WITH_ACCOUNTS:
                         register_page(page)
@@ -5207,6 +5295,7 @@ def main():
                     group_page(page)
                     nav_keys_page(page)
                     crumb_motion(browser)
+                    field_keys(browser)
                 if want("docs") and not ONLY:
                     docs_page(browser)
                 if want("assistant") and not ONLY:

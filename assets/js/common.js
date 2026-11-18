@@ -22,6 +22,65 @@
     el.dispatchEvent(new Event("input", { bubbles: true }));
   });
 
+  /* 表单里上下方向键换框：↓ 下一格、↑ 上一格，省得为了挪一格去够 Tab。
+     只接管单行文本类输入框——多行文本、下拉、数字/日期/时间这些本来就用方向键做事的，
+     以及带候选列表（list=）的输入框，一律照旧。一行到哪儿为止：同一个弹窗、
+     同一个表单、同一个页面，不跨出去；最后一格再按 ↓ 落到这一行里的主按钮。 */
+  var ARROW_TEXTY = { text: 1, search: 1, email: 1, url: 1, tel: 1, password: 1 };
+
+  function arrowShown(el) {
+    if (el.hidden || el.disabled || el.readOnly) return false;
+    var cs = window.getComputedStyle(el);
+    if (!cs || cs.display === "none" || cs.visibility === "hidden") return false;
+    return el.getClientRects().length > 0;
+  }
+
+  function arrowScope(el) {
+    return el.closest("#overlayBody, .overlay-body, [role='dialog']") ||
+           el.closest("form") || el.closest("[data-page]") || document.body;
+  }
+
+  // 这一行里能落脚的控件，按页面顺序排好
+  function arrowRow(from) {
+    var nodes = arrowScope(from).querySelectorAll("input, select, textarea, button");
+    var row = [];
+    for (var i = 0; i < nodes.length; i++) {
+      var el = nodes[i];
+      if (el.tagName === "BUTTON") {
+        // 只算主按钮（提交那一颗）：中间那些小图标键不该把方向键拦住
+        if (!el.classList.contains("primary") && el.type !== "submit") continue;
+      } else if (el.type === "hidden") {
+        continue;
+      }
+      if (arrowShown(el)) row.push(el);
+    }
+    return row;
+  }
+
+  document.addEventListener("keydown", function (e) {
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.isComposing) return;
+    var from = e.target;
+    if (!from || !from.tagName) return;
+    var step = e.key === "ArrowDown" ? 1 : -1;
+    if (from.tagName === "BUTTON") {
+      // 主按钮上按 ↑ 回上一格：既然 ↓ 能落到按钮上，回来也得走同一条路
+      if (step > 0) return;
+      if (!from.classList.contains("primary") && from.type !== "submit") return;
+    } else {
+      if (from.tagName !== "INPUT" || from.readOnly) return;
+      if (!ARROW_TEXTY[(from.type || "text").toLowerCase()]) return;
+      if (from.hasAttribute("list")) return;
+    }
+    var row = arrowRow(from);
+    var at = row.indexOf(from);
+    if (at < 0) return;
+    var want = row[at + step];
+    if (!want) return;
+    e.preventDefault();
+    want.focus();
+  }, true);
+
   // The revision this page last saw.  A write that carries it is refused if
   // another session moved on in the meantime (first write wins).
   var revs = {};

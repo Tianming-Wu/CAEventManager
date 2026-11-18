@@ -297,6 +297,47 @@ def run(version="", kind="manual", note=""):
     return target, manifest
 
 
+def make(version="", kind="manual", reason="manual", note=""):
+    """做一份备份，并把它记进审计：``action: backup``、操作人是服务自己。
+
+    成功与失败都记——审计是事后查"这份包是谁让它出来的"，只有成功那几行等于
+    没有记录。``reason`` 说明这一次是为谁做的：``routine``（到点自动）、
+    ``manual``（有人点了或命令行跑的）、``pre-restore``（恢复前留的那一份）。
+    """
+    try:
+        path, manifest = run(version=version, kind=kind, note=note)
+    except Exception:
+        _audit_backup("failed", reason)
+        raise
+    _audit_backup("success", reason, path, manifest)
+    return path, manifest
+
+
+def _audit_backup(result, reason, path="", manifest=None):
+    try:
+        import panel
+        detail = panel.audit_note(
+            result=result,
+            reason=reason,
+            file=os.path.basename(path) if path else "",
+            bytes=os.path.getsize(path) if path else "",
+            events=len(manifest.get("events") or []) if manifest else "",
+        )
+        with panel.tx() as tx:
+            panel.audit(tx, panel.SERVICE_UID, "backup", "backup", detail)
+    except Exception:                                   # noqa: BLE001 - 记不上也不该抛
+        pass
+
+
+def _close_panel():
+    """把面板库那条常驻连接关掉：恢复要换库，盘上不能还挂着 -wal。"""
+    try:
+        import panel
+        panel.connect().close()
+    except Exception:                                   # noqa: BLE001
+        pass
+
+
 def _walk_files(stage):
     """stage 里该进包的每个文件：算 sha256 与字节数，顺手排掉 WAL 这类旁支。"""
     out = []
@@ -485,7 +526,7 @@ def auto(version="", now=None):
     state = due_state(now)
     if not state["due"]:
         return None
-    path, manifest = run(version=version, kind="auto")
+    path, manifest = make(version=version, kind="auto", reason="routine")
     kept, drop = prune(apply=True)
     print("自动备份：%s（%s），留存 %d 份，清掉 %d 份"
           % (path, _human(os.path.getsize(path)), len(kept), len(drop)))
@@ -636,9 +677,12 @@ def restore(path, with_identity=False, version=""):
     if problems:
         raise BackupError("这份备份没通过校验：\n  " + "\n  ".join(problems))
     actions = []
-    # 恢复之前先把当下的状态收一份：恢复本身也是一次破坏性操作
-    safety, _ = run(version=version, kind="pre-restore")
+    # 恢复之前先把当下的状态收一份：恢复本身也是一次破坏性操作。
+    # 这一份的审计要等库换完再写——现在写进去的会被恢复掉的那份库一起带走
+    safety, safety_manifest = run(version=version, kind="pre-restore")
     actions.append("已把当前状态备份到 %s" % safety)
+    # 收完就把它开过的连接收掉，盘上不留 -wal：下一步要换库
+    _close_panel()
 
     stage = tempfile.mkdtemp(prefix="restore-")
     try:
@@ -733,7 +777,25 @@ def restore(path, with_identity=False, version=""):
                            "要写回加 --with-identity")
     finally:
         shutil.rmtree(stage, ignore_errors=True)
+    # 库已经换完了，这时候写才留得住：恢复前那一份备份 + 恢复这件事本身
+    _audit_backup("success", "pre-restore", safety, safety_manifest)
+    _audit_restore(path, safety, with_identity)
     return actions
+
+
+def _audit_restore(path, safety, with_identity=False):
+    """恢复这件事本身也记一条：换完之后库里才留得住，所以放在最后写。"""
+    try:
+        import panel
+        detail = panel.audit_note(
+            file=os.path.basename(path),
+            safety=os.path.basename(safety) if safety else "",
+            identity="yes" if with_identity else "no",
+        )
+        with panel.tx() as tx:
+            panel.audit(tx, panel.SERVICE_UID, "restore", "backup", detail)
+    except Exception:                                   # noqa: BLE001 - 记不上也不该抛
+        pass
 
 
 # --------------------------------------------------------------------------- #

@@ -72,7 +72,7 @@ PAGES_DIR = os.path.join(BASE_DIR, "pages")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.13.20.146"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.13.21.147"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -3137,8 +3137,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/backup/run" and method == "POST":
             # 立刻做一份：不做破坏性的事，站长点了就做，记一条审计
             need("owner")
-            target, manifest = backup.run(version=VERSION, kind="manual",
-                                          note="面板上手动做的")
+            target, manifest = backup.make(version=VERSION, kind="manual",
+                                           reason="manual", note="面板上手动做的")
             with panel.tx() as tx:
                 panel.audit(tx, acc["username"], "backup_run", "backup",
                             panel.audit_note(file=os.path.basename(target)))

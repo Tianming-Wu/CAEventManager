@@ -55,7 +55,8 @@ def pick(name):
 
 
 def cmd_run(args):
-    path, manifest = backup.run(version=app.VERSION, kind=args.kind, note=args.note or "")
+    path, manifest = backup.make(version=app.VERSION, kind=args.kind,
+                                 reason="manual", note=args.note or "")
     print("备份完成：%s（%s）" % (path, human(os.path.getsize(path))))
     print("  库：%s" % "、".join(sorted(manifest["databases"])) or "—")
     shapes = {}

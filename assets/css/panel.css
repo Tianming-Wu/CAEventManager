@@ -464,8 +464,18 @@ button.nav-item {
   gap: 10px 16px;
   flex-wrap: wrap;
   margin-bottom: 16px;
+  /* 标题后面跟着副标题的页面比只有标题的页面高 2px（副标题的降部），
+     差这一丁点正文就又错开了。这里把标题区的高度钉成"标题+副标题"那一行的
+     高度，有没有副标题都一样。 */
+  min-height: 26px;
 }
-.page-head .page-actions { align-self: center; }
+/* 右上角那排按钮比标题高（34 对 26），会把整行撑高，于是有按钮的页面正文比
+   没按钮的页面低 8px——同一个列表在两页之间就错开了。把它的上下外边距收负值，
+   让这排按钮在行里"不占高度"：框仍居中、仍能点，行高回到标题那一行的高度。 */
+.page-head .page-actions {
+  align-self: center;
+  margin-block: -5px;
+}
 
 /* the back button and the title are one item, so the button centres on the
    title instead of on a row that the button itself stretched */

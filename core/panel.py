@@ -40,6 +40,9 @@ STATUS_LABEL = {"pending": "待审核", "active": "正常", "disabled": "已停�
                 "rejected": "已拒绝", "banned": "已封禁"}
 COOKIE = "xl_panel_session"
 SESSION_TTL = 7 * 24 * 3600
+# 审计里的两个"不是人"的操作人：0 是平台自己（建库、同步开关），1 是服务自己
+# （定时备份这类后台动作）。真正的账号从 10000 起发，所以这两个编号不会撞。
+SERVICE_UID = 1
 # How long a re-entered password keeps the session elevated.  It lives on the
 # session row, not on the account: another device signing in as the same person
 # starts from zero, and signing out drops it with the session.
@@ -927,9 +930,10 @@ def audit(conn, actor, action, target=None, detail=None):
     if extra:
         # 同一个人可以既用面板也用令牌：审计里分开写，事后才分得清是谁的手
         detail = (detail + ", " if detail else "") + "via: " + extra
+    key = str(actor) if isinstance(actor, int) else actor_key(conn, actor)
     conn.execute(
         "INSERT INTO audit (ts, actor, action, target, detail) VALUES (?,?,?,?,?)",
-        (time.time(), actor_key(conn, actor), action, target, detail),
+        (time.time(), key, action, target, detail),
     )
 
 
@@ -972,6 +976,8 @@ def with_actor_labels(conn, rows):
             uid = int(text)
             if uid == 0:
                 item["actorName"] = "system"
+            elif uid == SERVICE_UID:
+                item["actorName"] = "service"
             else:
                 item["actorName"] = names.get(uid) or ("账号 #%d" % uid)
             item["actorId"] = text

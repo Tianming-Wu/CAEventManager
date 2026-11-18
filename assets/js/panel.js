@@ -4437,7 +4437,7 @@
         '<button class="btn sm primary" data-decide="approve" data-id="' + a.id + '">通过</button> ' +
         '<button class="btn sm danger" data-decide="reject" data-id="' + a.id + '">拒绝</button>' +
         "</td></tr>";
-    }).join("") : rowsOrEmpty(5, "pendingUsers", "没有待处理的申请");
+    }).join("") : rowsOrEmpty(5, "accounts", "没有待处理的申请");
 
     var decided = S.accounts.filter(function (a) {
       return a.decidedAt && a.status !== "pending";
@@ -4450,7 +4450,7 @@
         "<td>" + statusTag(a) + "</td>" +
         "<td>" + PX.esc(a.decidedBy || "—") + "</td>" +
         '<td class="mono">' + PX.when(a.decidedAt) + "</td></tr>";
-    }).join("") : rowsOrEmpty(5, "decidedUsers", "还没有处理记录");
+    }).join("") : rowsOrEmpty(5, "accounts", "还没有处理记录");
   }
 
   function drawApprovalEvents() {
@@ -4578,6 +4578,7 @@
   function loadBackup() {
     return PX.api("/backup").then(function (d) {
       S.backup = d || null;
+      markLoaded("backup");
       drawBackup();
     }).catch(function (e) { PX.toast(PX.esc(e.message), true); });
   }

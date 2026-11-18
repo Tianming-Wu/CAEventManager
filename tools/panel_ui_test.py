@@ -2847,6 +2847,63 @@ def nav_keys_page(page):
     check("End goes to the last entry", last == "account", last)
 
 
+def head_align(page):
+    """有按钮与没按钮的页面，标题区一样高，正文第一个元素从同一个高度开始。"""
+    print("== 标题区高度：按钮不该把正文按下去 ==")
+    routes = ["#/overview", "#/rosters", "#/write-approvals", "#/users",
+              "#/all-events", "#/server", "#/audit", "#/account"]
+    seen = {}
+    for route in routes:
+        page.goto(BASE + "/panel" + route, wait_until="domcontentloaded")
+        page.wait_for_timeout(400)
+        got = page.evaluate("""() => {
+            const sec = document.querySelector('section.page:not([hidden])');
+            if (!sec) return null;
+            const head = sec.querySelector('.page-head');
+            let first = null;
+            for (const el of sec.children) {
+                if (el === head || el.hidden) continue;
+                if (el.getBoundingClientRect().height < 1) continue;
+                first = el;
+                break;
+            }
+            return {head: head ? Math.round(head.getBoundingClientRect().height) : -1,
+                    body: first ? Math.round(first.getBoundingClientRect().top) : -1,
+                    acts: !!sec.querySelector('.page-head .page-actions')};
+        }""")
+        if got:
+            seen[route] = got
+    check("量到了几页", len(seen) == len(routes), sorted(seen))
+    check("两种页面都有",
+          sum(1 for v in seen.values() if v["acts"]) >= 2
+          and sum(1 for v in seen.values() if not v["acts"]) >= 2,
+          {k: v["acts"] for k, v in seen.items()})
+    check("标题区高度处处一样", len({v["head"] for v in seen.values()}) == 1, seen)
+    check("正文第一个元素从同一个高度开始",
+          len({v["body"] for v in seen.values()}) == 1, seen)
+
+
+def approval_queue_text(page):
+    """注册申请那一页的两张表：读完了就不能还挂着"正在读取…"。"""
+    print("== 注册申请：空表也要说清楚 ==")
+    page.goto(BASE + "/panel#/approval-users")
+    page.wait_for_timeout(900)
+    got = page.evaluate("""() => ({
+        pending: document.querySelector('#pendingTable tbody').innerText.trim(),
+        decided: document.querySelector('#decidedTable tbody').innerText.trim(),
+        sub: document.getElementById('approvalUsersSub').innerText.trim(),
+    })""")
+    check("待审核那张表不会一直显示正在读取",
+          "正在读取" not in got["pending"], got["pending"][:80])
+    check("最近处理那张表也不会", "正在读取" not in got["decided"],
+          got["decided"][:80])
+    check("空表说的是没有待处理的申请",
+          got["pending"] != "" and ("没有待处理" in got["pending"]
+                                    or "通过" in got["pending"]),
+          got["pending"][:80])
+    check("副标题说得出现在有几条", got["sub"] != "", got["sub"])
+
+
 def field_keys(browser):
     """表单里上下方向键换框：单行文本才接管，别的输入框照旧用自己的方向键。"""
     print("== 表单里上下方向键换框 ==")
@@ -4353,6 +4410,11 @@ def server_page(page):
     check("服务卡片上有重启与安全模式两个按钮",
           page.locator("#serviceRestartBtn").count() == 1
           and page.locator("#safeModeBtn").count() == 1)
+    check("放重启与安全模式的那张卡片叫操作",
+          page.locator('[data-page="server"] .card', has_text="重启服务")
+              .locator("h2").first.inner_text().strip() == "操作",
+          page.locator('[data-page="server"] .card', has_text="重启服务")
+              .locator("h2").first.inner_text())
     check("按钮写的是重启服务与进入安全模式",
           page.inner_text("#serviceRestartBtn").strip() == "重启服务"
           and page.inner_text("#safeModeBtn").strip() == "进入安全模式",
@@ -4411,6 +4473,17 @@ def server_page(page):
         document.querySelectorAll('#backupTable tbody tr')).map(tr => tr.innerText)""")
     check("列表里能看到刚做的那一份",
           any((made.get("name") or "") in row for row in rows), rows[:2])
+
+    print("== 备份进审计日志 ==")
+    page.goto(BASE + "/panel#/audit")
+    page.wait_for_timeout(900)
+    audit = page.evaluate("""() => Array.from(
+        document.querySelectorAll('#auditTable tbody tr'))
+        .map(tr => tr.innerText.replace(/\\s+/g, ' '))""")
+    check("审计里有服务自己记的备份",
+          any("service (1)" in row and "backup" in row for row in audit), audit[:3])
+    page.goto(BASE + "/panel#/server")
+    page.wait_for_timeout(500)
 
 
 def sudo_page(page):
@@ -5285,6 +5358,7 @@ def main():
                         nav_keys_page(page)
                         crumb_motion(browser)
                         field_keys(browser)
+                        head_align(page)
                 else:
                     if WITH_ACCOUNTS:
                         register_page(page)
@@ -5296,6 +5370,7 @@ def main():
                     nav_keys_page(page)
                     crumb_motion(browser)
                     field_keys(browser)
+                    head_align(page)
                 if want("docs") and not ONLY:
                     docs_page(browser)
                 if want("assistant") and not ONLY:
@@ -5329,6 +5404,7 @@ def main():
                     if WITH_ACCOUNTS:
                         profile_page(page)
                     users_table(page)
+                    approval_queue_text(page)
                     if WITH_ACCOUNTS:
                         temp_password_page(browser)
                 if want("ops"):

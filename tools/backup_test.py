@@ -158,7 +158,8 @@ def main():
               os.path.isfile(os.path.join(data, backup.SETTINGS_NAME)))
 
         print("== 做一份备份 ==")
-        path, manifest = backup.run(version="0.0.0-test", kind="manual")
+        path, manifest = backup.make(version="0.0.0-test", kind="manual",
+                                     reason="manual")
         check("备份写出到 backups_dir",
               os.path.isfile(path) and os.path.dirname(path) == os.path.join(box, "bk"),
               path)
@@ -172,6 +173,49 @@ def main():
         check("身份文件进包", "config.json" in manifest["identity"], manifest["identity"])
         check("备份设置不进包",
               not any(backup.SETTINGS_NAME in n for n in names), names)
+
+        print("== 备份进审计 ==")
+
+        def last_backup_row():
+            conn = sqlite3.connect(os.path.join(data, "panel.sqlite3"))
+            conn.row_factory = sqlite3.Row
+            row = conn.execute("SELECT * FROM audit WHERE action='backup'"
+                               " ORDER BY id DESC LIMIT 1").fetchone()
+            conn.close()
+            return dict(row) if row else {}
+
+        row = last_backup_row()
+        check("记下一条 backup", bool(row), row)
+        check("操作人是服务自己（编号 1）", row.get("actor") == "1", row.get("actor"))
+        detail = row.get("detail") or ""
+        check("说明写清结果与缘由",
+              "result: success" in detail and "reason: manual" in detail, detail)
+        check("说明里有包名与大小",
+              os.path.basename(path) in detail and "bytes: " in detail, detail)
+        check("服务编号显示成 service (1)",
+              [r["actorLabel"] for r in panel.with_actor_labels(
+                  panel.connect(), [row])] == ["service (1)"],
+              [r["actorLabel"] for r in panel.with_actor_labels(panel.connect(), [row])])
+
+        # 失败也要留一行：只有成功记录等于没记录
+        real_run = backup.run
+
+        def broken_run(*a, **kw):
+            raise backup.BackupError("盘满了")
+
+        backup.run = broken_run
+        try:
+            failed = False
+            try:
+                backup.make(version="0.0.0-test", reason="routine")
+            except backup.BackupError:
+                failed = True
+            check("失败的那次照样抛出去", failed)
+        finally:
+            backup.run = real_run
+        row = last_backup_row()
+        check("失败也记一行", (row.get("detail") or "").find("result: failed") >= 0,
+              row.get("detail"))
 
         print("== 校验 ==")
         check("这份备份自己校验通过", backup.verify(path) == [], backup.verify(path))
@@ -210,6 +254,9 @@ def main():
               [i["name"] for i in backup.list_backups()])
         check("默认不写回身份文件（配置不被回滚）",
               not any("身份文件 config.json" in a for a in actions), actions)
+        row = last_backup_row()
+        check("恢复前那一份也进了审计",
+              "reason: pre-restore" in (row.get("detail") or ""), row.get("detail"))
 
         print("== 坏包不认 ==")
         broken = path + ".broken"

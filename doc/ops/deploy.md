@@ -230,6 +230,11 @@ python3 bin/backup.py webdav test          # 连得上、目录建得出、写�
 `./bin/service.sh reset` 会清空活动数据（活动与账号都重建），重置前会要求输入 `yes`，并自动把旧库
 备份成 `data/backup-<时间>-*`。新的站长密码重新写进 `data/owner_password.txt`。
 
+每一次备份（到点自动、手动、恢复前）都往审计里写一行：操作人是 `service (1)`，动作 `backup`，
+说明里带 `result`、`reason`（`routine` / `manual` / `pre-restore`）、包名与字节数；失败也写一行，
+`result` 记 `failed`。恢复这件事本身另记一行 `restore`，带恢复的是哪份包、恢复前的安全备份叫什么。
+恢复会换库，所以这几行是在换完之后写的——换之前的审计随旧库一起被替换掉。
+
 ## 自检
 
 ```sh

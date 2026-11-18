@@ -21,6 +21,7 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "core"))
 
 import app  # noqa: E402
+import localconfig  # noqa: E402
 
 problems = []
 
@@ -255,6 +256,48 @@ def module_guard():
             os.environ.pop("LOTTERY_DATA_DIR", None)
         else:
             os.environ["LOTTERY_DATA_DIR"] = previous
+
+
+def client_address():
+    """客户端地址：默认只认 TCP 对端，信任代理时才读请求头，且只认合法地址。"""
+    import clientip
+
+    peer = "192.168.81.12"
+    fwd = {"X-Forwarded-For": "9.9.9.9, 123.139.11.48"}
+    check("默认用对端地址", clientip.resolve(peer, fwd) == peer,
+          clientip.resolve(peer, fwd))
+    check("信任代理时取最右那一段（代理追加的那个）",
+          clientip.resolve(peer, fwd, True) == "123.139.11.48",
+          clientip.resolve(peer, fwd, True))
+    check("只有一段时就是它",
+          clientip.resolve(peer, {"X-Forwarded-For": "123.139.11.48"}, True)
+          == "123.139.11.48")
+    check("信任代理但没有头就回落到对端",
+          clientip.resolve(peer, {}, True) == peer, clientip.resolve(peer, {}, True))
+    check("只有 X-Real-IP 也能用",
+          clientip.resolve(peer, {"X-Real-IP": "203.0.113.9"}, True) == "203.0.113.9",
+          clientip.resolve(peer, {"X-Real-IP": "203.0.113.9"}, True))
+    check("带端口的写法剥掉端口",
+          clientip.resolve(peer, {"X-Real-IP": "203.0.113.9:5678"}, True) == "203.0.113.9",
+          clientip.resolve(peer, {"X-Real-IP": "203.0.113.9:5678"}, True))
+    check("IPv6 原样规范化",
+          clientip.resolve(peer, {"X-Forwarded-For": "[2001:db8::1]:443"}, True)
+          == "2001:db8::1",
+          clientip.resolve(peer, {"X-Forwarded-For": "[2001:db8::1]:443"}, True))
+    check("不是地址的一律丢掉，回落到对端",
+          clientip.resolve(peer, {"X-Forwarded-For": "unknown"}, True) == peer)
+    check("掺换行伪造日志的也丢掉",
+          clientip.resolve(peer, {"X-Forwarded-For": "1.2.3.4\nforged line"}, True) == peer,
+          clientip.resolve(peer, {"X-Forwarded-For": "1.2.3.4\nforged line"}, True))
+    check("空的头当没有",
+          clientip.resolve(peer, {"X-Forwarded-For": "  ", "X-Real-IP": ""}, True) == peer)
+    check("开关读得懂 true / 1 / on 与 JSON 布尔",
+          localconfig.static_flag({"trust_forwarded_ip": True}, "trust_forwarded_ip")
+          and localconfig.static_flag({"trust_forwarded_ip": "true"}, "trust_forwarded_ip")
+          and localconfig.static_flag({"trust_forwarded_ip": 1}, "trust_forwarded_ip")
+          and localconfig.static_flag({"trust_forwarded_ip": "on"}, "trust_forwarded_ip"))
+    check("没写就是关（默认不信任请求头）",
+          not localconfig.static_flag({}, "trust_forwarded_ip"))
 
 
 def error_page():
@@ -643,6 +686,9 @@ def main():
 
     print("== 模块保护层 ==")
     module_guard()
+
+    print("== 客户端地址：对端还是请求头 ==")
+    client_address()
 
     print("== 500 说明页 ==")
     error_page()

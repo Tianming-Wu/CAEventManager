@@ -58,6 +58,10 @@ STATIC_DEFAULTS = {
     # 相对路径按应用根目录算，绝对路径照用（LOTTERY_DATA_DIR 环境变量仍然优先）
     "data_dir": "",
     "backups_dir": "",
+    # 服务前面有反向代理时，审计与日志里的客户端地址改取请求头：
+    # 代理会把真实地址写进 X-Forwarded-For / X-Real-IP，而 TCP 对端只有代理自己。
+    # 只有端口不能被外部直接访问（否则谁都能伪造这两个头）时才该打开
+    "trust_forwarded_ip": False,
 }
 
 SECRET_LEN = 32
@@ -160,6 +164,14 @@ def static_limit(cfg, key):
         return int(cfg.get(key, STATIC_DEFAULTS.get(key, 0)))
     except (TypeError, ValueError):
         return int(STATIC_DEFAULTS.get(key, 0))
+
+
+def static_flag(cfg, key):
+    """静态设置里的开关：文件里写成 true / "true" / 1 / "on" 都算开。"""
+    raw_value = cfg.get(key, STATIC_DEFAULTS.get(key, False))
+    if isinstance(raw_value, str):
+        return raw_value.strip().lower() in ("1", "true", "yes", "on")
+    return bool(raw_value)
 
 
 def static_path(cfg, key, default_name):

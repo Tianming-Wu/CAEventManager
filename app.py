@@ -45,6 +45,7 @@ import auth
 import assistant
 import bus
 import checkin
+import clientip
 import db
 import eventfs
 import expr
@@ -71,7 +72,7 @@ PAGES_DIR = os.path.join(BASE_DIR, "pages")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.13.19.145"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.13.20.146"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -841,8 +842,14 @@ class Handler(BaseHTTPRequestHandler):
     _scope = None
 
     # ---------------- plumbing ----------------
+    def _client_ip(self):
+        """请求的发起者：默认是 TCP 对端；config.json 打开 trust_forwarded_ip 时
+        改读代理写在请求头里的地址（这时端口必须不能被外部直接访问）。"""
+        return clientip.resolve(self.client_address[0], self.headers,
+                                localconfig.static_flag(LOCAL_CFG, "trust_forwarded_ip"))
+
     def log_message(self, fmt, *args):
-        log("%s %s" % (self.address_string(), fmt % args))
+        log("%s %s" % (self._client_ip(), fmt % args))
 
     def _send(self, status, body=b"", ctype="application/json; charset=utf-8", headers=None):
         self._status = status
@@ -1302,7 +1309,7 @@ class Handler(BaseHTTPRequestHandler):
         if method == "POST" and route == "/api/submit":
             data = self._body()
             with lists.tx() as tx:
-                res = lists.submit_signup(tx, row, data, self.client_address[0])
+                res = lists.submit_signup(tx, row, data, self._client_ip())
             with panel.tx() as px:
                 panel.audit(px, "signup", "signup_submit", str(row["id"]),
                             panel.audit_note(sid=data.get("sid"),
@@ -1437,7 +1444,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _panel_api(self, method, route, raw_path, query=None):
         conn = panel.connect()
-        ip = self.client_address[0]
+        ip = self._client_ip()
         path = route[len("/api/panel"):] or "/"
         query = query or {}
         # 每条请求自己负责把"经由令牌"的标记清掉：同一个线程会连着服务好几个请求
@@ -4491,7 +4498,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/checkin/submit" and method == "POST":
             self._check_csrf()
-            ip = self.client_address[0]
+            ip = self._client_ip()
             wait = auth.login_blocked(ip)
             if wait:
                 return self._err("尝试太频繁了，请 %d 秒后再试" % wait, 429)

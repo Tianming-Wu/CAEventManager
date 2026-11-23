@@ -2481,10 +2481,21 @@ def crumb_motion(browser):
             check("%s：标题确实挪了 36px" % label, travel >= 30, travel)
             # 一帧最多走全程的六成：掉帧（机器忙）会把几帧的路并成一帧，那不是产品的问题；
             # 真正的"抽"是一下跨过一大段或者跳回原处，那种会超过这个门槛。
+            # 整段只走出三四格时，浏览器已经把动画合成成几步了，这时候"逐帧平滑"根本没得量：
+            # 直接跳过这条，免得机器一忙就在"真抽"和"合成"之间随机红。
+            levels = []
+            for r in rows:
+                if not levels or abs(r["left"] - levels[-1]) > 0.5:
+                    levels.append(r["left"])
+            coarse = len(levels) <= 4
             jumps = [(b["t"], round(b["left"] - a["left"], 1))
                      for a, b in zip(rows, rows[1:])
                      if abs(b["left"] - a["left"]) > travel * 0.6]
-            check("%s：没有一下子跨过一大段" % label, not jumps, jumps[:4])
+            if coarse:
+                print("    （这一段只走出 %d 格，动画被浏览器合并了，跳过逐帧门槛）"
+                      % len(levels))
+            else:
+                check("%s：没有一下子跨过一大段" % label, not jumps, jumps[:4])
             check("%s：一路往一个方向走" % label,
                   not [s for s in back if abs(s) >= 2],
                   "回头的帧：%s" % [s for s in back if abs(s) >= 2])

@@ -126,6 +126,58 @@ def migrate_events():
             os.environ["LOTTERY_DATA_DIR"] = previous
 
 
+def event_public_url():
+    """config.json 的前缀换了，活动库里存着的对外地址要跟着换（域名迁移用）。"""
+    import sqlite3
+
+    import panel
+
+    root = tempfile.mkdtemp(prefix="panel-url-")
+    previous = os.environ.get("LOTTERY_DATA_DIR")
+    os.environ["LOTTERY_DATA_DIR"] = root
+    was = app.LOCAL_CFG
+    token = "Tok" + "0" * 29
+    try:
+        panel.init_db()
+        with panel.tx() as tx:
+            tx.execute("INSERT INTO events (seq, token, title, kind, owner_id, created_at)"
+                       " VALUES (1,?,?,?,?,?)",
+                       (token, "域名迁移", "nwuca.lottery", 1, time.time()))
+        app.LOCAL_CFG = {"public_base_prefix": "https://old.example/pre"}
+        app.db.set_event(1)
+        app.db.init_db()
+        conn = app.db.connect()
+        with app.db.tx(conn):
+            app.db.set_config_raw(conn, "public_base_url",
+                                  "https://old.example/pre/" + token)
+
+        # 前缀换了：启动时那一遍会把地址改过来
+        app.LOCAL_CFG = {"public_base_prefix": "https://new.example/pre"}
+        changed = app.refresh_public_url(1)
+        check("地址跟着前缀换掉",
+              changed == "https://new.example/pre/" + token, changed)
+        check("库里也换掉了",
+              app.db.get_config(app.db.connect(), "public_base_url")
+              == "https://new.example/pre/" + token)
+        checked = app.db.audit_tail(app.db.connect(), limit=20)
+        actions = [row["action"] for row in checked]
+        check("换地址这件事记在活动自己的审计里",
+              "public_base_url" in actions, actions[:3])
+
+        check("已经一致就不再动", app.refresh_public_url(1) == "")
+        app.LOCAL_CFG = {"public_base_prefix": ""}
+        check("没配前缀就什么都不做",
+              app.refresh_public_url(1) == ""
+              and app.db.get_config(app.db.connect(), "public_base_url")
+              == "https://new.example/pre/" + token)
+    finally:
+        app.LOCAL_CFG = was
+        if previous is None:
+            os.environ.pop("LOTTERY_DATA_DIR", None)
+        else:
+            os.environ["LOTTERY_DATA_DIR"] = previous
+
+
 def account_cap():
     """账号总数上限：静态设置 max_accounts，0 表示不限；待审核的账号也占名额。"""
     import lists
@@ -689,6 +741,9 @@ def main():
 
     print("== 客户端地址：对端还是请求头 ==")
     client_address()
+
+    print("== 活动的对外地址跟着前缀走 ==")
+    event_public_url()
 
     print("== 500 说明页 ==")
     error_page()

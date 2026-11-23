@@ -285,6 +285,18 @@ python tools/prod_check.py https://example.org/mount <活动 token>   # 线上�
 环境变量可以覆盖：`LOTTERY_DATA_DIR`、`LOTTERY_PACKS_DIR`、`LOTTERY_PORT`、
 `LOTTERY_VERSION`（测试用）、`LOTTERY_LOG_MAX`、`LOTTERY_ASSISTANT_PROMPT`。
 
+### 换域名或换挂载前缀
+
+对外地址只认 `config.json` 的 `public_base_prefix`，代码里没有写死任何域名。搬家时：
+
+1. 改 `public_base_prefix`（末尾那段挂载路径照旧保留，例如 `https://新域名/u/laffey/xlottery`）
+2. 重启服务。启动时会把每个活动自己库里存着的对外地址按"新前缀 + 自己的 token"重算一遍
+   （`app.refresh_public_url`），改动记在活动自己的审计里；本来就一致的不动
+3. 反代那一跳同时指向新域名；旧域名在迁移期继续解析
+
+活动页的分享链接与二维码是按那一栏现拼的，所以第二步之后新生成的链接才用新域名；
+已经印出去、发出去的旧地址只能靠旧域名继续解析——迁移期两个域名并存正是为了这个。
+
 ## 相关文档
 
 - [接口](../reference/api.md)

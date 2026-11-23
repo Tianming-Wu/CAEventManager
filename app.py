@@ -72,7 +72,7 @@ PAGES_DIR = os.path.join(BASE_DIR, "pages")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.13.21.147"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.13.22.148"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -359,6 +359,30 @@ def public_base_url(seq=None):
     prefix = (LOCAL_CFG.get("public_base_prefix") or "").rstrip("/")
     token = panel.event_token(db.event_id() if seq is None else seq)
     return (prefix + "/" + token) if token else prefix
+
+
+def refresh_public_url(seq):
+    """把活动库里存着的对外地址跟着 config.json 的前缀改一遍。
+
+    活动页（公示、大屏、后台）分享与生成二维码时用的是自己库里那一栏，而不是每次
+    现算；域名换了、前缀改了，老活动不改这一栏就还在拼旧域名。返回改成了什么，
+    本来就一致就返回空串。
+    """
+    prefix = (LOCAL_CFG.get("public_base_prefix") or "").rstrip("/")
+    token = panel.event_token(seq)
+    if not prefix or not token:
+        return ""
+    want = prefix + "/" + token
+    conn = db.connect()
+    have = (db.get_config(conn, "public_base_url") or "").strip()
+    if have == want:
+        return ""
+    with db.tx(conn):
+        db.set_config_raw(conn, "public_base_url", want)
+        db.audit(conn, "public_base_url",
+                 detail="%s -> %s" % (have or "—", want))
+    log("活动 %d 的对外地址更新为 %s" % (seq, want))
+    return want
 
 
 MIME_OVERRIDES = {
@@ -5144,6 +5168,8 @@ def main():
             db.init_db()
             conn = db.connect()
             bootstrap_secrets()
+            # 域名或前缀换过：把活动的对外地址一并跟上（配置是唯一的准）
+            refresh_public_url(seq)
             model.ensure_event(conn)
     # the built-in presets live in templates/*.json; the table is what the app
     # reads, so they are copied in on every start

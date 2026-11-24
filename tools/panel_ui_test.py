@@ -2909,8 +2909,23 @@ def approval_queue_text(page):
     check("副标题说得出现在有几条", got["sub"] != "", got["sub"])
 
 
-def import_page(page):
-    """用户管理 › 导入账号：读表、预览即编辑、下载、导入。"""
+def import_page(browser):
+    """用户管理 › 导入账号：读表、预览即编辑、下载、导入。
+
+    这一段自己开一个上下文：它要点弹窗、要下载，和别段共用一个页面时，
+    前一段留下的弹窗会压在上面（点什么都落在遮罩上）。
+    """
+    ctx, page = new_page(browser, 1280, 900)
+    # 无头环境弹不出「另存为」：拿掉 picker，走"下载回落"这条真实分支
+    ctx.add_init_script("delete window.showSaveFilePicker")
+    try:
+        ui_login(page)
+        run_import_page(page)
+    finally:
+        ctx.close()
+
+
+def run_import_page(page):
     print("== 导入账号：按钮在左边，进子页 ==")
     page.goto(BASE + "/panel#/users")
     page.wait_for_timeout(600)
@@ -2929,12 +2944,6 @@ def import_page(page):
     page.wait_for_timeout(700)
     check("进的是子页", page.url.endswith("#/import-accounts"), page.url)
     check("有返回键", page.locator("#importBack").is_visible())
-    rules = page.evaluate("""() => Array.from(
-        document.querySelectorAll('#importRule option')).map(o => o.value)""")
-    check("密码规则是下拉的几项",
-          rules[:2] == ["random", "sid"] and "custom" in rules, rules)
-    check("自定义规则的输入框平时藏着",
-          not page.locator("#importTemplate").is_visible())
     check("空表说得出下一步",
           "还没有内容" in page.inner_text("#importTable tbody"),
           page.inner_text("#importTable tbody")[:60])
@@ -2952,18 +2961,18 @@ def import_page(page):
         const table = document.getElementById('importTable');
         return {name: tr && tr.querySelector('[data-import-field=name]').value,
                 user: tr && tr.querySelector('[data-import-field=username]').value,
+                pwd: tr && tr.querySelector('[data-import-field=password]').value,
                 bad: !!(tr && tr.classList.contains('row-bad')),
                 dot: !!dot,
-                why: dot ? (dot.getAttribute('title') || '') : '',
-                shown: table ? !table.classList.contains('warn-off') : false,
-                state: document.getElementById('importState').innerText.trim()};
+                tip: dot ? (dot.getAttribute('data-tip') || '') : '',
+                shown: table ? !table.classList.contains('warn-off') : false};
     }""")
     check("空行留得住（不是点一下又缩回去）", bool(one) and one["name"] == "", one)
+    check("空行不替人补内容：登录名与密码都还是空的",
+          one["user"] == "" and one["pwd"] == "", one)
     check("有问题的那一行标红", one["bad"], one)
-    check("警示列露出来，原因写在图标上",
-          one["shown"] and one["dot"] and "显示名" in one["why"], one)
-    check("状态行说的是行数，不是口号",
-          "无法导入" in one["state"], one["state"])
+    check("警示列露出来，原因挂在悬停说明上",
+          one["shown"] and one["dot"] and "显示名" in one["tip"], one)
     page.fill("#importTable tbody tr:first-child [data-import-field=name]", "手填甲")
     page.wait_for_timeout(1500)
     focused = page.evaluate("""() => {
@@ -2971,23 +2980,67 @@ def import_page(page):
         return el && el.getAttribute ? (el.getAttribute('data-import-field') || el.id) : '';
     }""")
     check("打字期间焦点不会被重绘带走", focused == "name", focused)
+    still = page.evaluate("""() => {
+        const tr = document.querySelector('#importTable tbody tr[data-import-row]');
+        return {user: tr.querySelector('[data-import-field=username]').value,
+                pwd: tr.querySelector('[data-import-field=password]').value,
+                bad: tr.classList.contains('row-bad'),
+                fill: document.getElementById('importFillBtn').disabled};
+    }""")
+    check("填了显示名也不会自己长出登录名与密码",
+          still["user"] == "" and still["pwd"] == "", still)
+    check("还缺东西时这一行不能导入，自动填充键亮着",
+          still["bad"] and still["fill"] is False, still)
+
+    print("== 自动填充：只有点它才补 ==")
+    page.evaluate("() => document.getElementById('importFillBtn').click()")
+    try:
+        page.wait_for_function(
+            "() => document.getElementById('overlayTitle').innerText.trim() === '自动填充'",
+            timeout=8000)
+    except Exception:
+        pass
+    page.wait_for_timeout(200)
+    dialog = page.evaluate("""() => ({
+        title: document.getElementById('overlayTitle').innerText.trim(),
+        rules: Array.from(document.querySelectorAll('#afRule option')).map(o => o.value),
+        help: !!document.querySelector('#overlayBody .import-rule-help'),
+        text: document.getElementById('overlayBody').innerText.slice(0, 80)})""")
+    check("自动填充是弹窗，密码规则在弹窗里",
+          dialog["title"] == "自动填充" and dialog["rules"][:2] == ["random", "sid"], dialog)
+    check("使用说明在规则下面", dialog["help"], dialog)
+    page.evaluate("() => document.getElementById('afGo').click()")
+    page.wait_for_timeout(1600)
     filled = page.evaluate("""() => {
         const tr = document.querySelector('#importTable tbody tr[data-import-row]');
-        const table = document.getElementById('importTable');
-        return {bad: tr.classList.contains('row-bad'),
-                hidden: table.classList.contains('warn-off'),
-                user: tr.querySelector('[data-import-field=username]').value,
+        return {user: tr.querySelector('[data-import-field=username]').value,
                 pwd: tr.querySelector('[data-import-field=password]').value,
-                count: document.getElementById('importCount').innerText.trim(),
-                go: document.getElementById('importGo').disabled};
+                bad: tr.classList.contains('row-bad'),
+                go: document.getElementById('importGo').disabled,
+                count: document.getElementById('importCount').innerText.trim()};
     }""")
-    check("补上显示名之后这一行能建", not filled["bad"] and filled["go"] is False, filled)
-    check("没人有问题时警示列收起来", filled["hidden"], filled)
-    check("登录名与密码都补出来了",
+    check("点了才补出登录名与密码",
           bool(filled["user"]) and len(filled["pwd"]) >= 8, filled)
+    check("这一行现在能导入了", not filled["bad"] and filled["go"] is False, filled)
     check("计数写的是可导入几行", "可导入" in filled["count"], filled["count"])
+
+    # 手动清空登录名：不能又被自动补上
+    page.fill("#importTable tbody tr:first-child [data-import-field=username]", "")
+    page.wait_for_timeout(1500)
+    cleared = page.evaluate("""() => {
+        const tr = document.querySelector('#importTable tbody tr[data-import-row]');
+        return {user: tr.querySelector('[data-import-field=username]').value,
+                bad: tr.classList.contains('row-bad')};
+    }""")
+    check("删掉的登录名就留空，不自己长回来",
+          cleared["user"] == "" and cleared["bad"], cleared)
     page.click("#importBack")
     page.wait_for_timeout(500)
+    check("有内容时离开会拦一下",
+          page.locator("#importLeaveGo").count() == 1, page.url)
+    page.click("#importLeaveGo")
+    page.wait_for_timeout(600)
+    check("确认之后才真的走", page.url.endswith("#/users"), page.url)
     page.click("#importAccountBtn")
     page.wait_for_timeout(700)
 
@@ -3002,6 +3055,7 @@ def import_page(page):
     page.wait_for_function(
         "() => document.querySelectorAll('#importTable tbody tr[data-import-row]').length >= 2",
         timeout=20000)
+    page.wait_for_timeout(500)
     got = page.evaluate("""() => Array.from(
         document.querySelectorAll('#importTable tbody tr[data-import-row]')).map(tr => ({
             user: tr.querySelector('[data-import-field=username]').value,
@@ -3010,33 +3064,31 @@ def import_page(page):
             bad: tr.classList.contains('row-bad'),
         }))""")
     check("两行都读进来了", len(got) == 2, got)
-    check("空登录名按拼音补上", bool(got[0]["user"]) and got[0]["user"] != "", got[0])
-    check("空密码按规则生成", len(got[0]["pwd"]) >= 8, got[0])
+    check("表里没登录名就留空", got[0]["user"] == "" and got[1]["user"] == "", got)
     check("表里给的密码照原样", got[1]["pwd"] == "GivenPass9", got[1])
-    check("两行都能导入", not any(row["bad"] for row in got), got)
+    check("缺登录名的那两行还不能导入", got[0]["bad"] and got[1]["bad"], got)
+    check("导入键是灰的", page.locator("#importGo").is_disabled())
+
+    page.evaluate("() => document.getElementById('importFillBtn').click()")
+    page.wait_for_timeout(600)
+    page.evaluate("() => document.getElementById('afGo').click()")
+    page.wait_for_timeout(1600)
+    ready = page.evaluate("""() => Array.from(
+        document.querySelectorAll('#importTable tbody tr[data-import-row]')).map(tr => ({
+            user: tr.querySelector('[data-import-field=username]').value,
+            pwd: tr.querySelector('[data-import-field=password]').value,
+            bad: tr.classList.contains('row-bad'),
+        }))""")
+    check("自动填充补齐了登录名，没动表里给的密码",
+          ready[0]["user"] != "" and ready[1]["user"] != ""
+          and ready[1]["pwd"] == "GivenPass9", ready)
+    check("两行都能导入了", not any(row["bad"] for row in ready), ready)
     check("导入键亮了", not page.locator("#importGo").is_disabled())
     check("没有问题时状态行是空的",
           page.inner_text("#importState").strip() == "",
           page.inner_text("#importState"))
-    check("每一行都有密码时，自动生成那颗键是灰的",
-          page.locator("#importGenBtn").is_disabled())
-    check("按钮写的是自动生成密码",
-          page.inner_text("#importGenBtn").strip() == "自动生成密码",
-          page.inner_text("#importGenBtn"))
-    rule_geo = page.evaluate("""() => {
-        const sel = document.getElementById('importRule');
-        const help = document.getElementById('importRuleHelp');
-        if (!sel || !help) return null;
-        const a = sel.getBoundingClientRect(), b = help.getBoundingClientRect();
-        return {right: Math.round(b.left - a.right),
-                centreGap: Math.round(Math.abs((a.top + a.height / 2) - (b.top + b.height / 2))),
-                labels: Array.from(document.querySelectorAll(
-                    '[data-page="import-accounts"] .field label')).map(l => l.innerText.trim())};
-    }""")
-    check("使用说明挂在规则框右边、与它中线对齐",
-          bool(rule_geo) and rule_geo["right"] > 0 and rule_geo["centreGap"] <= 3, rule_geo)
-    check("没有单独的规则说明标题",
-          "规则说明" not in (rule_geo or {}).get("labels", []), rule_geo)
+    check("每一行都填满时，自动填充那颗键是灰的",
+          page.locator("#importFillBtn").is_disabled())
 
     print("== 下载账号表 ==")
     with page.expect_download(timeout=20000) as grab:
@@ -3044,10 +3096,10 @@ def import_page(page):
     download = grab.value
     saved = os.path.join(box, "saved.csv")
     download.save_as(saved)
-    text = open(saved, encoding="utf-8-sig").read()
+    text_csv = open(saved, encoding="utf-8-sig").read()
     check("下载的是一张表", download.suggested_filename.endswith(".csv"),
           download.suggested_filename)
-    check("表里有初始密码", "GivenPass9" in text, text[:120])
+    check("表里有初始密码", "GivenPass9" in text_csv, text_csv[:120])
     page.wait_for_timeout(600)
 
     print("== 改过之后导入要先问一句 ==")
@@ -5595,7 +5647,7 @@ def main():
                     if WITH_ACCOUNTS:
                         profile_page(page)
                     users_table(page)
-                    import_page(page)
+                    import_page(browser)
                     approval_queue_text(page)
                     if WITH_ACCOUNTS:
                         temp_password_page(browser)

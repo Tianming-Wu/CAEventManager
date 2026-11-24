@@ -2342,29 +2342,39 @@ def main():
                 {"filename": "a.csv", "data": blob, "rule": {"id": "sid6"}})
     rows = plan.get("rows") or []
     check("三行都读进来了", len(rows) == 3, len(rows))
-    check("空登录名按姓名拼音补上",
-          bool(rows) and rows[0]["username"] != "" and rows[0]["autoUsername"] is True,
+    check("预览不替人补内容：登录名与密码留空",
+          bool(rows) and rows[0]["username"] == "" and rows[0]["password"] == "",
           rows[:1])
-    check("空密码按规则生成",
-          bool(rows) and rows[0]["generated"] is True and len(rows[0]["password"]) >= 8,
-          rows[:1])
+    check("缺内容的行标成不能导入",
+          bool(rows) and rows[0]["status"] == "blocked"
+          and any("登录名" in p for p in rows[0]["problems"]), rows[:1])
     check("表里给的密码原样留着", bool(rows) and rows[1]["password"] == "Sf9xQ2mV",
           rows[1:2])
+
+    filled = post(owner, "/api/panel/account/import/preview",
+                  {"filename": "a.csv", "data": blob, "rule": {"id": "sid6"},
+                   "autofill": {"username": True, "password": True}})
+    fill_rows = filled.get("rows") or []
+    check("点了自动填充才补登录名",
+          bool(fill_rows) and fill_rows[0]["username"] != "", fill_rows[:1])
+    check("点了自动填充才补密码",
+          bool(fill_rows) and len(fill_rows[0]["password"]) >= 8, fill_rows[:1])
     check("撞名的那一行标成不能导入",
           bool(rows) and rows[2]["status"] == "blocked"
           and any("登录名" in p for p in rows[2]["problems"]), rows[2:])
     check("预览统计对得上",
-          plan["counts"]["ready"] == 2 and plan["counts"]["blocked"] == 1,
-          plan.get("counts"))
+          plan["counts"]["blocked"] == 3 and filled["counts"]["ready"] == 2,
+          (plan.get("counts"), filled.get("counts")))
 
     custom = post(owner, "/api/panel/account/import/preview",
                   {"filename": "a.csv", "data": blob,
-                   "rule": {"id": "custom", "template": "cae-{{学号}}"}})
+                   "rule": {"id": "custom", "template": "cae-{{学号}}"},
+                   "autofill": {"username": True, "password": True}})
     check("自定义规则用得上表里别的列",
           (custom["rows"][0]["password"] or "").startswith("cae-2025001"),
           custom["rows"][0]["password"])
 
-    ready = [r for r in rows if r["status"] == "ready"]
+    ready = [r for r in fill_rows if r["status"] == "ready"]
     made = post(owner, "/api/panel/account/import", {"rows": ready})
     check("能建的两行建出来了", made.get("created") == 2, made)
     listed = call(owner, "/api/panel/accounts?limit=200")["accounts"]

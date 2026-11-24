@@ -1154,24 +1154,17 @@ table.tbl tr.is-muted td { color: var(--dim); }
 }
 .cell-input:disabled { opacity: .55; }
 /* 「自动 / 生成」这类小标签贴在格子右侧，不参与输入的排版 */
-.cell-wrap { display: flex; align-items: center; gap: 4px; }
-.cell-wrap .cell-input { flex: 1 1 auto; }
-.cell-tag { flex: 0 0 auto; font-size: .72rem; color: var(--dim); }
-.cell-tag:empty { display: none; }
+.cell-select { width: 100%; min-width: 0; }
 /* 警示列：一个图标，够窄，所以窄屏也钉在右边。没人出问题时整列收起来 */
 table.tbl tr.row-bad .cell-input { border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
 table.tbl tr.row-bad td { background: color-mix(in srgb, var(--danger) 6%, transparent); }
 table.tbl th.import-warn,
 table.tbl td.import-warn {
   width: 34px;
-  padding-left: 2px;
-  padding-right: 2px;
+  padding-left: 10px;
+  padding-right: 4px;
   text-align: center;
-  position: sticky;
-  right: 0;
-  background: var(--surface);
 }
-table.tbl th.import-warn { background: var(--surface-2); }
 table.tbl.warn-off th.import-warn,
 table.tbl.warn-off td.import-warn { display: none; }
 .warn-dot {
@@ -1199,17 +1192,8 @@ table.tbl.warn-off td.import-warn { display: none; }
 .link-ico svg { width: 14px; height: 14px; flex: 0 0 auto; }
 .link-ico:hover { text-decoration: underline; }
 
-/* 初始密码规则那一行：下拉、（选了自定义时才出现的）输入框、说明链接，
-   三者同一条中线；说明的字比 .hint（.78rem）略大一点，是一条能点的说明，不是脚注 */
-.import-rule-line {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-.import-rule-line select { flex: 0 0 auto; width: auto; min-width: 13em; max-width: 22em; }
-.import-rule-line #importTemplate { flex: 1 1 160px; min-width: 0; }
-.import-rule-help { font-size: .86rem; flex: 0 0 auto; }
+/* 自动填充弹窗里的「使用说明」：一条能点的说明，字比 .hint 略大 */
+.import-rule-help { font-size: .86rem; }
 
 /* ---------- profile ---------- */
 .profile-grid {
@@ -2501,7 +2485,6 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   table.tbl.fixed th:first-child,
   table.tbl.fixed td:first-child {
     position: static;
-    background: transparent;
     min-width: 0;
     max-width: none;
     white-space: normal;

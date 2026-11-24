@@ -73,7 +73,7 @@ PAGES_DIR = os.path.join(BASE_DIR, "pages")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.13.27.153"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.13.28.154"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -409,12 +409,16 @@ def _import_input(payload):
     return accountimport.rows_from_client(payload.get("rows") or [], keep_empty=True)
 
 
-def _import_plan(conn, rows, rule, actor=None, fill=True):
+def _import_plan(conn, rows, rule, actor=None, autofill=None):
     """逐行给结论：这一行能不能建、登录名与密码最终是什么。
 
-    ``fill=True``（预览）时把空的登录名按拼音补上、空的密码按规则生成；
-    提交时不再补，缺什么就报什么——预览里看到的那份就是要落库的那份。
+    **不替人补任何内容**：空的登录名与空的密码一律留空并标成"还不能导入"，
+    要补得由人来点 [自动填充]。``autofill`` 就是那一次点击的意图：
+    ``{"username": True, "password": True}``。
     """
+    autofill = autofill or {}
+    fill_user = bool(autofill.get("username"))
+    fill_password = bool(autofill.get("password"))
     chosen = accountimport.rule_by_id((rule or {}).get("id") or "random")
     if (rule or {}).get("template"):
         chosen = dict(chosen, template=rule["template"], kind="template",
@@ -424,7 +428,7 @@ def _import_plan(conn, rows, rule, actor=None, fill=True):
     room = (cap - used) if cap > 0 else None
     seen = {}
     out = []
-    counts = {"total": 0, "ready": 0, "blocked": 0, "generated": 0, "autoUsername": 0}
+    counts = {"total": 0, "ready": 0, "blocked": 0, "emptyUser": 0, "emptyPassword": 0}
     warnings = []
     for at, row in enumerate(rows, 1):
         problems = []
@@ -439,15 +443,13 @@ def _import_plan(conn, rows, rule, actor=None, fill=True):
             problems.append("角色只能是管理员或超级管理员")
             role = "admin"
         username = (row.get("username") or "").strip()
-        auto = False
-        if not username and fill:
-            seed = accountimport.username_seed(name)
+        if not username and fill_user:
             username = accountimport.unique_username(
-                seed, lambda n: n.lower() in seen or panel.username_taken(conn, n))
-            auto = True
-            counts["autoUsername"] += 1
+                accountimport.username_seed(name),
+                lambda n: n.lower() in seen or panel.username_taken(conn, n))
         if not username:
             problems.append("登录名是空的")
+            counts["emptyUser"] += 1
         else:
             problem = panel.username_problem(username)
             if problem:
@@ -458,26 +460,22 @@ def _import_plan(conn, rows, rule, actor=None, fill=True):
                 problems.append("登录名已被占用")
             seen.setdefault(username.lower(), at)
         password = (row.get("password") or "").strip()
-        generated = False
-        if not password and fill:
+        if not password and fill_password:
             password, why = accountimport.render_password(
                 chosen, dict(row, username=username))
             if why:
                 problems.append(why)
-            elif password:
-                generated = True
-                counts["generated"] += 1
         if password and len(password) < panel.PASSWORD_MIN:
             problems.append("初始密码至少 %d 位" % panel.PASSWORD_MIN)
         elif not password:
             problems.append("还没有初始密码")
+            counts["emptyPassword"] += 1
         if room is not None and at > room:
             problems.append("超出账号上限：这个实例还能建 %d 个" % max(room, 0))
         if (row.get("org") or "").strip() and "组织列" not in " ".join(warnings):
             warnings.append("组织列已经读进来了，但组织功能还没上线，这次先不生效")
         out.append({"index": at, "username": username, "name": name, "role": role,
-                    "password": password, "generated": generated,
-                    "autoUsername": auto, "org": (row.get("org") or "").strip(),
+                    "password": password, "org": (row.get("org") or "").strip(),
                     "note": (row.get("note") or "").strip(),
                     "extras": row.get("extras") or {},
                     "problems": problems,
@@ -2291,7 +2289,8 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError as exc:
                 raise model.ApiError(str(exc), 400)
             plan = _import_plan(conn, rows, data.get("rule") or {},
-                                actor=need("owner"))
+                                actor=need("owner"),
+                                autofill=data.get("autofill") or {})
             return self._json(plan)
 
         if path == "/account/import" and method == "POST":
@@ -2300,7 +2299,7 @@ class Handler(BaseHTTPRequestHandler):
             rows = accountimport.rows_from_client(data.get("rows") or [], keep_empty=True)
             if not rows:
                 raise model.ApiError("没有要导入的账号")
-            plan = _import_plan(conn, rows, {}, actor=actor, fill=False)
+            plan = _import_plan(conn, rows, {}, actor=actor)
             if plan["counts"]["blocked"]:
                 first = [r for r in plan["rows"] if r["problems"]]
                 raise model.ApiError(

@@ -2890,7 +2890,13 @@
     closeAssistantDrawer();
     // 弹窗同理：换一页了，上一页的详情不该还压在新页面上（它属于那个对象，不是这一页的）
     if (wanted !== S.route) closeAllOverlays();
-    if (!guardBypass && S.route === "new-event" && wanted !== "new-event" && S.dirty) {
+    if (!importBypass && S.route === "import-accounts" && wanted !== "import-accounts" &&
+      S.import && (S.import.rows || []).length) {
+    try { history.replaceState(null, "", "#/import-accounts"); } catch (e) { /* 老浏览器 */ }
+    askImportLeave(wanted);
+    return;
+  }
+  if (!guardBypass && S.route === "new-event" && wanted !== "new-event" && S.dirty) {
       // 地址退回表单那一页，但不许重画：location.replace 会再触发一次 hashchange，
       // 表单会按预设重填一遍，填过的内容和脏标记当场都没了（"继续编辑"也就无从恢复）
       var here = "#/" + S.route +
@@ -3508,6 +3514,24 @@
     };
   }
 
+  var importBypass = false;
+
+  function askImportLeave(into) {
+    openOverlay("import-leave", "离开导入账号？",
+      '<p class="page-sub">这一批还没有导入。初始密码只在这一页看得到，' +
+      "离开之后就取不回来了</p>" +
+      '<div class="row" style="margin-top:18px;justify-content:flex-end">' +
+      '<button class="btn" type="button" data-close-overlay="1">继续编辑</button>' +
+      '<button class="btn danger" type="button" id="importLeaveGo">离开</button></div>');
+    $("#importLeaveGo").addEventListener("click", function () {
+      closeOverlay();
+      importBypass = true;
+      S.import = null;
+      go(into);
+      setTimeout(function () { importBypass = false; }, 80);
+    });
+  }
+
   function markDirty() { S.dirty = true; }
 
   /* 离开创建页时把这张表单清空：不然下次进来还挂着上一次的名字与人像。
@@ -3995,9 +4019,11 @@
      因为初始密码只在这一页上看得到，关掉就没了。 */
   function resetImport() {
     markLoading("importRows");
-    S.import = { rows: [], counts: null, rule: null, rules: [], cap: null,
-                 warnings: [], template: "", revision: 0, downloaded: -1,
-                 busy: false };
+    S.import = { rows: [], counts: null, rules: [], cap: null, warnings: [],
+                 rule: { id: "random", template: "" },
+                 // 预览不替人补内容：要补得先点 [自动填充]，而且只补那一次
+                 autofill: { username: true, password: true },
+                 revision: 0, downloaded: -1, busy: false };
     var help = $("#importRuleHelp");
     if (help) help.setAttribute("href", PX.PREFIX + "/docs#/usage/account-import.md");
   }
@@ -4006,38 +4032,23 @@
     return PX.api("/account/import/rules").then(function (d) {
       S.import.rules = d.rules || [];
       S.import.cap = d.cap || null;
-      if (!S.import.rule) S.import.rule = (S.import.rules[0] || {}).id || "random";
-      var sel = $("#importRule");
-      if (sel) {
-        sel.innerHTML = S.import.rules.map(function (r) {
-          return '<option value="' + PX.esc(r.id) + '">' + PX.esc(r.label) + "</option>";
-        }).join("");
-        sel.value = S.import.rule;
-      }
-      syncImportTemplateRow();
     }).catch(function (e) { PX.toast(PX.esc(e.message), true); });
-  }
-
-  function syncImportTemplateRow() {
-    var input = $("#importTemplate");
-    if (!input) return;
-    input.hidden = S.import.rule !== "custom";
-    if (!input.hidden) input.value = S.import.template || "";
   }
 
   function importRulePayload() {
     if (!S.import) return { id: "random" };
-    var payload = { id: S.import.rule };
-    if (S.import.rule === "custom") payload.template = S.import.template || "";
+    var payload = { id: S.import.rule.id || "random" };
+    if (payload.id === "custom") payload.template = S.import.rule.template || "";
     return payload;
   }
 
-  function importPreview(rows, rule) {
+  function importPreview(rows, rule, autofill) {
     S.import.busy = true;
     drawImport();
     return PX.api("/account/import/preview", {
       method: "POST",
-      body: { rows: rows, rule: rule || importRulePayload() }
+      body: { rows: rows, rule: rule || importRulePayload(),
+              autofill: autofill || {} }
     }).then(function (d) {
       S.import.rows = (d.rows || []).map(function (r) { return pickImportRow(r); });
       S.import.counts = d.counts || null;
@@ -4073,9 +4084,8 @@
   function importWarnCell(row) {
     var why = (row.problems || []).join("；");
     if (!why) return "";
-    return '<button class="warn-dot" type="button" data-import-why="' + PX.esc(why) +
-      '" title="' + PX.esc(why) + '" aria-label="' + PX.esc(why) + '">' + ICON_WARN +
-      "</button>";
+    return '<button class="badge-off warn-dot" type="button" data-tip="' + PX.esc(why) +
+      '" aria-label="不能导入：' + PX.esc(why) + '">' + ICON_WARN + "</button>";
   }
 
   function importRowHtml(row) {
@@ -4087,15 +4097,14 @@
     };
     return '<tr data-import-row="' + row.index + '"' + (bad ? ' class="row-bad"' : "") + ">" +
       '<td class="mono">' + row.index + "</td>" +
-      '<td><span class="cell-wrap">' + field("username", " mono") +
-      '<span class="cell-tag">' + (row.autoUsername ? "自动" : "") + "</span></span></td>" +
+      "<td>" + field("username", " mono") + "</td>" +
       "<td>" + field("name") + "</td>" +
-      '<td><select class="cell-input" data-import-field="role" data-row="' + row.index + '">' +
+      '<td><select class="cell-input cell-select" data-import-field="role" data-row="' +
+      row.index + '">' +
       '<option value="admin"' + (row.role === "admin" ? " selected" : "") + ">管理员</option>" +
       '<option value="superadmin"' + (row.role === "superadmin" ? " selected" : "") +
       ">超级管理员</option></select></td>" +
-      '<td><span class="cell-wrap">' + field("password", " mono") +
-      '<span class="cell-tag">' + (row.generated ? "生成" : "") + "</span></span></td>" +
+      "<td>" + field("password", " mono") + "</td>" +
       '<td><input class="cell-input" data-import-field="org" data-row="' + row.index +
       '" value="' + PX.esc(row.org || "") + '" disabled></td>' +
       "<td>" + field("note") + "</td>" +
@@ -4115,16 +4124,6 @@
       tr.classList.toggle("row-bad", row.status !== "ready");
       var warn = tr.querySelector("td.import-warn");
       if (warn) warn.innerHTML = importWarnCell(row);
-      var auto = tr.querySelector('[data-import-field="username"]');
-      if (auto) {
-        var tag = auto.parentNode.querySelector(".cell-tag");
-        if (tag) tag.textContent = row.autoUsername ? "自动" : "";
-      }
-      var pwd = tr.querySelector('[data-import-field="password"]');
-      if (pwd) {
-        var ptag = pwd.parentNode.querySelector(".cell-tag");
-        if (ptag) ptag.textContent = row.generated ? "生成" : "";
-      }
       var fields = tr.querySelectorAll("[data-import-field]");
       for (var j = 0; j < fields.length; j++) {
         var el = fields[j];
@@ -4165,12 +4164,14 @@
       $("#importGo").disabled = !!why || !state.rows.length || state.busy;
       $("#importGo").title = why || "把这份预览建出来";
     }
-    if ($("#importGenBtn")) {
-      // 只有真的有空密码时这颗键才有意义
-      var blanks = state.rows.filter(function (r) { return !r.password; }).length;
-      $("#importGenBtn").disabled = !blanks || state.busy;
-      $("#importGenBtn").title = blanks ? "给 " + blanks + " 行空密码按当前规则生成"
-                                        : "每一行都有密码";
+    if ($("#importFillBtn")) {
+      // 只有真的还有空格子时这颗键才有意义
+      var blanks = state.rows.filter(function (r) {
+        return !r.username || !r.password;
+      }).length;
+      $("#importFillBtn").disabled = !blanks || state.busy;
+      $("#importFillBtn").title = blanks ? "有 " + blanks + " 行缺登录名或初始密码"
+                                         : "每一行都填满了";
     }
     if ($("#importState")) $("#importState").textContent = why;
     if ($("#importWarn")) {
@@ -4252,22 +4253,103 @@
     if (!S.import) return;
     var rows = S.import.rows || [];
     if (!rows.length) return;
-    var blob = new Blob(["\ufeff" + importTableCsv()], { type: "text/csv;charset=utf-8" });
-    var url = URL.createObjectURL(blob);
-    var a = document.createElement("a");
-    a.href = url;
-    a.download = "accounts-" + PX.pad(new Date().getMonth() + 1) + PX.pad(new Date().getDate()) +
-      ".csv";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
-    S.import.downloaded = S.import.revision;
-    PX.api("/account/import/downloaded", {
-      method: "POST", body: { rows: rows.length }
-    }).catch(function () { /* 记账失败不影响下载 */ });
-    drawImport();
-    PX.toast("账号表已下载");
+    var text = "\ufeff" + importTableCsv();
+    var now = new Date();
+    var name = "accounts-" + now.getFullYear() + PX.pad(now.getMonth() + 1) +
+      PX.pad(now.getDate()) + ".csv";
+    var mark = function () {
+      S.import.downloaded = S.import.revision;
+      drawImport();
+      PX.toast("账号表已下载");
+      PX.api("/account/import/downloaded", {
+        method: "POST", body: { rows: rows.length }
+      }).catch(function () { /* 记账失败不影响下载 */ });
+    };
+    var fallback = function () {
+      var blob = new Blob([text], { type: "text/csv;charset=utf-8" });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement("a");
+      a.href = url;
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+      mark();
+    };
+    // 能弹「另存为」就弹：位置由人来选。取消（AbortError）不算下载过，
+    // 导入之前还会再问一次
+    if (window.showSaveFilePicker) {
+      window.showSaveFilePicker({
+        suggestedName: name,
+        types: [{description: "CSV", accept: {"text/csv": [".csv"]}}]
+      }).then(function (handle) {
+        return handle.createWritable().then(function (writable) {
+          return writable.write(text).then(function () { return writable.close(); });
+        });
+      }).then(mark).catch(function (e) {
+        if (e && (e.name === "AbortError" || e.name === "NotAllowedError")) return;
+        fallback();
+      });
+      return;
+    }
+    fallback();
+  }
+
+  /* 自动填充：只填空着的格子，填什么由这一次的选择决定 */
+  function autofillDialog() {
+    if (!S.import) return;
+    if (!(S.import.rows || []).length) {
+      PX.toast("先读一张表或手动录入", true);
+      return;
+    }
+    var opts = S.import.autofill || {username: true, password: true};
+    var rule = S.import.rule || {id: "random", template: ""};
+    var choices = (S.import.rules || []).map(function (r) {
+      return '<option value="' + PX.esc(r.id) + '"' +
+        (r.id === rule.id ? " selected" : "") + ">" + PX.esc(r.label) + "</option>";
+    }).join("");
+    openOverlay("import-autofill", "自动填充",
+      '<p class="page-sub">只填空着的格子，已经填了的不动</p>' +
+      '<div class="as-form-grid" style="margin-top:12px">' +
+      '<div class="field"><label for="afUser">补齐登录名（按姓名拼音）</label>' +
+      '<label class="switch" style="margin-top:6px"><input type="checkbox" id="afUser"' +
+      (opts.username ? " checked" : "") + '><span class="track"></span></label></div>' +
+      '<div class="field"><label for="afPass">补齐初始密码</label>' +
+      '<label class="switch" style="margin-top:6px"><input type="checkbox" id="afPass"' +
+      (opts.password ? " checked" : "") + '><span class="track"></span></label></div>' +
+      "</div>" +
+      '<div class="field" style="margin-top:10px"><label for="afRule">密码规则</label>' +
+      '<select id="afRule">' + choices + "</select></div>" +
+      '<div class="field" id="afTplRow" style="margin-top:8px"' +
+      (rule.id === "custom" ? "" : " hidden") + '>' +
+      '<label for="afTpl">自定义规则</label>' +
+      '<input id="afTpl" type="text" autocomplete="off" spellcheck="false" ' +
+      'placeholder="{{学号:6}}" value="' + PX.esc(rule.template || "") + '"></div>' +
+      '<p style="margin-top:8px"><a class="link-ico import-rule-help" href="' +
+      PX.PREFIX + '/docs#/usage/account-import.md" target="_blank" rel="noopener">' +
+      '<svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" ' +
+      'stroke-width="1.5" stroke-linecap="round"><circle cx="10" cy="10" r="7.2"/>' +
+      '<path d="M8.2 7.9a1.9 1.9 0 0 1 3.7.6c0 1.2-1.9 1.5-1.9 2.8"/>' +
+      '<path d="M10 14.2v.1"/></svg><span>使用说明</span></a></p>' +
+      '<div class="row" style="margin-top:16px;justify-content:flex-end">' +
+      '<button class="btn" type="button" data-close-overlay="1">取消</button>' +
+      '<button class="btn primary" type="button" id="afGo">自动填充</button></div>');
+    if ($("#afRule")) {
+      $("#afRule").addEventListener("change", function () {
+        var row = $("#afTplRow");
+        if (row) row.hidden = this.value !== "custom";
+      });
+    }
+    $("#afGo").addEventListener("click", function () {
+      S.import.autofill = {username: !!($("#afUser") && $("#afUser").checked),
+                           password: !!($("#afPass") && $("#afPass").checked)};
+      S.import.rule = {id: $("#afRule") ? $("#afRule").value : "random",
+                       template: ($("#afTpl") && $("#afTpl").value) || ""};
+      closeOverlay();
+      // 只在这一次请求里补：之后重算（含把某一格删空）不会再补回来
+      importPreview(S.import.rows, importRulePayload(), S.import.autofill);
+    });
   }
 
   function submitImport() {
@@ -7757,42 +7839,9 @@
     if (file) readImportFile(file);
   });
   $("#importManualBtn").addEventListener("click", addImportBlankRow);
-  $("#importRule").addEventListener("change", function () {
-    S.import.rule = this.value;
-    syncImportTemplateRow();
-    if ((S.import.rows || []).length) importPreview(S.import.rows, importRulePayload());
-  });
-  $("#importTemplate").addEventListener("input", function () {
-    S.import.template = this.value;
-  });
-  $("#importTemplate").addEventListener("change", function () {
-    S.import.template = this.value;
-    if ((S.import.rows || []).length) importPreview(S.import.rows, importRulePayload());
-  });
-  $("#importGenBtn").addEventListener("click", function () {
-    if (!(S.import.rows || []).length) {
-      PX.toast("先读一张表或手动录入", true);
-      return;
-    }
-    var blanks = (S.import.rows || []).filter(function (r) { return !r.password; });
-    if (!blanks.length) {
-      PX.toast("每一行都已经有密码了");
-      return;
-    }
-    // 只把空的那几格交回去：已经有的密码（表里带的、手改的）不动
-    var keep = S.import.rows.map(function (r) {
-      return r.password ? r : Object.assign({}, r, { password: "" });
-    });
-    importPreview(keep, importRulePayload());
-  });
+  $("#importFillBtn").addEventListener("click", autofillDialog);
   $("#importDownloadBtn").addEventListener("click", downloadImportTable);
   $("#importGo").addEventListener("click", submitImport);
-  $("#importTable").addEventListener("click", function (e) {
-    var dot = e.target.closest ? e.target.closest(".warn-dot") : null;
-    if (!dot) return;
-    // 触屏没有悬停：点一下把原因摆出来
-    PX.toast(PX.esc(dot.getAttribute("data-import-why") || ""), true, 6000);
-  });
   $("#importTable").addEventListener("input", function (e) {
     var input = e.target;
     if (input && input.getAttribute && input.getAttribute("data-import-field")) {

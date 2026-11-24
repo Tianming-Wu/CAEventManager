@@ -32,6 +32,8 @@
     "screens": { min: "admin", group: "resources" },
     "templates": { min: "admin" },
     "users": { min: "superadmin" },
+    // 批量建号只给站长：这条路上能把人设成超级管理员，超管不能自己开这道门
+    "import-accounts": { min: "owner", parent: { href: "#/users", label: "用户管理" } },
     "all-events": { min: "superadmin" },
     "roster-admin": { min: "superadmin" },
     "approval-users": { min: "superadmin", group: "approvals" },
@@ -1143,6 +1145,8 @@
       el.hidden = myRank() < rank(el.getAttribute("data-min-role"));
     });
     $("#hostStats").hidden = !isOwner() || !S.host;
+    // 批量建号只给站长：超管连这颗键都看不见
+    if ($("#importAccountBtn")) $("#importAccountBtn").hidden = !isOwner();
   }
 
   // The rail shows icons only, so every entry needs a hover title.
@@ -2977,6 +2981,11 @@
         return loadAdminLists().then(draw);
       },
       users: function () { return loadAccounts().then(draw); },
+      "import-accounts": function () {
+        // 每次进来都从空表开始：上一批的密码留在屏幕上没有意义
+        resetImport();
+        return loadImportRules().then(drawImport);
+      },
       "approval-users": function () { return loadAccounts().then(draw); },
       audit: function () { return loadAudit().then(draw); },
       templates: function () { return loadTemplates(true).then(draw); },
@@ -3031,6 +3040,7 @@
       case "templates": return drawTemplates();
       case "new-event": return drawNewEvent();
       case "users": return drawUsers();
+      case "import-accounts": return drawImport();
       case "all-events": return drawAllEvents();
       case "roster-admin": return drawRosterAdmin();
       case "approval-users": return drawApprovalUsers();
@@ -3977,6 +3987,263 @@
 
   function drawUsers() {
     renderAccountsTable();
+  }
+
+  /* ------------------------------------------------------- 批量导入账号 --- */
+  /* 预览就是编辑页：读进来的每一行都能就地改，改完点[导入]。
+     账号表下载过一次之后又改了内容，[导入] 会先问一句要不要重新下一份——
+     因为初始密码只在这一页上看得到，关掉就没了。 */
+  function resetImport() {
+    markLoading("importRows");
+    S.import = { rows: [], counts: null, rule: null, rules: [], cap: null,
+                 warnings: [], template: "", revision: 0, downloaded: -1,
+                 busy: false };
+    var help = $("#importRuleHelp");
+    if (help) help.setAttribute("href", PX.PREFIX + "/docs#/usage/account-import.md");
+  }
+
+  function loadImportRules() {
+    return PX.api("/account/import/rules").then(function (d) {
+      S.import.rules = d.rules || [];
+      S.import.cap = d.cap || null;
+      if (!S.import.rule) S.import.rule = (S.import.rules[0] || {}).id || "random";
+      var sel = $("#importRule");
+      if (sel) {
+        sel.innerHTML = S.import.rules.map(function (r) {
+          return '<option value="' + PX.esc(r.id) + '">' + PX.esc(r.label) + "</option>";
+        }).join("");
+        sel.value = S.import.rule;
+      }
+      syncImportTemplateRow();
+    }).catch(function (e) { PX.toast(PX.esc(e.message), true); });
+  }
+
+  function syncImportTemplateRow() {
+    var custom = S.import.rule === "custom";
+    var row = $("#importTemplateRow");
+    if (!row) return;
+    row.hidden = !custom;
+    if (custom && $("#importTemplate")) $("#importTemplate").value = S.import.template || "";
+  }
+
+  function importRulePayload() {
+    if (!S.import) return { id: "random" };
+    var payload = { id: S.import.rule };
+    if (S.import.rule === "custom") payload.template = S.import.template || "";
+    return payload;
+  }
+
+  function importPreview(rows, rule) {
+    S.import.busy = true;
+    drawImport();
+    return PX.api("/account/import/preview", {
+      method: "POST",
+      body: { rows: rows, rule: rule || importRulePayload() }
+    }).then(function (d) {
+      S.import.rows = (d.rows || []).map(function (r) { return pickImportRow(r); });
+      S.import.counts = d.counts || null;
+      S.import.cap = d.cap || S.import.cap;
+      S.import.warnings = d.warnings || [];
+      S.import.revision += 1;
+      S.import.busy = false;
+      drawImport();
+      return d;
+    }).catch(function (e) {
+      S.import.busy = false;
+      PX.toast(PX.esc(e.message), true);
+      drawImport();
+    });
+  }
+
+  function pickImportRow(row) {
+    return {
+      index: row.index, username: row.username || "", name: row.name || "",
+      role: row.role || "admin", password: row.password || "",
+      org: row.org || "", note: row.note || "", extras: row.extras || {},
+      generated: !!row.generated, autoUsername: !!row.autoUsername,
+      problems: row.problems || [], status: row.status || "ready"
+    };
+  }
+
+  function drawImport() {
+    var state = S.import;
+    if (!state) return;
+    syncCrumb("import-accounts");
+    var counts = state.counts || { total: 0, ready: 0, blocked: 0, generated: 0 };
+    var cap = state.cap || { max: 0, used: 0, left: 0 };
+    if ($("#importCount")) {
+      $("#importCount").textContent = counts.total
+        ? "共 " + counts.total + " 行，能建 " + counts.ready + " 行"
+        : "";
+    }
+    var body = $("#importTable tbody");
+    if (body) {
+      body.innerHTML = state.rows.length ? state.rows.map(function (row) {
+        var bad = row.status !== "ready";
+        return '<tr data-import-row="' + row.index + '"' + (bad ? ' class="row-bad"' : "") + ">" +
+          '<td class="mono">' + row.index + "</td>" +
+          '<td><input class="cell-input mono" data-import-field="username" data-row="' +
+          row.index + '" value="' + PX.esc(row.username) + '" spellcheck="false">' +
+          (row.autoUsername ? ' <span class="hint">自动</span>' : "") + "</td>" +
+          '<td><input class="cell-input" data-import-field="name" data-row="' +
+          row.index + '" value="' + PX.esc(row.name) + '"></td>' +
+          '<td><select class="cell-input" data-import-field="role" data-row="' +
+          row.index + '">' +
+          '<option value="admin"' + (row.role === "admin" ? " selected" : "") + ">管理员</option>" +
+          '<option value="superadmin"' + (row.role === "superadmin" ? " selected" : "") +
+          ">超级管理员</option></select></td>" +
+          '<td><input class="cell-input mono" data-import-field="password" data-row="' +
+          row.index + '" value="' + PX.esc(row.password) + '" spellcheck="false">' +
+          (row.generated ? ' <span class="hint">生成</span>' : "") + "</td>" +
+          '<td><input class="cell-input" data-import-field="org" data-row="' +
+          row.index + '" value="' + PX.esc(row.org) + '" disabled></td>' +
+          '<td><input class="cell-input" data-import-field="note" data-row="' +
+          row.index + '" value="' + PX.esc(row.note) + '"></td>' +
+          '<td class="wrap">' +
+          (bad ? '<span class="tag danger">' + PX.esc(row.problems[0] || "不能导入") + "</span>"
+               : '<span class="tag">可导入</span>') + "</td></tr>";
+      }).join("") : emptyRow(8, "还没有内容：选一个表格，或者点 [手动录入]");
+    }
+
+    var fresh = state.downloaded === state.revision && state.revision > 0;
+    var why = "";
+    if (!state.rows.length) why = "先读一张表或手动录入";
+    else if (counts.blocked) why = "有 " + counts.blocked + " 行还不能导入";
+    else if (S.import.cap && S.import.cap.max > 0 && counts.ready > S.import.cap.left) {
+      why = "超出账号上限：这个实例还能建 " + S.import.cap.left + " 个";
+    }
+    if ($("#importGo")) {
+      $("#importGo").disabled = !!why || state.busy;
+      $("#importGo").title = why || "把这份预览建出来";
+    }
+    if ($("#importState")) {
+      var bits = [];
+      if (why) bits.push(why);
+      if (counts.generated) bits.push("其中 " + counts.generated + " 个密码是刚生成的");
+      if (S.import.cap && S.import.cap.max > 0) {
+        bits.push("账号上限 " + S.import.cap.max + "，已用 " + S.import.cap.used);
+      }
+      bits.push(fresh ? "账号表已下载（含初始密码）"
+                      : "初始密码只在这一页看得到，导入前请先 [下载账号表]");
+      $("#importState").textContent = bits.join("；");
+    }
+    if ($("#importWarn")) {
+      var warns = state.warnings || [];
+      $("#importWarn").hidden = !warns.length;
+      $("#importWarn").textContent = warns.join("；");
+    }
+    if ($("#importDownloadBtn")) $("#importDownloadBtn").disabled = !state.rows.length;
+  }
+
+  // 表格里的就地编辑：先把值写回本地（下载与导入都用最新的），
+  // 再等手停下来重新算一遍预览——冲突、上限、密码都要服务端算
+  var importTimer = null;
+  function importCellChanged(input, immediate) {
+    if (!S.import) return;
+    var field = input.getAttribute("data-import-field");
+    var index = Number(input.getAttribute("data-row"));
+    var row = (S.import.rows || []).filter(function (r) { return r.index === index; })[0];
+    if (!row) return;
+    row[field] = input.value;
+    if (field === "username") row.autoUsername = false;
+    if (field === "password") row.generated = false;
+    // 内容动过了：上一份下载的账号表就过期了
+    S.import.revision += 1;
+    if (importTimer) clearTimeout(importTimer);
+    var run = function () {
+      importTimer = null;
+      importPreview(S.import.rows, importRulePayload());
+    };
+    if (immediate) run();
+    else importTimer = setTimeout(run, 450);
+  }
+
+  function addImportBlankRow() {
+    if (!S.import) return;
+    var next = (S.import.rows || []).length + 1;
+    S.import.rows = (S.import.rows || []).concat([{
+      index: next, username: "", name: "", role: "admin", password: "",
+      org: "", note: "", extras: {}, generated: false, autoUsername: true,
+      problems: [], status: "ready"
+    }]);
+    importPreview(S.import.rows, importRulePayload());
+  }
+
+  function readImportFile(file) {
+    var reader = new FileReader();
+    reader.onload = function () {
+      var text = String(reader.result || "");
+      var base64 = text.indexOf("base64,") >= 0 ? text.split("base64,")[1] : "";
+      PX.api("/account/import/preview", {
+        method: "POST",
+        body: { filename: file.name, data: base64, rule: importRulePayload() }
+      }).then(function (d) {
+        S.import.rows = (d.rows || []).map(pickImportRow);
+        S.import.counts = d.counts || null;
+        S.import.cap = d.cap || S.import.cap;
+        S.import.warnings = d.warnings || [];
+        S.import.revision += 1;
+        drawImport();
+      }).catch(function (e) { PX.toast(PX.esc(e.message), true); });
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function importTableCsv() {
+    var head = ["登录名", "显示名", "角色", "初始密码", "组织", "备注"];
+    var lines = [head.join(",")];
+    (S.import.rows || []).forEach(function (row) {
+      lines.push([row.username, row.name, row.role === "superadmin" ? "超级管理员" : "管理员",
+                  row.password, row.org, row.note].map(function (cell) {
+        var text = String(cell == null ? "" : cell);
+        return /[",\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text;
+      }).join(","));
+    });
+    return lines.join("\n") + "\n";
+  }
+
+  function downloadImportTable() {
+    if (!S.import) return;
+    var rows = S.import.rows || [];
+    if (!rows.length) return;
+    var blob = new Blob(["\ufeff" + importTableCsv()], { type: "text/csv;charset=utf-8" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = "accounts-" + PX.pad(new Date().getMonth() + 1) + PX.pad(new Date().getDate()) +
+      ".csv";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+    S.import.downloaded = S.import.revision;
+    PX.api("/account/import/downloaded", {
+      method: "POST", body: { rows: rows.length }
+    }).catch(function () { /* 记账失败不影响下载 */ });
+    drawImport();
+    PX.toast("账号表已下载");
+  }
+
+  function submitImport() {
+    if (!S.import) return;
+    var state = S.import;
+    var rows = state.rows || [];
+    if (!rows.length) return;
+    var go = function () {
+      PX.api("/account/import", { method: "POST", body: { rows: rows } })
+        .then(function (d) {
+          PX.toast("已导入 " + d.created + " 个账号");
+          resetImport();
+          return loadImportRules().then(drawImport);
+        })
+        .catch(function (e) { PX.toast(PX.esc(e.message), true); });
+    };
+    if (state.downloaded !== state.revision) {
+      confirmHighRisk("账号表还没下载", "改过之后也没重新下载。初始密码只在那一份文件里，" +
+                      "关掉这一页就取不回来了", "仍然导入", false, go, { noSudo: true });
+      return;
+    }
+    go();
   }
 
   function canDecide(acc) {
@@ -7426,6 +7693,67 @@
   $("#rosterBack").addEventListener("click", function () {
     location.hash = "#/rosters";
   });
+
+  /* ---- 导入账号 ---- */
+  $("#importBack").addEventListener("click", function () {
+    location.hash = "#/users";
+  });
+  $("#importAccountBtn").addEventListener("click", function () {
+    location.hash = "#/import-accounts";
+  });
+  $("#importPickBtn").addEventListener("click", function () {
+    var picker = $("#importFile");
+    picker.value = "";
+    picker.click();
+  });
+  $("#importFile").addEventListener("change", function () {
+    var file = this.files && this.files[0];
+    if (file) readImportFile(file);
+  });
+  $("#importManualBtn").addEventListener("click", addImportBlankRow);
+  $("#importRule").addEventListener("change", function () {
+    S.import.rule = this.value;
+    syncImportTemplateRow();
+    if ((S.import.rows || []).length) importPreview(S.import.rows, importRulePayload());
+  });
+  $("#importTemplate").addEventListener("input", function () {
+    S.import.template = this.value;
+  });
+  $("#importTemplate").addEventListener("change", function () {
+    S.import.template = this.value;
+    if ((S.import.rows || []).length) importPreview(S.import.rows, importRulePayload());
+  });
+  $("#importGenBtn").addEventListener("click", function () {
+    if (!(S.import.rows || []).length) {
+      PX.toast("先读一张表或手动录入", true);
+      return;
+    }
+    var blanks = (S.import.rows || []).filter(function (r) { return !r.password; });
+    if (!blanks.length) {
+      PX.toast("每一行都已经有密码了");
+      return;
+    }
+    // 只把空的那几格交回去：已经有的密码（表里带的、手改的）不动
+    var keep = S.import.rows.map(function (r) {
+      return r.password ? r : Object.assign({}, r, { password: "" });
+    });
+    importPreview(keep, importRulePayload());
+  });
+  $("#importDownloadBtn").addEventListener("click", downloadImportTable);
+  $("#importGo").addEventListener("click", submitImport);
+  $("#importTable").addEventListener("input", function (e) {
+    var input = e.target;
+    if (input && input.getAttribute && input.getAttribute("data-import-field")) {
+      importCellChanged(input, false);
+    }
+  });
+  $("#importTable").addEventListener("change", function (e) {
+    var input = e.target;
+    if (input && input.getAttribute && input.getAttribute("data-import-field")) {
+      importCellChanged(input, true);
+    }
+  });
+
   $("#signupCopyBtn").addEventListener("click", function () {
     var text = $("#signupUrl").textContent || "";
     var done = function () { PX.toast("链接已复制"); };

@@ -1133,6 +1133,39 @@ table.tbl td.wrap { white-space: normal; min-width: 12em; }
 table.tbl tr.is-muted td { color: var(--dim); }
 .empty { color: var(--dim); font-size: .85rem; padding: 14px 4px; text-align: center; }
 
+/* ---------- 导入账号：表格里就地编辑 ---------- */
+/* 单元格里是输入框：让它长得像"能改的字"，而不是又一层表格 */
+.cell-input {
+  width: 100%;
+  min-width: 0;
+  padding: 4px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: .84rem;
+}
+.cell-input:hover { border-color: var(--line); }
+.cell-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--surface);
+}
+.cell-input:disabled { opacity: .55; }
+/* 这一行还不能导入：整行淡下去，状态那一格说原因 */
+table.tbl tr.row-bad .cell-input { border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
+table.tbl tr.row-bad td { background: color-mix(in srgb, var(--danger) 6%, transparent); }
+/* 带图标的链接（规则说明）：图标与字一条中线 */
+.link-ico {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  text-decoration: none;
+}
+.link-ico svg { width: 14px; height: 14px; flex: 0 0 auto; }
+.link-ico:hover { text-decoration: underline; }
+
 /* ---------- profile ---------- */
 .profile-grid {
   display: flex;

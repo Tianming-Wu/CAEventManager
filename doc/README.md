@@ -19,6 +19,7 @@
 | --- | --- |
 | [usage/about.md](usage/about.md) | 关于：版本号怎么读、仓库与许可证、作者与反馈 |
 | [usage/start.md](usage/start.md) | 开始使用：注册与审核、侧栏有哪些页、顶栏、手机上 |
+| [usage/account-import.md](usage/account-import.md) | 导入账号：批量建号、表格列、初始密码规则、下载账号表 |
 | [usage/account.md](usage/account.md) | 账号与角色：三种角色、登录名、账户信息、敏感操作、界面设置 |
 | [usage/events.md](usage/events.md) | 活动：我的活动、创建、邀请成员、移出、存档、活动后台 |
 | [usage/event-site.md](usage/event-site.md) | 活动现场：地址、公示页、大屏、签到、活动设置、日志、模块页面在哪 |

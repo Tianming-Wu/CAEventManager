@@ -1141,6 +1141,8 @@
       <header class="page-head">
         <h1>用户管理</h1>
         <div class="page-actions">
+          <!-- 批量建号只对站长开放：这条路上能顺手把人设成超级管理员 -->
+          <button class="btn" id="importAccountBtn" type="button">导入账号</button>
           <!-- 管理员手动开号：只给登录名与显示名，密码由系统生成（临时密码） -->
           <button class="btn primary" id="newAccountBtn" type="button">新建账号</button>
         </div>
@@ -1180,6 +1182,91 @@
         </div>
         <div class="row" style="margin-top:10px;justify-content:flex-end">
           <button class="btn sm" id="usersMore" type="button" hidden>加载更多</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- =================================================== 导入账号（子页） -->
+    <section class="page" data-page="import-accounts" hidden>
+      <header class="page-head">
+        <div class="head-title">
+          <button class="icon-btn crumb-back" id="importBack" type="button"
+                  aria-label="回到用户管理" title="回到用户管理">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12 5l-5 5 5 5"/></svg>
+          </button>
+          <h1 class="crumb-title">
+            <a class="crumb" data-href="#/users" role="link" tabindex="0">用户管理</a>
+            <span class="crumb-sep" aria-hidden="true">›</span>
+            <span>导入账号</span>
+          </h1>
+        </div>
+        <p class="page-sub" id="importSub">读一张表批量建号，每一行先看一遍再导入</p>
+      </header>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>导入表</h2>
+          <span class="hint" id="importCount"></span>
+          <div class="spacer"></div>
+          <input type="file" id="importFile" accept=".csv,.xlsx,.xlsm" hidden>
+          <button class="btn sm" id="importPickBtn" type="button">选择文件</button>
+          <button class="btn sm" id="importManualBtn" type="button">手动录入</button>
+        </div>
+        <p class="hint" style="margin-top:8px">
+          认 CSV 与 Excel。表头用登录名 / 显示名 / 角色 / 初始密码 / 组织 / 备注，
+          其余列也读进来，写密码规则时能引用
+        </p>
+
+        <div class="as-form-grid" style="margin-top:10px">
+          <div class="field">
+            <label for="importRule">初始密码规则</label>
+            <select id="importRule"></select>
+          </div>
+          <div class="field" id="importTemplateRow" hidden>
+            <label for="importTemplate">自定义规则</label>
+            <input id="importTemplate" type="text" autocomplete="off" spellcheck="false"
+                   placeholder="{{学号:6}}">
+          </div>
+          <div class="field">
+            <label>规则说明</label>
+            <a class="hint link-ico" id="importRuleHelp" href="docs" target="_blank"
+               rel="noopener">
+              <svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor"
+                   stroke-width="1.5" stroke-linecap="round">
+                <circle cx="10" cy="10" r="7.2"/>
+                <path d="M8.2 7.9a1.9 1.9 0 0 1 3.7.6c0 1.2-1.9 1.5-1.9 2.8"/>
+                <path d="M10 14.2v.1"/>
+              </svg>
+              <span>使用说明</span>
+            </a>
+          </div>
+        </div>
+
+        <div class="row" style="margin-top:12px;flex-wrap:wrap">
+          <button class="btn" id="importGenBtn" type="button">按规则生成空白密码</button>
+          <button class="btn" id="importDownloadBtn" type="button">下载账号表</button>
+          <div class="spacer"></div>
+          <button class="btn primary" id="importGo" type="button" disabled>导入</button>
+        </div>
+        <p class="note" id="importState" style="margin-top:8px"></p>
+        <p class="note" id="importWarn" hidden style="margin-top:4px"></p>
+      </div>
+
+      <div class="card">
+        <div class="tblwrap">
+          <table class="tbl fixed" id="importTable">
+            <thead><tr>
+              <th style="width:44px">#</th>
+              <th>登录名</th>
+              <th>显示名</th>
+              <th style="width:130px">角色</th>
+              <th>初始密码</th>
+              <th style="width:120px">组织</th>
+              <th>备注</th>
+              <th style="width:170px">状态</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
         </div>
       </div>
     </section>

@@ -19,6 +19,7 @@ import re
 import shutil
 import struct
 import sys
+import tempfile
 import time
 import urllib.request
 import zipfile
@@ -2915,6 +2916,105 @@ def approval_queue_text(page):
     check("副标题说得出现在有几条", got["sub"] != "", got["sub"])
 
 
+def import_page(page):
+    """用户管理 › 导入账号：读表、预览即编辑、下载、导入。"""
+    print("== 导入账号：按钮在左边，进子页 ==")
+    page.goto(BASE + "/panel#/users")
+    page.wait_for_timeout(600)
+    check("用户管理右上角有导入账号",
+          page.locator("#importAccountBtn").is_visible(), None)
+    where = page.evaluate("""() => {
+        const pick = document.getElementById('importAccountBtn');
+        const make = document.getElementById('newAccountBtn');
+        if (!pick || !make) return null;
+        return {pick: Math.round(pick.getBoundingClientRect().left),
+                make: Math.round(make.getBoundingClientRect().left)};
+    }""")
+    check("导入账号在新建账号左边", bool(where) and where["pick"] < where["make"], where)
+
+    page.click("#importAccountBtn")
+    page.wait_for_timeout(700)
+    check("进的是子页", page.url.endswith("#/import-accounts"), page.url)
+    check("有返回键", page.locator("#importBack").is_visible())
+    rules = page.evaluate("""() => Array.from(
+        document.querySelectorAll('#importRule option')).map(o => o.value)""")
+    check("密码规则是下拉的几项",
+          rules[:2] == ["random", "sid"] and "custom" in rules, rules)
+    check("自定义规则的输入框平时藏着",
+          not page.locator("#importTemplate").is_visible())
+    check("空表说得出下一步",
+          "还没有内容" in page.inner_text("#importTable tbody"),
+          page.inner_text("#importTable tbody")[:60])
+    check("空表时导入键是灰的", page.locator("#importGo").is_disabled())
+
+    print("== 读一张表：预览就是编辑页 ==")
+    box = tempfile.mkdtemp(prefix="import-ui-")
+    path = os.path.join(box, "accounts.csv")
+    with open(path, "w", encoding="utf-8-sig") as fh:
+        fh.write("显示名,角色,初始密码,学号\n"
+                 "界面甲,管理员,,2026011\n"
+                 "界面乙,,GivenPass9,2026012\n")
+    page.set_input_files("#importFile", path)
+    page.wait_for_function(
+        "() => document.querySelectorAll('#importTable tbody tr[data-import-row]').length >= 2",
+        timeout=20000)
+    got = page.evaluate("""() => Array.from(
+        document.querySelectorAll('#importTable tbody tr[data-import-row]')).map(tr => ({
+            user: tr.querySelector('[data-import-field=username]').value,
+            name: tr.querySelector('[data-import-field=name]').value,
+            pwd: tr.querySelector('[data-import-field=password]').value,
+            bad: tr.classList.contains('row-bad'),
+        }))""")
+    check("两行都读进来了", len(got) == 2, got)
+    check("空登录名按拼音补上", bool(got[0]["user"]) and got[0]["user"] != "", got[0])
+    check("空密码按规则生成", len(got[0]["pwd"]) >= 8, got[0])
+    check("表里给的密码照原样", got[1]["pwd"] == "GivenPass9", got[1])
+    check("两行都能导入", not any(row["bad"] for row in got), got)
+    check("导入键亮了", not page.locator("#importGo").is_disabled())
+    check("说明里提醒先下载",
+          "下载账号表" in page.inner_text("#importState"),
+          page.inner_text("#importState"))
+
+    print("== 下载账号表 ==")
+    with page.expect_download(timeout=20000) as grab:
+        page.click("#importDownloadBtn")
+    download = grab.value
+    saved = os.path.join(box, "saved.csv")
+    download.save_as(saved)
+    text = open(saved, encoding="utf-8-sig").read()
+    check("下载的是一张表", download.suggested_filename.endswith(".csv"),
+          download.suggested_filename)
+    check("表里有初始密码", "GivenPass9" in text, text[:120])
+    page.wait_for_timeout(600)
+    check("下载之后状态行说已下载",
+          "已下载" in page.inner_text("#importState"), page.inner_text("#importState"))
+
+    print("== 改过之后导入要先问一句 ==")
+    page.fill("#importTable tbody tr:nth-child(2) [data-import-field=name]", "界面乙改")
+    page.wait_for_timeout(1200)
+    page.click("#importGo")
+    page.wait_for_timeout(600)
+    asked = page.locator("#overlayBody").count() and "下载" in page.inner_text("#overlayBody")
+    check("没重新下载就先问一句", bool(asked),
+          page.inner_text("#overlayBody")[:80] if page.locator("#overlayBody").count() else "")
+    page.click("#confirmGo")
+    page.wait_for_timeout(1500)
+    made = []
+    owner = owner_opener()
+    for acc in call(owner, "/api/panel/accounts?limit=200")["accounts"]:
+        if acc["name"] in ("界面甲", "界面乙改"):
+            made.append(acc)
+    check("两个账号都建出来了", len(made) == 2, [a["name"] for a in made])
+    check("导入出来的是临时密码",
+          all(a["passTemp"] is True for a in made),
+          [(a["name"], a["passTemp"]) for a in made])
+
+    print("== 返回键回到用户管理 ==")
+    page.click("#importBack")
+    page.wait_for_timeout(600)
+    check("回到用户管理", page.url.endswith("#/users"), page.url)
+
+
 def field_keys(browser):
     """表单里上下方向键换框：单行文本才接管，别的输入框照旧用自己的方向键。"""
     print("== 表单里上下方向键换框 ==")
@@ -5415,6 +5515,7 @@ def main():
                     if WITH_ACCOUNTS:
                         profile_page(page)
                     users_table(page)
+                    import_page(page)
                     approval_queue_text(page)
                     if WITH_ACCOUNTS:
                         temp_password_page(browser)

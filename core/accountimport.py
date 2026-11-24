@@ -134,8 +134,12 @@ def rows_from_matrix(matrix):
     return out
 
 
-def rows_from_client(rows):
-    """界面上编辑过的行（键已经是规范名）→ 与解析结果同一种形状。"""
+def rows_from_client(rows, keep_empty=False):
+    """界面上编辑过的行（键已经是规范名）→ 与解析结果同一种形状。
+
+    ``keep_empty=True`` 时连全空的行也留下：界面上刚点 [手动录入] 加的那一行
+    本来就只有序号，丢掉它就成了"点一下闪回原样"。
+    """
     out = []
     for item in rows or []:
         if not isinstance(item, dict):
@@ -147,7 +151,8 @@ def rows_from_client(rows):
                "org": str(item.get("org") or "").strip(),
                "note": str(item.get("note") or "").strip(),
                "extras": dict(item.get("extras") or {})}
-        if any(row[k] for k in ("username", "name", "password", "note")) or row["extras"]:
+        if keep_empty or any(row[k] for k in ("username", "name", "password", "note")) \
+                or row["extras"]:
             out.append(row)
     return out
 

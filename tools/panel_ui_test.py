@@ -2947,6 +2947,39 @@ def import_page(page):
           page.inner_text("#importTable tbody")[:60])
     check("空表时导入键是灰的", page.locator("#importGo").is_disabled())
 
+    print("== 手动录入加一行 ==")
+    page.click("#importManualBtn")
+    page.wait_for_function(
+        "() => document.querySelectorAll('#importTable tbody tr[data-import-row]').length === 1",
+        timeout=20000)
+    page.wait_for_timeout(700)
+    one = page.evaluate("""() => {
+        const tr = document.querySelector('#importTable tbody tr[data-import-row]');
+        if (!tr) return null;
+        return {name: tr.querySelector('[data-import-field=name]').value,
+                user: tr.querySelector('[data-import-field=username]').value,
+                bad: tr.classList.contains('row-bad'),
+                status: tr.querySelector('td:last-child').innerText.trim()};
+    }""")
+    check("空行留得住（不是点一下又缩回去）", one is not None, one)
+    check("空行标着还差显示名", bool(one) and one["bad"] and "显示名" in one["status"], one)
+    page.fill("#importTable tbody tr:first-child [data-import-field=name]", "手填甲")
+    page.wait_for_timeout(1500)
+    filled = page.evaluate("""() => {
+        const tr = document.querySelector('#importTable tbody tr[data-import-row]');
+        return {bad: tr.classList.contains('row-bad'),
+                user: tr.querySelector('[data-import-field=username]').value,
+                pwd: tr.querySelector('[data-import-field=password]').value,
+                go: document.getElementById('importGo').disabled};
+    }""")
+    check("补上显示名之后这一行能建", not filled["bad"] and filled["go"] is False, filled)
+    check("登录名与密码都补出来了",
+          bool(filled["user"]) and len(filled["pwd"]) >= 8, filled)
+    page.click("#importBack")
+    page.wait_for_timeout(500)
+    page.click("#importAccountBtn")
+    page.wait_for_timeout(700)
+
     print("== 读一张表：预览就是编辑页 ==")
     box = tempfile.mkdtemp(prefix="import-ui-")
     path = os.path.join(box, "accounts.csv")

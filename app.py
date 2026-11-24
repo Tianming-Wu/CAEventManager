@@ -42,6 +42,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs, quote
 
 import auth
+import accountimport
 import assistant
 import bus
 import checkin
@@ -72,7 +73,7 @@ PAGES_DIR = os.path.join(BASE_DIR, "pages")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.13.22.148"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.13.23.149"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -383,6 +384,113 @@ def refresh_public_url(seq):
                  detail="%s -> %s" % (have or "—", want))
     log("活动 %d 的对外地址更新为 %s" % (seq, want))
     return want
+
+
+# 导入表里的角色写法 → 库里的角色
+IMPORT_ROLES = {
+    "": "admin",
+    "管理员": "admin",
+    "admin": "admin",
+    "超级管理员": "superadmin",
+    "超管": "superadmin",
+    "superadmin": "superadmin",
+}
+
+
+def _import_input(payload):
+    """导入接口的入参：整份文件（base64）或界面上编辑过的行。"""
+    blob = payload.get("data") or ""
+    if blob:
+        try:
+            raw = base64.b64decode(blob)
+        except (ValueError, TypeError):
+            raise ValueError("文件内容读不出来")
+        return accountimport.parse(raw, payload.get("filename") or "")
+    return accountimport.rows_from_client(payload.get("rows") or [])
+
+
+def _import_plan(conn, rows, rule, actor=None, fill=True):
+    """逐行给结论：这一行能不能建、登录名与密码最终是什么。
+
+    ``fill=True``（预览）时把空的登录名按拼音补上、空的密码按规则生成；
+    提交时不再补，缺什么就报什么——预览里看到的那份就是要落库的那份。
+    """
+    chosen = accountimport.rule_by_id((rule or {}).get("id") or "random")
+    if (rule or {}).get("template"):
+        chosen = dict(chosen, template=rule["template"], kind="template",
+                      id=(rule or {}).get("id") or "custom")
+    cap = localconfig.static_limit(LOCAL_CFG, "max_accounts")
+    used = panel.account_count(conn)
+    room = (cap - used) if cap > 0 else None
+    seen = {}
+    out = []
+    counts = {"total": 0, "ready": 0, "blocked": 0, "generated": 0, "autoUsername": 0}
+    warnings = []
+    for at, row in enumerate(rows, 1):
+        problems = []
+        name = (row.get("name") or "").strip()
+        if not name:
+            problems.append("显示名是空的")
+        elif len(name) > 24:
+            problems.append("显示名最长 24 个字")
+        raw_role = (row.get("role") or "").strip()
+        role = IMPORT_ROLES.get(raw_role.lower())
+        if role is None:
+            problems.append("角色只能是管理员或超级管理员")
+            role = "admin"
+        username = (row.get("username") or "").strip()
+        auto = False
+        if not username and fill:
+            seed = accountimport.username_seed(name)
+            username = accountimport.unique_username(
+                seed, lambda n: n.lower() in seen or panel.username_taken(conn, n))
+            auto = True
+            counts["autoUsername"] += 1
+        if not username:
+            problems.append("登录名是空的")
+        else:
+            problem = panel.username_problem(username)
+            if problem:
+                problems.append("登录名：%s" % problem)
+            elif username.lower() in seen:
+                problems.append("登录名与第 %d 行重复" % seen[username.lower()])
+            elif panel.username_taken(conn, username):
+                problems.append("登录名已被占用")
+            seen.setdefault(username.lower(), at)
+        password = (row.get("password") or "").strip()
+        generated = False
+        if not password and fill:
+            password, why = accountimport.render_password(
+                chosen, dict(row, username=username))
+            if why:
+                problems.append(why)
+            elif password:
+                generated = True
+                counts["generated"] += 1
+        if password and len(password) < panel.PASSWORD_MIN:
+            problems.append("初始密码至少 %d 位" % panel.PASSWORD_MIN)
+        elif not password:
+            problems.append("还没有初始密码")
+        if room is not None and at > room:
+            problems.append("超出账号上限：这个实例还能建 %d 个" % max(room, 0))
+        if (row.get("org") or "").strip() and "组织列" not in " ".join(warnings):
+            warnings.append("组织列已经读进来了，但组织功能还没上线，这次先不生效")
+        out.append({"index": at, "username": username, "name": name, "role": role,
+                    "password": password, "generated": generated,
+                    "autoUsername": auto, "org": (row.get("org") or "").strip(),
+                    "note": (row.get("note") or "").strip(),
+                    "extras": row.get("extras") or {},
+                    "problems": problems,
+                    "status": "blocked" if problems else "ready"})
+        counts["total"] += 1
+        if problems:
+            counts["blocked"] += 1
+        else:
+            counts["ready"] += 1
+    return {"ok": True, "rows": out, "counts": counts, "warnings": warnings,
+            "rule": chosen, "passwordMin": panel.PASSWORD_MIN,
+            "cap": {"max": cap, "used": used,
+                    "left": max(0, room) if room is not None else 0}}
 
 
 MIME_OVERRIDES = {
@@ -2163,6 +2271,73 @@ class Handler(BaseHTTPRequestHandler):
                     actor=actor["username"])
             return self._json({"ok": True, "id": acc_id, "uid": uid,
                                "password": password})
+
+        # ---- 批量建号：导入表 → 预览 → 导入 ----
+        # 只有站长能进来：这条路上可以顺手把一批人设成超级管理员，
+        # 超管自己给自己开超管的那条缝就干脆不给开
+        if path == "/account/import/rules" and method == "GET":
+            need("owner")
+            cap = localconfig.static_limit(LOCAL_CFG, "max_accounts")
+            used = panel.account_count(conn)
+            return self._json({"ok": True, "rules": accountimport.rules(),
+                               "cap": {"max": cap, "used": used,
+                                       "left": max(0, cap - used) if cap > 0 else 0}})
+
+        if path == "/account/import/preview" and method == "POST":
+            need("owner")
+            data = body()
+            try:
+                rows = _import_input(data)
+            except ValueError as exc:
+                raise model.ApiError(str(exc), 400)
+            plan = _import_plan(conn, rows, data.get("rule") or {},
+                                actor=need("owner"))
+            return self._json(plan)
+
+        if path == "/account/import" and method == "POST":
+            actor = need("owner")
+            data = body()
+            rows = accountimport.rows_from_client(data.get("rows") or [])
+            if not rows:
+                raise model.ApiError("没有要导入的账号")
+            plan = _import_plan(conn, rows, {}, actor=actor, fill=False)
+            if plan["counts"]["blocked"]:
+                first = [r for r in plan["rows"] if r["problems"]]
+                raise model.ApiError(
+                    "还有 %d 行不能导入：第 %d 行 %s"
+                    % (plan["counts"]["blocked"], first[0]["index"],
+                       first[0]["problems"][0]) if first else "还有行不能导入", 400)
+            made = []
+            with panel.tx() as tx:
+                limit = localconfig.static_limit(LOCAL_CFG, "max_accounts")
+                if limit > 0 and panel.account_count(tx) + len(rows) > limit:
+                    raise model.ApiError(panel.ACCOUNT_FULL, 403)
+                for item in plan["rows"]:
+                    if panel.username_taken(tx, item["username"]):
+                        raise model.ApiError(
+                            "第 %d 行的登录名刚被别人占了：%s"
+                            % (item["index"], item["username"]), 409)
+                    acc_id, uid = panel.create_account(
+                        tx, item["username"], item["name"], item["role"],
+                        item["password"], note=item["note"][:200], temp=True,
+                        actor=actor["username"])
+                    made.append({"id": acc_id, "uid": uid,
+                                 "username": item["username"], "role": item["role"]})
+                panel.audit(tx, actor["username"], "account_import", "accounts",
+                            panel.audit_note(created=len(made),
+                                             source="import",
+                                             superadmin=len([m for m in made
+                                                             if m["role"] == "superadmin"])))
+            return self._json({"ok": True, "created": len(made), "accounts": made})
+
+        if path == "/account/import/downloaded" and method == "POST":
+            # 账号表被下载过一次：记一笔，事后能查"那批初始密码是什么时候发出去的"
+            actor = need("owner")
+            data = body()
+            with panel.tx() as tx:
+                panel.audit(tx, actor["username"], "account_import_export", "accounts",
+                            panel.audit_note(rows=int(data.get("rows") or 0)))
+            return self._json({"ok": True})
 
         if path == "/account/role" and method == "POST":
             actor = need("owner")

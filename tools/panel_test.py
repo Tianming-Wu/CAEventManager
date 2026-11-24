@@ -2326,6 +2326,61 @@ def main():
     status, where = open_page(owner, "/panel")
     check("别的账号照常进控制台", status == 200, (status, where))
 
+    print("== 批量导入：预览 → 导入 ==")
+    post(owner, "/api/panel/sudo/exit", {})
+    rules = call(owner, "/api/panel/account/import/rules")
+    ids = [r["id"] for r in (rules.get("rules") or [])]
+    check("导入带一组密码规则", ids[:2] == ["random", "sid"] and "custom" in ids, ids)
+    check("规则接口说出了还剩多少名额", "cap" in rules, rules.get("cap"))
+
+    csv_text = ("登录名,显示名,角色,初始密码,学号\n"
+                ",导入甲,管理员,,2025001\n"
+                ",导入乙,,Sf9xQ2mV,2025002\n"
+                "owner,导入丙,,,2025003\n")
+    blob = base64.b64encode(csv_text.encode("utf-8")).decode()
+    plan = post(owner, "/api/panel/account/import/preview",
+                {"filename": "a.csv", "data": blob, "rule": {"id": "sid6"}})
+    rows = plan.get("rows") or []
+    check("三行都读进来了", len(rows) == 3, len(rows))
+    check("空登录名按姓名拼音补上",
+          bool(rows) and rows[0]["username"] != "" and rows[0]["autoUsername"] is True,
+          rows[:1])
+    check("空密码按规则生成",
+          bool(rows) and rows[0]["generated"] is True and len(rows[0]["password"]) >= 8,
+          rows[:1])
+    check("表里给的密码原样留着", bool(rows) and rows[1]["password"] == "Sf9xQ2mV",
+          rows[1:2])
+    check("撞名的那一行标成不能导入",
+          bool(rows) and rows[2]["status"] == "blocked"
+          and any("登录名" in p for p in rows[2]["problems"]), rows[2:])
+    check("预览统计对得上",
+          plan["counts"]["ready"] == 2 and plan["counts"]["blocked"] == 1,
+          plan.get("counts"))
+
+    custom = post(owner, "/api/panel/account/import/preview",
+                  {"filename": "a.csv", "data": blob,
+                   "rule": {"id": "custom", "template": "cae-{{学号}}"}})
+    check("自定义规则用得上表里别的列",
+          (custom["rows"][0]["password"] or "").startswith("cae-2025001"),
+          custom["rows"][0]["password"])
+
+    ready = [r for r in rows if r["status"] == "ready"]
+    made = post(owner, "/api/panel/account/import", {"rows": ready})
+    check("能建的两行建出来了", made.get("created") == 2, made)
+    listed = call(owner, "/api/panel/accounts?limit=200")["accounts"]
+    names = [m["username"] for m in made.get("accounts") or []]
+    fresh = [a for a in listed if a["username"] in names]
+    check("导入出来的号是临时密码",
+          len(fresh) == 2 and all(a["passTemp"] is True for a in fresh),
+          [(a["username"], a["passTemp"]) for a in fresh])
+    bad = call(owner, "/api/panel/account/import", {"rows": rows}, expect=400)
+    check("有问题的行整批不收", bad and "不能导入" in (bad.get("error") or ""), bad)
+    post(owner, "/api/panel/account/import/downloaded", {"rows": 2})
+    audit = call(owner, "/api/panel/audit?q=account_import&limit=20")
+    actions = [r["action"] for r in audit.get("audit") or []]
+    check("导入与下载都进了审计",
+          "account_import" in actions and "account_import_export" in actions, actions)
+
     print("== event pages still reachable ==")
     token = events[0]["id"]
     board = call(anon, "/%s/api/board" % token)

@@ -2523,24 +2523,31 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
     max-width: none;
   }
 
-  /* 时间 / 活动号这类列，宽度按内容算就会在"有数据→没数据"之间来回跳：
-     搜索没结果时表里只剩一行跨列的提示，列宽就由表头那几个字决定。这里把列宽钉死，
-     表格自己保住一个下限宽度（放不下就横滚），宽度从此只跟表头有关。 */
-  table.tbl.stable-cols { table-layout: fixed; }
-  table.tbl.stable-cols th,
-  table.tbl.stable-cols td { overflow: hidden; text-overflow: ellipsis; }
-  table.tbl.stable-cols#auditTable { min-width: 33em; }
-  table.tbl.stable-cols#auditTable th:nth-child(1) { width: 9.5em; }
-  table.tbl.stable-cols#auditTable th:nth-child(2) { width: 8em; }
-  table.tbl.stable-cols#auditTable th:nth-child(3) { width: 8em; }
-  table.tbl.stable-cols#auditTable th:nth-child(4) { width: 8em; }
-  table.tbl.stable-cols#allEventsTable { min-width: 34em; }
-  table.tbl.stable-cols#allEventsTable th:nth-child(1) { width: 11em; }
-  table.tbl.stable-cols#allEventsTable th:nth-child(2) { width: 5.5em; }
-  table.tbl.stable-cols#allEventsTable th:nth-child(3) { width: 7em; }
-  table.tbl.stable-cols#allEventsTable th:nth-child(4) { width: 9em; }
-  table.tbl.stable-cols#allEventsTable th:nth-child(5) { width: 8em; }
-  table.tbl.stable-cols#allEventsTable th:nth-child(6) { width: 7em; }
+  /* 审计日志、活动管理、导入预览这三张表在窄屏也按固定列宽排：
+     内容本来就是定长（时间、活动号、角色），固定之后列宽不再随"有没有数据、
+     搜索有没有结果"抖，也不会被压成表头两个字宽。整张表给一个总宽，
+     放不下就横向滚动。 */
+  #auditTable { table-layout: fixed; width: 42em; }
+  #auditTable th:nth-child(1) { width: 10em; }
+  #auditTable th:nth-child(2) { width: 8em; }
+  #auditTable th:nth-child(3) { width: 10em; }
+  #auditTable th:nth-child(4) { width: 5em; }
+  #auditTable th:nth-child(5) { width: 9em; }
+  #allEventsTable { table-layout: fixed; width: 36em; }
+  #allEventsTable th:nth-child(1) { width: 9em; }
+  #allEventsTable th:nth-child(2) { width: 5em; }
+  #allEventsTable th:nth-child(3) { width: 6em; }
+  #allEventsTable th:nth-child(4) { width: 6em; }
+  #allEventsTable th:nth-child(5) { width: 6em; }
+  #allEventsTable th:nth-child(6) { width: 4em; }
+  #importTable { table-layout: fixed; width: 56em; }
+  #importTable th:nth-child(1) { width: 2.6em; }
+  #importTable th:nth-child(2) { width: 10em; }
+  #importTable th:nth-child(3) { width: 8.5em; }
+  #importTable th:nth-child(4) { width: 8.5em; }
+  #importTable th:nth-child(5) { width: 10em; }
+  #importTable th:nth-child(6) { width: 8.5em; }
+  #importTable th:nth-child(7) { width: 8.5em; }
 
   /* ---------- 手机上的日期与时刻 ----------
      电脑上那两个文本框加日历按钮是为了避开原生控件的混排占位符；

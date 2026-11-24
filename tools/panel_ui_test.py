@@ -2481,22 +2481,15 @@ def crumb_motion(browser):
             back = [s for s in steps if s * want_dir < 0]
             check("%s：标题确实挪了 36px" % label, travel >= 30, travel)
             # 一帧最多走全程的六成：掉帧（机器忙）会把几帧的路并成一帧，那不是产品的问题；
-            # 真正的"抽"是一下跨过一大段或者跳回原处，那种会超过这个门槛。
-            # 整段只走出三四格时，浏览器已经把动画合成成几步了，这时候"逐帧平滑"根本没得量：
-            # 直接跳过这条，免得机器一忙就在"真抽"和"合成"之间随机红。
-            levels = []
-            for r in rows:
-                if not levels or abs(r["left"] - levels[-1]) > 0.5:
-                    levels.append(r["left"])
-            coarse = len(levels) <= 4
-            jumps = [(b["t"], round(b["left"] - a["left"], 1))
+            # 真正的"抽"是一下跨过一大段或者跳回原处。判据因此看两件事：
+            # 位移大**而且**这一帧的时间间隔正常——掉帧的那一步时间也会跟着长。
+            spans = sorted(b["t"] - a["t"] for a, b in zip(rows, rows[1:]))
+            typical = spans[len(spans) // 2] if spans else 16
+            jumps = [(b["t"], round(b["left"] - a["left"], 1), b["t"] - a["t"])
                      for a, b in zip(rows, rows[1:])
-                     if abs(b["left"] - a["left"]) > travel * 0.6]
-            if coarse:
-                print("    （这一段只走出 %d 格，动画被浏览器合并了，跳过逐帧门槛）"
-                      % len(levels))
-            else:
-                check("%s：没有一下子跨过一大段" % label, not jumps, jumps[:4])
+                     if abs(b["left"] - a["left"]) > travel * 0.6
+                     and (b["t"] - a["t"]) <= typical * 2]
+            check("%s：没有一下子跨过一大段" % label, not jumps, jumps[:4])
             check("%s：一路往一个方向走" % label,
                   not [s for s in back if abs(s) >= 2],
                   "回头的帧：%s" % [s for s in back if abs(s) >= 2])
@@ -3212,14 +3205,17 @@ def search_page(page):
     }""")
     check("the circle is small under a mouse",
           12 <= box["w"] <= 22 and 12 <= box["h"] <= 22, box)
-    check("but a finger still gets a big one", page.evaluate("""() => {
+    check("触屏上那颗清空键更大，而且四边等距", page.evaluate("""() => {
         for (const sheet of document.styleSheets) {
             let rules;
             try { rules = sheet.cssRules; } catch (e) { continue; }
             for (const rule of rules) {
-                if (rule.conditionText && rule.conditionText.indexOf('coarse') >= 0 &&
-                    rule.cssText.indexOf('.search-clear') >= 0 &&
-                    /width:\s*30px/.test(rule.cssText)) return true;
+                if (!rule.conditionText || rule.conditionText.indexOf('coarse') < 0) continue;
+                const text = rule.cssText || '';
+                if (text.indexOf('.search-clear') < 0) continue;
+                // 上下各 4px 定位、右边 4px：高度由框决定，四边留白才一样
+                if (/width:\\s*34px/.test(text) && /top:\\s*4px/.test(text) &&
+                    /bottom:\\s*4px/.test(text) && /right:\\s*4px/.test(text)) return true;
             }
         }
         return false;
@@ -5138,9 +5134,8 @@ def touch_page(browser):
         check("表格比容器宽：可以横向滚动",
               info["wrapScroll"] > info["wrapW"], info)
         check("首列不再被压成省略号", info["firstCell"] >= 60, info)
-        check("操作列贴在右边，按钮不用滑就够得着",
-              info["actRight"] <= info["wrapRight"] + 1
-              and info["actRight"] >= info["wrapRight"] - 40, info)
+        check("窄屏不冻结操作列，滑过去就能碰到",
+              info["actLeft"] > info["wrapRight"], info)
         page.goto(BASE + "/panel#/rosters")
         page.wait_for_timeout(900)
         narrow = page.evaluate("""() => {
@@ -5182,13 +5177,18 @@ def touch_page(browser):
         btn = page.evaluate("""() => {
             const b = document.querySelector('#allEventsTable tbody [data-event-detail]');
             if (!b) return null;
-            const wrap = b.closest('.tblwrap').getBoundingClientRect();
+            const wrap = b.closest('.tblwrap');
             const r = b.getBoundingClientRect();
-            return {w: Math.round(r.width), right: Math.round(r.right),
-                    wrapRight: Math.round(wrap.right)};
+            return {w: Math.round(r.width),
+                    scroll: wrap.scrollWidth, box: wrap.clientWidth,
+                    ths: Array.from(document.querySelectorAll(
+                        '#allEventsTable thead th')).map(
+                            th => Math.round(th.getBoundingClientRect().width))};
         }""")
-        check("活动管理首列的活动名整颗都在容器里",
-              btn and btn["w"] > 40 and btn["right"] <= btn["wrapRight"] + 1, btn)
+        check("活动名那一列够宽，不是一条竖条",
+              btn and btn["w"] > 40, btn)
+        check("放不下就横滚，不靠冻结列挤",
+              btn and btn["scroll"] > btn["box"], btn)
     finally:
         ctx.close()
         try:

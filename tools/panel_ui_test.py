@@ -2955,26 +2955,44 @@ def import_page(page):
     page.wait_for_timeout(700)
     one = page.evaluate("""() => {
         const tr = document.querySelector('#importTable tbody tr[data-import-row]');
-        if (!tr) return null;
-        return {name: tr.querySelector('[data-import-field=name]').value,
-                user: tr.querySelector('[data-import-field=username]').value,
-                bad: tr.classList.contains('row-bad'),
-                status: tr.querySelector('td:last-child').innerText.trim()};
+        const dot = tr && tr.querySelector('.warn-dot');
+        const table = document.getElementById('importTable');
+        return {name: tr && tr.querySelector('[data-import-field=name]').value,
+                user: tr && tr.querySelector('[data-import-field=username]').value,
+                bad: !!(tr && tr.classList.contains('row-bad')),
+                dot: !!dot,
+                why: dot ? (dot.getAttribute('title') || '') : '',
+                shown: table ? !table.classList.contains('warn-off') : false,
+                state: document.getElementById('importState').innerText.trim()};
     }""")
-    check("空行留得住（不是点一下又缩回去）", one is not None, one)
-    check("空行标着还差显示名", bool(one) and one["bad"] and "显示名" in one["status"], one)
+    check("空行留得住（不是点一下又缩回去）", bool(one) and one["name"] == "", one)
+    check("有问题的那一行标红", one["bad"], one)
+    check("警示列露出来，原因写在图标上",
+          one["shown"] and one["dot"] and "显示名" in one["why"], one)
+    check("状态行说的是行数，不是口号",
+          "无法导入" in one["state"], one["state"])
     page.fill("#importTable tbody tr:first-child [data-import-field=name]", "手填甲")
     page.wait_for_timeout(1500)
+    focused = page.evaluate("""() => {
+        const el = document.activeElement;
+        return el && el.getAttribute ? (el.getAttribute('data-import-field') || el.id) : '';
+    }""")
+    check("打字期间焦点不会被重绘带走", focused == "name", focused)
     filled = page.evaluate("""() => {
         const tr = document.querySelector('#importTable tbody tr[data-import-row]');
+        const table = document.getElementById('importTable');
         return {bad: tr.classList.contains('row-bad'),
+                hidden: table.classList.contains('warn-off'),
                 user: tr.querySelector('[data-import-field=username]').value,
                 pwd: tr.querySelector('[data-import-field=password]').value,
+                count: document.getElementById('importCount').innerText.trim(),
                 go: document.getElementById('importGo').disabled};
     }""")
     check("补上显示名之后这一行能建", not filled["bad"] and filled["go"] is False, filled)
+    check("没人有问题时警示列收起来", filled["hidden"], filled)
     check("登录名与密码都补出来了",
           bool(filled["user"]) and len(filled["pwd"]) >= 8, filled)
+    check("计数写的是可导入几行", "可导入" in filled["count"], filled["count"])
     page.click("#importBack")
     page.wait_for_timeout(500)
     page.click("#importAccountBtn")
@@ -3004,9 +3022,28 @@ def import_page(page):
     check("表里给的密码照原样", got[1]["pwd"] == "GivenPass9", got[1])
     check("两行都能导入", not any(row["bad"] for row in got), got)
     check("导入键亮了", not page.locator("#importGo").is_disabled())
-    check("说明里提醒先下载",
-          "下载账号表" in page.inner_text("#importState"),
+    check("没有问题时状态行是空的",
+          page.inner_text("#importState").strip() == "",
           page.inner_text("#importState"))
+    check("每一行都有密码时，自动生成那颗键是灰的",
+          page.locator("#importGenBtn").is_disabled())
+    check("按钮写的是自动生成密码",
+          page.inner_text("#importGenBtn").strip() == "自动生成密码",
+          page.inner_text("#importGenBtn"))
+    rule_geo = page.evaluate("""() => {
+        const sel = document.getElementById('importRule');
+        const help = document.getElementById('importRuleHelp');
+        if (!sel || !help) return null;
+        const a = sel.getBoundingClientRect(), b = help.getBoundingClientRect();
+        return {right: Math.round(b.left - a.right),
+                centreGap: Math.round(Math.abs((a.top + a.height / 2) - (b.top + b.height / 2))),
+                labels: Array.from(document.querySelectorAll(
+                    '[data-page="import-accounts"] .field label')).map(l => l.innerText.trim())};
+    }""")
+    check("使用说明挂在规则框右边、与它中线对齐",
+          bool(rule_geo) and rule_geo["right"] > 0 and rule_geo["centreGap"] <= 3, rule_geo)
+    check("没有单独的规则说明标题",
+          "规则说明" not in (rule_geo or {}).get("labels", []), rule_geo)
 
     print("== 下载账号表 ==")
     with page.expect_download(timeout=20000) as grab:
@@ -3019,13 +3056,12 @@ def import_page(page):
           download.suggested_filename)
     check("表里有初始密码", "GivenPass9" in text, text[:120])
     page.wait_for_timeout(600)
-    check("下载之后状态行说已下载",
-          "已下载" in page.inner_text("#importState"), page.inner_text("#importState"))
 
     print("== 改过之后导入要先问一句 ==")
     page.fill("#importTable tbody tr:nth-child(2) [data-import-field=name]", "界面乙改")
-    page.wait_for_timeout(1200)
-    page.click("#importGo")
+    page.wait_for_timeout(1400)
+    # 程序化点击：这张表刚重绘过，鼠标点击会撞上"元素还在动"，测的又不是命中测试
+    page.evaluate("() => document.getElementById('importGo').click()")
     page.wait_for_timeout(600)
     asked = page.locator("#overlayBody").count() and "下载" in page.inner_text("#overlayBody")
     check("没重新下载就先问一句", bool(asked),
@@ -3042,9 +3078,20 @@ def import_page(page):
           all(a["passTemp"] is True for a in made),
           [(a["name"], a["passTemp"]) for a in made])
 
-    print("== 返回键回到用户管理 ==")
+    print("== 返回用户管理要有让位动画 ==")
+    check("用户管理的标题也在 head-title 里（动画要它）",
+          page.locator('.page[data-page="users"] .head-title .crumb-title').count() == 1)
+    page.evaluate(CRUMB_SAMPLER)
+    page.evaluate("(n) => window.__startCrumb(n)", "users")
     page.click("#importBack")
-    page.wait_for_timeout(600)
+    page.wait_for_timeout(1100)
+    moved = [s for s in page.evaluate("() => window.__crumb || []") if s["shown"]]
+    travel = (round(max(r["left"] for r in moved) - min(r["left"] for r in moved), 1)
+              if moved else 0)
+    check("标题从让位处滑回原位（不是闪回）", travel >= 30, travel)
+    check("最后落在原位",
+          bool(moved) and abs(moved[-1]["left"] - min(r["left"] for r in moved)) < 1,
+          moved[-1] if moved else None)
     check("回到用户管理", page.url.endswith("#/users"), page.url)
 
 

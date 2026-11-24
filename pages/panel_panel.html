@@ -1139,7 +1139,9 @@
     <!-- ====================================================== 用户管理 -->
     <section class="page" data-page="users" hidden>
       <header class="page-head">
-        <h1>用户管理</h1>
+        <div class="head-title">
+          <h1 class="crumb-title"><span>用户管理</span></h1>
+        </div>
         <div class="page-actions">
           <!-- 批量建号只对站长开放：这条路上能顺手把人设成超级管理员 -->
           <button class="btn" id="importAccountBtn" type="button">导入账号</button>
@@ -1200,7 +1202,7 @@
             <span>导入账号</span>
           </h1>
         </div>
-        <p class="page-sub" id="importSub">读一张表批量建号，每一行先看一遍再导入</p>
+        <p class="page-sub" id="importSub">批量创建账号</p>
       </header>
 
       <div class="card">
@@ -1213,24 +1215,18 @@
           <button class="btn sm" id="importManualBtn" type="button">手动录入</button>
         </div>
         <p class="hint" style="margin-top:8px">
-          认 CSV 与 Excel。表头用登录名 / 显示名 / 角色 / 初始密码 / 组织 / 备注，
+          支持 CSV 与 Excel。表头用登录名 / 显示名 / 角色 / 初始密码 / 组织 / 备注，
           其余列也读进来，写密码规则时能引用
         </p>
 
-        <div class="as-form-grid" style="margin-top:10px">
-          <div class="field">
-            <label for="importRule">初始密码规则</label>
+        <div class="field" style="margin-top:10px">
+          <label for="importRule">初始密码规则</label>
+          <div class="import-rule-line">
             <select id="importRule"></select>
-          </div>
-          <div class="field" id="importTemplateRow" hidden>
-            <label for="importTemplate">自定义规则</label>
             <input id="importTemplate" type="text" autocomplete="off" spellcheck="false"
-                   placeholder="{{学号:6}}">
-          </div>
-          <div class="field">
-            <label>规则说明</label>
-            <a class="hint link-ico" id="importRuleHelp" href="docs" target="_blank"
-               rel="noopener">
+                   placeholder="{{学号:6}}" aria-label="自定义规则" hidden>
+            <a class="link-ico import-rule-help" id="importRuleHelp" href="docs"
+               target="_blank" rel="noopener">
               <svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor"
                    stroke-width="1.5" stroke-linecap="round">
                 <circle cx="10" cy="10" r="7.2"/>
@@ -1243,7 +1239,7 @@
         </div>
 
         <div class="row" style="margin-top:12px;flex-wrap:wrap">
-          <button class="btn" id="importGenBtn" type="button">按规则生成空白密码</button>
+          <button class="btn" id="importGenBtn" type="button" disabled>自动生成密码</button>
           <button class="btn" id="importDownloadBtn" type="button">下载账号表</button>
           <div class="spacer"></div>
           <button class="btn primary" id="importGo" type="button" disabled>导入</button>
@@ -1254,7 +1250,7 @@
 
       <div class="card">
         <div class="tblwrap">
-          <table class="tbl fixed" id="importTable">
+          <table class="tbl fixed warn-off" id="importTable">
             <thead><tr>
               <th style="width:44px">#</th>
               <th>登录名</th>
@@ -1263,7 +1259,7 @@
               <th>初始密码</th>
               <th style="width:120px">组织</th>
               <th>备注</th>
-              <th style="width:170px">状态</th>
+              <th class="import-warn" aria-label="有问题"></th>
             </tr></thead>
             <tbody></tbody>
           </table>
@@ -1280,7 +1276,7 @@
       <div class="card">
         <div class="card-head"><h2>当前活动</h2></div>
         <div class="tblwrap">
-          <table class="tbl fixed" id="allEventsTable">
+          <table class="tbl fixed stable-cols" id="allEventsTable">
             <thead><tr>
               <th>活动</th><th class="num">活动号</th><th>负责人</th><th>创建时间</th><th>token</th>
               <th class="actions">操作</th>
@@ -1582,7 +1578,7 @@
       </header>
       <div class="card">
         <div class="tblwrap">
-          <table class="tbl fixed" id="auditTable">
+          <table class="tbl fixed stable-cols" id="auditTable">
             <thead><tr>
               <th>时间</th><th>操作人</th><th>动作</th><th>对象</th><th>说明</th>
             </tr></thead>

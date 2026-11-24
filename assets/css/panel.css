@@ -1153,9 +1153,42 @@ table.tbl tr.is-muted td { color: var(--dim); }
   background: var(--surface);
 }
 .cell-input:disabled { opacity: .55; }
-/* 这一行还不能导入：整行淡下去，状态那一格说原因 */
+/* 「自动 / 生成」这类小标签贴在格子右侧，不参与输入的排版 */
+.cell-wrap { display: flex; align-items: center; gap: 4px; }
+.cell-wrap .cell-input { flex: 1 1 auto; }
+.cell-tag { flex: 0 0 auto; font-size: .72rem; color: var(--dim); }
+.cell-tag:empty { display: none; }
+/* 警示列：一个图标，够窄，所以窄屏也钉在右边。没人出问题时整列收起来 */
 table.tbl tr.row-bad .cell-input { border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
 table.tbl tr.row-bad td { background: color-mix(in srgb, var(--danger) 6%, transparent); }
+table.tbl th.import-warn,
+table.tbl td.import-warn {
+  width: 34px;
+  padding-left: 2px;
+  padding-right: 2px;
+  text-align: center;
+  position: sticky;
+  right: 0;
+  background: var(--surface);
+}
+table.tbl th.import-warn { background: var(--surface-2); }
+table.tbl.warn-off th.import-warn,
+table.tbl.warn-off td.import-warn { display: none; }
+.warn-dot {
+  appearance: none;
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--danger);
+  cursor: pointer;
+}
+.warn-dot svg { width: 16px; height: 16px; }
+.warn-dot:hover { background: var(--danger-soft); }
 /* 带图标的链接（规则说明）：图标与字一条中线 */
 .link-ico {
   display: inline-flex;
@@ -1165,6 +1198,18 @@ table.tbl tr.row-bad td { background: color-mix(in srgb, var(--danger) 6%, trans
 }
 .link-ico svg { width: 14px; height: 14px; flex: 0 0 auto; }
 .link-ico:hover { text-decoration: underline; }
+
+/* 初始密码规则那一行：下拉、（选了自定义时才出现的）输入框、说明链接，
+   三者同一条中线；说明的字比 .hint（.78rem）略大一点，是一条能点的说明，不是脚注 */
+.import-rule-line {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.import-rule-line select { flex: 0 0 auto; width: auto; min-width: 13em; max-width: 22em; }
+.import-rule-line #importTemplate { flex: 1 1 160px; min-width: 0; }
+.import-rule-help { font-size: .86rem; flex: 0 0 auto; }
 
 /* ---------- profile ---------- */
 .profile-grid {
@@ -1602,9 +1647,18 @@ a.crumb, a.crumb:hover, .nav-item, .nav-item:hover { text-decoration: none; }
 .btn.block { width: 100%; padding: 10px; font-size: .95rem; }
 
 @media (pointer: coarse) {
-  /* a 16px circle is a mouse target, not a finger one */
-  .search-clear { width: 30px; height: 30px; right: 3px; }
-  .search-clear svg { width: 13px; height: 13px; }
+  /* a 16px circle is a mouse target, not a finger one.
+     上下各留 4px 的顶/底定位、右边同样留 4px：这样不管搜索框多高，
+     这颗圆键在框里都是四边等距的（写死高度会让上下留白比右边多）。 */
+  .search-clear {
+    width: 34px;
+    top: 4px;
+    bottom: 4px;
+    height: auto;
+    right: 4px;
+    transform: none;
+  }
+  .search-clear svg { width: 15px; height: 15px; }
   .btn { min-height: var(--tap); }
   .btn.sm { min-height: 38px; padding: 5px 12px; }
 }
@@ -2434,31 +2488,30 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
      写死 min-width 会给出一种"有条滚动条，但推不动多少东西"的假滚动。
      首列与操作列各自贴边，常用的按钮不用滑动就够得着。 */
   .tblwrap { overflow-x: auto; overscroll-behavior-x: contain; }
-  table.tbl.fixed { table-layout: auto; }
+  /* 窄屏的表格按内容定宽：列宽交给内容（放不下就横滚），不要平均分配——
+     平均分配会把"时间""角色"这种短列压到两三个字宽，长内容挤成省略号谁也读不出来。 */
+  table.tbl.fixed { table-layout: auto; width: auto; min-width: 100%; }
   table.tbl.fixed th,
-  table.tbl.fixed td { overflow: visible; text-overflow: clip; }
+  table.tbl.fixed td { overflow: visible; text-overflow: clip; white-space: nowrap; }
+  /* 表格里的输入框也要有个下限宽度，否则整列被压成一格看不清的字 */
+  .cell-input { min-width: 7.5em; }
+  /* 窄屏不冻结任何一列。首列贴边看起来像"我知道这是哪一行"，代价是它和右边的操作列
+     一起吃掉一半以上的宽度——两边都钉住之后，中间那些列连一屏都显示不全。
+     往左滑一下就知道是哪一行，比钉死一列划算。 */
   table.tbl.fixed th:first-child,
   table.tbl.fixed td:first-child {
-    position: sticky;
-    left: 0;
-    z-index: 2;
-    background: var(--surface);
-    /* 贴边的首列要比屏幕窄：宽过屏幕后，后面的列就再也滑不出来了。
-       也不能窄到把名字挤成一列竖条，所以给一个下限、允许换行。 */
-    min-width: 45vw;
-    max-width: 60vw;
+    position: static;
+    background: transparent;
+    min-width: 0;
+    max-width: none;
     white-space: normal;
   }
   table.tbl.fixed th.actions,
   table.tbl.fixed td.actions {
-    position: sticky;
-    right: 0;
-    background: var(--surface);
-    box-shadow: -1px 0 0 var(--line-soft);
+    position: static;
+    background: transparent;
+    box-shadow: none;
   }
-  table.tbl.fixed th:first-child,
-  table.tbl.fixed th.actions { background: var(--surface-2); z-index: 3; }
-  table.tbl.fixed th.actions { top: 0; }
 
   /* 首列自己就吃掉大半屏幕时（名字很长、又只有它一列有内容），钉住它等于把屏幕
      让给一列，剩下的列永远滑不进来。这种表格由 panel.js 打上 .wide-first，
@@ -2467,8 +2520,27 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
   .tblwrap.wide-first table.tbl.fixed td:first-child {
     position: static;
     min-width: 0;
-    max-width: 60vw;
+    max-width: none;
   }
+
+  /* 时间 / 活动号这类列，宽度按内容算就会在"有数据→没数据"之间来回跳：
+     搜索没结果时表里只剩一行跨列的提示，列宽就由表头那几个字决定。这里把列宽钉死，
+     表格自己保住一个下限宽度（放不下就横滚），宽度从此只跟表头有关。 */
+  table.tbl.stable-cols { table-layout: fixed; }
+  table.tbl.stable-cols th,
+  table.tbl.stable-cols td { overflow: hidden; text-overflow: ellipsis; }
+  table.tbl.stable-cols#auditTable { min-width: 33em; }
+  table.tbl.stable-cols#auditTable th:nth-child(1) { width: 9.5em; }
+  table.tbl.stable-cols#auditTable th:nth-child(2) { width: 8em; }
+  table.tbl.stable-cols#auditTable th:nth-child(3) { width: 8em; }
+  table.tbl.stable-cols#auditTable th:nth-child(4) { width: 8em; }
+  table.tbl.stable-cols#allEventsTable { min-width: 34em; }
+  table.tbl.stable-cols#allEventsTable th:nth-child(1) { width: 11em; }
+  table.tbl.stable-cols#allEventsTable th:nth-child(2) { width: 5.5em; }
+  table.tbl.stable-cols#allEventsTable th:nth-child(3) { width: 7em; }
+  table.tbl.stable-cols#allEventsTable th:nth-child(4) { width: 9em; }
+  table.tbl.stable-cols#allEventsTable th:nth-child(5) { width: 8em; }
+  table.tbl.stable-cols#allEventsTable th:nth-child(6) { width: 7em; }
 
   /* ---------- 手机上的日期与时刻 ----------
      电脑上那两个文本框加日历按钮是为了避开原生控件的混排占位符；

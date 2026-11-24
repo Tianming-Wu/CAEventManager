@@ -4019,11 +4019,10 @@
   }
 
   function syncImportTemplateRow() {
-    var custom = S.import.rule === "custom";
-    var row = $("#importTemplateRow");
-    if (!row) return;
-    row.hidden = !custom;
-    if (custom && $("#importTemplate")) $("#importTemplate").value = S.import.template || "";
+    var input = $("#importTemplate");
+    if (!input) return;
+    input.hidden = S.import.rule !== "custom";
+    if (!input.hidden) input.value = S.import.template || "";
   }
 
   function importRulePayload() {
@@ -4065,68 +4064,115 @@
     };
   }
 
+  /* 警示格：正常行是空的；有问题的那一行在最右边给一颗圆圈感叹号，
+     悬停看原因（电脑），点一下弹一条通知（触屏）。整列只在有人出问题时才出现。 */
+  var ICON_WARN = '<svg viewBox="0 0 20 20" aria-hidden="true" fill="none" ' +
+    'stroke="currentColor" stroke-width="1.6" stroke-linecap="round">' +
+    '<circle cx="10" cy="10" r="7.4"/><path d="M10 6.4v4.4"/><path d="M10 13.6v.1"/></svg>';
+
+  function importWarnCell(row) {
+    var why = (row.problems || []).join("；");
+    if (!why) return "";
+    return '<button class="warn-dot" type="button" data-import-why="' + PX.esc(why) +
+      '" title="' + PX.esc(why) + '" aria-label="' + PX.esc(why) + '">' + ICON_WARN +
+      "</button>";
+  }
+
+  function importRowHtml(row) {
+    var bad = row.status !== "ready";
+    var field = function (name, extra) {
+      return '<input class="cell-input' + (extra || "") + '" data-import-field="' + name +
+        '" data-row="' + row.index + '" value="' + PX.esc(row[name] || "") + '"' +
+        (name === "username" || name === "password" ? ' spellcheck="false"' : "") + ">";
+    };
+    return '<tr data-import-row="' + row.index + '"' + (bad ? ' class="row-bad"' : "") + ">" +
+      '<td class="mono">' + row.index + "</td>" +
+      '<td><span class="cell-wrap">' + field("username", " mono") +
+      '<span class="cell-tag">' + (row.autoUsername ? "自动" : "") + "</span></span></td>" +
+      "<td>" + field("name") + "</td>" +
+      '<td><select class="cell-input" data-import-field="role" data-row="' + row.index + '">' +
+      '<option value="admin"' + (row.role === "admin" ? " selected" : "") + ">管理员</option>" +
+      '<option value="superadmin"' + (row.role === "superadmin" ? " selected" : "") +
+      ">超级管理员</option></select></td>" +
+      '<td><span class="cell-wrap">' + field("password", " mono") +
+      '<span class="cell-tag">' + (row.generated ? "生成" : "") + "</span></span></td>" +
+      '<td><input class="cell-input" data-import-field="org" data-row="' + row.index +
+      '" value="' + PX.esc(row.org || "") + '" disabled></td>' +
+      "<td>" + field("note") + "</td>" +
+      '<td class="import-warn">' + importWarnCell(row) + "</td></tr>";
+  }
+
+  /* 表格里已经有这一批行了：只改变化的那几处，不重建。
+     重建会在"正在打字的格子被移走"时抛异常（innerHTML 设置失败），
+     而且焦点与光标位置也跟着丢——打字的人每停半秒就被打断一次。 */
+  function patchImportRows(body, rows) {
+    var trs = body.querySelectorAll("tr[data-import-row]");
+    if (!rows.length || trs.length !== rows.length) return false;
+    for (var i = 0; i < rows.length; i++) {
+      var tr = trs[i];
+      var row = rows[i];
+      if (Number(tr.getAttribute("data-import-row")) !== row.index) return false;
+      tr.classList.toggle("row-bad", row.status !== "ready");
+      var warn = tr.querySelector("td.import-warn");
+      if (warn) warn.innerHTML = importWarnCell(row);
+      var auto = tr.querySelector('[data-import-field="username"]');
+      if (auto) {
+        var tag = auto.parentNode.querySelector(".cell-tag");
+        if (tag) tag.textContent = row.autoUsername ? "自动" : "";
+      }
+      var pwd = tr.querySelector('[data-import-field="password"]');
+      if (pwd) {
+        var ptag = pwd.parentNode.querySelector(".cell-tag");
+        if (ptag) ptag.textContent = row.generated ? "生成" : "";
+      }
+      var fields = tr.querySelectorAll("[data-import-field]");
+      for (var j = 0; j < fields.length; j++) {
+        var el = fields[j];
+        if (el === document.activeElement) continue;      // 正在打字的格子不动它
+        var want = row[el.getAttribute("data-import-field")] || "";
+        if (el.value !== want) el.value = want;
+      }
+    }
+    return true;
+  }
+
   function drawImport() {
     var state = S.import;
     if (!state) return;
     syncCrumb("import-accounts");
     var counts = state.counts || { total: 0, ready: 0, blocked: 0, generated: 0 };
-    var cap = state.cap || { max: 0, used: 0, left: 0 };
     if ($("#importCount")) {
       $("#importCount").textContent = counts.total
-        ? "共 " + counts.total + " 行，能建 " + counts.ready + " 行"
+        ? "共 " + counts.total + " 行，可导入 " + counts.ready + " 行"
         : "";
     }
     var body = $("#importTable tbody");
-    if (body) {
-      body.innerHTML = state.rows.length ? state.rows.map(function (row) {
-        var bad = row.status !== "ready";
-        return '<tr data-import-row="' + row.index + '"' + (bad ? ' class="row-bad"' : "") + ">" +
-          '<td class="mono">' + row.index + "</td>" +
-          '<td><input class="cell-input mono" data-import-field="username" data-row="' +
-          row.index + '" value="' + PX.esc(row.username) + '" spellcheck="false">' +
-          (row.autoUsername ? ' <span class="hint">自动</span>' : "") + "</td>" +
-          '<td><input class="cell-input" data-import-field="name" data-row="' +
-          row.index + '" value="' + PX.esc(row.name) + '"></td>' +
-          '<td><select class="cell-input" data-import-field="role" data-row="' +
-          row.index + '">' +
-          '<option value="admin"' + (row.role === "admin" ? " selected" : "") + ">管理员</option>" +
-          '<option value="superadmin"' + (row.role === "superadmin" ? " selected" : "") +
-          ">超级管理员</option></select></td>" +
-          '<td><input class="cell-input mono" data-import-field="password" data-row="' +
-          row.index + '" value="' + PX.esc(row.password) + '" spellcheck="false">' +
-          (row.generated ? ' <span class="hint">生成</span>' : "") + "</td>" +
-          '<td><input class="cell-input" data-import-field="org" data-row="' +
-          row.index + '" value="' + PX.esc(row.org) + '" disabled></td>' +
-          '<td><input class="cell-input" data-import-field="note" data-row="' +
-          row.index + '" value="' + PX.esc(row.note) + '"></td>' +
-          '<td class="wrap">' +
-          (bad ? '<span class="tag danger">' + PX.esc(row.problems[0] || "不能导入") + "</span>"
-               : '<span class="tag">可导入</span>') + "</td></tr>";
-      }).join("") : emptyRow(8, "还没有内容：选一个表格，或者点 [手动录入]");
+    var table = $("#importTable");
+    var anyProblem = (state.rows || []).some(function (r) { return r.status !== "ready"; });
+    if (table) table.classList.toggle("warn-off", !anyProblem);
+    if (body && !patchImportRows(body, state.rows)) {
+      body.innerHTML = state.rows.length
+        ? state.rows.map(importRowHtml).join("")
+        : emptyRow(7, "还没有内容：选一个表格，或者点 [手动录入]");
     }
 
-    var fresh = state.downloaded === state.revision && state.revision > 0;
     var why = "";
-    if (!state.rows.length) why = "先读一张表或手动录入";
-    else if (counts.blocked) why = "有 " + counts.blocked + " 行还不能导入";
+    if (counts.blocked) why = "有 " + counts.blocked + " 行无法导入";
     else if (S.import.cap && S.import.cap.max > 0 && counts.ready > S.import.cap.left) {
       why = "超出账号上限：这个实例还能建 " + S.import.cap.left + " 个";
     }
     if ($("#importGo")) {
-      $("#importGo").disabled = !!why || state.busy;
+      $("#importGo").disabled = !!why || !state.rows.length || state.busy;
       $("#importGo").title = why || "把这份预览建出来";
     }
-    if ($("#importState")) {
-      var bits = [];
-      if (why) bits.push(why);
-      if (counts.generated) bits.push("其中 " + counts.generated + " 个密码是刚生成的");
-      if (S.import.cap && S.import.cap.max > 0) {
-        bits.push("账号上限 " + S.import.cap.max + "，已用 " + S.import.cap.used);
-      }
-      bits.push(fresh ? "账号表已下载（含初始密码）"
-                      : "初始密码只在这一页看得到，导入前请先 [下载账号表]");
-      $("#importState").textContent = bits.join("；");
+    if ($("#importGenBtn")) {
+      // 只有真的有空密码时这颗键才有意义
+      var blanks = state.rows.filter(function (r) { return !r.password; }).length;
+      $("#importGenBtn").disabled = !blanks || state.busy;
+      $("#importGenBtn").title = blanks ? "给 " + blanks + " 行空密码按当前规则生成"
+                                        : "每一行都有密码";
     }
+    if ($("#importState")) $("#importState").textContent = why;
     if ($("#importWarn")) {
       var warns = state.warnings || [];
       $("#importWarn").hidden = !warns.length;
@@ -7741,6 +7787,12 @@
   });
   $("#importDownloadBtn").addEventListener("click", downloadImportTable);
   $("#importGo").addEventListener("click", submitImport);
+  $("#importTable").addEventListener("click", function (e) {
+    var dot = e.target.closest ? e.target.closest(".warn-dot") : null;
+    if (!dot) return;
+    // 触屏没有悬停：点一下把原因摆出来
+    PX.toast(PX.esc(dot.getAttribute("data-import-why") || ""), true, 6000);
+  });
   $("#importTable").addEventListener("input", function (e) {
     var input = e.target;
     if (input && input.getAttribute && input.getAttribute("data-import-field")) {

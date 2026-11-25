@@ -1195,6 +1195,25 @@ def routes_page(page):
         check("%-16s -> %s" % (route, title), expect in title, title)
 
 
+def docs_links(browser):
+    """文档页里的站内链接都该落在清单里：漏一份文档就会显示成「链接已断」。"""
+    print("== 文档页的站内链接 ==")
+    ctx, page = new_page(browser, 1280, 900)
+    try:
+        ui_login(page)
+        for path in ("usage/platform-pages.md", "usage/orgs.md", "usage/start.md"):
+            page.goto(BASE + "/docs#/" + path)
+            page.wait_for_timeout(1500)
+            info = page.evaluate("""() => ({
+                broken: Array.from(document.querySelectorAll('.md-broken'))
+                    .map(x => x.textContent),
+                docs: Array.from(document.querySelectorAll('.md-doc')).length,
+            })""")
+            check("%s 里没有断链" % path, not info["broken"], info["broken"])
+    finally:
+        ctx.close()
+
+
 def docs_page(browser):
     """使用文档：侧栏那一项是新标签页，那一页自带一套骨架。"""
     print("== 使用文档（独立页面）==")
@@ -3332,7 +3351,7 @@ def org_page(page):
     body = page.inner_text("#orgsTable tbody")
     check("新组织出现在列表里",
           oname in body and oid in body, body[:120])
-    check("列表里写着一位负责人", "负责人 1" in body, body[:120])
+    check("成员列只写人数", "负责人" not in body and "\t1\t" in body, body[:120])
     after = page.evaluate("""() => {
         const a = document.querySelector('#sidebar [data-nav="orgs"]');
         return {trail: a.hasAttribute('data-trail'), current: a.getAttribute('aria-current')};
@@ -3365,10 +3384,8 @@ def org_page(page):
     page.wait_for_timeout(800)
     check("进的是组织详情", page.inner_text("#orgTitle") == oname,
           page.inner_text("#orgTitle"))
-    check("副标题只写标识，不写我在组织里的身份",
-          page.inner_text("#orgSub").strip() == oid, page.inner_text("#orgSub"))
-    check("这一页写着改动要 sudo",
-          "sudo" in page.inner_text("#orgEditNote"), page.inner_text("#orgEditNote"))
+    check("副标题不写标识也不写身份",
+          page.inner_text("#orgSub").strip() == "", page.inner_text("#orgSub"))
     check("详情里组织管理也是淡高亮",
           page.evaluate("""() => document.querySelector('#sidebar [data-nav="orgs"]')
               .hasAttribute('data-trail')"""))
@@ -3376,7 +3393,10 @@ def org_page(page):
           page.locator("#orgMemberTable tbody tr").count() == 1
           and "共 1 人" in page.inner_text("#orgMemberCount"),
           page.inner_text("#orgMemberCount"))
-    check("组织标识是只读的", page.locator("#orgEditId").is_disabled())
+    check("标识写成一行说明",
+          page.inner_text(".org-id-line").startswith("id:") and
+          page.inner_text("#orgEditId") == oid, page.inner_text(".org-id-line"))
+    check("标识没有输入框", page.locator("input#orgEditId").count() == 0)
     check("成员一栏是身份下拉",
           page.locator("#orgMemberTable [data-org-role-for]").count() == 1)
 
@@ -3458,18 +3478,72 @@ def org_page(page):
     page.wait_for_timeout(1500)
     check("恢复后又能改", page.locator("#orgEditName").is_enabled())
 
+    print("== 我的组织 › 组织 › 组织管理（自己管自己，不必 sudo） ==")
+    selfoid = "ui-self-%d" % random.randint(1000, 9999)
+    page.evaluate("""(id) => fetch('/api/panel/me', {
+            headers: {'X-Requested-With': 'CAEventManager'}
+        }).then(r => r.json()).then(d => fetch('/api/panel/org/create', {
+            method: 'POST',
+            headers: {'X-Requested-With': 'CAEventManager',
+                      'Content-Type': 'application/json'},
+            body: JSON.stringify({id: id, name: '自管组织', heads: [d.me.id]})
+        })).then(r => r.json())""", selfoid)
+    page.goto(BASE + "/panel#/my-orgs")
+    page.wait_for_timeout(1400)
+    grid = page.inner_text("#myOrgGrid")
+    check("我的组织里有自己负责的组织", "自管组织" in grid, grid[:80])
+    page.evaluate("""(id) => document.querySelector(
+        '#myOrgGrid [data-org-self="' + id + '"]').click()""", selfoid)
+    page.wait_for_timeout(1400)
+    check("点卡片进组织页", page.inner_text("#myOrgTitle") == "自管组织",
+          page.inner_text("#myOrgTitle"))
+    check("组织页写着我的身份与人数",
+          "负责人" in page.inner_text("#myOrgSub"), page.inner_text("#myOrgSub"))
+    check("负责人看得到 [组织管理]", page.locator("#myOrgManageBtn").is_visible())
+    page.click("#myOrgManageBtn")
+    page.wait_for_timeout(1400)
+    check("进的是组织自己的管理页",
+          page.url.endswith("#/my-org-manage/" + selfoid), page.url)
+    check("管理页写着标识",
+          page.inner_text("#orgManageId") == selfoid, page.inner_text("#orgManageId"))
+    check("唯一负责人的 [移出] 是灰的",
+          page.locator("#orgManageTable .badge-off").count() == 1)
+    check("灰着的那颗点不出确认框",
+          page.evaluate("""() => {
+              document.querySelector('#orgManageTable .badge-off').click();
+              return document.getElementById('overlay').hidden;
+          }"""))
+    page.fill("#orgManageName", "自管组织二")
+    page.evaluate("() => document.getElementById('orgManageSave').click()")
+    page.wait_for_timeout(1600)
+    check("自己改名字不必提权就直接生效",
+          page.inner_text("#orgManageCrumb") == "自管组织二",
+          page.inner_text("#orgManageCrumb"))
+
+    print("== 平台页给组织负责人指一条更轻的路 ==")
+    page.goto(BASE + "/panel#/org/" + selfoid)
+    page.wait_for_timeout(1400)
+    check("平台页上出现提示条",
+          page.locator("#orgSelfHint").is_visible()
+          and "负责人" in page.inner_text("#orgSelfHintText"),
+          page.inner_text("#orgSelfHintText"))
+    page.evaluate("() => document.getElementById('orgSelfHintClose').click()")
+    page.wait_for_timeout(250)
+    check("提示条可以关掉", page.locator("#orgSelfHint").is_hidden())
+
     print("== 我的组织：一张卡片一个组织 ==")
     page.goto(BASE + "/panel#/my-orgs")
     page.wait_for_timeout(900)
     check("侧栏有我的组织", "my-orgs" in visible_nav(page)["items"])
     grid = page.inner_text("#myOrgGrid")
-    check("有一张组织卡片",
-          page.locator("#myOrgGrid .org-card").count() == 1, grid[:80])
+    check("我的组织里列出了参加的组织",
+          page.locator("#myOrgGrid .org-card").count() >= 1, grid[:80])
     check("卡片上写着名字与人数",
           (oname + "二") in grid and "1 位成员" in grid, grid[:120])
     check("卡片上写着我的身份", "负责人" in grid, grid[:120])
-    check("卡片留出了背景图的位置",
-          page.locator("#myOrgGrid .org-card .org-cover").count() == 1)
+    check("每张卡片都留出了背景图的位置",
+          page.locator("#myOrgGrid .org-card .org-cover").count()
+          == page.locator("#myOrgGrid .org-card").count())
     check("加入组织先摆着、还没有邀请码可用",
           page.locator("#orgJoinBtn").is_disabled())
 
@@ -3490,6 +3564,20 @@ def org_page(page):
     page.wait_for_timeout(800)
     body = page.inner_text("#orgsTable tbody")
     check("彻底删除后回到列表且不在其中", oid not in body, body[:120])
+
+    print("== 写错地址的详情页 ==")
+    page.goto(BASE + "/panel#/org/" + selfoid)
+    page.wait_for_timeout(1200)
+    page.evaluate("() => { location.hash = '#/org/nwuca/x'; }")
+    page.wait_for_timeout(1000)
+    check("多一段的地址直接说没有这一页",
+          page.locator("#missing").is_visible(), page.url)
+    check("不把上一个组织的页面留在屏幕上",
+          page.evaluate(
+              "() => document.querySelector('.page[data-page=\"org\"]').hidden"))
+    page.evaluate("() => document.getElementById('missingBack').click()")
+    page.wait_for_timeout(900)
+    check("回到首页", page.url.endswith("#/overview"), page.url)
 
     print("== 新建活动这类向导也淡高亮上一层 ==")
     page.goto(BASE + "/panel#/new-event")
@@ -6031,6 +6119,7 @@ def main():
                     head_align(page)
                 if want("docs") and not ONLY:
                     docs_page(browser)
+                    docs_links(browser)
                 if want("assistant") and not ONLY:
                     assistant_page(page)
                     assistant_drawer(browser)

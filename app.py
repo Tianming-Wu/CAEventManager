@@ -74,7 +74,7 @@ PAGES_DIR = os.path.join(BASE_DIR, "pages")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.13.37.163"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.13.38.164"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -2402,14 +2402,14 @@ class Handler(BaseHTTPRequestHandler):
             org = orgs.row(conn, (data.get("id") or "").strip())
             if org is None:
                 raise model.ApiError("组织不存在", 404)
-            mine = orgs.my_role(conn, org["id"], actor["id"])
-            if acc["role"] not in ("superadmin", "owner") and mine != "head":
-                raise model.ApiError("只有负责人能改这个组织", 403)
             if org["archived_at"]:
                 raise model.ApiError("组织已归档，先恢复再改", 409)
-            # 平台侧动组织一律提权；组织自己的负责人（不带平台角色）办自己的事不必
-            if acc["role"] in ("superadmin", "owner"):
+            mine = orgs.my_role(conn, org["id"], actor["id"])
+            if (data.get("scope") or "self").strip() == "platform":
+                need("superadmin", "owner")
                 need_sudo()
+            elif mine not in ("head", "admin"):
+                raise model.ApiError("只有组织的负责人或管理能改这个组织", 403)
             name = data.get("name")
             note = data.get("note")
             if name is not None:
@@ -2426,14 +2426,14 @@ class Handler(BaseHTTPRequestHandler):
             org = orgs.row(conn, (data.get("org") or "").strip())
             if org is None:
                 raise model.ApiError("组织不存在", 404)
-            mine = orgs.my_role(conn, org["id"], actor["id"])
-            if acc["role"] not in ("superadmin", "owner") and mine != "head":
-                raise model.ApiError("只有负责人能改成员", 403)
             if org["archived_at"]:
                 raise model.ApiError("组织已归档，先恢复再改", 409)
-            # 同上：平台侧动成员要提权
-            if acc["role"] in ("superadmin", "owner"):
+            mine = orgs.my_role(conn, org["id"], actor["id"])
+            if (data.get("scope") or "self").strip() == "platform":
+                need("superadmin", "owner")
                 need_sudo()
+            elif mine not in ("head", "admin"):
+                raise model.ApiError("只有组织的负责人或管理能改成员", 403)
             account_id = int(data.get("account") or 0)
             target = conn.execute("SELECT * FROM accounts WHERE id=?",
                                   (account_id,)).fetchone()
@@ -2443,8 +2443,8 @@ class Handler(BaseHTTPRequestHandler):
             role = (data.get("role") or "member").strip()
             if role not in orgs.ROLES:
                 raise model.ApiError("组织内身份只有负责人、管理、成员")
-            if role == "head" and not (acc["role"] in ("superadmin", "owner")
-                                         or mine == "head"):
+            if role == "head" and not (mine == "head"
+                                       or (data.get("scope") or "").strip() == "platform"):
                 raise model.ApiError("只有负责人能指定负责人", 403)
             before = orgs.my_role(conn, org["id"], account_id)
             with panel.tx() as tx:

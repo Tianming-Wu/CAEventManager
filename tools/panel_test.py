@@ -2423,8 +2423,18 @@ def main():
           detail.get("members"))
 
     # 平台侧改别人的组织要提权：站长本人是这个组织的负责人也一样
+    # 同一件事在两个页面上规矩不同：平台页要 sudo，组织自己的设置页不要
+    selfedit = call(owner, "/api/panel/org/update",
+                    {"id": "cs-club", "name": "计算机社", "scope": "self"})
+    check("负责人从「我的组织」改不必提权",
+          selfedit and selfedit.get("ok"), selfedit)
+    refused = call(owner, "/api/panel/org/update",
+                   {"id": "cs-club", "name": "平台改名", "scope": "platform"}, expect=403)
+    check("平台页改组织要先进 sudo",
+          refused and refused.get("sudoRequired") is True, refused)
     refused = call(owner, "/api/panel/org/member",
-                   {"org": "cs-club", "account": mate, "action": "remove"}, expect=403)
+                   {"org": "cs-club", "account": mate, "action": "remove",
+                    "scope": "platform"}, expect=403)
     check("平台侧改成员要先进 sudo",
           refused and refused.get("sudoRequired") is True, refused)
     refused = call(owner, "/api/panel/org/archive", {"id": "cs-club"}, expect=403)
@@ -2432,16 +2442,19 @@ def main():
     post(owner, "/api/panel/sudo", {"password": owner_password()})
 
     post(owner, "/api/panel/org/member",
-         {"org": "cs-club", "account": mate, "action": "remove"})
+         {"org": "cs-club", "account": mate, "action": "remove",
+          "scope": "platform"})
     check("可以踢人",
           len(call(owner, "/api/panel/org?id=cs-club")["members"]) == 1)
     post(owner, "/api/panel/org/member",
-         {"org": "cs-club", "account": mate, "action": "add", "role": "member"})
+         {"org": "cs-club", "account": mate, "action": "add", "role": "member",
+          "scope": "platform"})
     check("可以再加回来",
           [m["role"] for m in call(owner, "/api/panel/org?id=cs-club")["members"]]
           == ["head", "member"])
     keep = call(owner, "/api/panel/org/member",
-                {"org": "cs-club", "account": owner_id, "action": "remove"}, expect=409)
+                {"org": "cs-club", "account": owner_id, "action": "remove",
+                 "scope": "platform"}, expect=409)
     check("最后一个负责人不能被踢掉", keep and "负责人" in (keep.get("error") or ""), keep)
 
     mine = call(owner, "/api/panel/org/mine")["orgs"]
@@ -2453,7 +2466,8 @@ def main():
           archived and archived[0]["archived"] is True and archived[0]["members"] == 2,
           archived[0] if archived else None)
     frozen = call(owner, "/api/panel/org/member",
-                  {"org": "cs-club", "account": mate, "action": "remove"}, expect=409)
+                  {"org": "cs-club", "account": mate, "action": "remove",
+                   "scope": "platform"}, expect=409)
     check("归档之后不能再改成员", frozen and "归档" in (frozen.get("error") or ""), frozen)
     post(owner, "/api/panel/org/restore", {"id": "cs-club"})
     back = [o for o in call(owner, "/api/panel/orgs")["orgs"] if o["id"] == "cs-club"]

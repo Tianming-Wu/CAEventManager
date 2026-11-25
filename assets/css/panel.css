@@ -1531,7 +1531,31 @@ select:invalid { color: var(--dim); }
   place-items: center;
   overflow: hidden;
 }
-.org-cover-hint { font-size: .8rem; color: var(--dim); }
+/* 标识写成一行说明，不占一个输入框 */
+.org-id-line { margin: 0 0 14px; font-size: .78rem; color: var(--muted); }
+/* 组织页顶上那条"你可以去另一页做"的提示 */
+.org-self-hint {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 8px 10px 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  font-size: .84rem;
+  color: var(--text);
+}
+.org-self-hint > span { flex: 1 1 auto; min-width: 0; }
+.org-self-hint-x { width: 26px; height: 26px; }
+/* 组织页的横幅：外观图将来摆在这里 */
+.org-banner {
+  height: 132px;
+  margin-bottom: 14px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
 .org-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(232px, 1fr));
@@ -1545,6 +1569,19 @@ select:invalid { color: var(--dim); }
   display: flex;
   flex-direction: column;
 }
+.org-card-open {
+  appearance: none;
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.org-card-open:hover { background: var(--surface-2); }
 .org-card .org-cover {
   height: 76px;
   border: 0;

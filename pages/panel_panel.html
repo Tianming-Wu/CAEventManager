@@ -219,10 +219,8 @@
       <a class="nav-item" data-href="#/orgs" role="link" tabindex="0" data-nav="orgs"
          data-min-role="superadmin">
         <svg viewBox="0 0 20 20" aria-hidden="true">
-          <rect x="7.6" y="2.8" width="4.8" height="3.6" rx="1"/>
-          <rect x="2.6" y="13.6" width="4.8" height="3.6" rx="1"/>
-          <rect x="12.6" y="13.6" width="4.8" height="3.6" rx="1"/>
-          <path d="M10 6.4v3.4M5 13.6v-3.4h10v3.4"/>
+          <circle cx="10" cy="6" r="2.6"/>
+          <path d="M5.3 16.5a4.7 4.7 0 0 1 9.4 0M5.1 6.6a2 2 0 1 0 .1 3.6M4.5 12.3a3.2 3.2 0 0 0-3 3.2M14.9 6.6a2 2 0 1 1-.1 3.6M15.5 12.3a3.2 3.2 0 0 1 3 3.2"/>
         </svg>
         <span class="nav-text">组织管理</span>
       </a>
@@ -1404,6 +1402,102 @@
       </div>
     </section>
 
+    <!-- ================================================= 我的组织 › 组织 -->
+    <section class="page" data-page="my-org" hidden>
+      <header class="page-head">
+        <div class="head-title">
+          <button class="icon-btn crumb-back" id="myOrgBack" type="button"
+                  aria-label="回到我的组织" title="回到我的组织">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12 5l-5 5 5 5"/></svg>
+          </button>
+          <h1 class="crumb-title">
+            <a class="crumb" data-href="#/my-orgs" role="link" tabindex="0">我的组织</a>
+            <span class="crumb-sep" aria-hidden="true">›</span>
+            <span id="myOrgTitle">—</span>
+          </h1>
+        </div>
+        <p class="page-sub" id="myOrgSub"></p>
+        <div class="page-actions">
+          <button class="btn primary" id="myOrgManageBtn" type="button" hidden>组织管理</button>
+        </div>
+      </header>
+
+      <div class="org-banner" id="myOrgBanner"></div>
+
+      <div class="card">
+        <div class="card-head"><h2>简介</h2></div>
+        <p class="page-sub" id="myOrgNote">—</p>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>成员</h2>
+          <span class="hint" id="myOrgMemberCount"></span>
+        </div>
+        <div class="tblwrap">
+          <table class="tbl fixed" id="myOrgMemberTable">
+            <thead><tr>
+              <th>成员</th><th>身份</th><th>加入时间</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================================= 我的组织 › 组织 › 组织管理 -->
+    <section class="page" data-page="my-org-manage" hidden>
+      <header class="page-head">
+        <div class="head-title">
+          <button class="icon-btn crumb-back" id="orgManageBack" type="button"
+                  aria-label="回到组织" title="回到组织">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12 5l-5 5 5 5"/></svg>
+          </button>
+          <h1 class="crumb-title">
+            <a class="crumb" data-href="#/my-orgs" role="link" tabindex="0">我的组织</a>
+            <span class="crumb-sep" aria-hidden="true">›</span>
+            <a class="crumb" id="orgManageCrumb" role="link" tabindex="0">—</a>
+            <span class="crumb-sep" aria-hidden="true">›</span>
+            <span>组织管理</span>
+          </h1>
+        </div>
+        <div class="page-actions">
+          <button class="btn primary" id="orgManageSave" type="button">保存</button>
+        </div>
+      </header>
+
+      <div class="card">
+        <div class="card-head"><h2>基本信息</h2></div>
+        <p class="org-id-line">id: <span class="mono" id="orgManageId">—</span></p>
+        <div class="field">
+          <label for="orgManageName">名称 <span class="req">必填</span></label>
+          <input id="orgManageName" type="text" maxlength="40" autocomplete="off">
+          <p class="err" id="orgManageNameErr" hidden></p>
+        </div>
+        <div class="field">
+          <label for="orgManageNote">简介</label>
+          <input id="orgManageNote" type="text" maxlength="200" autocomplete="off">
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>成员</h2>
+          <span class="hint" id="orgManageCount"></span>
+          <div class="spacer"></div>
+          <button class="btn sm" id="orgManageAdd" type="button">添加成员</button>
+        </div>
+        <div class="tblwrap">
+          <table class="tbl fixed" id="orgManageTable">
+            <thead><tr>
+              <th>成员</th><th>身份</th><th>加入时间</th><th class="actions">操作</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
     <!-- =================================================== 组织详情（子页） -->
     <section class="page" data-page="org" hidden>
       <header class="page-head">
@@ -1421,26 +1515,51 @@
         <p class="page-sub" id="orgSub"></p>
       </header>
 
-      <div class="card">
-        <div class="card-head">
-          <h2>基本信息</h2>
-          <span class="note" id="orgEditNote"></span>
+      <!-- 平台侧看到的组织，如果自己正好是这个组织的负责人或管理，指一条更轻的路 -->
+      <div class="org-self-hint" id="orgSelfHint" hidden>
+        <span id="orgSelfHintText"></span>
+        <button class="btn sm" id="orgSelfHintGo" type="button">前往</button>
+        <button class="icon-btn org-self-hint-x" id="orgSelfHintClose" type="button"
+                aria-label="关闭提示">
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <path d="M5.5 5.5l9 9M14.5 5.5l-9 9"/>
+          </svg>
+        </button>
+      </div>
+
+      <div class="cols-2">
+        <div class="col">
+          <div class="card">
+            <div class="card-head">
+              <h2>基本信息</h2>
+              <span class="note" id="orgEditNote"></span>
+            </div>
+            <p class="org-id-line">id: <span class="mono" id="orgEditId">—</span></p>
+            <div class="field">
+              <label for="orgEditName">名称 <span class="req">必填</span></label>
+              <input id="orgEditName" type="text" maxlength="40" autocomplete="off">
+              <p class="err" id="orgEditNameErr" hidden></p>
+            </div>
+            <div class="field">
+              <label for="orgEditNoteInput">简介</label>
+              <input id="orgEditNoteInput" type="text" maxlength="200" autocomplete="off">
+            </div>
+            <div class="row" style="margin-top:16px;justify-content:flex-end">
+              <button class="btn primary" id="orgSaveBtn" type="button">保存</button>
+            </div>
+          </div>
         </div>
-        <div class="field">
-          <label for="orgEditName">名称 <span class="req">必填</span></label>
-          <input id="orgEditName" type="text" maxlength="40" autocomplete="off">
-          <p class="err" id="orgEditNameErr" hidden></p>
-        </div>
-        <div class="field">
-          <label for="orgEditNoteInput">简介</label>
-          <input id="orgEditNoteInput" type="text" maxlength="200" autocomplete="off">
-        </div>
-        <div class="field">
-          <label for="orgEditId">组织标识</label>
-          <input id="orgEditId" type="text" disabled>
-        </div>
-        <div class="row" style="margin-top:16px;justify-content:flex-end">
-          <button class="btn primary" id="orgSaveBtn" type="button">保存</button>
+        <div class="col">
+          <div class="card">
+            <div class="card-head">
+              <h2>外观</h2>
+              <span class="note">显示在「我的组织」的卡片上</span>
+            </div>
+            <div class="org-cover">
+              <span class="org-cover-hint">还没有背景图</span>
+            </div>
+            <p class="hint">横幅压在组织名称后面，用作卡片的背景</p>
+          </div>
         </div>
       </div>
 
@@ -1941,6 +2060,14 @@
       <div class="denied-inner">
         <p class="denied-title">您无权访问此页面</p>
         <button class="denied-action" id="switchAccount" type="button">切换账号？</button>
+      </div>
+    </div>
+
+    <!-- 地址指向一个不存在的页面：不摆半页旧数据，直接说这一页没有 -->
+    <div class="denied" id="missing" hidden>
+      <div class="denied-inner">
+        <p class="denied-title">页面不存在</p>
+        <button class="denied-action" id="missingBack" type="button">回到首页</button>
       </div>
     </div>
 

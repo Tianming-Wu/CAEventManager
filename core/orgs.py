@@ -80,7 +80,7 @@ def _members(conn, org_id):
         " a.avatar, a.avatar_at"
         " FROM org_members m LEFT JOIN accounts a ON a.id=m.account_id"
         " WHERE m.org_id=? ORDER BY CASE m.role WHEN 'head' THEN 0 WHEN 'admin' THEN 1"
-        " ELSE 2 END, m.joined_at", (org_id,)).fetchall()
+        " ELSE 2 END, a.name COLLATE NOCASE, m.joined_at", (org_id,)).fetchall()
     return [{"accountId": r["account_id"], "uid": r["uid"], "name": r["name"] or "",
              "avatar": r["avatar"] or "", "avatarAt": float(r["avatar_at"] or 0),
              "role": r["role"], "roleLabel": ROLE_LABEL[r["role"]],
@@ -102,7 +102,7 @@ def archived_members(org):
                     "name": str(item.get("n") or ""), "avatar": "", "avatarAt": 0,
                     "role": role, "roleLabel": ROLE_LABEL[role],
                     "joinedAt": float(item.get("t") or 0)})
-    out.sort(key=lambda m: (-RANK[m["role"]], m["joinedAt"]))
+    out.sort(key=lambda m: (-RANK[m["role"]], m["name"], m["joinedAt"]))
     return out
 
 

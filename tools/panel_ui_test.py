@@ -3938,6 +3938,36 @@ def events_table(page):
     close_overlays(page)
 
 
+def preset_favorite_flash(page):
+    """在预设广场点收藏，整页不许先清空再填回来。"""
+    print("== 收藏预设：页面不许闪白 ==")
+    page.goto(BASE + "/panel#/templates")
+    page.wait_for_timeout(900)
+    before = page.evaluate(
+        "() => document.querySelectorAll('#presetSquare .preset-card').length")
+    check("广场里有预设卡片", before >= 1, before)
+    page.evaluate("""() => {
+        window.__sawEmpty = false;
+        const box = document.getElementById('presetSquare');
+        const obs = new MutationObserver(() => {
+            if (!box.querySelector('.preset-card')) window.__sawEmpty = true;
+        });
+        obs.observe(box, {childList: true, subtree: true});
+        window.__flashObs = obs;
+    }""")
+    page.click("#presetSquare .preset-star")
+    page.wait_for_timeout(1600)
+    state = page.evaluate("""() => ({
+        empty: window.__sawEmpty,
+        cards: document.querySelectorAll('#presetSquare .preset-card').length})""")
+    page.evaluate("() => { if (window.__flashObs) window.__flashObs.disconnect(); }")
+    check("收藏过程中没有出现空白", state["empty"] is False, state)
+    check("收藏之后卡片还在", state["cards"] >= 1, state)
+    # 复原：再点一次取消收藏
+    page.click("#presetSquare .preset-star")
+    page.wait_for_timeout(900)
+
+
 def create_page(browser):
     print("== creating an activity from the console ==")
     ctx, page = new_page(browser, 1440, 900)
@@ -5675,6 +5705,7 @@ def main():
                     if WITH_ACCOUNTS:
                         temp_password_page(browser)
                 if want("ops"):
+                    preset_favorite_flash(page)
                     events_table(page)
                     dialog_page(page)
                     theme_page(page)

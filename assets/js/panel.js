@@ -3185,28 +3185,37 @@
         PX.esc(loaded("templates") ? empty : "正在读取…") + "</div>";
   }
 
+  /* 三栏：收藏 / 我创建的 / 预设广场。数据已经在手上就直接画，
+     没有才摆"正在读取…"——收藏一下再整页闪白是这条路上最容易犯的错。 */
+  function renderShelves() {
+    var fav = S.templates.filter(function (p) { return p.fav; });
+    var mine = S.templates.filter(function (p) { return p.mine && !p.builtin; });
+    // the square is everything shared, whether or not it is also starred
+    var square = S.templates.filter(function (p) {
+      return p.builtin || p.visibility === "public" || p.visibility === "org";
+    });
+    presetShelf("#presetFavorites", fav, "fav", "还没有收藏的预设");
+    presetShelf("#presetMine", mine, "mine", "还没有创建的预设");
+    presetShelf("#presetSquare", square, "square", "还没有可用的预设");
+  }
+
   function drawTemplates() {
     // importing brings content into the installation: only the station master
     var importBtn = $("#presetImportBtn");
     if (importBtn) importBtn.hidden = !isOwner();
-    // 先把三栏摆成"正在读取…"，别让人看见"还没有收藏的预设"再变出来
-    markLoading("templates");
-    presetShelf("#presetFavorites", [], "fav", "还没有收藏的预设");
-    presetShelf("#presetMine", [], "mine", "还没有创建的预设");
-    presetShelf("#presetSquare", [], "square", "还没有可用的预设");
+    if (S.templates.length) {
+      renderShelves();                 // 手上有一份就先画着，别先清空
+    } else {
+      markLoading("templates");
+      presetShelf("#presetFavorites", [], "fav", "还没有收藏的预设");
+      presetShelf("#presetMine", [], "mine", "还没有创建的预设");
+      presetShelf("#presetSquare", [], "square", "还没有可用的预设");
+    }
     return PX.api("/templates").then(function (d) {
       S.templates = d.presets || [];
       S.visibilityOptions = d.visibility || [];
       markLoaded("templates");
-      var fav = S.templates.filter(function (p) { return p.fav; });
-      var mine = S.templates.filter(function (p) { return p.mine && !p.builtin; });
-      // the square is everything shared, whether or not it is also starred
-      var square = S.templates.filter(function (p) {
-        return p.builtin || p.visibility === "public" || p.visibility === "org";
-      });
-      presetShelf("#presetFavorites", fav, "fav", "还没有收藏的预设");
-      presetShelf("#presetMine", mine, "mine", "还没有创建的预设");
-      presetShelf("#presetSquare", square, "square", "还没有可用的预设");
+      renderShelves();
     }).catch(function (e) { PX.toast(PX.esc(e.message), true); });
   }
 
@@ -3304,8 +3313,9 @@
   }
 
   function presetFavorite(id, on) {
+    // 先就地把这颗星翻过来，再让服务端确认：整页重画一次，但不经过空白态
     PX.api("/preset/favorite", { method: "POST", body: { id: id, on: on } })
-      .then(function () { return loadTemplates().then(drawTemplates); })
+      .then(drawTemplates)
       .catch(function (e) { PX.toast(PX.esc(e.message), true); });
   }
 

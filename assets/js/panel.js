@@ -36,6 +36,8 @@
     "import-accounts": { min: "owner", parent: { href: "#/users", label: "用户管理" } },
     "all-events": { min: "superadmin" },
     "roster-admin": { min: "superadmin" },
+    "orgs": { min: "superadmin" },
+    "org-new": { min: "superadmin", parent: { href: "#/orgs", label: "组织管理" } },
     "approval-users": { min: "superadmin", group: "approvals" },
     "approval-events": { min: "superadmin", group: "approvals" },
     "new-event": { min: "admin" },
@@ -2977,6 +2979,12 @@
       "all-events": function () {
         return Promise.all([loadEvents(), loadArchived(true)]).then(draw);
       },
+      orgs: function () { return loadOrgs().then(drawOrgs); },
+      "org-new": function () {
+        // 每次进来都从空白开始：上一份没提交的人选留在屏幕上没有意义
+        resetOrgForm();
+        drawOrgNew();
+      },
       "roster-admin": function () {
         // 进来先看「当前」那一栏：归档是少数情况，不该是默认视角
         S.adminArchived = false;
@@ -3049,6 +3057,8 @@
       case "import-accounts": return drawImport();
       case "all-events": return drawAllEvents();
       case "roster-admin": return drawRosterAdmin();
+      case "orgs": return drawOrgs();
+      case "org-new": return drawOrgNew();
       case "approval-users": return drawApprovalUsers();
       case "approval-events": return drawApprovalEvents();
       case "modules": return drawModules();
@@ -4023,6 +4033,209 @@
         err.textContent = e.message;
         btn.disabled = false;
       });
+  }
+
+  /* ------------------------------------------------------------------ 组织 --- */
+  /* 组织管的是归属：谁属于哪个组织、在里面是什么身份。活动暂不挂在组织上；
+   * 组织里的身份也不带来平台权力——不改角色、不重置密码、不删账号。 */
+  function orgById(id) {
+    return (S.orgs || []).filter(function (o) { return o.id === id; })[0] || null;
+  }
+
+  function resetOrgForm() {
+    S.orgForm = { heads: [], admins: [], members: [] };
+    S.orgPeople = {};
+    ["orgName", "orgId", "orgNote"].forEach(function (id) {
+      var el = $("#" + id);
+      if (el) el.value = "";
+    });
+    var err = $("#orgCreateErr");
+    if (err) err.textContent = "";
+  }
+
+  function loadOrgs() {
+    markLoading("orgs");
+    return PX.api("/orgs").then(function (d) {
+      S.orgs = d.orgs || [];
+      markLoaded("orgs");
+    }).catch(function (e) { PX.toast(PX.esc(e.message), true); });
+  }
+
+  function orgRows() {
+    var q = (S.orgFilter || "").trim().toLowerCase();
+    var rows = S.orgs || [];
+    if (!q) return rows;
+    return rows.filter(function (o) {
+      return (o.name || "").toLowerCase().indexOf(q) >= 0 ||
+             (o.id || "").toLowerCase().indexOf(q) >= 0;
+    });
+  }
+
+  function drawOrgs() {
+    var body = $("#orgsTable tbody");
+    if (!body) return;
+    var rows = orgRows();
+    var total = (S.orgs || []).length;
+    var countEl = $("#orgsCount");
+    if (countEl) {
+      countEl.textContent = total ? "共 " + total + " 个组织" +
+        (rows.length !== total ? "，匹配 " + rows.length + " 个" : "") : "";
+    }
+    body.innerHTML = rows.length ? rows.map(function (o) {
+      var btns = o.archived
+        ? '<button class="btn sm" data-org-restore="' + PX.esc(o.id) + '">恢复</button>' +
+          (isOwner()
+            ? '<button class="btn sm danger" data-org-drop="' + PX.esc(o.id) +
+              '">彻底删除</button>'
+            : "")
+        : '<button class="btn sm" data-org-archive="' + PX.esc(o.id) + '">归档</button>';
+      // 归档后不再回查账号：成员数是折起来的那份快照算出来的
+      var people = o.members + (o.heads ? "（总负责人 " + o.heads + "）" : "");
+      return "<tr>" +
+        "<td><b>" + PX.esc(o.name) + "</b></td>" +
+        '<td class="mono">' + PX.esc(o.id) + "</td>" +
+        '<td class="mono">' + people + "</td>" +
+        "<td>" + (o.myRoleLabel
+          ? '<span class="tag">' + PX.esc(o.myRoleLabel) + "</span>"
+          : "—") + "</td>" +
+        "<td>" + (o.archived ? '<span class="tag warn">已归档</span>' : "—") + "</td>" +
+        '<td class="actions">' + btns + "</td></tr>";
+    }).join("") : rowsOrEmpty(6, "orgs",
+      (S.orgFilter || "").trim() ? "没有匹配的组织" : "还没有组织");
+  }
+
+  /* 选过的人排成一行：与创建活动里的成员行同一套样子 */
+  function orgChips(list) {
+    return list.map(function (id) {
+      var p = S.orgPeople[id];
+      if (!p) return "";
+      return '<span class="invite-chip">' +
+        '<span class="avatar">' + (p.avatar
+          ? '<img alt="" src="' + PX.esc(p.avatar) + '">'
+          : PX.esc((p.label || "").charAt(0))) + "</span>" +
+        '<span class="nm">' + PX.esc(p.label || "") + "</span>" +
+        '<button type="button" data-org-unpick="' + p.id + '" aria-label="移出">×</button>' +
+        "</span>";
+    }).join("");
+  }
+
+  var ORG_CHIP_BOX = { heads: "#orgHeadChips", admins: "#orgAdminChips",
+                       members: "#orgMemberChips" };
+
+  function drawOrgNew() {
+    if (!S.orgForm) resetOrgForm();
+    var f = S.orgForm;
+    Object.keys(ORG_CHIP_BOX).forEach(function (key) {
+      var box = $(ORG_CHIP_BOX[key]);
+      if (box) box.innerHTML = orgChips(f[key]);
+    });
+  }
+
+  function unpickOrgPerson(id) {
+    var f = S.orgForm;
+    if (!f) return;
+    ["heads", "admins", "members"].forEach(function (key) {
+      f[key] = f[key].filter(function (x) { return String(x) !== String(id); });
+    });
+    drawOrgNew();
+  }
+
+  /* 三个框互斥：一个人只能出现在其中一个里面。别的框已经选过的人，
+   * 这个框干脆不列出来——比"列出来但是灰的"少一句话要解释。 */
+  function pickOrgPeople(key, title, mode) {
+    var f = S.orgForm;
+    var others = [];
+    ["heads", "admins", "members"].forEach(function (k) {
+      if (k !== key) others = others.concat(f[k]);
+    });
+    pickPeople({
+      title: title,
+      mode: mode,
+      chosen: f[key].map(function (id) { return S.orgPeople[id]; }).filter(Boolean),
+      exclude: others,
+      apply: function (people) {
+        f[key] = people.map(function (p) { return p.id; });
+        people.forEach(function (p) { S.orgPeople[p.id] = p; });
+        drawOrgNew();
+      }
+    });
+  }
+
+  function createOrg() {
+    var err = $("#orgCreateErr");
+    var f = S.orgForm || { heads: [], admins: [], members: [] };
+    var name = $("#orgName").value.trim();
+    var id = $("#orgId").value.trim().toLowerCase();
+    err.textContent = "";
+    if (!name) {
+      err.textContent = "请填写组织名称";
+      $("#orgName").focus();
+      return;
+    }
+    if (!id) {
+      err.textContent = "请填写组织标识";
+      $("#orgId").focus();
+      return;
+    }
+    if (!f.heads.length) {
+      err.textContent = "至少要有一位总负责人";
+      return;
+    }
+    $("#orgCreate").disabled = true;
+    PX.api("/org/create", {
+      method: "POST",
+      body: { id: id, name: name, note: $("#orgNote").value.trim(),
+              heads: f.heads, admins: f.admins, members: f.members }
+    }).then(function () {
+      $("#orgCreate").disabled = false;
+      PX.toast("已创建组织");
+      location.hash = "#/orgs";
+    }).catch(function (e) {
+      $("#orgCreate").disabled = false;
+      err.textContent = e.message;
+    });
+  }
+
+  function archiveOrg(id) {
+    var o = orgById(id);
+    openOverlay("org-archive", "归档组织",
+      '<p class="page-sub">成员关系折起来存放，明细行删除；之后可以恢复。</p>' +
+      '<p class="page-sub"><b>' + PX.esc(o ? o.name : id) + "</b></p>" +
+      '<div class="row" style="margin-top:18px;justify-content:flex-end">' +
+      '<button class="btn" type="button" data-close-overlay="1">取消</button>' +
+      '<button class="btn primary" type="button" id="orgArchiveGo">归档</button></div>');
+    $("#orgArchiveGo").addEventListener("click", function () {
+      closeOverlay();
+      PX.api("/org/archive", { method: "POST", body: { id: id } })
+        .then(function () { PX.toast("已归档"); return loadOrgs(); })
+        .then(drawOrgs)
+        .catch(fail);
+    });
+  }
+
+  function restoreOrg(id) {
+    PX.api("/org/restore", { method: "POST", body: { id: id } })
+      .then(function () { PX.toast("已恢复"); return loadOrgs(); })
+      .then(drawOrgs)
+      .catch(fail);
+  }
+
+  /* 彻底删除只在归档之后：先把明细折掉，剩下那一行才谈得上"删干净" */
+  function dropOrg(id) {
+    var o = orgById(id);
+    openOverlay("org-drop", "彻底删除组织",
+      '<p class="page-sub">删除后不能恢复，成员的归属记录一并消失。</p>' +
+      '<p class="page-sub"><b>' + PX.esc(o ? o.name : id) + "</b></p>" +
+      '<div class="row" style="margin-top:18px;justify-content:flex-end">' +
+      '<button class="btn" type="button" data-close-overlay="1">取消</button>' +
+      '<button class="btn danger" type="button" id="orgDropGo">彻底删除</button></div>');
+    $("#orgDropGo").addEventListener("click", function () {
+      closeOverlay();
+      apiSudo("/org/delete", { method: "POST", body: { id: id } }, "彻底删除组织")
+        .then(function () { PX.toast("已删除"); return loadOrgs(); })
+        .then(drawOrgs)
+        .catch(fail);
+    });
   }
 
   function drawUsers() {
@@ -7155,6 +7368,18 @@
     var uninvite = t.closest("[data-uninvite]");
     if (uninvite) return removeInvite(Number(uninvite.getAttribute("data-uninvite")));
 
+    var orgUnpick = t.closest("[data-org-unpick]");
+    if (orgUnpick) return unpickOrgPerson(orgUnpick.getAttribute("data-org-unpick"));
+
+    var orgArchive = t.closest("[data-org-archive]");
+    if (orgArchive) return archiveOrg(orgArchive.getAttribute("data-org-archive"));
+
+    var orgRestore = t.closest("[data-org-restore]");
+    if (orgRestore) return restoreOrg(orgRestore.getAttribute("data-org-restore"));
+
+    var orgDrop = t.closest("[data-org-drop]");
+    if (orgDrop) return dropOrg(orgDrop.getAttribute("data-org-drop"));
+
     var banBtn = t.closest("[data-ban]");
     if (banBtn) return confirmBan(Number(banBtn.getAttribute("data-ban")));
 
@@ -7434,6 +7659,25 @@
   $("#safeModeBtn").addEventListener("click", toggleSafeMode);
   $("#serviceRestartBtn").addEventListener("click", restartService);
   $("#newAccountBtn").addEventListener("click", newAccountDialog);
+  $("#orgNewBtn").addEventListener("click", function () {
+    resetOrgForm();
+    location.hash = "#/org-new";
+  });
+  $("#orgNewBack").addEventListener("click", function () { location.hash = "#/orgs"; });
+  $("#orgCreate").addEventListener("click", createOrg);
+  $("#orgHeadPick").addEventListener("click", function () {
+    pickOrgPeople("heads", "选择总负责人", "single");
+  });
+  $("#orgAdminPick").addEventListener("click", function () {
+    pickOrgPeople("admins", "选择组织管理", "multi");
+  });
+  $("#orgMemberPick").addEventListener("click", function () {
+    pickOrgPeople("members", "选择成员", "multi");
+  });
+  bindLiveSearch("#orgSearch", "#orgSearchClear", function (value) {
+    S.orgFilter = value || "";
+    drawOrgs();
+  });
   $("#backupSave").addEventListener("click", saveBackup);
   $("#backupRun").addEventListener("click", runBackup);
   $("#bkDavTest").addEventListener("click", testBackupDav);

@@ -3143,6 +3143,130 @@ def run_import_page(page):
     check("回到用户管理", page.url.endswith("#/users"), page.url)
 
 
+def org_page(page):
+    """组织管理：建组织、三个选人框互斥、归档与恢复、搜索、彻底删除。"""
+    oid = "ui-org-%d" % random.randint(1000, 9999)
+    oname = "界面测试组织"
+    print("== 组织管理：入口与空状态 ==")
+    page.goto(BASE + "/panel#/orgs")
+    page.wait_for_timeout(700)
+    nav = visible_nav(page)
+    check("侧栏有组织管理", "orgs" in nav["items"], nav["items"])
+    check("右上角有创建组织", page.locator("#orgNewBtn").is_visible())
+    body = page.inner_text("#orgsTable tbody")
+    check("空表说得出下一步", "还没有组织" in body, body[:60])
+
+    print("== 创建组织：必填项逐个拦下 ==")
+    page.click("#orgNewBtn")
+    page.wait_for_timeout(600)
+    check("进的是组织子页", page.url.endswith("#/org-new"), page.url)
+    check("有返回键", page.locator("#orgNewBack").is_visible())
+    check("标识规则写在字段下面",
+          "不可更改" in page.inner_text('[data-page="org-new"] .hint'),
+          page.inner_text('[data-page="org-new"] .hint')[:60])
+
+    def complain():
+        return page.evaluate(
+            "() => document.getElementById('orgCreateErr').textContent")
+
+    page.evaluate("() => document.getElementById('orgCreate').click()")
+    check("没填名称就交上去会被拦下", complain() == "请填写组织名称", complain())
+    page.fill("#orgName", oname)
+    page.evaluate("() => document.getElementById('orgCreate').click()")
+    check("没填标识也会被拦下", complain() == "请填写组织标识", complain())
+    page.fill("#orgId", oid)
+    page.evaluate("() => document.getElementById('orgCreate').click()")
+    check("没有总负责人也会被拦下", complain() == "至少要有一位总负责人", complain())
+
+    print("== 负责人：单选，选完落到人像行里 ==")
+    page.evaluate("() => document.getElementById('orgHeadPick').click()")
+    page.wait_for_selector(".pp-back", timeout=10000)
+    page.wait_for_timeout(500)
+    head = page.evaluate("""() => {
+        const t = document.querySelector('.pp-back .pp-tile');
+        if (!t) return null;
+        t.click();
+        return t.getAttribute('data-pp-id');
+    }""")
+    check("选人弹窗里有账号可选", bool(head), head)
+    page.evaluate("() => document.querySelector('.pp-back .pp-done').click()")
+    page.wait_for_timeout(400)
+    chip = page.evaluate("""() => {
+        const b = document.querySelector('#orgHeadChips [data-org-unpick]');
+        return b ? b.getAttribute('data-org-unpick') : null;
+    }""")
+    check("负责人落到人像行里", bool(chip) and chip == head, (chip, head))
+
+    print("== 三个选人框互斥 ==")
+    page.evaluate("() => document.getElementById('orgAdminPick').click()")
+    page.wait_for_selector(".pp-back", timeout=10000)
+    page.wait_for_timeout(600)
+    seen = page.evaluate(
+        "(id) => !!document.querySelector('.pp-back [data-pp-id=\"' + id + '\"]')", head)
+    check("别的框选过的人不再出现", not seen, head)
+    page.evaluate("() => document.querySelector('.pp-back .pp-cancel').click()")
+    page.wait_for_timeout(300)
+
+    print("== 建成之后回到列表 ==")
+    page.evaluate("() => document.getElementById('orgCreate').click()")
+    page.wait_for_function("() => location.hash === '#/orgs'", timeout=20000)
+    page.wait_for_timeout(700)
+    body = page.inner_text("#orgsTable tbody")
+    check("新组织出现在列表里",
+          oname in body and oid in body, body[:120])
+    check("列表里写着一位总负责人", "总负责人 1" in body, body[:120])
+
+    print("== 搜索 ==")
+    page.fill("#orgSearch", "zzz-没有这个")
+    page.wait_for_timeout(300)
+    body = page.inner_text("#orgsTable tbody")
+    check("搜不到时说没有匹配", "没有匹配的组织" in body, body[:60])
+    page.fill("#orgSearch", oid[-4:])
+    page.wait_for_timeout(300)
+    body = page.inner_text("#orgsTable tbody")
+    check("按标识也能搜到", oname in body, body[:60])
+    page.click("#orgSearchClear")
+    page.wait_for_timeout(300)
+    check("清空搜索后回到全部", oname in page.inner_text("#orgsTable tbody"))
+
+    print("== 归档与恢复 ==")
+    page.evaluate("(id) => document.querySelector('#orgsTable [data-org-archive=\"' + id + '\"]')"
+                  ".click()", oid)
+    page.wait_for_selector("#orgArchiveGo", timeout=8000)
+    page.evaluate("() => document.getElementById('orgArchiveGo').click()")
+    page.wait_for_timeout(1000)
+    body = page.inner_text("#orgsTable tbody")
+    check("归档后标着已归档", "已归档" in body, body[:120])
+    check("归档后操作只剩恢复与彻底删除",
+          page.locator('#orgsTable [data-org-restore="%s"]' % oid).count() == 1
+          and page.locator('#orgsTable [data-org-archive="%s"]' % oid).count() == 0)
+    page.evaluate("(id) => document.querySelector('#orgsTable [data-org-restore=\"' + id + '\"]')"
+                  ".click()", oid)
+    page.wait_for_timeout(1000)
+    body = page.inner_text("#orgsTable tbody")
+    check("恢复后回到正常", "已归档" not in body, body[:120])
+
+    print("== 彻底删除：先归档，再提权 ==")
+    page.evaluate("(id) => document.querySelector('#orgsTable [data-org-archive=\"' + id + '\"]')"
+                  ".click()", oid)
+    page.wait_for_selector("#orgArchiveGo", timeout=8000)
+    page.evaluate("() => document.getElementById('orgArchiveGo').click()")
+    page.wait_for_timeout(1000)
+    page.evaluate("(id) => document.querySelector('#orgsTable [data-org-drop=\"' + id + '\"]')"
+                  ".click()", oid)
+    page.wait_for_selector("#orgDropGo", timeout=8000)
+    page.evaluate("() => document.getElementById('orgDropGo').click()")
+    # sudo 十分钟有效：接连跑两次时第二次可能不用再认证，弹窗就没出现
+    try:
+        page.wait_for_selector("#sudoPass", timeout=3000)
+        enter_sudo(page)
+    except Exception:
+        page.wait_for_timeout(400)
+    page.wait_for_timeout(1400)
+    body = page.inner_text("#orgsTable tbody")
+    check("彻底删除后不在列表里", oid not in body, body[:120])
+
+
 def field_keys(browser):
     """表单里上下方向键换框：单行文本才接管，别的输入框照旧用自己的方向键。"""
     print("== 表单里上下方向键换框 ==")
@@ -5701,6 +5825,7 @@ def main():
                         profile_page(page)
                     users_table(page)
                     import_page(browser)
+                    org_page(page)
                     approval_queue_text(page)
                     if WITH_ACCOUNTS:
                         temp_password_page(browser)

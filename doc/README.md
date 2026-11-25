@@ -15,7 +15,7 @@
 - **开始使用**：[注册与面板导航](usage/start.md)、[账号与角色](usage/account.md)、[界面设置](usage/theme.md)、[关于](usage/about.md)
 - **活动**：[创建与归档](usage/events.md)、[活动页面与现场](usage/event-site.md)、[预设](usage/presets.md)、[短链](usage/shortlinks.md)
 - **名单与报名**：[名单](usage/rosters.md)、[报名](usage/signups.md)、[审批](usage/approval.md)、[导出与打印](usage/output.md)
-- **平台管理**：[平台管理页](usage/platform-pages.md)、[导入账号](usage/account-import.md)、[服务器与审计](usage/server.md)、[sudo 模式](usage/sudo.md)、[通知与服务提示](usage/notices.md)
+- **平台管理**：[平台管理页](usage/platform-pages.md)、[组织](usage/orgs.md)、[导入账号](usage/account-import.md)、[服务器与审计](usage/server.md)、[sudo 模式](usage/sudo.md)、[通知与服务提示](usage/notices.md)
 - **运维助手**：[操作说明](usage/assistant.md)、[附加提示词](usage/assistant-prompt.md)
 
 ## 参考

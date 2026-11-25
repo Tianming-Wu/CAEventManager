@@ -211,6 +211,16 @@
         </svg>
         <span class="nav-text">名单管理</span>
       </a>
+      <a class="nav-item" data-href="#/orgs" role="link" tabindex="0" data-nav="orgs"
+         data-min-role="superadmin">
+        <svg viewBox="0 0 20 20" aria-hidden="true">
+          <rect x="7.6" y="2.8" width="4.8" height="3.6" rx="1"/>
+          <rect x="2.6" y="13.6" width="4.8" height="3.6" rx="1"/>
+          <rect x="12.6" y="13.6" width="4.8" height="3.6" rx="1"/>
+          <path d="M10 6.4v3.4M5 13.6v-3.4h10v3.4"/>
+        </svg>
+        <span class="nav-text">组织管理</span>
+      </a>
 
       <!-- a group: the header only expands, the children lead to pages -->
       <div class="nav-group" data-group="approvals" data-min-role="superadmin">
@@ -1325,6 +1335,131 @@
           </table>
         </div>
       </div>
+    </section>
+
+    <!-- ====================================================== 组织管理 -->
+    <section class="page" data-page="orgs" hidden>
+      <header class="page-head">
+        <div class="head-title">
+          <h1 class="crumb-title"><span>组织管理</span></h1>
+        </div>
+        <div class="page-actions">
+          <button class="btn primary" id="orgNewBtn" type="button">创建组织</button>
+        </div>
+      </header>
+      <div class="card">
+        <div class="card-head">
+          <h2>组织</h2>
+          <span class="hint" id="orgsCount"></span>
+          <div class="hp" aria-hidden="true">
+            <input type="text" name="username" autocomplete="username" tabindex="-1">
+            <input type="password" name="password" autocomplete="current-password" tabindex="-1">
+          </div>
+          <div class="searchbox">
+            <input class="search" id="orgSearch" type="search" name="panel_org_filter"
+                   placeholder="搜索组织名称或标识" autocomplete="off" autocorrect="off"
+                   autocapitalize="off" spellcheck="false" data-form-type="other"
+                   aria-autocomplete="none" aria-label="搜索组织">
+            <button class="search-clear" id="orgSearchClear" type="button"
+                    aria-label="清空搜索" hidden>
+              <svg viewBox="0 0 20 20" aria-hidden="true">
+                <path d="M6.6 6.6l6.8 6.8M13.4 6.6l-6.8 6.8"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div class="tblwrap">
+          <table class="tbl fixed" id="orgsTable">
+            <thead><tr>
+              <th>名称</th><th>标识</th><th>成员</th><th>我的身份</th>
+              <th>状态</th><th class="actions">操作</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- =================================================== 创建组织（子页） -->
+    <section class="page" data-page="org-new" hidden>
+      <header class="page-head">
+        <div class="head-title">
+          <button class="icon-btn crumb-back" id="orgNewBack" type="button"
+                  aria-label="回到组织管理" title="回到组织管理">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12 5l-5 5 5 5"/></svg>
+          </button>
+          <h1 class="crumb-title">
+            <a class="crumb" data-href="#/orgs" role="link" tabindex="0">组织管理</a>
+            <span class="crumb-sep" aria-hidden="true">›</span>
+            <span>创建组织</span>
+          </h1>
+        </div>
+        <div class="page-actions">
+          <button class="btn primary" id="orgCreate" type="button">创建组织</button>
+        </div>
+      </header>
+
+      <div class="card">
+        <div class="card-head"><h2>基本信息</h2></div>
+        <div class="field">
+          <label for="orgName">名称 <span class="req">必填</span></label>
+          <input id="orgName" type="text" maxlength="40" autocomplete="off"
+                 placeholder="例如：计算机协会">
+        </div>
+        <div class="field">
+          <label for="orgId">组织标识 <span class="req">必填</span></label>
+          <input id="orgId" type="text" maxlength="24" autocomplete="off"
+                 spellcheck="false" placeholder="例如：cs-club">
+        </div>
+        <p class="hint">3 到 24 位小写字母、数字、连字符与下划线；建好后不可更改</p>
+        <div class="field" style="margin-top:14px">
+          <label for="orgNote">说明</label>
+          <input id="orgNote" type="text" maxlength="200" autocomplete="off">
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>总负责人</h2>
+          <span class="note">必填，可以有多位</span>
+        </div>
+        <div class="invite-row">
+          <div class="invite-chips" id="orgHeadChips"></div>
+          <button class="invite-slot" id="orgHeadPick" type="button" aria-label="选择总负责人">
+            <svg viewBox="0 0 20 20" aria-hidden="true">
+              <path d="M10 4.6v10.8M4.6 10h10.8"/>
+            </svg>
+            <span class="cap">总负责人</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>组织管理与成员</h2>
+          <span class="note">可以之后再添加</span>
+        </div>
+        <div class="invite-row">
+          <div class="invite-chips" id="orgAdminChips"></div>
+          <button class="invite-slot" id="orgAdminPick" type="button" aria-label="选择组织管理">
+            <svg viewBox="0 0 20 20" aria-hidden="true">
+              <path d="M10 4.6v10.8M4.6 10h10.8"/>
+            </svg>
+            <span class="cap">组织管理</span>
+          </button>
+        </div>
+        <div class="invite-row" style="margin-top:14px">
+          <div class="invite-chips" id="orgMemberChips"></div>
+          <button class="invite-slot" id="orgMemberPick" type="button" aria-label="选择成员">
+            <svg viewBox="0 0 20 20" aria-hidden="true">
+              <path d="M10 4.6v10.8M4.6 10h10.8"/>
+            </svg>
+            <span class="cap">成员</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="err" id="orgCreateErr"></div>
     </section>
 
     <!-- ============================================ 活跃审批 › 注册申请 -->

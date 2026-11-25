@@ -161,6 +161,21 @@ def enter_sudo(page, expect_prompt=True):
         timeout=8000)
 
 
+def sudo_if_asked(page, timeout=2500):
+    """写操作要提权：弹窗出来就答，没出来说明 sudo 还在有效期内。"""
+    try:
+        page.wait_for_selector("#sudoPass", timeout=timeout)
+    except Exception:
+        return False
+    page.fill("#sudoPass", PASSWORD)
+    page.click("#sudoEnter")
+    page.wait_for_function(
+        "() => document.getElementById('shell').classList.contains('sudo')",
+        timeout=8000)
+    page.wait_for_timeout(200)
+    return True
+
+
 def ui_login(page, user=None, password=None):
     user = user or LOGIN
     password = password or PASSWORD
@@ -3338,18 +3353,22 @@ def org_page(page):
     page.wait_for_timeout(300)
     check("清空搜索后回到全部", oname in page.inner_text("#orgsTable tbody"))
 
-    print("== 组织详情：改名字、改身份、加减人 ==")
+    print("== 组织详情：这一页给平台侧，每一处改动都要提权 ==")
     check("列表里不再摆归档按钮",
           page.locator("#orgsTable [data-org-archive]").count() == 0)
+    check("列表里没有我的身份这一列",
+          "我的身份" not in page.inner_text("#orgsTable thead"),
+          page.inner_text("#orgsTable thead"))
     page.evaluate("""(id) => document.querySelector(
         '#orgsTable [data-org-open="' + id + '"]').click()""", oid)
     page.wait_for_function("() => location.hash.indexOf('#/org/') === 0", timeout=20000)
     page.wait_for_timeout(800)
     check("进的是组织详情", page.inner_text("#orgTitle") == oname,
           page.inner_text("#orgTitle"))
-    check("副标题写着标识与我的身份",
-          oid in page.inner_text("#orgSub") and "负责人" in page.inner_text("#orgSub"),
-          page.inner_text("#orgSub"))
+    check("副标题只写标识，不写我在组织里的身份",
+          page.inner_text("#orgSub").strip() == oid, page.inner_text("#orgSub"))
+    check("这一页写着改动要 sudo",
+          "sudo" in page.inner_text("#orgEditNote"), page.inner_text("#orgEditNote"))
     check("详情里组织管理也是淡高亮",
           page.evaluate("""() => document.querySelector('#sidebar [data-nav="orgs"]')
               .hasAttribute('data-trail')"""))
@@ -3362,9 +3381,20 @@ def org_page(page):
           page.locator("#orgMemberTable [data-org-role-for]").count() == 1)
 
     page.fill("#orgEditName", oname + "二")
-    page.fill("#orgEditNoteInput", "改过的说明")
+    page.wait_for_timeout(2000)
+    check("静置两秒名字还在",
+          page.input_value("#orgEditName") == oname + "二",
+          page.input_value("#orgEditName"))
+    page.fill("#orgEditNoteInput", "改过的简介")
+    page.wait_for_timeout(600)
+    check("填了简介之后名字还在",
+          page.input_value("#orgEditName") == oname + "二",
+          page.input_value("#orgEditName"))
+    # 这一页的写操作一律走 apiSudo：会话已经有 sudo 时就不再弹窗，
+    # 所以这里只看结果——名字改成了，说明请求确实发了出去并被接受
     page.evaluate("() => document.getElementById('orgSaveBtn').click()")
-    page.wait_for_timeout(1200)
+    sudo_if_asked(page, 8000)
+    page.wait_for_timeout(1400)
     check("改完名字标题跟着变", page.inner_text("#orgTitle") == oname + "二",
           page.inner_text("#orgTitle"))
 
@@ -3380,12 +3410,14 @@ def org_page(page):
     }""")
     check("有账号可以加进来", bool(added), added)
     page.evaluate("() => document.querySelector('.pp-back .pp-done').click()")
+    sudo_if_asked(page)
     page.wait_for_timeout(1400)
     check("加完变成两个人",
           page.locator("#orgMemberTable tbody tr").count() == 2
           and "共 2 人" in page.inner_text("#orgMemberCount"),
           page.inner_text("#orgMemberCount"))
     page.select_option('#orgMemberTable [data-org-role-for="%s"]' % added, "admin")
+    sudo_if_asked(page)
     page.wait_for_timeout(1400)
     role = page.evaluate("""(id) => {
         const sel = document.querySelector(
@@ -3393,8 +3425,16 @@ def org_page(page):
         return sel ? sel.value : null;
     }""", added)
     check("身份改成管理之后就留在那儿", role == "admin", role)
+
+    print("== 移出成员：先问一句，再提权 ==")
     page.evaluate("""(id) => document.querySelector(
         '#orgMemberTable [data-org-kick="' + id + '"]').click()""", added)
+    page.wait_for_selector("#orgKickGo", timeout=8000)
+    check("移出之前先确认", page.locator("#orgKickGo").is_visible())
+    check("确认的时候人还没被移出",
+          page.locator("#orgMemberTable tbody tr").count() == 2)
+    page.evaluate("() => document.getElementById('orgKickGo').click()")
+    sudo_if_asked(page)
     page.wait_for_timeout(1400)
     check("移出之后又回到一个人",
           page.locator("#orgMemberTable tbody tr").count() == 1
@@ -3405,6 +3445,7 @@ def org_page(page):
     page.evaluate("() => document.getElementById('orgArchiveBtn').click()")
     page.wait_for_selector("#orgArchiveGo", timeout=8000)
     page.evaluate("() => document.getElementById('orgArchiveGo').click()")
+    sudo_if_asked(page)
     page.wait_for_timeout(1500)
     check("归档后副标题标着已归档", "已归档" in page.inner_text("#orgSub"),
           page.inner_text("#orgSub"))
@@ -3413,23 +3454,38 @@ def org_page(page):
           page.locator("#orgMemberTable [data-org-role-for]").count() == 0)
     check("归档后出现恢复键", page.locator("#orgRestoreBtn").is_visible())
     page.evaluate("() => document.getElementById('orgRestoreBtn').click()")
+    sudo_if_asked(page)
     page.wait_for_timeout(1500)
     check("恢复后又能改", page.locator("#orgEditName").is_enabled())
 
+    print("== 我的组织：一张卡片一个组织 ==")
+    page.goto(BASE + "/panel#/my-orgs")
+    page.wait_for_timeout(900)
+    check("侧栏有我的组织", "my-orgs" in visible_nav(page)["items"])
+    grid = page.inner_text("#myOrgGrid")
+    check("有一张组织卡片",
+          page.locator("#myOrgGrid .org-card").count() == 1, grid[:80])
+    check("卡片上写着名字与人数",
+          (oname + "二") in grid and "1 位成员" in grid, grid[:120])
+    check("卡片上写着我的身份", "负责人" in grid, grid[:120])
+    check("卡片留出了背景图的位置",
+          page.locator("#myOrgGrid .org-card .org-cover").count() == 1)
+    check("加入组织先摆着、还没有邀请码可用",
+          page.locator("#orgJoinBtn").is_disabled())
+
     print("== 彻底删除：先归档，再提权 ==")
+    page.goto(BASE + "/panel#/org/" + oid)
+    page.wait_for_selector("#orgTitle", timeout=20000)
+    page.wait_for_timeout(900)
     page.evaluate("() => document.getElementById('orgArchiveBtn').click()")
     page.wait_for_selector("#orgArchiveGo", timeout=8000)
     page.evaluate("() => document.getElementById('orgArchiveGo').click()")
+    sudo_if_asked(page)
     page.wait_for_timeout(1500)
     page.evaluate("() => document.getElementById('orgDropBtn').click()")
     page.wait_for_selector("#orgDropGo", timeout=8000)
     page.evaluate("() => document.getElementById('orgDropGo').click()")
-    # sudo 十分钟有效：接连跑两次时第二次可能不用再认证，弹窗就没出现
-    try:
-        page.wait_for_selector("#sudoPass", timeout=3000)
-        enter_sudo(page)
-    except Exception:
-        page.wait_for_timeout(400)
+    sudo_if_asked(page)
     page.wait_for_function("() => location.hash === '#/orgs'", timeout=20000)
     page.wait_for_timeout(800)
     body = page.inner_text("#orgsTable tbody")

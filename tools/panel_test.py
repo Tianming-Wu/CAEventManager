@@ -2422,6 +2422,15 @@ def main():
           [m["role"] for m in detail["members"]] == ["head", "admin"],
           detail.get("members"))
 
+    # 平台侧改别人的组织要提权：站长本人是这个组织的负责人也一样
+    refused = call(owner, "/api/panel/org/member",
+                   {"org": "cs-club", "account": mate, "action": "remove"}, expect=403)
+    check("平台侧改成员要先进 sudo",
+          refused and refused.get("sudoRequired") is True, refused)
+    refused = call(owner, "/api/panel/org/archive", {"id": "cs-club"}, expect=403)
+    check("归档要先进 sudo", refused and refused.get("sudoRequired") is True, refused)
+    post(owner, "/api/panel/sudo", {"password": owner_password()})
+
     post(owner, "/api/panel/org/member",
          {"org": "cs-club", "account": mate, "action": "remove"})
     check("可以踢人",
@@ -2453,6 +2462,7 @@ def main():
           back[0] if back else None)
 
     post(owner, "/api/panel/org/archive", {"id": "cs-club"})
+    post(owner, "/api/panel/sudo/exit", {})
     refused = call(owner, "/api/panel/org/delete", {"id": "cs-club"}, expect=403)
     check("彻底删除要提权", refused and refused.get("sudoRequired") is True, refused)
     post(owner, "/api/panel/sudo", {"password": owner_password()})

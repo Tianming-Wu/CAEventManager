@@ -3538,11 +3538,13 @@ def org_page(page):
     grid = page.inner_text("#myOrgGrid")
     check("我的组织里列出了参加的组织",
           page.locator("#myOrgGrid .org-card").count() >= 1, grid[:80])
-    check("卡片上写着名字与人数",
-          (oname + "二") in grid and "1 位成员" in grid, grid[:120])
+    check("卡片上写着组织名", (oname + "二") in grid, grid[:120])
     check("卡片上写着我的身份", "负责人" in grid, grid[:120])
-    check("每张卡片都留出了背景图的位置",
-          page.locator("#myOrgGrid .org-card .org-cover").count()
+    check("卡片上写着成员人数",
+          page.locator("#myOrgGrid .org-card-people").count()
+          == page.locator("#myOrgGrid .org-card").count(), grid[:120])
+    check("每张卡片都有一块图的位置",
+          page.locator("#myOrgGrid .org-card-cover").count()
           == page.locator("#myOrgGrid .org-card").count())
     check("加入组织先摆着、还没有邀请码可用",
           page.locator("#orgJoinBtn").is_disabled())
@@ -5894,9 +5896,13 @@ def role_page(browser):
             check("%-10s sees no normal page content" % role, page.evaluate(
                 """() => Array.from(document.querySelectorAll('.page'))
                          .every(p => p.hidden)"""))
-            check("%-10s: only the two lines are shown" % role, page.evaluate(
-                """() => document.getElementById('denied').innerText.trim()
-                         .split('\\n').filter(l => l.trim()).length === 2"""),
+            check("%-10s: 标题加两个按钮，没有别的" % role, page.evaluate(
+                """() => {
+                    const box = document.getElementById('denied');
+                    const lines = box.innerText.trim().split('\\n')
+                        .filter(l => l.trim());
+                    return lines.length === 3 && !!document.getElementById('deniedBack');
+                }"""),
                   page.evaluate(
                       "() => document.getElementById('denied').innerText"))
         finally:

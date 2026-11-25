@@ -4247,19 +4247,116 @@
     var count = $("#myOrgsCount");
     if (count) count.textContent = rows.length ? "共 " + rows.length + " 个" : "";
     grid.innerHTML = rows.length ? rows.map(function (o) {
+      var src = orgCoverSrc(o);
       return '<article class="org-card" role="listitem">' +
         '<button class="org-card-open" type="button" data-org-self="' + PX.esc(o.id) +
         '" aria-label="打开 ' + PX.esc(o.name) + '">' +
-        '<div class="org-cover"></div>' +
-        '<div class="org-card-body">' +
-        '<h3 class="org-card-name">' + PX.esc(o.name) + "</h3>" +
-        (o.note ? '<p class="org-card-note">' + PX.esc(o.note) + "</p>" : "") +
-        '<p class="org-card-meta">' +
-        (o.myRoleLabel ? '<span class="tag">' + PX.esc(o.myRoleLabel) + "</span>" : "") +
-        '<span class="mono">' + o.members + " 位成员</span></p>" +
-        "</div></button></article>";
+        '<span class="org-card-cover' + (src ? "" : " no-cover") + '"' +
+        (src ? ' style="background-image:url(' + PX.esc(src) + ')"' : "") + ">" +
+        (o.myRoleLabel
+          ? '<span class="org-card-role"><span class="tag">' + PX.esc(o.myRoleLabel) +
+            "</span></span>"
+          : "") +
+        '<span class="org-card-people" title="成员人数">' +
+        '<svg viewBox="0 0 20 20" aria-hidden="true">' +
+        '<circle cx="7.4" cy="6.6" r="2.7"/>' +
+        '<path d="M2 16.2a5.4 5.4 0 0 1 10.8 0M12.5 4.7a2.5 2.5 0 1 1 .4 4.8' +
+        'M13.3 11.5a4.8 4.8 0 0 1 4.7 4.7"/></svg>' +
+        "<span>" + o.members + "</span></span>" +
+        "</span>" +
+        '<span class="org-card-name">' + PX.esc(o.name) + "</span>" +
+        "</button></article>";
     }).join("") : '<p class="hint">' +
       (loaded("myOrgs") ? "还没有参加组织" : "正在读取…") + "</p>";
+  }
+
+  /* 外观那张图：外链直接用，站内那份按账号去取 */
+  function orgCoverSrc(o) {
+    if (!o || !o.cover) return "";
+    if (/^https?:\/\//i.test(o.cover)) return o.cover;
+    return PX.PREFIX + "/api/panel/org_cover/" + encodeURIComponent(o.id) + "?v=" +
+      Math.round(o.coverAt || 0);
+  }
+
+  function coverSizeText(bytes) {
+    if (!bytes) return "";
+    if (bytes >= 1024 * 1024) return (bytes / 1024 / 1024).toFixed(1) + " MB";
+    return Math.round(bytes / 1024) + " KB";
+  }
+
+  /* 一页里可能有两处外观（平台侧、组织自己的管理页）：传进来的是那一组元素的 id 前缀 */
+  function drawCoverUi(prefix, o) {
+    var box = $("#" + prefix + "Preview");
+    var size = $("#" + prefix + "Size");
+    var clear = $("#" + prefix + "Clear");
+    if (!box) return;
+    var src = orgCoverSrc(o);
+    box.innerHTML = src
+      ? '<img alt="" src="' + PX.esc(src) + '">'
+      : '<span class="org-cover-hint">还没有图片</span>';
+    box.classList.toggle("empty", !src);
+    if (size) {
+      size.textContent = o && o.coverBytes
+        ? "站内图片 " + coverSizeText(o.coverBytes) : "";
+    }
+    if (clear) clear.hidden = !src;
+  }
+
+  function askCoverLink(scope) {
+    var d = S.orgDetail;
+    if (!d) return;
+    openOverlay("org-cover", "使用图片链接",
+      '<p class="page-sub">填图床地址，直接用那张图，不占站内空间。</p>' +
+      '<div class="field"><label for="orgCoverUrl">图片地址</label>' +
+      '<input id="orgCoverUrl" type="text" maxlength="500" autocomplete="off"' +
+      ' placeholder="https://…"></div>' +
+      '<p class="err" id="orgCoverErr" hidden></p>' +
+      '<div class="row" style="margin-top:16px;justify-content:flex-end">' +
+      '<button class="btn" type="button" data-close-overlay="1">取消</button>' +
+      '<button class="btn primary" type="button" id="orgCoverGo">保存</button></div>');
+    $("#orgCoverGo").addEventListener("click", function () {
+      var url = $("#orgCoverUrl").value.trim();
+      var err = $("#orgCoverErr");
+      if (!/^https?:\/\/\S+$/i.test(url)) {
+        err.textContent = "请填写以 http 或 https 开头的图片地址";
+        err.hidden = false;
+        return;
+      }
+      closeOverlay();
+      orgWrite(scope, "/org/cover",
+        { id: d.org.id, url: url, scope: scope }, "更换组织图片")
+        .then(function () { PX.toast("已更新"); return afterOrgChange(); })
+        .catch(fail);
+    });
+  }
+
+  function uploadCover(scope, file) {
+    var d = S.orgDetail;
+    if (!d || !file) return;
+    if (file.size > 2 * 1024 * 1024) {
+      PX.toast("图片超过 2 MB", true);
+      return;
+    }
+    var reader = new FileReader();
+    reader.onload = function () {
+      orgWrite(scope, "/org/cover",
+        { id: d.org.id, data: String(reader.result || ""), scope: scope },
+        "上传组织图片").then(function () {
+        PX.toast("已上传");
+        return afterOrgChange();
+      }).catch(fail);
+    };
+    reader.onerror = function () { PX.toast("无法读取该文件", true); };
+    reader.readAsDataURL(file);
+  }
+
+  function clearCover(scope) {
+    var d = S.orgDetail;
+    if (!d) return;
+    orgWrite(scope, "/org/cover",
+      { id: d.org.id, clear: true, scope: scope }, "清除组织图片")
+      .then(function () { PX.toast("已清除"); return afterOrgChange(); })
+      .catch(fail);
   }
 
   /* 选过的人排成一行：与创建活动里的成员行同一套样子。
@@ -4508,6 +4605,7 @@
     $("#orgMemberCount").textContent = d.members.length
       ? "共 " + d.members.length + " 人" : "";
     if (tb) tb.innerHTML = orgMemberRows(d, manage, "orgDetail");
+    drawCoverUi("orgCover", o);
     // 自己正好是这个组织的负责人/管理时，指一条不必提权的路
     var mine = o.myRole || "";
     var hint = $("#orgSelfHint");
@@ -4675,8 +4773,15 @@
     $("#myOrgTitle").textContent = o.name;
     $("#myOrgSub").textContent = (o.myRoleLabel ? "我的身份 " + o.myRoleLabel + " · " : "") +
       d.members.length + " 位成员";
+    $("#myOrgCardTitle").textContent = o.name;
+    $("#myOrgCardId").textContent = o.id;
     $("#myOrgNote").textContent = o.note || "还没有简介";
-    $("#myOrgBanner").hidden = false;
+    // 没有图就什么都不摆：不留一个空框
+    var src = orgCoverSrc(o);
+    var col = $("#myOrgCoverCol");
+    col.hidden = !src;
+    $("#myOrgCover").innerHTML = src
+      ? '<img alt="" src="' + PX.esc(src) + '">' : "";
     $("#myOrgMemberCount").textContent = "共 " + d.members.length + " 人";
     var canManage = !o.archived && (o.myRole === "head" || o.myRole === "admin");
     $("#myOrgManageBtn").hidden = !canManage;
@@ -4712,6 +4817,7 @@
     $("#orgManageCount").textContent = d.members.length
       ? "共 " + d.members.length + " 人" : "";
     $("#orgManageTable tbody").innerHTML = orgMemberRows(d, !o.archived, "orgDetail");
+    drawCoverUi("manCover", o);
   }
 
 function archiveOrg(id) {
@@ -8250,8 +8356,31 @@ function archiveOrg(id) {
   });
   $("#orgSelfHintGo").addEventListener("click", function () {
     if (S.orgDetail) {
-      location.hash = "#/my-org/" + encodeURIComponent(S.orgDetail.org.id);
+      location.hash = "#/my-org-manage/" + encodeURIComponent(S.orgDetail.org.id);
     }
+  });
+  ["orgCover", "manCover"].forEach(function (prefix) {
+    var scope = prefix === "orgCover" ? "platform" : "self";
+    var link = $("#" + prefix + "Link");
+    var pick = $("#" + prefix + "Pick");
+    var file = $("#" + prefix + "File");
+    var clear = $("#" + prefix + "Clear");
+    if (link) link.addEventListener("click", function () { askCoverLink(scope); });
+    if (pick && file) {
+      pick.addEventListener("click", function () { file.value = ""; file.click(); });
+      file.addEventListener("change", function () {
+        if (file.files && file.files[0]) uploadCover(scope, file.files[0]);
+      });
+    }
+    if (clear) clear.addEventListener("click", function () { clearCover(scope); });
+  });
+  $("#missingPrev").addEventListener("click", function () {
+    if (window.history.length > 1) window.history.back();
+    else go(FALLBACK_ROUTE);
+  });
+  $("#deniedBack").addEventListener("click", function () {
+    if (window.history.length > 1) window.history.back();
+    else go(FALLBACK_ROUTE);
   });
   $("#orgSelfHintClose").addEventListener("click", function () {
     $("#orgSelfHint").hidden = true;

@@ -9,6 +9,7 @@
 """
 
 import json
+import os
 import time
 
 import panel
@@ -26,7 +27,11 @@ CREATE TABLE IF NOT EXISTS orgs (
     created_by  TEXT NOT NULL DEFAULT '',
     archived_at REAL NOT NULL DEFAULT 0,
     -- 归档之后成员关系折叠在这里：只留账号编号、身份与加入时间
-    folded      TEXT NOT NULL DEFAULT ''
+    folded      TEXT NOT NULL DEFAULT '',
+    -- 外观：cover 存外链地址，或我们自己写到 data/org_covers 下的文件名
+    cover       TEXT NOT NULL DEFAULT '',
+    cover_at    REAL NOT NULL DEFAULT 0,
+    cover_bytes INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS org_members (
     org_id     TEXT NOT NULL,
@@ -39,9 +44,83 @@ CREATE INDEX IF NOT EXISTS org_members_account ON org_members(account_id);
 """
 
 
+LATE_COLUMNS = (
+    ("orgs", "cover", "TEXT NOT NULL DEFAULT ''"),
+    ("orgs", "cover_at", "REAL NOT NULL DEFAULT 0"),
+    ("orgs", "cover_bytes", "INTEGER NOT NULL DEFAULT 0"),
+)
+
+
 def ensure(conn):
     conn.executescript(SCHEMA)
+    # 老库里没有外观这几列：建表语句只管新库，这里补上
+    for table, column, decl in LATE_COLUMNS:
+        have = {r["name"] for r in conn.execute(
+            "PRAGMA table_info(%s)" % table)}       # sql-ok：表名进不了占位符
+        if column not in have:
+            conn.execute("ALTER TABLE %s ADD COLUMN %s %s"
+                         % (table, column, decl))   # sql-ok：同上
     conn.commit()
+
+
+# --------------------------------------------------------------------------- #
+# 外观：一张图，可以是外链，也可以是我们替他存下来的
+# --------------------------------------------------------------------------- #
+COVER_MAX = 2 * 1024 * 1024          # 单张 2 MB 封顶
+COVER_DIR = "org_covers"
+
+
+def cover_dir():
+    path = os.path.join(os.path.dirname(panel.db_path()), COVER_DIR)
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def cover_path(name):
+    """只有我们自己写下的文件名才会走到文件系统上。"""
+    if not name or "/" in name or "\\" in name or name.startswith("."):
+        return None
+    return os.path.join(cover_dir(), name)
+
+
+def clean_cover_url(value):
+    """外链只收 http(s)，长度也要有个限度。"""
+    url = (value or "").strip()
+    if not url or len(url) > 500:
+        return None
+    if not url.startswith(("http://", "https://")):
+        return None
+    return url
+
+
+def save_cover(org_id, data):
+    """存下这张图，返回 (文件名, 字节数)。"""
+    found = panel.sniff_image(data)
+    if found is None:
+        raise ValueError("unsupported image")
+    if len(data) > COVER_MAX:
+        raise ValueError("too large")
+    drop_cover(org_id)
+    name = "%s.%s" % (org_id, found[0])
+    path = cover_path(name)
+    with open(path, "wb") as fh:
+        fh.write(data)
+    return name, len(data)
+
+
+def drop_cover(org_id):
+    for ext in ("png", "jpg", "webp"):
+        stale = cover_path("%s.%s" % (org_id, ext))
+        if stale and os.path.exists(stale):
+            os.unlink(stale)
+
+
+def cover_view(row):
+    """给界面用的两件东西：图片地址怎么来、站内那份有多大。"""
+    raw = (row["cover"] or "") if "cover" in row.keys() else ""
+    return {"cover": raw,
+            "coverAt": float(row["cover_at"] or 0) if "cover_at" in row.keys() else 0,
+            "coverBytes": int(row["cover_bytes"] or 0) if "cover_bytes" in row.keys() else 0}
 
 
 # --------------------------------------------------------------------------- #
@@ -246,7 +325,10 @@ def listing(conn, account_id=None, include_archived=False):
         count = len(members) if archived else int(r["n"] or 0)
         heads = sum(1 for m in members if m["role"] == "head") if archived else \
             heads_count(conn, r["id"])
+        cover = cover_view(r)
         out.append({"id": r["id"], "name": r["name"], "note": r["note"],
+                    "cover": cover["cover"], "coverAt": cover["coverAt"],
+                    "coverBytes": cover["coverBytes"],
                     "createdAt": r["created_at"], "createdBy": r["created_by"],
                     "members": count, "heads": heads, "archived": archived,
                     "archivedAt": r["archived_at"],

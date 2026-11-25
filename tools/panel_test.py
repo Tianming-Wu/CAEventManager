@@ -2460,6 +2460,32 @@ def main():
     mine = call(owner, "/api/panel/org/mine")["orgs"]
     check("我的组织里看得到", any(o["id"] == "cs-club" for o in mine), mine)
 
+    print("== 组织外观：站内上传、外链、清除 ==")
+    pixel = ("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8"
+             "z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
+    got = post(owner, "/api/panel/org/cover",
+               {"id": "cs-club", "scope": "self", "data": "data:image/png;base64," + pixel})
+    check("组织负责人能传一张图上来", got and got.get("coverBytes", 0) > 0, got)
+    served = urllib.request.Request(
+        ROOT + "/api/panel/org_cover/cs-club", headers=dict(HEADER))
+    with owner.open(served, timeout=20) as res:
+        blob = res.read()
+    check("站内那张图能取回来", blob[:4] == b"\x89PNG", blob[:8])
+    linked = post(owner, "/api/panel/org/cover",
+                  {"id": "cs-club", "scope": "self",
+                   "url": "https://img.example.com/a.png"})
+    check("也可以只填一个外链", linked and linked.get("coverBytes") == 0, linked)
+    bad = call(owner, "/api/panel/org/cover",
+               {"id": "cs-club", "scope": "self", "url": "ftp://x/a.png"}, expect=400)
+    check("外链只收 http(s)", bad and "http" in (bad.get("error") or ""), bad)
+    listed = [o for o in call(owner, "/api/panel/orgs")["orgs"] if o["id"] == "cs-club"]
+    check("清单里带着外观", bool(listed) and
+          listed[0]["cover"] == "https://img.example.com/a.png",
+          listed[0] if listed else None)
+    cleared = post(owner, "/api/panel/org/cover",
+                   {"id": "cs-club", "scope": "self", "clear": True})
+    check("可以清除", cleared and cleared.get("cover") == "", cleared)
+
     post(owner, "/api/panel/org/archive", {"id": "cs-club"})
     archived = [o for o in call(owner, "/api/panel/orgs")["orgs"] if o["id"] == "cs-club"]
     check("归档之后成员数还在（折进组织行）",

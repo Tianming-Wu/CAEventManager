@@ -74,7 +74,7 @@ PAGES_DIR = os.path.join(BASE_DIR, "pages")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.13.38.164"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.13.39.165"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -2362,11 +2362,15 @@ class Handler(BaseHTTPRequestHandler):
                 raise model.ApiError("组织不存在", 404)
             members = (orgs.archived_members(org) if org["archived_at"]
                        else orgs._members(conn, org["id"]))
+            cover = orgs.cover_view(org)
             return self._json({"ok": True,
                                "org": {"id": org["id"], "name": org["name"],
                                        "note": org["note"],
                                        "archived": bool(org["archived_at"]),
                                        "createdAt": org["created_at"],
+                                       "cover": cover["cover"],
+                                       "coverAt": cover["coverAt"],
+                                       "coverBytes": cover["coverBytes"],
                                        "myRole": mine,
                                        "myRoleLabel": orgs.ROLE_LABEL.get(mine, "")},
                                "members": members})
@@ -2394,6 +2398,14 @@ class Handler(BaseHTTPRequestHandler):
                 orgs.create(tx, org_id, name, (data.get("note") or "").strip(),
                             heads=heads, members=members, admin_ids=admin_ids,
                             actor=actor["username"])
+                cover = (data.get("cover") or "").strip()
+                if cover:
+                    url = orgs.clean_cover_url(cover)
+                    if not url:
+                        raise model.ApiError("图片地址只能是 http 或 https")
+                    tx.execute("UPDATE orgs SET cover=?, cover_at=? WHERE id=?",
+                               (url, time.time(), org_id))
+                    panel.audit(tx, actor["username"], "org_cover_url", org_id)
             return self._json({"ok": True, "id": org_id})
 
         if path == "/org/update" and method == "POST":
@@ -2419,6 +2431,82 @@ class Handler(BaseHTTPRequestHandler):
             with panel.tx() as tx:
                 orgs.update(tx, org["id"], name=name, note=note, actor=actor["username"])
             return self._json({"ok": True})
+
+        if path == "/org/cover" and method == "POST":
+            # 外观：给一个外链，或把图交给站内存一份（占组织自己的那点存储）
+            actor = need("admin", "superadmin", "owner")
+            data = body()
+            org = orgs.row(conn, (data.get("id") or "").strip())
+            if org is None:
+                raise model.ApiError("组织不存在", 404)
+            if org["archived_at"]:
+                raise model.ApiError("组织已归档，先恢复再改", 409)
+            mine = orgs.my_role(conn, org["id"], actor["id"])
+            if (data.get("scope") or "self").strip() == "platform":
+                need("superadmin", "owner")
+                need_sudo()
+            elif mine not in ("head", "admin"):
+                raise model.ApiError("只有组织的负责人或管理能改外观", 403)
+            if data.get("clear"):
+                with panel.tx() as tx:
+                    tx.execute("UPDATE orgs SET cover='', cover_at=?, cover_bytes=0"
+                               " WHERE id=?", (time.time(), org["id"]))
+                    panel.audit(tx, actor["username"], "org_cover_clear", org["id"])
+                orgs.drop_cover(org["id"])
+                return self._json({"ok": True, "cover": "", "coverBytes": 0})
+            url = data.get("url")
+            if url:
+                link = orgs.clean_cover_url(url)
+                if not link:
+                    raise model.ApiError("图片地址只能是 http 或 https")
+                with panel.tx() as tx:
+                    tx.execute("UPDATE orgs SET cover=?, cover_at=?, cover_bytes=0"
+                               " WHERE id=?", (link, time.time(), org["id"]))
+                    panel.audit(tx, actor["username"], "org_cover_url", org["id"])
+                orgs.drop_cover(org["id"])
+                return self._json({"ok": True, "cover": link, "coverBytes": 0})
+            raw = data.get("data") or ""
+            if not isinstance(raw, str) or not raw:
+                raise model.ApiError("图片内容无法识别", 400)
+            if "," in raw and raw.strip().lower().startswith("data:"):
+                raw = raw.split(",", 1)[1]
+            try:
+                blob = base64.b64decode(raw, validate=True)
+            except (ValueError, TypeError):
+                raise model.ApiError("图片内容无法识别", 400)
+            if len(blob) > orgs.COVER_MAX:
+                raise model.ApiError("图片超过 2 MB", 413)
+            try:
+                name, size = orgs.save_cover(org["id"], blob)
+            except ValueError as exc:
+                raise model.ApiError("只收 PNG、JPEG 或 WebP 图片", 400) \
+                    if "unsupported" in str(exc) else model.ApiError("图片太大", 413)
+            with panel.tx() as tx:
+                tx.execute("UPDATE orgs SET cover=?, cover_at=?, cover_bytes=?"
+                           " WHERE id=?", (name, time.time(), size, org["id"]))
+                panel.audit(tx, actor["username"], "org_cover_upload", org["id"],
+                            panel.audit_note(bytes=size))
+            return self._json({"ok": True, "cover": name, "coverBytes": size})
+
+        if path.startswith("/org_cover/") and method == "GET":
+            # 站内那张图：外链不走这里
+            need("admin", "superadmin", "owner")
+            want = path[len("/org_cover/"):].strip()
+            row = orgs.row(conn, want)
+            if row is None:
+                return self._err("not found", 404)
+            name = row["cover"] or ""
+            if orgs.clean_cover_url(name):
+                return self._err("not found", 404)
+            full = orgs.cover_path(name)
+            if not full or not os.path.exists(full):
+                return self._err("not found", 404)
+            with open(full, "rb") as fh:
+                blob = fh.read()
+            kind = panel.sniff_image(blob)
+            ctype = kind[1] if kind else "application/octet-stream"
+            return self._send(200, blob, ctype,
+                              [("Cache-Control", "private, max-age=604800")])
 
         if path == "/org/member" and method == "POST":
             actor = need("admin", "superadmin", "owner")

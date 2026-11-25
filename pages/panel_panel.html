@@ -129,8 +129,9 @@
         <button class="nav-item nav-group-head" type="button"
                 aria-expanded="false" aria-controls="nav-lists" data-toggle="lists">
           <svg viewBox="0 0 20 20" aria-hidden="true">
-            <path d="M3.6 5.4h12.8M3.6 10h12.8M3.6 14.6h7.4"/>
-            <circle cx="15.1" cy="14.6" r="1.5"/>
+            <rect x="4" y="2.5" width="12" height="15" rx="1.6"/>
+            <path d="M2 6h3M2 10h3M2 14h3m3-1q2.5-4 5 0"/>
+            <circle cx="10.5" cy="7.5" r="1.6"/>
           </svg>
           <span class="nav-text">名单与报名</span>
           <svg class="nav-caret" viewBox="0 0 20 20" aria-hidden="true">
@@ -210,9 +211,12 @@
       <a class="nav-item" data-href="#/roster-admin" role="link" tabindex="0" data-nav="roster-admin"
          data-min-role="superadmin">
         <svg viewBox="0 0 20 20" aria-hidden="true">
-          <rect x="4" y="2.5" width="12" height="15" rx="1.6"/>
-          <path d="M2 6h3M2 10h3M2 14h3m3-1q2.5-4 5 0"/>
-          <circle cx="10.5" cy="7.5" r="1.6"/>
+          <path d="M7 1.7h9.5q1.5 0 1.5 1.5v11.2"/>
+          <g transform="translate(-.6 3) scale(.95 .90)">
+            <rect x="4" y="2.5" width="12" height="15" rx="1.6"/>
+            <path d="M2 6h3M2 10h3M2 14h3m3-1q2.5-4 5 0"/>
+            <circle cx="10.5" cy="7.5" r="1.6"/>
+          </g>
         </svg>
         <span class="nav-text">名单管理</span>
       </a>
@@ -1422,11 +1426,19 @@
         </div>
       </header>
 
-      <div class="org-banner" id="myOrgBanner"></div>
-
-      <div class="card">
-        <div class="card-head"><h2>简介</h2></div>
-        <p class="page-sub" id="myOrgNote">—</p>
+      <div class="cols-2" id="myOrgTop">
+        <div class="col">
+          <div class="card">
+            <div class="card-head"><h2 id="myOrgCardTitle">—</h2></div>
+            <p class="org-id-line">id: <span class="mono" id="myOrgCardId">—</span></p>
+            <p class="page-sub" id="myOrgNote">—</p>
+          </div>
+        </div>
+        <div class="col" id="myOrgCoverCol" hidden>
+          <div class="card">
+            <div class="org-cover-img" id="myOrgCover"></div>
+          </div>
+        </div>
       </div>
 
       <div class="card">
@@ -1496,6 +1508,20 @@
           </table>
         </div>
       </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>外观</h2>
+          <span class="note" id="manCoverSize"></span>
+          <div class="spacer"></div>
+          <button class="btn sm" id="manCoverLink" type="button">使用链接</button>
+          <button class="btn sm" id="manCoverPick" type="button">上传图片</button>
+          <button class="btn sm" id="manCoverClear" type="button" hidden>清除</button>
+          <input type="file" id="manCoverFile" accept="image/png,image/jpeg,image/webp" hidden>
+        </div>
+        <div class="org-cover-img" id="manCoverPreview"></div>
+        <p class="hint">图片显示在「我的组织」的卡片上，比例 16:9 最合适；也可以填写图床地址</p>
+      </div>
     </section>
 
     <!-- =================================================== 组织详情（子页） -->
@@ -1517,6 +1543,10 @@
 
       <!-- 平台侧看到的组织，如果自己正好是这个组织的负责人或管理，指一条更轻的路 -->
       <div class="org-self-hint" id="orgSelfHint" hidden>
+        <svg class="org-self-hint-i" viewBox="0 0 20 20" aria-hidden="true">
+          <circle cx="10" cy="10" r="7.6"/>
+          <path d="M10 9.2v4.4M10 6.6v.1"/>
+        </svg>
         <span id="orgSelfHintText"></span>
         <button class="btn sm" id="orgSelfHintGo" type="button">前往</button>
         <button class="icon-btn org-self-hint-x" id="orgSelfHintClose" type="button"
@@ -1553,12 +1583,15 @@
           <div class="card">
             <div class="card-head">
               <h2>外观</h2>
-              <span class="note">显示在「我的组织」的卡片上</span>
+              <span class="note" id="orgCoverSize"></span>
+              <div class="spacer"></div>
+              <button class="btn sm" id="orgCoverLink" type="button">使用链接</button>
+              <button class="btn sm" id="orgCoverPick" type="button">上传图片</button>
+              <button class="btn sm" id="orgCoverClear" type="button" hidden>清除</button>
+              <input type="file" id="orgCoverFile" accept="image/png,image/jpeg,image/webp" hidden>
             </div>
-            <div class="org-cover">
-              <span class="org-cover-hint">还没有背景图</span>
-            </div>
-            <p class="hint">横幅压在组织名称后面，用作卡片的背景</p>
+            <div class="org-cover-img" id="orgCoverPreview"></div>
+            <p class="hint">显示在「我的组织」的卡片上，比例 16:9 最合适；也可以填写图床地址</p>
           </div>
         </div>
       </div>
@@ -1640,10 +1673,10 @@
               <h2>外观</h2>
               <span class="note">显示在「我的组织」的卡片上</span>
             </div>
-            <div class="org-cover" id="orgCover">
-              <span class="org-cover-hint">还没有背景图</span>
+            <div class="org-cover-img empty" id="orgNewCover">
+              <span class="org-cover-hint">还没有图片</span>
             </div>
-            <p class="hint">横幅压在组织名称后面，用作卡片的背景</p>
+            <p class="hint">创建之后在组织详情里上传，或填写图床地址；比例 16:9 最合适</p>
           </div>
         </div>
       </div>
@@ -2059,7 +2092,10 @@
     <div class="denied" id="denied" hidden>
       <div class="denied-inner">
         <p class="denied-title">您无权访问此页面</p>
-        <button class="denied-action" id="switchAccount" type="button">切换账号？</button>
+        <div class="row" style="justify-content:center;gap:10px">
+          <button class="denied-action" id="deniedBack" type="button">返回上一页</button>
+          <button class="denied-action" id="switchAccount" type="button">切换账号？</button>
+        </div>
       </div>
     </div>
 
@@ -2067,7 +2103,10 @@
     <div class="denied" id="missing" hidden>
       <div class="denied-inner">
         <p class="denied-title">页面不存在</p>
-        <button class="denied-action" id="missingBack" type="button">回到首页</button>
+        <div class="row" style="justify-content:center;gap:10px">
+          <button class="denied-action" id="missingPrev" type="button">返回上一页</button>
+          <button class="denied-action" id="missingBack" type="button">回到首页</button>
+        </div>
       </div>
     </div>
 

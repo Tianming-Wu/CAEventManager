@@ -1380,6 +1380,75 @@
       </div>
     </section>
 
+    <!-- =================================================== 组织详情（子页） -->
+    <section class="page" data-page="org" hidden>
+      <header class="page-head">
+        <div class="head-title">
+          <button class="icon-btn crumb-back" id="orgBack" type="button"
+                  aria-label="回到组织管理" title="回到组织管理">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12 5l-5 5 5 5"/></svg>
+          </button>
+          <h1 class="crumb-title">
+            <a class="crumb" data-href="#/orgs" role="link" tabindex="0">组织管理</a>
+            <span class="crumb-sep" aria-hidden="true">›</span>
+            <span id="orgTitle">—</span>
+          </h1>
+        </div>
+        <p class="page-sub" id="orgSub"></p>
+      </header>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>基本信息</h2>
+          <span class="note" id="orgEditNote"></span>
+        </div>
+        <div class="field">
+          <label for="orgEditName">名称 <span class="req">必填</span></label>
+          <input id="orgEditName" type="text" maxlength="40" autocomplete="off">
+          <p class="err" id="orgEditNameErr" hidden></p>
+        </div>
+        <div class="field">
+          <label for="orgEditNoteInput">说明</label>
+          <input id="orgEditNoteInput" type="text" maxlength="200" autocomplete="off">
+        </div>
+        <div class="field">
+          <label for="orgEditId">组织标识</label>
+          <input id="orgEditId" type="text" disabled>
+        </div>
+        <div class="row" style="margin-top:16px;justify-content:flex-end">
+          <button class="btn primary" id="orgSaveBtn" type="button">保存</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>成员</h2>
+          <span class="hint" id="orgMemberCount"></span>
+          <div class="spacer"></div>
+          <button class="btn sm" id="orgMemberAdd" type="button">添加成员</button>
+        </div>
+        <div class="tblwrap">
+          <table class="tbl fixed" id="orgMemberTable">
+            <thead><tr>
+              <th>成员</th><th>身份</th><th>加入时间</th><th class="actions">操作</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>状态</h2>
+          <span class="note" id="orgStateNote"></span>
+          <div class="spacer"></div>
+          <button class="btn" id="orgArchiveBtn" type="button">归档</button>
+          <button class="btn" id="orgRestoreBtn" type="button" hidden>恢复</button>
+          <button class="btn danger" id="orgDropBtn" type="button" hidden>彻底删除</button>
+        </div>
+      </div>
+    </section>
+
     <!-- =================================================== 创建组织（子页） -->
     <section class="page" data-page="org-new" hidden>
       <header class="page-head">
@@ -1426,13 +1495,13 @@
           <span class="note">必填，可以有多位</span>
         </div>
         <div class="invite-row">
-          <div class="invite-chips" id="orgHeadChips"></div>
           <button class="invite-slot" id="orgHeadPick" type="button" aria-label="选择负责人">
             <svg viewBox="0 0 20 20" aria-hidden="true">
               <path d="M10 4.6v10.8M4.6 10h10.8"/>
             </svg>
             <span class="cap">负责人</span>
           </button>
+          <div class="invite-chips" id="orgHeadChips"></div>
         </div>
         <p class="err" id="orgHeadErr" hidden></p>
       </div>
@@ -1443,23 +1512,23 @@
           <span class="note">可以之后再添加</span>
         </div>
         <div class="invite-row">
-          <div class="invite-chips" id="orgAdminChips"></div>
           <button class="invite-slot" id="orgAdminPick" type="button" aria-label="选择管理">
             <svg viewBox="0 0 20 20" aria-hidden="true">
               <path d="M10 4.6v10.8M4.6 10h10.8"/>
             </svg>
             <span class="cap">管理</span>
           </button>
+          <div class="invite-chips" id="orgAdminChips"></div>
         </div>
         <div class="row-sep" role="presentation"></div>
         <div class="invite-row">
-          <div class="invite-chips" id="orgMemberChips"></div>
           <button class="invite-slot" id="orgMemberPick" type="button" aria-label="选择成员">
             <svg viewBox="0 0 20 20" aria-hidden="true">
               <path d="M10 4.6v10.8M4.6 10h10.8"/>
             </svg>
             <span class="cap">成员</span>
           </button>
+          <div class="invite-chips" id="orgMemberChips"></div>
         </div>
       </div>
     </section>

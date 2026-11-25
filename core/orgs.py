@@ -48,10 +48,13 @@ def ensure(conn):
 # 成员关系的折叠与摊开
 # --------------------------------------------------------------------------- #
 def _fold(conn, org_id):
+    # 名字一起折进去：归档之后不再回查账号，但那几行还得认得出来是谁
     rows = conn.execute(
-        "SELECT account_id, role, joined_at FROM org_members WHERE org_id=?"
-        " ORDER BY joined_at", (org_id,)).fetchall()
-    return json.dumps([{"a": r["account_id"], "r": r["role"], "t": r["joined_at"]}
+        "SELECT m.account_id, m.role, m.joined_at, a.name FROM org_members m"
+        " LEFT JOIN accounts a ON a.id=m.account_id"
+        " WHERE m.org_id=? ORDER BY m.joined_at", (org_id,)).fetchall()
+    return json.dumps([{"a": r["account_id"], "n": r["name"] or "",
+                        "r": r["role"], "t": r["joined_at"]}
                        for r in rows], ensure_ascii=False)
 
 
@@ -73,11 +76,13 @@ def _unfold(conn, org_id, folded):
 
 def _members(conn, org_id):
     rows = conn.execute(
-        "SELECT m.account_id, m.role, m.joined_at, a.uid, a.name, a.username"
+        "SELECT m.account_id, m.role, m.joined_at, a.uid, a.name, a.username,"
+        " a.avatar, a.avatar_at"
         " FROM org_members m LEFT JOIN accounts a ON a.id=m.account_id"
         " WHERE m.org_id=? ORDER BY CASE m.role WHEN 'head' THEN 0 WHEN 'admin' THEN 1"
         " ELSE 2 END, m.joined_at", (org_id,)).fetchall()
     return [{"accountId": r["account_id"], "uid": r["uid"], "name": r["name"] or "",
+             "avatar": r["avatar"] or "", "avatarAt": float(r["avatar_at"] or 0),
              "role": r["role"], "roleLabel": ROLE_LABEL[r["role"]],
              "joinedAt": r["joined_at"]} for r in rows]
 
@@ -93,8 +98,10 @@ def archived_members(org):
         if not isinstance(item, dict):
             continue
         role = item.get("r") if item.get("r") in ROLES else "member"
-        out.append({"accountId": int(item.get("a") or 0), "role": role,
-                    "roleLabel": ROLE_LABEL[role], "joinedAt": float(item.get("t") or 0)})
+        out.append({"accountId": int(item.get("a") or 0),
+                    "name": str(item.get("n") or ""), "avatar": "", "avatarAt": 0,
+                    "role": role, "roleLabel": ROLE_LABEL[role],
+                    "joinedAt": float(item.get("t") or 0)})
     out.sort(key=lambda m: (-RANK[m["role"]], m["joinedAt"]))
     return out
 

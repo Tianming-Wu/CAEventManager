@@ -3175,6 +3175,9 @@ def org_page(page):
     check("三个加号的字是 负责人 / 管理 / 成员",
           [c["text"] for c in caps] == ["负责人", "管理", "成员"], caps)
     check("这些字都不折行", all(c["lines"] == 1 for c in caps), caps)
+    xs = page.evaluate("""() => ['orgHeadPick', 'orgAdminPick', 'orgMemberPick']
+        .map(id => Math.round(document.getElementById(id).getBoundingClientRect().left))""")
+    check("三排的加号左边对齐", len(set(xs)) == 1, xs)
 
     def complain():
         return page.evaluate("""() => {
@@ -3204,11 +3207,15 @@ def org_page(page):
     check("大写转小写，空格与 @ 收不进来", typed == "abcde1", typed)
     page.fill("#orgId", "ab")
     page.wait_for_timeout(250)
-    check("不足 3 位当场说明",
+    check("打字途中不评语", complain() == "", complain())
+    page.evaluate("() => document.getElementById('orgId').blur()")
+    page.wait_for_timeout(250)
+    check("失焦后说明不足 3 位",
           complain().startswith("至少 3 位"), complain())
     page.fill("#orgId", oid)
+    page.evaluate("() => document.getElementById('orgId').blur()")
     page.wait_for_timeout(250)
-    check("补够了就不用再说", complain() == "", complain())
+    check("补够了就不再提", complain() == "", complain())
     page.evaluate("() => document.getElementById('orgCreate').click()")
     check("没有负责人也会被拦下", complain() == "至少要有一位负责人", complain())
     check("页面上没有另起一行的报错条",
@@ -3237,6 +3244,9 @@ def org_page(page):
         document.querySelectorAll('#orgHeadChips [data-org-unpick]'),
         b => b.getAttribute('data-org-unpick'))""")
     check("两位负责人都落到人像行里", sorted(chips) == sorted(heads), (chips, heads))
+    xs2 = page.evaluate("""() => ['orgHeadPick', 'orgAdminPick', 'orgMemberPick']
+        .map(id => Math.round(document.getElementById(id).getBoundingClientRect().left))""")
+    check("有人之后加号仍与别的排对齐", len(set(xs2)) == 1, xs2)
     check("选到人之后必填提示撤掉", complain() == "", complain())
     faces = page.evaluate("""() => Array.prototype.map.call(
         document.querySelectorAll('#orgHeadChips img'),
@@ -3328,31 +3338,90 @@ def org_page(page):
     page.wait_for_timeout(300)
     check("清空搜索后回到全部", oname in page.inner_text("#orgsTable tbody"))
 
-    print("== 归档与恢复 ==")
-    page.evaluate("(id) => document.querySelector('#orgsTable [data-org-archive=\"' + id + '\"]')"
-                  ".click()", oid)
+    print("== 组织详情：改名字、改身份、加减人 ==")
+    check("列表里不再摆归档按钮",
+          page.locator("#orgsTable [data-org-archive]").count() == 0)
+    page.evaluate("""(id) => document.querySelector(
+        '#orgsTable [data-org-open="' + id + '"]').click()""", oid)
+    page.wait_for_function("() => location.hash.indexOf('#/org/') === 0", timeout=20000)
+    page.wait_for_timeout(800)
+    check("进的是组织详情", page.inner_text("#orgTitle") == oname,
+          page.inner_text("#orgTitle"))
+    check("副标题写着标识与我的身份",
+          oid in page.inner_text("#orgSub") and "负责人" in page.inner_text("#orgSub"),
+          page.inner_text("#orgSub"))
+    check("详情里组织管理也是淡高亮",
+          page.evaluate("""() => document.querySelector('#sidebar [data-nav="orgs"]')
+              .hasAttribute('data-trail')"""))
+    check("成员表里有一个人",
+          page.locator("#orgMemberTable tbody tr").count() == 1
+          and "共 1 人" in page.inner_text("#orgMemberCount"),
+          page.inner_text("#orgMemberCount"))
+    check("组织标识是只读的", page.locator("#orgEditId").is_disabled())
+    check("成员一栏是身份下拉",
+          page.locator("#orgMemberTable [data-org-role-for]").count() == 1)
+
+    page.fill("#orgEditName", oname + "二")
+    page.fill("#orgEditNoteInput", "改过的说明")
+    page.evaluate("() => document.getElementById('orgSaveBtn').click()")
+    page.wait_for_timeout(1200)
+    check("改完名字标题跟着变", page.inner_text("#orgTitle") == oname + "二",
+          page.inner_text("#orgTitle"))
+
+    print("== 添加成员与调整身份 ==")
+    page.evaluate("() => document.getElementById('orgMemberAdd').click()")
+    page.wait_for_selector(".pp-back", timeout=10000)
+    page.wait_for_timeout(500)
+    added = page.evaluate("""() => {
+        const t = document.querySelector('.pp-back .pp-tile');
+        if (!t) return null;
+        t.click();
+        return t.getAttribute('data-pp-id');
+    }""")
+    check("有账号可以加进来", bool(added), added)
+    page.evaluate("() => document.querySelector('.pp-back .pp-done').click()")
+    page.wait_for_timeout(1400)
+    check("加完变成两个人",
+          page.locator("#orgMemberTable tbody tr").count() == 2
+          and "共 2 人" in page.inner_text("#orgMemberCount"),
+          page.inner_text("#orgMemberCount"))
+    page.select_option('#orgMemberTable [data-org-role-for="%s"]' % added, "admin")
+    page.wait_for_timeout(1400)
+    role = page.evaluate("""(id) => {
+        const sel = document.querySelector(
+            '#orgMemberTable [data-org-role-for="' + id + '"]');
+        return sel ? sel.value : null;
+    }""", added)
+    check("身份改成管理之后就留在那儿", role == "admin", role)
+    page.evaluate("""(id) => document.querySelector(
+        '#orgMemberTable [data-org-kick="' + id + '"]').click()""", added)
+    page.wait_for_timeout(1400)
+    check("移出之后又回到一个人",
+          page.locator("#orgMemberTable tbody tr").count() == 1
+          and "共 1 人" in page.inner_text("#orgMemberCount"),
+          page.inner_text("#orgMemberCount"))
+
+    print("== 归档与恢复都在这一页 ==")
+    page.evaluate("() => document.getElementById('orgArchiveBtn').click()")
     page.wait_for_selector("#orgArchiveGo", timeout=8000)
     page.evaluate("() => document.getElementById('orgArchiveGo').click()")
-    page.wait_for_timeout(1000)
-    body = page.inner_text("#orgsTable tbody")
-    check("归档后标着已归档", "已归档" in body, body[:120])
-    check("归档后操作只剩恢复与彻底删除",
-          page.locator('#orgsTable [data-org-restore="%s"]' % oid).count() == 1
-          and page.locator('#orgsTable [data-org-archive="%s"]' % oid).count() == 0)
-    page.evaluate("(id) => document.querySelector('#orgsTable [data-org-restore=\"' + id + '\"]')"
-                  ".click()", oid)
-    page.wait_for_timeout(1000)
-    body = page.inner_text("#orgsTable tbody")
-    check("恢复后回到正常", "已归档" not in body, body[:120])
+    page.wait_for_timeout(1500)
+    check("归档后副标题标着已归档", "已归档" in page.inner_text("#orgSub"),
+          page.inner_text("#orgSub"))
+    check("归档后不能再改", page.locator("#orgEditName").is_disabled())
+    check("归档后成员身份只能看",
+          page.locator("#orgMemberTable [data-org-role-for]").count() == 0)
+    check("归档后出现恢复键", page.locator("#orgRestoreBtn").is_visible())
+    page.evaluate("() => document.getElementById('orgRestoreBtn').click()")
+    page.wait_for_timeout(1500)
+    check("恢复后又能改", page.locator("#orgEditName").is_enabled())
 
     print("== 彻底删除：先归档，再提权 ==")
-    page.evaluate("(id) => document.querySelector('#orgsTable [data-org-archive=\"' + id + '\"]')"
-                  ".click()", oid)
+    page.evaluate("() => document.getElementById('orgArchiveBtn').click()")
     page.wait_for_selector("#orgArchiveGo", timeout=8000)
     page.evaluate("() => document.getElementById('orgArchiveGo').click()")
-    page.wait_for_timeout(1000)
-    page.evaluate("(id) => document.querySelector('#orgsTable [data-org-drop=\"' + id + '\"]')"
-                  ".click()", oid)
+    page.wait_for_timeout(1500)
+    page.evaluate("() => document.getElementById('orgDropBtn').click()")
     page.wait_for_selector("#orgDropGo", timeout=8000)
     page.evaluate("() => document.getElementById('orgDropGo').click()")
     # sudo 十分钟有效：接连跑两次时第二次可能不用再认证，弹窗就没出现
@@ -3361,9 +3430,10 @@ def org_page(page):
         enter_sudo(page)
     except Exception:
         page.wait_for_timeout(400)
-    page.wait_for_timeout(1400)
+    page.wait_for_function("() => location.hash === '#/orgs'", timeout=20000)
+    page.wait_for_timeout(800)
     body = page.inner_text("#orgsTable tbody")
-    check("彻底删除后不在列表里", oid not in body, body[:120])
+    check("彻底删除后回到列表且不在其中", oid not in body, body[:120])
 
     print("== 新建活动这类向导也淡高亮上一层 ==")
     page.goto(BASE + "/panel#/new-event")

@@ -1503,6 +1503,23 @@ select:invalid { color: var(--dim); }
 .invite-slot:hover { color: var(--accent-strong); }
 /* 邀请那一行：一排人头像，名字在头像下面；加号排在最后一个位置 */
 .invite-row { display: flex; align-items: flex-start; gap: 14px; flex-wrap: wrap; min-width: 0; }
+/* 表格里的一格人：小头像 + 名字 */
+.person-cell { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.person-cell .avatar { width: 26px; height: 26px; font-size: .72rem; }
+.person-cell .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 表格里当链接用的名字：点进详情 */
+.link-btn {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent-strong);
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.link-btn:hover { text-decoration: underline; }
+
 /* 同一张卡片里两排人之间的分隔线：不加就分不清谁属哪一排 */
 .row-sep { height: 1px; margin: 16px 0; background: var(--line); }
 .invite-chips { display: flex; gap: 14px; flex-wrap: wrap; min-width: 0; }

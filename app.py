@@ -73,7 +73,7 @@ PAGES_DIR = os.path.join(BASE_DIR, "pages")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.13.28.154"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.13.29.155"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -434,7 +434,7 @@ def _import_plan(conn, rows, rule, actor=None, autofill=None):
         problems = []
         name = (row.get("name") or "").strip()
         if not name:
-            problems.append("显示名是空的")
+            problems.append("缺少显示名")
         elif len(name) > 24:
             problems.append("显示名最长 24 个字")
         raw_role = (row.get("role") or "").strip()
@@ -448,7 +448,7 @@ def _import_plan(conn, rows, rule, actor=None, autofill=None):
                 accountimport.username_seed(name),
                 lambda n: n.lower() in seen or panel.username_taken(conn, n))
         if not username:
-            problems.append("登录名是空的")
+            problems.append("缺少登录名")
             counts["emptyUser"] += 1
         else:
             problem = panel.username_problem(username)
@@ -468,7 +468,7 @@ def _import_plan(conn, rows, rule, actor=None, autofill=None):
         if password and len(password) < panel.PASSWORD_MIN:
             problems.append("初始密码至少 %d 位" % panel.PASSWORD_MIN)
         elif not password:
-            problems.append("还没有初始密码")
+            problems.append("缺少初始密码")
             counts["emptyPassword"] += 1
         if room is not None and at > room:
             problems.append("超出账号上限：这个实例还能建 %d 个" % max(room, 0))

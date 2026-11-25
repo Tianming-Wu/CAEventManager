@@ -363,6 +363,11 @@ svg {
   font-weight: 600;
   box-shadow: inset 0 0 0 1px var(--line);
 }
+/* 当前页在它里面（例如「组织管理 › 创建组织」）：淡一档亮着，点它回到那一层 */
+.nav-item[data-trail] {
+  background: var(--surface-2);
+  color: var(--text);
+}
 .nav-item[aria-current="page"]::before {
   content: "";
   position: absolute;
@@ -1492,11 +1497,14 @@ select:invalid { color: var(--dim); }
   font-size: .78rem;
   color: var(--dim);
   line-height: 1.2;
+  white-space: nowrap;
 }
 .invite-slot:hover::before { border-color: var(--accent); }
 .invite-slot:hover { color: var(--accent-strong); }
 /* 邀请那一行：一排人头像，名字在头像下面；加号排在最后一个位置 */
 .invite-row { display: flex; align-items: flex-start; gap: 14px; flex-wrap: wrap; min-width: 0; }
+/* 同一张卡片里两排人之间的分隔线：不加就分不清谁属哪一排 */
+.row-sep { height: 1px; margin: 16px 0; background: var(--line); }
 .invite-chips { display: flex; gap: 14px; flex-wrap: wrap; min-width: 0; }
 .invite-chip {
   position: relative;
@@ -2322,6 +2330,10 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
 /* 次要说明：与正文分开的淡色小字（面板原来缺这一条，.note 会按正文字号渲染） */
 .note { font-size: .78rem; color: var(--dim); }
 .err { color: var(--danger); font-size: .82rem; min-height: 1.3em; }
+.err[hidden] { display: none; }
+/* 出问题的那一格自己标出来：警示写在框下面，不在页面别处另起一行 */
+.field input[aria-invalid="true"],
+.field select[aria-invalid="true"] { border-color: var(--danger); }
 .msg { font-size: .85rem; color: var(--accent-strong); }
 .auth-foot { margin-top: 12px; text-align: center; font-size: .8rem; color: var(--muted); }
 .notice {

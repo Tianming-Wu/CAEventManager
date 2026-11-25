@@ -3156,56 +3156,149 @@ def org_page(page):
     body = page.inner_text("#orgsTable tbody")
     check("空表说得出下一步", "还没有组织" in body, body[:60])
 
-    print("== 创建组织：必填项逐个拦下 ==")
+    print("== 创建组织：侧栏淡高亮、必填项在框下标出 ==")
     page.click("#orgNewBtn")
     page.wait_for_timeout(600)
     check("进的是组织子页", page.url.endswith("#/org-new"), page.url)
     check("有返回键", page.locator("#orgNewBack").is_visible())
-    check("标识规则写在字段下面",
-          "不可更改" in page.inner_text('[data-page="org-new"] .hint'),
-          page.inner_text('[data-page="org-new"] .hint')[:60])
+    trail = page.evaluate("""() => {
+        const a = document.querySelector('#sidebar [data-nav="orgs"]');
+        return a ? {trail: a.hasAttribute('data-trail'),
+                    current: a.getAttribute('aria-current')} : null;
+    }""")
+    check("子页里组织管理淡高亮",
+          bool(trail) and trail["trail"] and not trail["current"], trail)
+    caps = page.evaluate("""() => ['orgHeadPick', 'orgAdminPick', 'orgMemberPick'].map(id => {
+        const cap = document.getElementById(id).querySelector('.cap');
+        return {text: cap.textContent, lines: cap.getClientRects().length};
+    })""")
+    check("三个加号的字是 负责人 / 管理 / 成员",
+          [c["text"] for c in caps] == ["负责人", "管理", "成员"], caps)
+    check("这些字都不折行", all(c["lines"] == 1 for c in caps), caps)
 
     def complain():
-        return page.evaluate(
-            "() => document.getElementById('orgCreateErr').textContent")
+        return page.evaluate("""() => {
+            for (const id of ['orgNameErr', 'orgIdErr', 'orgHeadErr']) {
+                const el = document.getElementById(id);
+                if (el && !el.hidden && el.textContent) return el.textContent;
+            }
+            return '';
+        }""")
+
+    def page_errors():
+            return page.locator('[data-page="org-new"] .err:not([hidden])').count()
 
     page.evaluate("() => document.getElementById('orgCreate').click()")
-    check("没填名称就交上去会被拦下", complain() == "请填写组织名称", complain())
+    check("没填名称就在框下标出来", complain() == "请填写组织名称", complain())
+    check("名称那一格随之标红",
+          page.get_attribute("#orgName", "aria-invalid") == "true")
     page.fill("#orgName", oname)
+    check("填上名称后提示撤掉", complain() == "", complain())
     page.evaluate("() => document.getElementById('orgCreate').click()")
-    check("没填标识也会被拦下", complain() == "请填写组织标识", complain())
-    page.fill("#orgId", oid)
-    page.evaluate("() => document.getElementById('orgCreate').click()")
-    check("没有总负责人也会被拦下", complain() == "至少要有一位总负责人", complain())
+    check("没填标识也标在框下", complain() == "请填写组织标识", complain())
 
-    print("== 负责人：单选，选完落到人像行里 ==")
+    print("== 组织标识：不合规的字符进不来，短信当场说 ==")
+    page.click("#orgId")
+    page.keyboard.type("ABC d@e1")
+    typed = page.input_value("#orgId")
+    check("大写转小写，空格与 @ 收不进来", typed == "abcde1", typed)
+    page.fill("#orgId", "ab")
+    page.wait_for_timeout(250)
+    check("不足 3 位当场说明",
+          complain().startswith("至少 3 位"), complain())
+    page.fill("#orgId", oid)
+    page.wait_for_timeout(250)
+    check("补够了就不用再说", complain() == "", complain())
+    page.evaluate("() => document.getElementById('orgCreate').click()")
+    check("没有负责人也会被拦下", complain() == "至少要有一位负责人", complain())
+    check("页面上没有另起一行的报错条",
+          page.locator("#orgCreateErr").count() == 0
+          and page.locator('[data-page="org-new"] .err:not([hidden])').count() == 1,
+          page.locator('[data-page="org-new"] .err:not([hidden])').count())
+
+    print("== 负责人：多选，头像按账号取图 ==")
     page.evaluate("() => document.getElementById('orgHeadPick').click()")
     page.wait_for_selector(".pp-back", timeout=10000)
     page.wait_for_timeout(500)
-    head = page.evaluate("""() => {
-        const t = document.querySelector('.pp-back .pp-tile');
-        if (!t) return null;
-        t.click();
-        return t.getAttribute('data-pp-id');
+    heads = page.evaluate("""() => {
+        const out = [];
+        for (const t of document.querySelectorAll('.pp-back .pp-tile')) {
+            if (t.classList.contains('off')) continue;
+            t.click();
+            out.push(t.getAttribute('data-pp-id'));
+            if (out.length === 2) break;
+        }
+        return out;
     }""")
-    check("选人弹窗里有账号可选", bool(head), head)
+    check("负责人可以选多位", len(heads) == 2, heads)
     page.evaluate("() => document.querySelector('.pp-back .pp-done').click()")
     page.wait_for_timeout(400)
-    chip = page.evaluate("""() => {
-        const b = document.querySelector('#orgHeadChips [data-org-unpick]');
-        return b ? b.getAttribute('data-org-unpick') : null;
-    }""")
-    check("负责人落到人像行里", bool(chip) and chip == head, (chip, head))
+    chips = page.evaluate("""() => Array.prototype.map.call(
+        document.querySelectorAll('#orgHeadChips [data-org-unpick]'),
+        b => b.getAttribute('data-org-unpick'))""")
+    check("两位负责人都落到人像行里", sorted(chips) == sorted(heads), (chips, heads))
+    check("选到人之后必填提示撤掉", complain() == "", complain())
+    faces = page.evaluate("""() => Array.prototype.map.call(
+        document.querySelectorAll('#orgHeadChips img'),
+        i => ({src: i.getAttribute('src'),
+               ok: i.complete && i.naturalWidth > 0}))""")
+    check("头像按账号取图，不是存了哪张图的名字",
+          all("/api/panel/avatar/" in f["src"] for f in faces), faces)
+    check("每一张头像都真的加载出来了", all(f["ok"] for f in faces), faces)
 
-    print("== 三个选人框互斥 ==")
+    print("== 三个选人框互斥：别人选过的人灰着 ==")
     page.evaluate("() => document.getElementById('orgAdminPick').click()")
     page.wait_for_selector(".pp-back", timeout=10000)
     page.wait_for_timeout(600)
-    seen = page.evaluate(
-        "(id) => !!document.querySelector('.pp-back [data-pp-id=\"' + id + '\"]')", head)
-    check("别的框选过的人不再出现", not seen, head)
+    grey = page.evaluate("""(id) => {
+        const t = document.querySelector('.pp-back [data-pp-id="' + id + '"]');
+        if (!t) return null;
+        const was = t.getAttribute('aria-pressed');
+        t.click();
+        return {total: document.querySelectorAll('.pp-back .pp-tile').length,
+                off: t.classList.contains('off'),
+                aria: t.getAttribute('aria-disabled'),
+                now: t.getAttribute('aria-pressed'),
+                was: was};
+    }""", heads[0])
+    check("已经当过负责人的人仍在名单里", bool(grey) and grey["total"] >= 2, grey)
+    check("但是灰显", bool(grey) and grey["off"] and grey["aria"] == "true", grey)
+    check("灰显的点不动", bool(grey) and grey["now"] == grey["was"], grey)
     page.evaluate("() => document.querySelector('.pp-back .pp-cancel').click()")
     page.wait_for_timeout(300)
+
+    print("== 填了一半走人：先问一句 ==")
+    page.evaluate("() => document.querySelector('#sidebar [data-nav=\"orgs\"]').click()")
+    page.wait_for_selector("#orgLeaveGo", timeout=8000)
+    check("离开前给出确认", page.url.endswith("#/org-new"), page.url)
+    page.evaluate("() => document.querySelector('#overlayBody [data-close-overlay]').click()")
+    page.wait_for_timeout(400)
+    check("继续编辑就留在这一页", page.url.endswith("#/org-new"), page.url)
+    check("人像行还在",
+          page.locator("#orgHeadChips [data-org-unpick]").count() == 2)
+
+    print("== 移出一个人：剩下的头像不重画 ==")
+    page.evaluate("""() => {
+        window.__orgChips = Array.prototype.slice.call(
+            document.querySelectorAll('#orgHeadChips .invite-chip'));
+        window.__orgImgs = Array.prototype.slice.call(
+            document.querySelectorAll('#orgHeadChips img'));
+    }""")
+    page.evaluate("""(id) => document.querySelector(
+        '#orgHeadChips [data-org-unpick="' + id + '"]').click()""", heads[1])
+    page.wait_for_timeout(400)
+    left = page.evaluate("""() => {
+        const chips = Array.prototype.slice.call(
+            document.querySelectorAll('#orgHeadChips .invite-chip'));
+        const imgs = Array.prototype.slice.call(
+            document.querySelectorAll('#orgHeadChips img'));
+        return {n: chips.length,
+                sameChips: chips.every(c => window.__orgChips.indexOf(c) >= 0),
+                sameImgs: imgs.every(i => window.__orgImgs.indexOf(i) >= 0)};
+    }""")
+    check("移出后少一个人", left["n"] == 1, left)
+    check("剩下的头像仍是原来那些节点，没有整行重画",
+          left["sameChips"] and left["sameImgs"], left)
 
     print("== 建成之后回到列表 ==")
     page.evaluate("() => document.getElementById('orgCreate').click()")
@@ -3214,7 +3307,13 @@ def org_page(page):
     body = page.inner_text("#orgsTable tbody")
     check("新组织出现在列表里",
           oname in body and oid in body, body[:120])
-    check("列表里写着一位总负责人", "总负责人 1" in body, body[:120])
+    check("列表里写着一位负责人", "负责人 1" in body, body[:120])
+    after = page.evaluate("""() => {
+        const a = document.querySelector('#sidebar [data-nav="orgs"]');
+        return {trail: a.hasAttribute('data-trail'), current: a.getAttribute('aria-current')};
+    }""")
+    check("回到顶层就换成实高亮",
+          after["current"] == "page" and not after["trail"], after)
 
     print("== 搜索 ==")
     page.fill("#orgSearch", "zzz-没有这个")
@@ -3265,6 +3364,19 @@ def org_page(page):
     page.wait_for_timeout(1400)
     body = page.inner_text("#orgsTable tbody")
     check("彻底删除后不在列表里", oid not in body, body[:120])
+
+    print("== 新建活动这类向导也淡高亮上一层 ==")
+    page.goto(BASE + "/panel#/new-event")
+    page.wait_for_timeout(800)
+    ev = page.evaluate("""() => {
+        const a = document.querySelector('#sidebar [data-nav="events"]');
+        return {trail: a.hasAttribute('data-trail'),
+                current: a.getAttribute('aria-current')};
+    }""")
+    check("新建活动时我的活动淡高亮",
+          ev["trail"] and not ev["current"], ev)
+    page.goto(BASE + "/panel#/orgs")
+    page.wait_for_timeout(500)
 
 
 def field_keys(browser):

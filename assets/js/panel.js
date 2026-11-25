@@ -40,7 +40,7 @@
     "org-new": { min: "superadmin", parent: { href: "#/orgs", label: "组织管理" } },
     "approval-users": { min: "superadmin", group: "approvals" },
     "approval-events": { min: "superadmin", group: "approvals" },
-    "new-event": { min: "admin" },
+    "new-event": { min: "admin", trail: "events" },
     // 模块管理是站长自己的页面：装模块、停模块都是整台机器的事
     "modules": { min: "owner" },
     "server": { min: "owner" },
@@ -2445,6 +2445,18 @@
     return !!(route && S.explicitBack);
   }
 
+  /* 侧栏那一项：当前页在它里面时淡一档亮着，表示"路径经过这里"。
+     有上一级的按上一级算；新建活动这类向导没有上一级，就明写一封 trail。 */
+  function routeTrail(route) {
+    var r = route ? ROUTES[route] : null;
+    if (!r) return "";
+    if (r.trail) return r.trail;
+    var parent = r.parent;
+    if (!parent) return "";
+    var name = String(parent.href || "").replace(/^#\//, "");
+    return ROUTES[name] ? name : "";
+  }
+
   /* 切换页面时给标题与返回键放一次入场动画：
      上一页与这一页都有（或都没有）返回键时不动，否则标题让位、按钮淡入放大。
 
@@ -2874,7 +2886,10 @@
     $$(".page").forEach(function (p) { p.hidden = true; });
     $("#denied").hidden = false;
     $("#siteFoot").hidden = true;
-    $$("[data-nav]").forEach(function (a) { a.removeAttribute("aria-current"); });
+    $$("[data-nav]").forEach(function (a) {
+      a.removeAttribute("aria-current");
+      a.removeAttribute("data-trail");
+    });
     $$(".nav-group").forEach(function (g) { g.classList.remove("has-current"); });
     closePane();
     var el = $("#content");
@@ -2898,7 +2913,13 @@
     askImportLeave(wanted);
     return;
   }
-  if (!guardBypass && S.route === "new-event" && wanted !== "new-event" && S.dirty) {
+    if (!orgBypass && S.route === "org-new" && wanted !== "org-new" && orgHasContent()) {
+      // 同一套办法：地址先退回去，问清楚再走
+      try { history.replaceState(null, "", "#/org-new"); } catch (e) { /* 老浏览器 */ }
+      askOrgLeave(wanted);
+      return;
+    }
+    if (!guardBypass && S.route === "new-event" && wanted !== "new-event" && S.dirty) {
       // 地址退回表单那一页，但不许重画：location.replace 会再触发一次 hashchange，
       // 表单会按预设重填一遍，填过的内容和脏标记当场都没了（"继续编辑"也就无从恢复）
       var here = "#/" + S.route +
@@ -2937,13 +2958,18 @@
     if (parent) S.openGroups[parent] = true;
     syncGroups();
 
+    var trail = routeTrail(wanted);
     var prevHadBack = routeHasBack(prevRoute);
     $$(".page").forEach(function (p) {
       p.hidden = p.getAttribute("data-page") !== wanted;
     });
     $$("[data-nav]").forEach(function (a) {
-      if (a.getAttribute("data-nav") === wanted) a.setAttribute("aria-current", "page");
+      var name = a.getAttribute("data-nav");
+      if (name === wanted) a.setAttribute("aria-current", "page");
       else a.removeAttribute("aria-current");
+      // 这一页在上层页的里面：淡一档亮着，点它回到那一层
+      if (trail && name === trail && name !== wanted) a.setAttribute("data-trail", "1");
+      else a.removeAttribute("data-trail");
     });
     $$(".nav-group").forEach(function (g) {
       var on = !!ROUTES[wanted] && ROUTES[wanted].group === g.getAttribute("data-group");
@@ -3552,6 +3578,24 @@
     });
   }
 
+  var orgBypass = false;
+
+  /* 创建组织填了一半就走去别处：先说清这一页的内容没有留存 */
+  function askOrgLeave(into) {
+    openOverlay("org-leave", "离开创建组织？",
+      '<p class="page-sub">已填写的内容不会保留。</p>' +
+      '<div class="row" style="margin-top:18px;justify-content:flex-end">' +
+      '<button class="btn" type="button" data-close-overlay="1">继续编辑</button>' +
+      '<button class="btn danger" type="button" id="orgLeaveGo">离开</button></div>');
+    $("#orgLeaveGo").addEventListener("click", function () {
+      closeOverlay();
+      orgBypass = true;
+      resetOrgForm();
+      go(into);
+      setTimeout(function () { orgBypass = false; }, 80);
+    });
+  }
+
   function markDirty() { S.dirty = true; }
 
   /* 离开创建页时把这张表单清空：不然下次进来还挂着上一次的名字与人像。
@@ -3917,9 +3961,7 @@
       var a = S.people[id];
       if (!a) return "";
       return '<span class="invite-chip">' +
-        '<span class="avatar">' + (a.avatar
-          ? '<img alt="" src="' + PX.esc(a.avatar) + '">'
-          : PX.esc((a.label || "").charAt(0))) + "</span>" +
+        personFaceHtml(a) +
         '<span class="nm">' + PX.esc(a.label || "") + "</span>" +
         '<button type="button" data-uninvite="' + a.id + '" aria-label="移出">×</button>' +
         "</span>";
@@ -3941,12 +3983,9 @@
       mode: opts.mode || "multi",
       chosen: opts.chosen || [],
       exclude: opts.exclude || [],
+      disabled: opts.disabled || [],
       empty: opts.empty || "没有匹配的账号",
-      avatarUrl: function (p) {
-        return p.avatar && !/^https?:\/\//i.test(p.avatar)
-          ? PX.PREFIX + "/api/panel/avatar/" + p.id + "?v=" + Math.round(p.avatarAt || 0)
-          : "";
-      },
+      avatarUrl: function (p) { return personAvatarUrl(p); },
       apply: opts.apply,
       search: function (q) {
         var qs = fixed.slice();
@@ -4047,10 +4086,28 @@
     S.orgPeople = {};
     ["orgName", "orgId", "orgNote"].forEach(function (id) {
       var el = $("#" + id);
-      if (el) el.value = "";
+      if (el) {
+        el.value = "";
+        el.removeAttribute("aria-invalid");
+      }
     });
-    var err = $("#orgCreateErr");
-    if (err) err.textContent = "";
+    ["#orgHeadChips", "#orgAdminChips", "#orgMemberChips"].forEach(function (sel) {
+      var box = $(sel);
+      if (box) box.innerHTML = "";
+    });
+    orgClearErrors();
+  }
+
+  /* 填了一半就走，先问一句：这一页的内容没有别的地方存着 */
+  function orgHasContent() {
+    var f = S.orgForm || {};
+    var text = ["orgName", "orgId", "orgNote"].some(function (id) {
+      var el = $("#" + id);
+      return el && el.value.trim();
+    });
+    return !!text || ["heads", "admins", "members"].some(function (k) {
+      return (f[k] || []).length > 0;
+    });
   }
 
   function loadOrgs() {
@@ -4090,7 +4147,7 @@
             : "")
         : '<button class="btn sm" data-org-archive="' + PX.esc(o.id) + '">归档</button>';
       // 归档后不再回查账号：成员数是折起来的那份快照算出来的
-      var people = o.members + (o.heads ? "（总负责人 " + o.heads + "）" : "");
+      var people = o.members + (o.heads ? "（负责人 " + o.heads + "）" : "");
       return "<tr>" +
         "<td><b>" + PX.esc(o.name) + "</b></td>" +
         '<td class="mono">' + PX.esc(o.id) + "</td>" +
@@ -4104,44 +4161,71 @@
       (S.orgFilter || "").trim() ? "没有匹配的组织" : "还没有组织");
   }
 
-  /* 选过的人排成一行：与创建活动里的成员行同一套样子 */
-  function orgChips(list) {
-    return list.map(function (id) {
-      var p = S.orgPeople[id];
-      if (!p) return "";
-      return '<span class="invite-chip">' +
-        '<span class="avatar">' + (p.avatar
-          ? '<img alt="" src="' + PX.esc(p.avatar) + '">'
-          : PX.esc((p.label || "").charAt(0))) + "</span>" +
-        '<span class="nm">' + PX.esc(p.label || "") + "</span>" +
-        '<button type="button" data-org-unpick="' + p.id + '" aria-label="移出">×</button>' +
-        "</span>";
-    }).join("");
+  /* 选过的人排成一行：与创建活动里的成员行同一套样子。
+     头像要按账号去取：名单里给的是存了哪张图，不是能直接当 src 的地址。 */
+  function personAvatarUrl(p) {
+    if (!p || !p.avatar) return "";
+    if (/^https?:\/\//i.test(p.avatar)) return p.avatar;
+    return PX.PREFIX + "/api/panel/avatar/" + p.id + "?v=" +
+      Math.round(p.avatarAt || 0);
+  }
+
+  function personFaceHtml(p) {
+    var url = personAvatarUrl(p);
+    return '<span class="avatar">' + (url
+      ? '<img alt="" src="' + PX.esc(url) + '">'
+      : PX.esc((p.label || "").charAt(0) || "?")) + "</span>";
+  }
+
+  function orgChipHtml(p) {
+    return '<span class="invite-chip" data-chip-id="' + PX.esc(p.id) + '">' +
+      personFaceHtml(p) +
+      '<span class="nm">' + PX.esc(p.label || "") + "</span>" +
+      '<button type="button" data-org-unpick="' + PX.esc(p.id) +
+      '" aria-label="移出">×</button></span>';
   }
 
   var ORG_CHIP_BOX = { heads: "#orgHeadChips", admins: "#orgAdminChips",
                        members: "#orgMemberChips" };
 
+  /* 人像行按名字对齐：已有的不动，缺的补在后面，不在名单里的拿掉。
+     整块重画会让这一行里每张头像都重新加载一遍——删一个人，剩下的全都闪一下。 */
+  function syncOrgChips(key) {
+    var box = $(ORG_CHIP_BOX[key]);
+    if (!box) return;
+    var ids = S.orgForm[key].map(String);
+    Array.prototype.forEach.call(box.querySelectorAll("[data-chip-id]"),
+      function (el) {
+        if (ids.indexOf(el.getAttribute("data-chip-id")) < 0) box.removeChild(el);
+      });
+    var have = {};
+    Array.prototype.forEach.call(box.querySelectorAll("[data-chip-id]"),
+      function (el) { have[el.getAttribute("data-chip-id")] = true; });
+    ids.forEach(function (id) {
+      var p = S.orgPeople[id];
+      if (have[id] || !p) return;
+      box.insertAdjacentHTML("beforeend", orgChipHtml(p));
+    });
+  }
+
   function drawOrgNew() {
     if (!S.orgForm) resetOrgForm();
-    var f = S.orgForm;
-    Object.keys(ORG_CHIP_BOX).forEach(function (key) {
-      var box = $(ORG_CHIP_BOX[key]);
-      if (box) box.innerHTML = orgChips(f[key]);
-    });
+    Object.keys(ORG_CHIP_BOX).forEach(syncOrgChips);
   }
 
   function unpickOrgPerson(id) {
     var f = S.orgForm;
     if (!f) return;
-    ["heads", "admins", "members"].forEach(function (key) {
+    var hit = "";
+    Object.keys(ORG_CHIP_BOX).forEach(function (key) {
+      if (f[key].map(String).indexOf(String(id)) >= 0) hit = key;
       f[key] = f[key].filter(function (x) { return String(x) !== String(id); });
     });
-    drawOrgNew();
+    if (hit) syncOrgChips(hit);
   }
 
-  /* 三个框互斥：一个人只能出现在其中一个里面。别的框已经选过的人，
-   * 这个框干脆不列出来——比"列出来但是灰的"少一句话要解释。 */
+  /* 三个框互斥：一个人只能出现在其中一个里面。别的框已经选过的人在这个框里
+   * 灰着——人看得见，知道他在，也点不动。 */
   function pickOrgPeople(key, title, mode) {
     var f = S.orgForm;
     var others = [];
@@ -4152,33 +4236,83 @@
       title: title,
       mode: mode,
       chosen: f[key].map(function (id) { return S.orgPeople[id]; }).filter(Boolean),
-      exclude: others,
+      disabled: others,
       apply: function (people) {
         f[key] = people.map(function (p) { return p.id; });
         people.forEach(function (p) { S.orgPeople[p.id] = p; });
-        drawOrgNew();
+        syncOrgChips(key);
+        orgFormChanged();
       }
     });
   }
 
+  /* 表单里的错都写在出问题的那一格下面：不另起一行讲，也不弹窗 */
+  function orgFieldError(which, text) {
+    var box = { name: "#orgNameErr", id: "#orgIdErr", heads: "#orgHeadErr" }[which];
+    var el = box ? $(box) : null;
+    if (el) {
+      el.textContent = text || "";
+      el.hidden = !text;
+    }
+    var input = which === "heads" ? null : $("#org" + (which === "name" ? "Name" : "Id"));
+    if (input) {
+      if (text) input.setAttribute("aria-invalid", "true");
+      else input.removeAttribute("aria-invalid");
+    }
+  }
+
+  function orgClearErrors() {
+    orgFieldError("name", "");
+    orgFieldError("id", "");
+    orgFieldError("heads", "");
+  }
+
+  /* 组织标识只收小写字母、数字、连字符与下划线：敲不进去的字当场就不收，
+     不等提交再说一遍。长度不够照旧提示，位置就在这一格下面。 */
+  function sanitizeOrgId() {
+    var box = $("#orgId");
+    if (!box) return;
+    var before = box.value;
+    var caret = box.selectionStart === undefined ? before.length : box.selectionStart;
+    var kept = 0;
+    var clean = "";
+    for (var i = 0; i < before.length && clean.length < 24; i++) {
+      var ch = before.charAt(i).toLowerCase();
+      if (!/[a-z0-9_-]/.test(ch)) continue;
+      clean += ch;
+      if (i < caret) kept += 1;
+    }
+    if (clean !== before) {
+      box.value = clean;
+      try { box.setSelectionRange(kept, kept); } catch (e) { /* 老浏览器 */ }
+    }
+    orgFieldError("id", clean && clean.length < 3
+      ? "至少 3 位，只接受小写字母、数字、连字符与下划线" : "");
+  }
+
+  function orgFormChanged() {
+    sanitizeOrgId();
+    if (($("#orgName") || {}).value) orgFieldError("name", "");
+    if (S.orgForm && S.orgForm.heads.length) orgFieldError("heads", "");
+  }
+
   function createOrg() {
-    var err = $("#orgCreateErr");
     var f = S.orgForm || { heads: [], admins: [], members: [] };
     var name = $("#orgName").value.trim();
     var id = $("#orgId").value.trim().toLowerCase();
-    err.textContent = "";
+    orgClearErrors();
     if (!name) {
-      err.textContent = "请填写组织名称";
+      orgFieldError("name", "请填写组织名称");
       $("#orgName").focus();
       return;
     }
-    if (!id) {
-      err.textContent = "请填写组织标识";
+    if (id.length < 3) {
+      orgFieldError("id", id ? "至少 3 位" : "请填写组织标识");
       $("#orgId").focus();
       return;
     }
     if (!f.heads.length) {
-      err.textContent = "至少要有一位总负责人";
+      orgFieldError("heads", "至少要有一位负责人");
       return;
     }
     $("#orgCreate").disabled = true;
@@ -4188,11 +4322,18 @@
               heads: f.heads, admins: f.admins, members: f.members }
     }).then(function () {
       $("#orgCreate").disabled = false;
+      // 刚建成功，不必再用"内容会丢掉"拦一次；表单在下次进来时清空
+      orgBypass = true;
       PX.toast("已创建组织");
-      location.hash = "#/orgs";
+      go("orgs");
+      setTimeout(function () { orgBypass = false; }, 80);
     }).catch(function (e) {
       $("#orgCreate").disabled = false;
-      err.textContent = e.message;
+      var msg = (e && e.message) || "创建失败";
+      if (msg.indexOf("标识") >= 0) orgFieldError("id", msg);
+      else if (msg.indexOf("名称") >= 0) orgFieldError("name", msg);
+      else if (msg.indexOf("负责人") >= 0) orgFieldError("heads", msg);
+      else PX.toast(PX.esc(msg), true);
     });
   }
 
@@ -7665,11 +7806,13 @@
   });
   $("#orgNewBack").addEventListener("click", function () { location.hash = "#/orgs"; });
   $("#orgCreate").addEventListener("click", createOrg);
+  $("#orgName").addEventListener("input", orgFormChanged);
+  $("#orgId").addEventListener("input", sanitizeOrgId);
   $("#orgHeadPick").addEventListener("click", function () {
-    pickOrgPeople("heads", "选择总负责人", "single");
+    pickOrgPeople("heads", "选择负责人", "multi");
   });
   $("#orgAdminPick").addEventListener("click", function () {
-    pickOrgPeople("admins", "选择组织管理", "multi");
+    pickOrgPeople("admins", "选择管理", "multi");
   });
   $("#orgMemberPick").addEventListener("click", function () {
     pickOrgPeople("members", "选择成员", "multi");

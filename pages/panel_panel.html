@@ -1405,14 +1405,16 @@
           <label for="orgName">名称 <span class="req">必填</span></label>
           <input id="orgName" type="text" maxlength="40" autocomplete="off"
                  placeholder="例如：计算机协会">
+          <p class="err" id="orgNameErr" hidden></p>
         </div>
         <div class="field">
           <label for="orgId">组织标识 <span class="req">必填</span></label>
           <input id="orgId" type="text" maxlength="24" autocomplete="off"
                  spellcheck="false" placeholder="例如：cs-club">
+          <p class="err" id="orgIdErr" hidden></p>
+          <p class="hint">小写字母、数字、连字符与下划线，3 到 24 位；建好后不可更改</p>
         </div>
-        <p class="hint">3 到 24 位小写字母、数字、连字符与下划线；建好后不可更改</p>
-        <div class="field" style="margin-top:14px">
+        <div class="field">
           <label for="orgNote">说明</label>
           <input id="orgNote" type="text" maxlength="200" autocomplete="off">
         </div>
@@ -1420,35 +1422,37 @@
 
       <div class="card">
         <div class="card-head">
-          <h2>总负责人</h2>
+          <h2>负责人</h2>
           <span class="note">必填，可以有多位</span>
         </div>
         <div class="invite-row">
           <div class="invite-chips" id="orgHeadChips"></div>
-          <button class="invite-slot" id="orgHeadPick" type="button" aria-label="选择总负责人">
+          <button class="invite-slot" id="orgHeadPick" type="button" aria-label="选择负责人">
             <svg viewBox="0 0 20 20" aria-hidden="true">
               <path d="M10 4.6v10.8M4.6 10h10.8"/>
             </svg>
-            <span class="cap">总负责人</span>
+            <span class="cap">负责人</span>
           </button>
         </div>
+        <p class="err" id="orgHeadErr" hidden></p>
       </div>
 
       <div class="card">
         <div class="card-head">
-          <h2>组织管理与成员</h2>
+          <h2>其他成员</h2>
           <span class="note">可以之后再添加</span>
         </div>
         <div class="invite-row">
           <div class="invite-chips" id="orgAdminChips"></div>
-          <button class="invite-slot" id="orgAdminPick" type="button" aria-label="选择组织管理">
+          <button class="invite-slot" id="orgAdminPick" type="button" aria-label="选择管理">
             <svg viewBox="0 0 20 20" aria-hidden="true">
               <path d="M10 4.6v10.8M4.6 10h10.8"/>
             </svg>
-            <span class="cap">组织管理</span>
+            <span class="cap">管理</span>
           </button>
         </div>
-        <div class="invite-row" style="margin-top:14px">
+        <div class="row-sep" role="presentation"></div>
+        <div class="invite-row">
           <div class="invite-chips" id="orgMemberChips"></div>
           <button class="invite-slot" id="orgMemberPick" type="button" aria-label="选择成员">
             <svg viewBox="0 0 20 20" aria-hidden="true">
@@ -1458,8 +1462,6 @@
           </button>
         </div>
       </div>
-
-      <div class="err" id="orgCreateErr"></div>
     </section>
 
     <!-- ============================================ 活跃审批 › 注册申请 -->

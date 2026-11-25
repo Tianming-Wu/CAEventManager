@@ -9,7 +9,8 @@
  *     title: "邀请成员",
  *     mode: "multi",            // single：点一下就定；multi：点完再按「完成」
  *     chosen: [person, ...],    // 打开时已经选中的
- *     exclude: [id, ...],       // 不该出现在名单里的（例如自己）
+ *     exclude: [id, ...],       // 不该出现在名单里的（不出现）
+ *     disabled: [id, ...],      // 要灰显的（还在名单里，点不动）
  *     placeholder: "搜索用户",
  *     empty: "没有匹配的账号",
  *     avatarUrl: function (person) { return "…/avatar/1?v=2" },
@@ -45,6 +46,13 @@
     (opts.exclude || []).forEach(function (id) {
       if (id) hidden[id] = true;
     });
+    // 灰显：人还列在那里，只是点不动。与 exclude 不同，exclude 是不出现
+    var off = {};
+    (opts.disabled || []).forEach(function (id) {
+      if (!id) return;
+      off[id] = true;
+      delete hidden[id];         // 两样都给时，灰着优先：列在那里才算灰着
+    });
     var results = [];
     var seq = 0;                // 只认最后一次搜索的回答：慢的那个不许盖住新的
 
@@ -61,10 +69,13 @@
       return '<span class="pp-avatar">' + esc(label.trim().charAt(0) || "?") + "</span>";
     }
 
-    function tileHtml(p, on) {
-      return '<button type="button" class="pp-tile' + (on ? " on" : "") + '"' +
-        ' data-pp-id="' + esc(p.id) + '" title="' + esc(labelOf(p)) + '"' +
-        ' aria-pressed="' + (on ? "true" : "false") + '">' +
+    function tileHtml(p, on, off) {
+      return '<button type="button" class="pp-tile' + (on ? " on" : "") +
+        (off ? " off" : "") + '"' +
+        ' data-pp-id="' + esc(p.id) + '"' +
+        ' title="' + esc(labelOf(p)) + (off ? "（已在别处选中）" : "") + '"' +
+        ' aria-pressed="' + (on ? "true" : "false") + '"' +
+        (off ? ' aria-disabled="true"' : "") + ">" +
         avatarHtml(p) +
         '<span class="pp-name">' + esc(labelOf(p)) + "</span></button>";
     }
@@ -138,7 +149,7 @@
         return;
       }
       list.innerHTML = '<div class="pp-grid">' + rows.map(function (p) {
-        return tileHtml(p, !!chosen[p.id]);
+        return tileHtml(p, !!chosen[p.id], !!off[p.id]);
       }).join("") + "</div>";
     }
 
@@ -165,6 +176,7 @@
       var btn = e.target.closest ? e.target.closest("[data-pp-id]") : null;
       if (!btn) return;
       var id = btn.getAttribute("data-pp-id");
+      if (off[id]) return;                 // 灰显的点不动
       var person = chosen[id] || null;
       for (var i = 0; i < results.length && !person; i++) {
         if (String(results[i].id) === id) person = results[i];

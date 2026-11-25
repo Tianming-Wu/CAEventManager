@@ -74,7 +74,7 @@ PAGES_DIR = os.path.join(BASE_DIR, "pages")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.13.34.160"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.13.35.161"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -2387,7 +2387,7 @@ class Handler(BaseHTTPRequestHandler):
             if len(name) > 40:
                 raise model.ApiError("组织名称最长 40 个字")
             if not heads:
-                raise model.ApiError("至少要有一位总负责人")
+                raise model.ApiError("至少要有一位负责人")
             if orgs.id_taken(conn, org_id):
                 raise model.ApiError("这个组织标识已被占用", 409)
             with panel.tx() as tx:
@@ -2404,7 +2404,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise model.ApiError("组织不存在", 404)
             mine = orgs.my_role(conn, org["id"], actor["id"])
             if acc["role"] not in ("superadmin", "owner") and mine != "head":
-                raise model.ApiError("只有总负责人能改这个组织", 403)
+                raise model.ApiError("只有负责人能改这个组织", 403)
             if org["archived_at"]:
                 raise model.ApiError("组织已归档，先恢复再改", 409)
             name = data.get("name")
@@ -2425,7 +2425,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise model.ApiError("组织不存在", 404)
             mine = orgs.my_role(conn, org["id"], actor["id"])
             if acc["role"] not in ("superadmin", "owner") and mine != "head":
-                raise model.ApiError("只有总负责人能改成员", 403)
+                raise model.ApiError("只有负责人能改成员", 403)
             if org["archived_at"]:
                 raise model.ApiError("组织已归档，先恢复再改", 409)
             account_id = int(data.get("account") or 0)
@@ -2436,15 +2436,15 @@ class Handler(BaseHTTPRequestHandler):
             action = (data.get("action") or "add").strip()
             role = (data.get("role") or "member").strip()
             if role not in orgs.ROLES:
-                raise model.ApiError("组织内身份只有总负责人、组织管理、组织成员")
+                raise model.ApiError("组织内身份只有负责人、管理、成员")
             if role == "head" and not (acc["role"] in ("superadmin", "owner")
                                          or mine == "head"):
-                raise model.ApiError("只有总负责人能指定总负责人", 403)
+                raise model.ApiError("只有负责人能指定负责人", 403)
             before = orgs.my_role(conn, org["id"], account_id)
             with panel.tx() as tx:
                 if action == "remove":
                     if before == "head" and orgs.heads_count(tx, org["id"]) <= 1:
-                        raise model.ApiError("至少要留一位总负责人", 409)
+                        raise model.ApiError("至少要留一位负责人", 409)
                     orgs.drop_member(tx, org["id"], account_id, actor=actor["username"])
                 else:
                     if before != "head" and role == "head":
@@ -2453,7 +2453,7 @@ class Handler(BaseHTTPRequestHandler):
                                     actor=actor["username"])
                 if before and before != role and action != "remove" and before == "head":
                     if orgs.heads_count(tx, org["id"]) < 1:
-                        raise model.ApiError("至少要留一位总负责人", 409)
+                        raise model.ApiError("至少要留一位负责人", 409)
             return self._json({"ok": True})
 
         if path == "/org/archive" and method == "POST":

@@ -14,7 +14,7 @@ import time
 import panel
 
 ROLES = ("head", "admin", "member")
-ROLE_LABEL = {"head": "总负责人", "admin": "组织管理", "member": "组织成员"}
+ROLE_LABEL = {"head": "负责人", "admin": "管理", "member": "成员"}
 RANK = {"head": 3, "admin": 2, "member": 1}
 
 SCHEMA = """

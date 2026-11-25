@@ -122,6 +122,13 @@ body.pp-open { overflow: hidden; }
   border-color: var(--accent, #a0522d);
   background: var(--accent-soft, rgba(160, 82, 45, .1));
 }
+/* 灰显：人仍在名单里，只是这次不能选（例如已经在另一个身份里） */
+.pp-tile.off {
+  opacity: .45;
+  cursor: not-allowed;
+  background: var(--surface-2, #f5f1ec);
+}
+.pp-tile.off:hover { background: var(--surface-2, #f5f1ec); }
 
 .pp-avatar {
   display: grid;

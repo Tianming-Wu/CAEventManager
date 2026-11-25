@@ -1,73 +1,47 @@
-# 模块开发指南 - module.json、能力声明、页面与屏幕
+# 模块开发指南 - 组织文件、声明能力与验证
 
-模块是活动的内容：装上并启用某个模块，才有它的页面、设置与现场玩法。平台只提供每个活动都有的那几页
-（公示页、大屏、签到、活动设置、日志）。
+活动可用的业务逻辑、设置及页面由模块提供。字段、函数和前端回调的完整约定见[模块接口](module-interface.md)。
 
-**接口约定单独一份**：[模块接口](module-interface.md)——那边写清平台保证什么、模块必须提供什么、
-`module.json` 的每个字段、动作（`actions`）的声明方式与兼容政策。这份讲怎么打包与申请能力。
+## 组织模块
 
-## 目录与 `module.json`
+内置模块位于 `builtin/modules/<id>/`，实例安装的模块位于 `modules/<id>/`。
 
+```text
+module.json          模块标识、版本、页面与能力声明
+schema.json          创建活动时使用的参数
+model.py             业务逻辑
+schema.sql           活动数据库表定义
+defaults.json        模块设置的默认值
+pages/               活动后台页签及资源
+external/            模块提供的活动页面及资源
+templates/           随模块提供的预设
+doc.md               模块信息及使用说明
 ```
-builtin/modules/<id>/            随版本发布的模块
-modules/<id>/                    实例自己装的模块（不进版本库）
-  module.json                    标识、名称、版本、页面、能力声明
-  schema.json                    创建活动时要填的参数（平台据此画表单）
-  model.py                       这个玩法的业务逻辑（平台按 kind 载入）
-  pages/<页签>.html              这个页签的标记，平台拼进活动后台的外壳
-  schema.sql                     这个模块在活动库里的表
-  defaults.json                  这个模块的默认配置键
-  templates/*.json               随模块发布的预设
-  doc.md                         这个模块的现场说明（运维助手也读这份）
-```
+
+先在 `module.json` 中填写唯一模块 ID、显示名称、版本及适用的平台版本。按实际需要声明 `pages`、`external`、`actions` 和 `features`。在 `doc.md` 中记录模块 ID 和可用页面。预设只能设置 `schema.json` 已声明的参数。
+
+## 能力声明
+
+| 能力 | 平台提供的功能 |
+| --- | --- |
+| `roster` | 从活动设置绑定平台名单，并按学号同步成员 |
+| `search` | 依据模块声明的字段、拼音及标签匹配人员 |
+| `shortlink` | 在活动设置提供短链管理，并按活动归属、限额及回收 |
+| `super.anyshortlink` | 允许短链指向活动地址范围外的目标 |
+
+能力定义见 `core/modules.py` 的 `CAPABILITIES`。解析时会忽略无效声明并记录原因。短链目标、接口及限制参见[短链接口](../reference/api-shortlink.md)。高危权限的导入提示及生效规则见[模块接口](module-interface.md#高危权限)。
+
+### 搜索
+
+将下列对象作为 `module.json` 的 `features` 字段值。
 
 ```json
 {
-  "id": "nwuca.lottery",
-  "name": "奖票抽奖",
-  "version": "1.0.0",
-  "api": 1,
-  "requires": ">=1.4",
-  "external": ["board", "screen", "checkin", "admin"],
-  "pages": [{"id": "ops", "title": "操作台"}],
-  "features": { "search": { } }
-}
-```
-
-| 字段 | 说明 |
-| --- | --- |
-| `id` | 唯一标识，形如 `nwuca.lottery`；模块之间的完全限定名就以它开头 |
-| `api` | 接口版本（见[模块接口](module-interface.md)）；缺省按 1 算 |
-| `requires` | 需要的平台版本，不满足就不出现在创建列表里 |
-| `pages` | 申请哪些控制台页面（平台提供的那几种画法） |
-| `external` | 需要哪些公开页面（公示页、大屏、签到） |
-| `features` | **能力声明**：要用的平台功能必须在这里申请，见下 |
-
-## 能力声明（`features`）
-
-平台给的能力要申请才生效，没申请的模块看不到对应界面与接口：
-
-| 能力 | 申请之后多出什么 |
-| --- | --- |
-| `roster` | 后台「活动设置 › 名单来源」：可以从平台的名单库里绑一份，按学号增量同步；接口 `/api/admin/rosters`、`roster_bind`、`roster_sync` |
-| `search` | 记下发拼音与词表，平台的搜索算法据此匹配（`records` / `name` / `key` / `fields` / `tags`） |
-| `shortlink` | 活动后台出现「短链」卡片 |
-
-能力之间可以互相依赖：`CAPABILITY_NEEDS` 里登记的那些，依赖没申请就不给这个能力
-（并记一条原因）。例如名单同步先要有名单。
-
-## 能力声明（原样写法）
-
-写法照安卓的 manifest：**名字 + 自己的定义**。跟玩法无关的东西（版本号热更新、事件流、导出打包）
-平台一直给，不用申请；用得着的才声明，**没声明的模块在接口里根本看不到那一段**。
-
-```json
-"features": {
   "search": {
-    "records": "students",       // state 里那份清单的键名
-    "name": "name",              // 姓名字段：平台据此建拼音索引
-    "key": "sid",                 // 学号/编号：片段匹配
-    "fields": ["grp", "note"],    // 其余字段：只做"直接包含"
+    "records": "students",
+    "name": "name",
+    "key": "sid",
+    "fields": ["grp", "note"],
     "tags": [
       {"keys": ["w", "工作人员"], "label": "#w 工作人员", "field": "role", "eq": "staff"},
       {"keys": ["未签到"], "label": "#未签到", "field": "marks.checkin", "filled": false}
@@ -76,107 +50,21 @@ modules/<id>/                    实例自己装的模块（不进版本库）
 }
 ```
 
-- **平台出算法，模块出词表**：解析、拼音音节匹配、条件求交在 `assets/js/event.js`；字段与标签词表是
-  模块自己的事
-- **没申请就不发**：没声明 `search` 的模块，`/api/admin/state` 里的记录连 `pys`（逐字音节）都不带
-- **写错只丢那一项**：能力名认不出、声明类型不对，解析时丢掉并记原因，不影响模块其它部分
-- 另一个能力是 `shortlink`：申请之后，平台替这个模块负责的活动生成短链，负责跳转、归属、
-  条数上限与回收。声明里没有字段可写：
+`records` 指定状态中的记录集合。`name` 用于构建姓名拼音索引，`key` 和 `fields` 指定其他可匹配字段，`tags` 映射标签词和记录条件。拼音音节匹配及组合搜索由 `assets/js/event.js` 提供。
 
-```json
-"features": { "shortlink": {} }
-```
+## 打包与验证
 
-**指向哪里由模块自己决定**：目标是活动地址下的任意相对路径（`screen`、`checkin`、`admin`，
-或者模块自己拼的东西，例如 `admin#/ops`、`join/AB3D7KM`）。模块也可以在自己那一层再套一套
-它自己的 token 体系，平台不管。平台只拦三件事：带协议的绝对地址、跳出活动的 `..`、再套一层 `/s/`。
-
-没申请这个能力的模块，活动后台里没有短链入口，`/api/panel/shortlink` 也会拒绝。短链由平台保管、
-活动归档时销毁，模块不要自己存短链号。
-
-- 要加新能力，在 `modules.py` 的 `CAPABILITIES` 里加一项，再在 `FEATURE_DEFAULTS` 补默认值
-
-### 保留前缀 `super.`
-
-`super.` 是平台留给**高危功能**的命名空间：模块 id 与能力名都不能用它（`load_module` 直接拒绝）。
-这一批能力现在一律不生效，声明了也只记一条原因，要平台单独授权才可能打开。
-
-第一个预留的是 `super.anyshortlink`：**不受限制的短链跳转**，可以指向活动地址之外的地方。
-与 `shortlink` 的区别只有一条：平台那三道拦截（协议、`..`、再套 `/s/`）在这个能力下全部放开。
-
-导入模块时，声明里出现的 `super.*` 会在确认弹窗里用红字一条条列出来——名字 + 一句说明，
-让人明确知道这个模块要了多大的权限。这件事还没做，接口先留在这里：
-`modules.super_features()` 返回 `[{"name", "note"}]`。
-
-## 模块之间的功能导出（计划中，尚未实现）
-
-语法定在这里，实现见 ROADMAP：
-
-```json
-// 提供方 nwuca.random
-"provides": {
-  "real_random": {"kind": "js", "entry": "random.js", "export": "realRandom"}
-}
-
-// 使用方 nwuca.lottery
-"depends": ["nwuca.random"],
-"features": {
-  "random": {"use": "nwuca.random.real_random"}
-}
-```
-
-- 完全限定名是 `<模块 id>.<功能名>`，例如 `nwuca.random.real_random`
-- **必须先声明 `depends`**：没声明就 `use` 别人的功能，这个模块直接判为无效、拒绝加载——
-  让依赖关系只有一处可写，不靠"碰巧加载到了"
-- 有了它就能写工具库型模块：只导出功能、不申请页面
-- **现状**：模块只有 `requires`（平台版本约束）与预设的 `dependency`（预设依赖模块），
-  还没有模块之间的依赖，所以这一条先搁置，等做依赖时一起实现（见 ROADMAP）
-
-## 仓库自带的两个模块
-
-拿它们当参考读，比读规范快：
-
-| 模块 | 它示范了什么 |
-| --- | --- |
-| `builtin/modules/nwuca.lottery` | 自定页签（操作台/名单/奖票/抽奖/设置）、动作、搜索词表、短链、公示页与签到页、大屏揭示动画、六张导出表 |
-| `builtin/modules/nwuca.talk` | 只用 3 个自定页签（议程/提问/设置）、七个动作、一张公示页与它自己的样式、两张导出表；没有名单、奖票、抽奖 |
-
-两个模块在同一个实例里互不影响：`python tools/run_suites.py modules` 就是跑这件事。
-
-## 页面与屏幕
-
-- 控制台页面由模块给：`pages/<页签>.html` 是内容，`pages/<页签>.js` 是脚本，外壳与调度在平台
-- 公开页（公示页、签到页）由模块给：`external/<页>.html` + 同名脚本，声明在 `module.json` 的 `external` 里
-- 公示页与大屏要什么数据由模块的 `present()` 说了算，平台只转发、不认识里面的字段
-- 展示屏幕是可替换的插接件：`theme/<标识>/screen.html`，活动配置里写 `screen_pack` 就切换
-- 预设是模块之上的一份配置快照，只能设置模块 `schema.json` 声明过的参数
-
-## 出错会怎样
-
-模块的 `model.py` 跑在服务进程里（没有可杀的独立进程），所以平台给它套了一层保护
-（`core/moduleguard.py`）：从模块取出来的每个函数都过一次保护层。
-
-- 抛 `errors.ApiError`：当作"给用户看的错误"原样向上交，例如参数不对回 400，不算崩溃
-- 抛别的异常：这一次请求兜住，接口回 503 与一句说明（**不是**「服务器内部错误」），
-  服务日志里留全栈；同时把这个模块的 `model.py` **重新载入一次**再试一次——模块内的全局状态
-  就此清掉，等于它能有的"重启"
-- 同一个模块**连续三次**失败：自动停用它（与站长点 [停用] 是同一个状态）、发一条全站通知、
-  审计记 `module_auto_off`。它的活动显示「此活动不可用」，数据一条不动
-- 成功一次就把失败计数清零
-
-写模块时因此要记住两件事：**别在模块顶层做会失败的重活**（导入期的异常同样会让它被停用），
-**该抛 `ApiError` 的地方别抛裸异常**——裸异常会被当成"这个模块坏了"。
-
-## 自测
+按[打包与安装](module-interface.md#打包与安装)的约定生成 ZIP 包。安装后，创建使用该模块的活动，检查创建参数、页签、活动页面和导出结果。声明了高危权限时，同时检查导入提示。
 
 ```powershell
-python tools/run_suites.py unit          # 模块清单与能力声明的解析都在这一套里
-python tools/run_suites.py ui            # 起一个实例、灌演示数据、把控制台走一遍
+python tools/run_suites.py unit modules
 ```
+
+可参考内置「奖票抽奖」的搜索、动作及模块页面，以及「讲座」的议程、提问和展示数据。
 
 ## 相关文档
 
-- [结构](architecture.md)
 - [模块接口](module-interface.md)
-- [短链接口](../reference/api-shortlink.md)
 - [奖票抽奖](../../builtin/modules/nwuca.lottery/doc.md)
+- [讲座](../../builtin/modules/nwuca.talk/doc.md)
+- [项目架构](architecture.md)

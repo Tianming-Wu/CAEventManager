@@ -1,79 +1,36 @@
-# CAEventManager - 学生社团活动管理服务平台
+# CAEventManager - 学生社团活动管理平台
 
-学生社团活动管理服务平台，提供活动报名、现场签到、现场推进与抽奖等功能。提供审计级别日志和软删除。
-
-一套服务同时承载主面板与多个活动：主面板管理账号、名单与报名，每个活动各有公示页、大屏、
-登记页与活动后台。自托管，单进程运行。
-
-活动的内容由**模块**决定，平台只提供外壳。仓库自带两个模块：`nwuca.lottery`（奖票抽奖）与
-`nwuca.talk`（按议程推进的讲座），两个模块可以在同一个实例里同时跑。
+CAEventManager 是可自行部署的学生社团活动管理平台，提供活动管理、名单、报名、现场签到及抽奖功能。
 
 ## 环境要求
 
-- Python 3
-- 部署主机可通过 ssh 访问，并存在 tar 命令
-- 运行界面测试需要本机安装 Microsoft Edge 与 Playwright
+| 场景 | 要求 |
+| --- | --- |
+| 本地部署 | Python 3。使用服务脚本时需要 Linux 和 `flock` |
+| 远程部署 | 满足服务运行要求。使用远程部署脚本时，需要 SSH 客户端及目标 Linux 系统上的 SSH 访问和 `tar` |
+| 界面测试 | Microsoft Edge 和 Python 的 Playwright 包 |
 
 ## 安装与启动
 
-```sh
-python3 app.py
-```
+1. 将应用文件放入部署目录。远程部署可使用部署脚本的 `-NoRestart` 选项，待配置完成后再启动。
+2. 在应用根目录创建 `config.json`。将 `public_base_prefix` 设置为用户访问实例的完整基础地址，包含协议及实际使用的端口和挂载路径，例如 `https://events.example.org/activities`。按需设置监听地址 `host` 和监听端口 `port`。完整示例、静态设置和环境变量见[部署配置](doc/ops/deploy.md#配置)。
+3. 在应用根目录启动服务。
 
-首次启动会生成默认配置（`config.json`），并生成默认站长密码写入 `data/owner_password.txt`。
-服务启动后，使用浏览器访问 `http://127.0.0.1:8931/` 并登录。
+   ```sh
+   ./bin/service.sh start
+   ```
 
-## 部署
+4. 通过配置的对外地址访问实例。使用站长登录名（默认为 `owner`）及数据目录中 `owner_password.txt` 保存的初始密码登录，随后修改密码。
 
-```powershell
-.\bin\deploy.ps1 -Remote user@host -Dest apps/lottery
-```
-
-## 配置
-
-`config.json` 在应用根目录，首次启动时自动写入：
-
-| 键 | 默认值 | 作用 |
-| --- | --- | --- |
-| `host` | `0.0.0.0` | 监听地址 |
-| `port` | `8931` | 监听端口 |
-| `public_base_prefix` | `http://127.0.0.1:8931` | 拼绝对链接用，不参与路由判定 |
-| `owner_username` / `owner_name` | `owner` / `站长` | 站长的登录名与显示名 |
-
-活动的访问地址由「前缀 + 活动自己的 token」组成，token 存在 `panel.sqlite3` 里，不写进配置文件。
-
-静态设置写在同一个文件里，改完要重启服务：`shortlink_per_event`（一个活动最多同时持有多条短链，
-默认 5）、`max_accounts`（账号总数上限，默认 0 即不限）、`data_dir` 与 `backups_dir`
-（数据与备份放在哪，默认是应用根目录下的 `data/` 与 `backups/`）。
-
-环境变量：`LOTTERY_DATA_DIR`、`LOTTERY_PACKS_DIR`、`LOTTERY_HOST`、`LOTTERY_PORT`、
-`LOTTERY_VERSION`、`LOTTERY_LOG_MAX`、`LOTTERY_ASSISTANT_PROMPT`。
-
-## 文档
-
-| 分类 | 位置 |
-| --- | --- |
-| 使用说明 | [doc/usage/](doc/usage/) |
-| 参考 | [doc/reference/](doc/reference/) |
-| 部署与运维 | [doc/ops/deploy.md](doc/ops/deploy.md) |
-| 开发 | [doc/dev/](doc/dev/) |
-| 计划与取舍 | [ROADMAP.md](ROADMAP.md) |
-| 全部文档 | [doc/README.md](doc/README.md) |
-
-## 注意事项
-
-- 活动没有删除操作，只有存档；存档后数据保留，可随时查阅
-- 影响权限与数据的敏感操作需要重新输入一次密码
-- 运维助手的写操作每次都要用户批准后才执行，需要 sudo 的动作不开放给它
-
-## 限制与路线图
-
-- 不做多租户：一套服务属于一个组织
-- 不引入第三方运行时依赖
-- 运维助手只读随应用装好的文档，碰不到服务器上的文件
-
-计划与取舍见 [ROADMAP.md](ROADMAP.md)。
+服务脚本支持通过面板重启服务，以及在切换安全模式后自动重启。前台调试可使用 `python3 app.py --host 127.0.0.1`。直接启动时，在面板切换安全模式后须手动重启。手动备份和定时备份均由应用提供。参见[首次部署](doc/ops/deploy.md#首次部署)。
 
 ## 许可证
 
-MIT，见 [LICENSE](LICENSE)。
+采用 MIT 许可证。参见 [LICENSE](LICENSE)。
+
+## 相关文档
+
+- [文档目录](doc/README.md)
+- [开始使用](doc/usage/start.md)
+- [部署与运维](doc/ops/deploy.md)
+- [路线图](ROADMAP.md)

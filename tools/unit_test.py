@@ -979,7 +979,7 @@ def main():
         check("提示词写了回答的 Markdown 语法与站内链接怎么写",
               "[文字](路径)" in a.SYSTEM_PROMPT
               and "usage/rosters.md" in a.SYSTEM_PROMPT
-              and "assistant.md#它会查文档" in a.SYSTEM_PROMPT
+              and "assistant.md#文档查询" in a.SYSTEM_PROMPT
               and "图片不渲染" in a.SYSTEM_PROMPT, a.SYSTEM_PROMPT[:80])
         # 站外白名单：模型的输出不可信，只有确知的地址才让界面渲染成链接
         allow = [re.compile(p) for p in a.outbound_links()]

@@ -1,386 +1,136 @@
-# 模块接口 - 平台与模块各管什么
+# 模块接口 - 声明格式、业务函数与页面接入
 
-平台的代码里不出现任何玩法名词（奖票、任务链、抽奖）。这一份把「平台保证什么、模块必须提供什么」
-定清楚，写的时候按它来，改的时候按它的兼容政策改。
+平台负责活动身份、成员席位、鉴权、通用资源及页面外壳。模块提供业务数据、动作与界面。开发和验证流程见[模块开发指南](modules.md)。
 
-接口版本见 [module.json 字段](#modulejson-字段)。这一版的接口版本是 **api 1**。
+## 接口版本
 
-## 谁负责什么
+`module.json` 的 `api` 为整数，省略时使用 1。平台支持的版本由 `core/modules.py` 中的 `SUPPORTED_API` 定义。模块的版本兼容性还受 `requires` 约束。
 
-| 事情 | 平台 | 模块 |
-| --- | --- | --- |
-| 活动、成员席位、邀请与移出 | 管 | — |
-| 账号、角色、审核、sudo | 管 | — |
-| 名单与报名（平台级的人） | 管 | 可调这批数据 |
-| 通知、审计、短链、服务提示 | 管 | 用它的能力，不自己存 |
-| 登录、会话、CSRF、并发冲突 | 管 | — |
-| 页面外壳（顶栏、页签、卡片、表格样式） | 管 | 提供页面的内容与脚本 |
-| 公示页、大屏的公共字段 | 管 | 提供展示数据 |
-| 签到二维码与凭据、时限、presence cookie | 管 | 提供「记一次到场」的动作 |
-| 玩法的数据表 | 建库时执行模块的 `schema.sql` | 声明表、写迁移 |
-| 玩法怎么记人、发什么、抽不抽奖 | 不知道 | 全权负责 |
-| 玩法页面上的按钮点什么 | 只管鉴权与事务 | 声明动作，实现动作 |
-
-一句判断准则：**平台管「谁、在哪、能不能」，模块管「做什么、怎么算」。**
-
-### 管理员把模块停用之后
-
-停用（`panel.set_module_enabled`）是全站级的开关，落在 `module_state` 表上。平台在每个活动请求
-进门前查一次（`panel.stopped_module`，一条查询：`events.kind` 连 `module_state`）：
-
-- 活动页 → 503 + `pages/module-off.html`（地址不动，启用之后刷新即回来）
-- 活动接口 → 503 + `MODULE_OFF_MSG`
-- 创建活动、预设一并标为不可用；「我的活动」的卡片带 `stopped` 标记
-- **已经打开的页面自己换过去**：停用时 `bus.bump("modules")`，每个活动的流都会看到这个站级键，
-  服务端确认这一场已被停用就发一条 `{"off": true}` 并收尾，客户端 `location.reload()` 落到说明页。
-  启用不做反向推送（那要靠轮询，代价不值）
-
-模块自己不需要为此写任何代码：它拿到的请求里已经不含停用的活动了。数据一条不动。
-
-### 高危能力（`super.*`）
-
-有些能力给出去就收不回来：模块能碰到「平台管的东西之外」——别的活动、别的账号、服务器，
-或者把用户带到别的地方去。这批能力放在保留命名空间 `super.` 下：
-
-- `module.json` 里照常写，例如 `"features": {"shortlink": {}, "super.anyshortlink": true}`
-- **声明即生效**：平台不给能力做逐条开关，模块只有「装了」与「没装」两种状态。
-  所以提示放在装的那一步：面板「模块管理 › 导入模块」会先把申请的能力摆出来，
-  高危那几条另起一句红字并带上后果，站长看清了才点 [安装]（要 sudo）
-- 装好之后模块名右侧挂「高危」胶囊，悬停能看到申请了哪几条；列表里也能随时 [停用] / [卸载]
-- 现有的一条：**`super.anyshortlink`**——短链目标的三道拦截（带协议的地址、`..`、再套 `/s/`）
-  全部放开，可以指向活动地址之外的地方，长度上限也从 200 放宽到 2000
-
-写模块的人要明白：申请了就一定要在 `doc.md` 里说清为什么需要它，站长是照着那句话判断的。
-
-### 打包与安装
-
-把模块目录打成 zip 就能装：`module.json` 在最外层，或者整个目录一起打包（顶层那一层会被去掉）。
-限 2 MB、解开后 8 MB、单文件 1 MB、最多 400 个文件；只收代码、数据、文档与页面资源
-（`.py` `.json` `.md` `.txt` `.js` `.css` `.html` `.svg` `.png` `.jpg` `.jpeg` `.webp`
-`.gif` `.woff` `.woff2` `.csv`），不收符号链接与可执行文件。
-
-装模块等于让一段别人写的代码在这个进程里跑：只有站长能装，装之前要再输一次密码。
-不想用界面也行——把目录放进 `modules/`，重启后一样出现在「模块管理」里。
-
-## 接口版本与兼容政策
-
-`module.json` 的 `"api"` 是接口版本（整数，缺省按 1 算）。平台声明自己支持的版本
-（`modules.SUPPORTED_API`），不支持的模块不出现在创建列表里。
-
-改动规则：
-
-| 改动 | 要不要动 `api` |
-| --- | --- |
-| 新增可选字段、新增动作、新增页面 | 不动：老模块照常跑 |
-| 新增必填字段、改字段语义、改动作参数含义 | **+1**，并且在本文写明迁移要点 |
-| 删除字段或动作 | **+1**，平台至少同时支持旧版本一个周期 |
-
-平台升级时，旧版本的模块要能继续用：这是硬要求，`tools/unit_test.py` 里保留一组
-「上一个 api 版本的模块声明」用来验证。
+新增可选字段不改变接口版本。修改既有字段语义、增加必填条件或移除接口时，应评估接口版本并明确旧版本的兼容及迁移要求。
 
 ## module.json 字段
 
+| 字段 | 用途 |
+| --- | --- |
+| `id` | 唯一模块 ID，例如 `nwuca.lottery`，不得使用保留前缀 `super.` |
+| `name`、`version` | 显示名称及模块版本 |
+| `api`、`requires` | 模块接口版本及平台版本约束 |
+| `description`、`author`、`homepage`、`license`、`contact` | 可选的模块说明与维护信息 |
+| `pages` | 后台页签，条目包含 `id` 和 `title` |
+| `scripts` | 页签脚本前载入的共用脚本，省略 `.js` 后缀 |
+| `settings` | 可在活动后台修改的模块设置，类型取自 `defaults.json` |
+| `external` | 活动页面声明，识别 `board`、`screen`、`checkin` 和 `admin` |
+| `features` | 平台能力声明，参见[能力声明](modules.md#能力声明) |
+| `actions` | 写操作声明，参见[动作声明](#动作声明) |
+
+创建活动时，平台读取 `schema.json` 中的 `fields` 生成参数表单并验证提交值。预设的参数也应符合该声明。
+
+### 高危权限
+
+`super.` 是平台保留的高危权限命名空间。当前支持 `super.anyshortlink`，允许短链指向活动范围外的地址。它与常规 `shortlink` 一并声明。
+
+站长导入模块时，平台列出模块声明的高危权限。确认安装须使用 sudo 模式。模块启用后，受支持的声明生效。在模块说明中注明权限用途及影响。查看权限或停用模块的操作见[平台管理页](../usage/platform-pages.md#高危权限)。
+
+### 打包与安装
+
+ZIP 文件可直接包含模块文件，也可包含一层模块目录。`module.json` 须位于模块目录根部。上限为压缩包 2 MiB、解压总计 8 MiB、单文件 1 MiB 和 400 个文件。界面导入仅接受 `modules.EXT_ALLOWED` 中的扩展名，并拒绝符号链接。
+
+当前 ZIP 导入不接受 `.sql`。需要发布 `schema.sql` 的受信模块可由部署维护人员放入实例的 `modules/`，再重启服务。手动安装应核对模块声明的高危权限。
+
+## 业务函数
+
+平台通过 `core/model.py` 按活动所用模块加载 `model.py`。模块按所用页面和能力提供相应函数。
+
+| 函数 | 用途 |
+| --- | --- |
+| `ensure_seed(conn)` | 可选的初始化钩子。须可重复调用 |
+| `snapshot(conn, cfg)` | 返回后台记录。使用搜索时，记录字段须匹配能力声明 |
+| `stats(conn, cfg)` | 返回统计数据，字段由模块定义 |
+| `present(conn, cfg)` | 返回公开展示数据 |
+| `check_settings(conn, updates)` | 可选，在平台完成类型校验后验证设置 |
+| `export_sheets(conn, cfg)` | 可选，返回包含 `name`、`text` 及可选 `primary` 的导出条目 |
+| `action(name, ctx, payload)` | 实现模块声明的动作 |
+| `self_checkin(conn, sid, name)` | 实现使用平台签到流程的模块的签到操作 |
+
+导出条目以 `primary: True` 标记单独下载的主 CSV。平台负责 ZIP 打包。
+
+### 数据表
+
+平台初始化活动数据库，随后执行模块提供的 `schema.sql`。表声明须可重复执行，建议为模块表使用专属前缀。涉及既有数据的结构变更应由模块明确处理并验证升级场景。
+
+## 动作声明
+
+平台在 `POST /<token>/api/do/<name>` 分发模块动作。
+
 ```json
 {
-  "id": "nwuca.lottery",
-  "name": "奖票抽奖",
-  "version": "1.0.0",
-  "api": 1,
-  "requires": ">=1.9",
-  "description": "签到、任务进度、奖票与抽奖",
-  "author": "…", "homepage": "…", "license": "…",
-  "pages": [{"id": "ops", "title": "操作台"}],
-  "scripts": ["common"],
-  "external": ["board", "screen", "checkin", "admin"],
-  "features": {"search": {}, "shortlink": {}},
-  "actions": { … 见下 … },
-  "board": {"title": "抽奖", "blocks": ["counters", "winners"]}
-}
-```
-
-| 字段 | 谁用 | 说明 |
-| --- | --- | --- |
-| `id` | 平台 | `nwuca.lottery` 这种形状；`super.` 是保留前缀 |
-| `name` | 平台 | 给人看的名字 |
-| `version` | 平台 | 模块自己的版本，改就升 |
-| `api` | 平台 | 接口版本，见上一节 |
-| `requires` | 平台 | 需要的平台版本 |
-| `pages` | 平台 | 申请哪些页签；`id` 任意小写串 |
-| `scripts` | 平台 | 页签脚本之前先载入的共用脚本，写文件名去掉 `.js`（如 `common`） |
-| `settings` | 平台 | 哪些配置项可以从界面改；类型取自 `defaults.json` 里那个默认值 |
-| `external` | 平台 | 要哪些公开页面：`board` / `screen` / `checkin` / `admin`；声明了就自带那一页 |
-| `features` | 平台 | 能力声明（`roster` / `search` / `shortlink`，以及要单独授权的 `super.*`） |
-| `actions` | 平台 | 写操作声明，平台据此生成接口、鉴权、审计与版本号 |
-| `board` | 平台 | 公示页/大屏要哪些块，见「展示数据」 |
-
-## 模块必须提供的函数
-
-模块在 `model.py` 里提供下面这些。平台只调这几个名字，别的一个都不认识。
-
-### 生命周期
-
-```python
-def init_event(conn, params):
-    """活动库刚建好、模块的表已建好时调用一次。params 是 schema.json 收上来的参数。"""
-
-def ensure_seed(conn):
-    """每次启动后的兜底：缺什么补什么，可重复调用。可以没有这个函数。"""
-```
-
-### 读
-
-```python
-def stats(conn, cfg):
-    """给公示页/大屏与后台的一组数字，键名由 board 声明。没有就返回 {}。"""
-
-def snapshot(conn, cfg):
-    """后台「名单」页要的行：id / sid / name / grp / role / 状态字段由模块定，
-    平台只按 features.search 的声明取值。"""
-```
-
-### 设置（可选）
-
-```python
-def check_settings(conn, updates):
-    """设置项的语义校验。平台已经按类型收过一遍，这里管"这个值合不合理"。"""
-```
-
-界面能改哪些键由 `module.json` 的 `settings` 声明；类型取自模块 `defaults.json` 里那个
-默认值（所以每个可改的键都要在 `defaults.json` 里有默认值）。平台自己的几个键
-（标题、副标题、公示地址、自助登记开关、展示屏幕）不写在模块里。
-
-### 导出（可选）
-
-```python
-def export_sheets(conn, cfg):
-    """要导出的表：[{"name": "01-汇总.csv", "text": "…", "primary": True}, …]"""
-```
-
-平台只负责打包成 zip、给文件起名；表有几张、每张什么列、叫什么名字都是模块的事。
-标 `primary: True` 的那一张会单独当"仅名单 CSV"下载。
-
-### 动作
-
-模块不写 HTTP，只写动作：
-
-```python
-def action(name, ctx, payload):
-    """执行一个动作。name 是 actions 里声明的名字，ctx 见下，payload 是参数。
-
-    返回 dict：平台原样回给前端；想写审计就带上 "audit": "一句话"。
-    出错抛 errors.ApiError（一句话 + 状态码）。
-    """
-```
-
-`ctx` 由平台给：
-
-```python
-{"conn": conn, "cfg": cfg, "event": {"seq": 3, "title": "…", "kind": "nwuca.lottery"},
- "account": {"id": 7, "username": "laffey", "name": "吴天明", "role": "owner"},
- "seat": "owner", "unlocked": False, "now": 1794332130.1}
-```
-
-签到也是动作，但平台在调用前后还要管凭据：
-
-```python
-def checkin(ctx, payload):
-    """自助签到：学号与姓名都对上才记一次到场。返回给报名人看的信息。"""
-```
-
-## actions：写操作的声明
-
-平台按声明生成 `/<token>/api/do/<name>`，并按声明做鉴权、事务、审计与版本号。
-
-```json
-"actions": {
-  "mark": {
-    "title": "标记完成",
-    "args": {"student": {"type": "int", "required": true},
-             "kind": {"type": "str", "required": true, "max": 16}},
+  "example": {
+    "title": "更新记录",
+    "args": {"record": {"type": "int", "required": true}},
     "seat": "member",
     "unlock": true,
     "finalized": "block",
-    "target": "student:{student}"
-  },
-  "draw": {"title": "抽一次", "args": {"prize": {"type": "int", "required": true}},
-           "seat": "owner", "unlock": true, "target": "draw"}
+    "target": "record:{record}"
+  }
 }
 ```
 
-| 键 | 默认 | 意思 |
+| 字段 | 默认值 | 用途 |
 | --- | --- | --- |
-| `title` | 动作名 | 审计里怎么写 |
-| `args` | `{}` | 参数表：`type`（int / str / bool / float / json）、`required`、`max` |
-| `seat` | `member` | 要什么席位：`member` 或 `owner` |
-| `unlock` | `false` | 要不要先打开「解锁修改」开关（现场高危动作一律走这个，现场没时间输密码） |
-| `finalized` | `block` | 活动已结算时是否还允许：`block` / `allow` |
-| `target` | `event` | 版本号对象模板，`{arg}` 会替换成参数；并发冲突与实时同步都按它算 |
+| `title` | 动作名 | 面向用户的操作名称及默认审计说明 |
+| `args` | `{}` | 参数定义，支持 `int`、`str`、`bool`、`float`、`json` 类型及 `required`、`max` |
+| `seat` | `member` | 所需活动席位，可设为 `owner` |
+| `unlock` | `false` | 是否须启用「解锁修改」 |
+| `finalized` | `block` | 活动结算后是否允许执行，可设为 `allow` |
+| `target` | `event` | 版本通知的对象模板，`{参数名}` 会替换为实际参数值 |
 
-平台在调用前后做的固定几件事：解析账号与席位 → 校验 `unlock` / `finalized` / 参数 →
-开事务 → 调 `action()` → 冲突检查 → 记审计（`title` + 模块返回的 `audit`）→ 推版本号。
+平台校验会话、席位、跨站请求防护及动作条件，并在事务中调用 `action()`。`ctx` 包含 `conn`、`cfg`、`event`、`account`、`seat`、`unlocked` 和 `now`。其中 `event` 包含 `seq`、`title` 和 `kind`。返回字典可包含 `audit`，用于补充操作日志。成功提交后由平台发布对象版本。
+
+参数或业务校验失败时抛出 `errors.ApiError`，传入面向用户的说明及相应 HTTP 状态码。动作实现使用调用方提供的事务，不自行提交或发布版本号。
 
 ## 页面与资源
 
-模块的页签由平台画外壳，内容与脚本由模块给：
-
-```
-pages/common.js         几页共用的脚本，写在 module.json 的 scripts 里（可选）
-pages/ops.html          这个页签的内容（一段 HTML，不含 <html> 外壳）
-pages/ops.js            这个页签的脚本（可选）
-pages/ops.css           可选
-```
-
-**HTML**：平台读 `pages/<页签>.html`，按 `pages` 的顺序拼进后台外壳的 `{{MODULE_PAGES}}`。
-
-**脚本**：平台先载 `module.json` 里 `scripts` 声明的共用脚本，再按 `pages` 的顺序载入
-`pages/<页签>.js`（地址是 `/<token>/module/<名字>.js`）。载入到不存在的文件不算错（回一份
-空 JS），所以不是每一页都得有脚本。载完按下面的契约调用：
+后台页签使用 `pages/<id>.html` 提供 HTML 片段。平台先加载 `scripts` 声明的共用脚本，再按页签顺序加载 `pages/<id>.js`。脚本从 `/<token>/module/<name>.js` 提供。
 
 ```js
-window.MODULE.pages.tickets = {
-  mount(ctx) {},              // 启动时一次；ctx = {LT, state, tab, page, reload, showTab}
-  refresh(state, tab) {},     // 平台每次拉到新状态
-  show(tab) {},               // 切到这个页签（返回值是 Promise 也行）
-  count(state) {},            // 可选：页签上的数字，没有就不画角标
+window.MODULE.pages.main = {
+  mount(ctx) {},
+  refresh(state, tab) {},
+  show(tab) {},
+  count(state) {},
 };
 ```
 
-- `LT` 是平台给的共用件（`esc` / `toast` / `modal` / `api` / `fmtTime` …）；模块脚本**拿不到**
-  平台内部的 `$`、`bad` 这类私有函数，要什么自己取
-- `state` 是平台的状态对象（同一个引用），模块可以往里挂自己的字段
-- `ctx.reload()` 让平台重新拉一次状态（模块改了东西之后要重读时用）
-- `ctx.showTab(id)` 切到另一个页签：模块自己的几页之间跳转用，例如名单页把一个人交给操作台
-- 同一模块的页面之间可以直接调对方的入口（`window.MODULE.pages.ops.select(name)`），
-  几页共用的画法放 `MODULE.lib`，由共用脚本定义
-- 顶栏那条状态由模块填：共用脚本里定义 `window.MODULE.head = { render(state) → HTML }`，
-  平台只提供那块地方，不认识上面写的是什么
-- 进来先落到哪一页由模块说了算：共用脚本里定义 `window.MODULE.landing(state)` 返回页签名，
-  平台只问一次
-- 解锁开关那句话由模块说：`window.MODULE.unlockNote`（字符串，或返回字符串的函数），
-  平台只认识开关本身
-- 页签里的按钮由模块自己在 `mount` 里接；平台只认平台外壳上那几个 `data-*`
-- 平台不直接调模块的函数，只走 `button → pageShow/pageRefresh`
+- `mount(ctx)` 初始化页签并注册事件。上下文包括 `LT`、`state`、`tab`、`page`、`reload` 和 `showTab`。
+- `refresh(state, tab)` 接收平台重新加载的状态。`show(tab)` 在切入页签时调用，可返回 Promise。`count(state)` 可返回页签计数。
+- `ctx.reload()` 重新读取状态，`ctx.showTab(id)` 切换页签。
+- 可选的全局钩子包括 `MODULE.head.render(state)`、`MODULE.landing(state)` 和 `MODULE.unlockNote`，用于提供标题栏内容、默认页签和解锁提示。
 
-模块还能带的东西：页签标记与脚本、公开页、预设、外观、导出表、设置校验。平台留给自己的
-只剩"壳"：页签调度、账号与席位、名单库、短链、通知、审计、备份归档、大屏与页面外壳。
+### 活动页面
 
-**已经搬完的**：五个页签的标记、脚本与动作全在模块里（`ops` / `roster` / `tickets` /
-`draw` / `config` 五份脚本加一份共用件）。平台侧只剩页签调度与主站功能：活动设置（成员、
-名单来源、短链、数据、危险区域）、日志、解锁开关。
+模块公示页和签到页可在 `external/` 提供完整 HTML 及对应资源，并在 `module.json` 中声明页面。公示页使用 `external/board.html`，签到页使用 `external/checkin.html`。活动后台由平台提供外壳，其中注入模块页签。建议明确声明 `external`，省略时加载器会采用默认页面声明。展示屏幕通过活动的 `screen_pack` 设置选择 `theme/<标识>/screen.html`，由展示屏幕分发器处理。
 
-### 公开页（`external`）
+`GET /<token>/api/board` 返回公开活动设置 `config`、模块 `present()` 的结果以及 `serverTime`。`present` 中的业务字段由模块与页面共同约定。经典展示屏幕读取可选的 `screen` 对象，各区域为可选字段。公开展示结果仅应包含可公开的数据。
 
-公示页、签到页这些不用登录的页面也归模块：在 `external/` 里放整页 HTML，脚本与样式放同一层。
+| 字段 | 经典展示屏幕读取的内容 |
+| --- | --- |
+| `subtitle`、`qr` | 副标题及各阶段的二维码说明 |
+| `banner` | 统计项目，常用字段为 `label`、`value`、`of`、`tone` 和 `phase`。未指定 `phase` 时不限制展示阶段 |
+| `strip` | 横向记录，包含 `label` 及 `items`。记录可提供 `title`、`name`、`note` 和样式类别 `kind` |
+| `wall` | 列表区域，使用 `on` 控制显示，并通过 `items` 提供 `name`、`note` 和 `level` |
+| `cards` | 包含 `title` 和 `body` 的卡片 |
+| `reveal` | 揭示动画，使用 `key` 标识新结果。可提供 `candidates`、`value`，多个结果可通过 `items` 集中展示 |
 
-```
-external/board.html      公示页（整页，含 <html> 外壳；{{TITLE}} / {{FAVICON}} 由平台替换）
-external/board.js        这一页的脚本
-external/checkin.html    签到页
-external/checkin.js
-```
+渲染细节见 `assets/js/screen.js`，数据示例见内置模块的 `present()`。
 
-- 页面在 `/<token>/` 下（公示页就是 `/<token>/`，签到页是 `/<token>/checkin`），
-  所以页面里写 `assets/css/app.css`、`external/board.js` 都是相对地址
-- `module.json` 的 `external` 声明了哪几页，平台就把哪几页指向模块；没带文件就是 404
-- 大屏走的还是「外部资源 › 展示屏幕」那套：`theme/<标识>/`，活动设置里挑一份
-- 平台在这些页面上仍是那几件共用件：`assets/js/event.js` 给的 `LT`、平台的那张样式表
+## 停用与异常
 
-## 数据
+平台在分发活动请求前检查模块状态。模块停用时，关联活动页面显示不可用提示，接口返回 HTTP 503。已打开的页面通过事件流接收状态变化。启用后可刷新页面恢复访问。
 
-活动库归平台建：平台先建自己的表（`config` / `audit`），再执行模块的 `schema.sql`。
-
-- `schema.sql` 必须可重复执行（`CREATE TABLE IF NOT EXISTS`）
-- 表名以一个短前缀开头，避免与平台表撞名（例如 `lottery_students`）
-- 改表结构：`module.json` 里把 `"schema": 2` 往上加，同时放 `migrations/2.sql`；
-  平台按活动库里记的版本依次执行。不写迁移、只改 `schema.sql` 的改动只在**新建活动**上生效
-
-## 展示数据
-
-公示页与大屏的公开接口是 `/api/board`：平台出壳，里面是什么由模块说。
-
-```python
-def present(conn, cfg):
-    """公示页/大屏要展示的东西。形状由模块自己定，平台原样塞进下面这个包：
-    {"ok": true, "config": …公开的活动设置…, "present": <这个返回值>, "serverTime": …}"""
-```
-
-平台不认识 `present` 里的任何字段——所以模块想怎么组织就怎么组织，页面上怎么画也由模块决定。
-公开页的公共字段（活动名、副标题、公示页地址、「显示学号」「显示完成时间」这些开关）在
-`config` 里，模块给的数据只要跟它对得上就行。
-
-### 大屏要画什么（`present().screen`）
-
-大屏是平台画的：外壳、二维码、阶段版式、揭示动画都在 `assets/js/screen.js` 里，模块只填数据。
-给哪块画哪块，一块都不给就只显示标题与二维码——所以换一个模块，大屏照样能用。
-
-```python
-"screen": {
-    "subtitle": "扫码查看实时奖票公示",          # 副标题的默认说法
-    "qr": {"signin": "扫码签到 · 每 10 秒刷新", "draw": "扫码查看"},
-    "banner": [{"label": "已签到", "value": "47", "of": "/63",
-                "tone": "green", "phase": "signin"}],      # 数字条，phase 可选
-    "strip":  {"label": "中奖名单",
-               "items": [{"title": "一等奖", "name": "高勇",
-                          "note": "#0061", "kind": "person"}]},
-    "wall":   {"on": True,
-               "items": [{"name": "高勇", "note": "0001 0002", "level": 2}]},
-    "cards":  [{"title": "当前场次", "body": "第三轮 · 剩 4 份"}],
-    "reveal": {"key": "draw:12",                 # 变了就播一次揭示动画
-               "title": "一等奖", "value": "0061", "note": "高勇", "sub": "2024001",
-               "candidates": ["0001", "0002"],   # 滚动时闪过的字
-               "hint": "请上台领奖 · 点击任意处关闭",
-               "items": [{"value": "0061", "name": "高勇", "note": ""}]},
-}
-```
-
-- `banner` 的 `tone` 是样式名（外观包自己定义配色），`of` 拼在数字后面当分母
-- `strip.items` 新的在前；`kind` 会变成额外的样式类
-- `reveal.items` 有两个以上时按"一次抽完"的样子画成网格；`names` 为真时大字按人名排
-- 平台不认识这些字段的业务含义，只按上面的形状排版
-
-`present()` 里其余的字段（例如这个模块给公示页的 `stats` / `students` / `winners`）是模块
-自己的事，平台原样转发，页面上怎么用也由模块决定。
-
-## 错误、审计、并发
-
-- 出错抛 `errors.ApiError("一句话", 状态码)`；平台翻成 `{ok: false, error}`，
-  没接住的异常一律 500 并且不把栈写给用户
-- 审计由平台记：动作跑完，平台写一条「谁、什么时候、什么动作、说明」。
-  模块想补充细节就在返回值里给 `"audit": "…"`
-- 并发冲突按动作声明的 `target` 算：同一个对象被别人先改过就返回 409，
-  客户端提示「另一个会话刚刚改过这一项」
-- 模块不要自己开关事务、不要自己推版本号，那是平台的事
-
-## 一个最小模块
-
-```
-modules/hello/
-  module.json      {"id": "nwuca.hello", "name": "打招呼", "version": "0.1.0", "api": 1,
-                    "pages": [{"id": "main", "title": "主页"}], "external": ["board"],
-                    "actions": {"say": {"title": "说一句", "args": {"text": {"type": "str"}}}}}
-  schema.sql       -- 自己那几张表
-  defaults.json    {}      -- 这个玩法的默认配置键
-  pages/main.html  <h2>打招呼</h2><button id="say">说一句</button>
-  pages/main.js    window.MODULE.pages.main = { mount(page) { … } }
-  model.py         def action(name, ctx, payload): return {"said": payload["text"]}
-  doc.md           现场怎么用
-```
-
-## 迁移路线
-
-现在的样子是「一个模块的所有玩法逻辑都在平台里长着」。按下面几步搬，每步都要套件全绿：
-
-1. **（已完成）** 业务模型搬进模块，核心只留分发器
-2. 动作声明：`module.json` 的 `actions` + 平台侧统一的 `/api/do/<name>` 调度；
-   抽奖模块先把自己的动作声明出来，平台里那 20 多个 `/api/admin/*` 收成调度与少数平台动作
-3. 页面资源：平台按 `pages/*.html|js` 注入，`pages/admin.html` 里与奖票相关的段落搬进模块
-4. 展示数据：公示页/大屏改吃 `present()`，平台只画壳
-5. 验收：装两个玩法完全不同的模块同时跑；`git grep` 一遍平台代码里没有玩法名词
-
-第 2 步与第 3 步之间不要交叉做：先把接口形状稳定下来，再搬页面。
+通过 `core/moduleguard.py` 执行的模块函数发生非业务异常时，平台记录异常并尝试重新加载模块。达到连续失败阈值（三次）时停用模块并记录审计。常规调用成功会清除累计失败计数。模块应使用 `ApiError` 报告预期的业务拒绝。
 
 ## 相关文档
 
 - [模块开发指南](modules.md)
-- [结构](architecture.md)
+- [项目架构](architecture.md)
 - [界面规范](ui-spec.md)

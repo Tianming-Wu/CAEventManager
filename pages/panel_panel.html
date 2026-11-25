@@ -100,7 +100,7 @@
           <path d="M7.4 8.2h5.2M7.4 10.6h3.2"/>
         </svg>
         <span class="nav-text">运维助手</span>
-        <span class="nav-dot" id="assistantDot" title="有一个等你批准的动作" hidden></span>
+        <span class="nav-dot" id="assistantDot" title="有待批准的操作" hidden></span>
       </a>
       <a class="nav-item" data-href="#/events" role="link" tabindex="0" data-nav="events">
         <svg viewBox="0 0 20 20" aria-hidden="true">
@@ -494,7 +494,7 @@
     <section class="page" data-page="events" hidden>
       <header class="page-head">
         <h1>我的活动</h1>
-        <p class="page-sub">你参与和申请的活动</p>
+        <p class="page-sub">查看已创建、已参与的活动与待处理邀请</p>
         <div class="page-actions">
           <button class="btn primary" id="newEventBtn">创建活动</button>
         </div>
@@ -528,7 +528,7 @@
             </button>
             <h1>创建活动</h1>
           </div>
-          <p class="page-sub">先选一种活动形式</p>
+          <p class="page-sub">请选择活动形式</p>
         </header>
         <div class="card">
           <div class="card-head">
@@ -615,7 +615,7 @@
         <div class="card">
           <div class="card-head"><h2>活动设定</h2></div>
           <div class="kind-fields" id="kindFields"></div>
-          <p class="hint">这些设定创建后不能更改</p>
+          <p class="hint">活动创建后无法修改这些设置</p>
         </div>
 
         <div class="err" id="createErr"></div>
@@ -626,7 +626,7 @@
     <section class="page" data-page="templates" hidden>
       <header class="page-head">
         <h1>预设管理</h1>
-        <p class="page-sub">一份存下来的活动配置，拿来起下一场</p>
+        <p class="page-sub">管理可用于创建活动的预设</p>
         <div class="page-actions">
           <button class="btn" id="presetImportBtn" type="button">导入预设</button>
           <button class="btn primary" id="presetNewBtn" type="button">新建预设</button>
@@ -705,7 +705,7 @@
         <div class="head-title">
           <h1 class="crumb-title"><span>我的报名</span></h1>
         </div>
-        <p class="page-sub">一个公开链接，报名的人直接进名单</p>
+        <p class="page-sub">管理报名链接及提交记录</p>
         <div class="page-actions">
           <button class="btn primary" id="signupNewBtn" type="button">创建报名</button>
         </div>
@@ -879,7 +879,7 @@
 
         <div class="col">
           <div class="card">
-            <div class="card-head"><h2>视觉效果</h2><span class="hint">报名页的样子</span></div>
+            <div class="card-head"><h2>视觉效果</h2></div>
             <div class="row" style="gap:12px;align-items:flex-end">
               <div class="field" style="flex:1 1 160px">
                 <label for="signupTheme">主题</label>
@@ -1011,7 +1011,7 @@
             <span>写入审批</span>
           </h1>
         </div>
-        <p class="page-sub">他人对名单写入权限的申请集中在此处理</p>
+        <p class="page-sub">查看待审批的名单写入申请及已发出的申请</p>
       </header>
 
       <div class="card">
@@ -1116,7 +1116,7 @@
     <section class="page" data-page="modules" hidden>
       <header class="page-head">
         <h1>模块管理</h1>
-        <p class="page-sub">活动形式的实现，决定一次活动能有哪些页面</p>
+        <p class="page-sub">管理活动模块及其启用状态</p>
         <div class="page-actions">
           <button class="btn primary" id="moduleInstallBtn" type="button">导入模块</button>
         </div>
@@ -1162,7 +1162,7 @@
           </div>
           <div class="searchbox">
             <input class="search" id="userSearch" type="search" name="panel_user_filter"
-                   placeholder="搜索用户名或显示名" autocomplete="off" autocorrect="off"
+                   placeholder="搜索登录名或显示名" autocomplete="off" autocorrect="off"
                    autocapitalize="off" spellcheck="false" data-form-type="other"
                    aria-autocomplete="none" aria-label="搜索账号">
             <button class="search-clear" id="userSearchClear" type="button"
@@ -1176,7 +1176,7 @@
         <div class="tblwrap">
           <table class="tbl fixed" id="accountsTable">
             <thead><tr>
-              <th>用户名</th><th>显示名</th><th>角色</th><th>状态</th>
+              <th>登录名</th><th>显示名</th><th>角色</th><th>状态</th>
               <th>最近登录</th><th class="actions">操作</th>
             </tr></thead>
             <tbody></tbody>
@@ -1216,7 +1216,7 @@
         </div>
         <p class="hint" style="margin-top:8px">
           支持 CSV 与 Excel；表头用登录名 / 显示名 / 角色 / 初始密码 / 组织 / 备注，
-          其余列可以在密码规则中使用
+          密码规则可引用其余列
         </p>
 
         <div class="row" style="margin-top:12px;flex-wrap:wrap">
@@ -1252,7 +1252,7 @@
     <section class="page" data-page="all-events" hidden>
       <header class="page-head">
         <h1>活动管理</h1>
-        <p class="page-sub">服务上的全部活动。点活动名打开详情，高权限操作都在那里</p>
+        <p class="page-sub">查看全部活动，点击活动名称打开详情</p>
       </header>
       <div class="card">
         <div class="card-head"><h2>当前活动</h2></div>
@@ -1291,7 +1291,7 @@
     <section class="page" data-page="roster-admin" hidden>
       <header class="page-head">
         <h1>名单管理</h1>
-        <p class="page-sub">服务上的全部名单与报名。点名称打开详情，归档、转移与彻底删除都在那里</p>
+        <p class="page-sub">查看全部名单与报名，点击名称打开详情</p>
       </header>
 
       <div class="card">
@@ -1341,7 +1341,7 @@
         <div class="tblwrap">
           <table class="tbl fixed" id="pendingTable">
             <thead><tr>
-              <th>用户名</th><th>显示名</th><th>申请说明</th><th>提交时间</th>
+              <th>登录名</th><th>显示名</th><th>申请说明</th><th>提交时间</th>
               <th class="actions">操作</th>
             </tr></thead>
             <tbody></tbody>
@@ -1356,7 +1356,7 @@
         <div class="tblwrap">
           <table class="tbl fixed" id="decidedTable">
             <thead><tr>
-              <th>用户名</th><th>显示名</th><th>结果</th><th>处理人</th><th>处理时间</th>
+              <th>登录名</th><th>显示名</th><th>结果</th><th>处理人</th><th>处理时间</th>
             </tr></thead>
             <tbody></tbody>
           </table>
@@ -1392,7 +1392,7 @@
     <section class="page" data-page="server" hidden>
       <header class="page-head">
         <h1>服务器管理</h1>
-        <p class="page-sub">运行这个服务的机器</p>
+        <p class="page-sub">查看服务状态并管理备份</p>
         <div class="page-actions">
           <button class="btn" id="hostRefresh">刷新</button>
         </div>
@@ -1576,7 +1576,7 @@
     <section class="page" data-page="account" hidden>
       <header class="page-head">
         <h1>账户信息</h1>
-        <p class="page-sub">你自己的账号</p>
+        <p class="page-sub">管理个人资料和登录凭据</p>
       </header>
 
       <div class="card">
@@ -1615,7 +1615,7 @@
           <span class="hint" id="tokenHint"></span>
           <button class="btn sm" id="tokenNew" type="button">新建令牌</button>
         </div>
-        <p class="page-sub">给平台之外的程序使用，例如脚本与群机器人</p>
+        <p class="page-sub">供外部程序访问平台接口</p>
         <div class="tblwrap">
           <table class="tbl fixed" id="tokenTable">
             <thead><tr>

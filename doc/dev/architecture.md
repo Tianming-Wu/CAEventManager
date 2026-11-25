@@ -1,215 +1,78 @@
-# 结构 - 分层、数据、权限与实时同步
+# 项目架构 - 进程、存储、权限与同步
 
-一套自托管系统，单进程、纯 Python 3 标准库、前端原生 JS 无构建步骤。这个选择的代价是写法朴素，
-好处是一台机器上执行 `python3 app.py` 即可运行，出问题时现场能读懂。
+平台使用 Python 标准库提供 HTTP 服务，前端使用原生 JavaScript。部署及启动方式参见[部署与运维](../ops/deploy.md)。
 
 ## 进程与路由
 
-一个 `ThreadingHTTPServer` 同时服务两类东西：**主面板**（账号、活动列表、名单、报名、审批、
-使用文档）与**每场活动的 token 段**（公示页、大屏、签到、活动后台）。新增活动不改变路径结构。
+`app.py` 使用 `ThreadingHTTPServer` 处理面板、文档、短链和活动请求。活动按路径中的访问凭据分发，外部访问地址通过 `public_base_prefix` 配置。接口路径参见[接口参考](../reference/api.md#路由分组)。
 
-```
-app.py            入口与 HTTP 层；两族：(面板 /api/panel/*、文档 /api/docs/*) 与 (活动 /<token>/*)
-core/             程序模块，导入时把 core/ 加进 sys.path
-core/paths.py     应用根目录；模块与资源的位置一律从这里算
-bin/              service.sh、run.sh（服务管理）、deploy.ps1（部署）
-panel.py          账号、会话、令牌、审计、助手存档、名单与报名的索引
-lists.py          名单与人员库（平台级的人）
-db.py             每场活动一个库；活动配置与状态
-model.py / expr.py / auth.py / checkin.py / exporter.py / packs.py / modules.py / presets.py / bus.py
-xlsx.py           表格读写（一个工作表、文本单元格）：名单与报名的导出导入都用它
-errors.py         ApiError：平台与模块共用的错误类型
-rng.py            随机源：有 /dev/hwrng 就与内核 CSPRNG 混合，没有就只用内核的
-pinyin.py         姓名 → 逐字音节与首字母（姓用姓氏读音）
-model.py          **加载器**：按活动所用的模块，把它的 model.py 载进来
-surnames.py       姓氏读音（曾 = zeng 这类），算拼音时先查它
-assistant.py      运维助手（模型调用、工具、提示词）
-policy.py         助手放行的唯一判定口
-health.py         服务有效性：按一次读数推出占用与空间的提示（core/health.py）
-shortlinks.py     短链：平台级的转发表，按活动记（core/shortlinks.py）
-safemode.py       安全模式：开关、对外的说明文字与拒绝理由
-startguard.py     崩溃自检：连续三次起不来，再下一次按安全模式起（core/startguard.py）
-```
-
-路由判定不依赖外部前缀：路径里出现已知活动 token 就按活动处理，否则把剩余路径按面板路由匹配。
-所以本机直连、反向代理前缀、将来的子域名都不用改代码；`public_base_prefix` 只用于生成绝对链接。
-
-## 随机
-
-平台的随机只有一处：`core/rng.py`。
-
-- 读得到 `/dev/hwrng` 时，把它的字节与 `os.urandom` 按字节异或混合——只用硬件会在设备坏掉时
-  悄悄退化成可预测的值，只用内核又浪费了手边那点真随机
-- `below()` 用拒绝采样，不取模，所以区间不整除时也均匀
-- 短链号、活动 token、会话与令牌、签到的签名密钥、抽奖抽票都走它；`rng.source()` 能问出
-  这台机器实际用的是哪一种
-
-## 模块提供什么
-
-平台不认识任何玩法：奖票、任务链、抽奖这些词只出现在模块里。
-
-| 模块目录里 | 平台拿它做什么 |
+| 组件 | 职责 |
 | --- | --- |
-| `module.json` | 标识、版本约束、申请的能力（`features`） |
-| `schema.json` | 建活动时画的表单 |
-| `model.py` | 这个玩法的业务逻辑。平台通过 `core/model.py` 按 `kind` 载入，`model.xxx(...)` 直接落到它上面 |
-| `schema.sql` | 这个模块在活动库里的表。平台建完自己的表（`config` / `audit`）再执行这一份 |
-| `defaults.json` | 这个模块的默认配置键，建活动时写进活动库 |
-| `templates/*.json` | 随模块发布的预设 |
-| `doc.md` | 现场说明，运维助手也读 |
-
-把 `builtin/modules/nwuca.lottery` 整个移走，平台照常启动：面板、名单、报名、审批、短链都在，
-用到这个玩法的接口才会报错（因为模块不在）。模块自己的初始化钩子是 `ensure_seed(conn)`，
-没有就跳过。
+| `core/paths.py`、`core/localconfig.py` | 应用路径及实例配置 |
+| `core/panel.py`、`core/lists.py` | 平台账号、活动索引、名单与报名的数据访问 |
+| `core/db.py`、`core/eventfs.py` | 活动数据库和归档 |
+| `core/modules.py`、`core/model.py` | 解析模块声明、加载模块和分发模型调用 |
+| `core/bus.py` | 对象版本与事件流 |
+| `core/assistant.py`、`core/policy.py` | 运维助手及工具准入 |
+| `core/health.py`、`core/safemode.py`、`core/startguard.py` | 服务状态提示、安全模式及启动自检 |
+| `core/backup.py` | 备份、恢复、留存与异地副本 |
 
 ## 数据
 
-| 库 | 装什么 |
+下列路径以默认数据目录为例。
+
+| 路径 | 内容 |
 | --- | --- |
-| `data/panel.sqlite3` | 账号、会话、令牌、活动索引、名单与报名索引、通知、审计、助手存档、短链 |
-| `data/lists.sqlite3` | 名单、名单成员、人员库、报名提交 |
-| `data/events/<活动号>/data.sqlite3` | 这个活动的业务库：平台表（config / audit 钩子）+ 模块的表 |
-| `data/events/<活动号>/audit.sqlite3` | 这个活动的审计日志，只追加，与业务库分开 |
-| `data/events/<活动号>/meta.json` | 活动名、模块、创建时间——打包之后还认得出这是哪一场 |
+| `data/panel.sqlite3` | 账号、会话、令牌、活动索引、名单与报名索引、通知、平台审计、助手存档与短链 |
+| `data/lists.sqlite3` | 人员、名单成员及报名提交记录 |
+| `data/events/<seq>/data.sqlite3` | 活动配置及模块业务数据 |
+| `data/events/<seq>/audit.sqlite3` | 活动操作日志 |
+| `data/events/<seq>/meta.json` | 活动元数据 |
 
-分库的理由是生命周期不同：活动会一场场地产生、归档、被导出；面板与名单是长期资产。
-一场活动的库单独拿走就能完整还原那一场。
+SQLite 使用 WAL。业务写入通过事务处理。归档与备份的操作方式参见[活动管理](../usage/platform-pages.md#活动管理)及[备份与恢复](../ops/deploy.md#备份与恢复)。
 
-SQLite 开 WAL；写入统一走事务包装（`tx()`），一次写入成功之后才更新对象版本号并推事件。
+### 活动标识
 
-## 活动号与 token
+`seq` 用于服务端查询、选库、同步和管理接口。活动访问凭据是活动对外路径中的随机字符串。通过 `panel.event_seq()` 与 `panel.event_token()` 在两种标识之间转换。
 
-同一个活动有两个标识，用途严格分开：
+### 随机数据
 
-- **活动号**（`seq`，例如 1）只在进程内部传递：选库、拼事件流的作用域、写审计都用它
-- **token**（32 位随机串）才是对外的东西：地址段、二维码、分享链接、短链跳转的目标
-
-请求进来时由分发层把 token 换成活动号（`panel.event_seq`），之后一路用活动号；
-需要拼对外地址时再换回 token（`panel.event_token`）。两者不混用，地址里也不会出现活动号。
+在 `core/rng.py` 中集中生成随机数据。随机整数使用拒绝采样。活动访问凭据、会话、短链及其他需要随机值的功能复用该模块。可通过 `rng.source()` 查询当前使用的随机源。
 
 ## 权限
 
-- 账号三级：站长（唯一）> 超级管理员 > 管理员，接口层与界面层都校验同一份 `need(...)`
-- 活动不是账号体系的一部分：进入某个活动的后台取决于**是不是这个活动的成员**，
-  席位状态是「待确认 / 在册 / 已移出」
-- 名单的**可见**与**可写**是两件事：可见性三档（私有 / 公开 / 组织公开），写权限单独授予
-- **平台不给普通账号真正的删除**：活动、名单、报名都是「拥有者归档 → 超管提权彻底删除」两段。
-  归档是软删除（`archived_at`，活动是打包成归档包）：对象退出列表、不能再改也不能再写，
-  数据一条不动。**在拥有者那一侧它就是删除**——归档之后他从自己的列表与详情里再也看不到它，
-  归档的东西只有超级管理员的专有页面（活动管理 / 名单管理的「已归档」）翻得出来；
-  取消归档与彻底删除也只有超级管理员能做，都要 sudo 并记审计。
-  没有归档过的对象拒绝彻底删除（409），所以「一下就抹掉别人的东西」这条路不存在
-- **什么时候要密码（sudo）**，两条判据，满足任一条就是提权操作：
-  - **不可撤销**：彻底删除、生成新的访问地址这类做过就回不去的动作
-  - **用自己的权限动别人的数据**：超管替别人归档/转移/删东西、强制归档别人的活动、
-    改角色、封禁账号、模块开关、服务器管理
-- 反过来说，**动自己的东西、而且收得回来**就不要密码：负责人归档自己的活动、
-  拥有者归档自己的名单与报名、负责人转移自己的活动——这些只有一句确认
-  （界面上 `confirmHighRisk(..., {noSudo: true})`）
-- 敏感操作要重新输一次密码（sudo 模式），记在会话上，换设备不继承
+平台接口按账号角色校验访问权限。活动后台另按当前活动的成员席位授权。名单可见性与写入权限分别处理。
 
-### 审计写什么
+归档及永久删除的界面入口参见[平台管理页](../usage/platform-pages.md)。提权操作由服务端校验当前会话的 sudo 状态。前端的 `confirmHighRisk()` 只负责确认流程，具体权限以服务端判定为准。
 
-审计行是五列：`ts / actor / action / target / detail`，规矩只有三条：
+### 审计
 
-- `actor` 存**编号**，不存登录名（登录名可以改，编号不会）：账号用它的 `uid`，
-  系统与没有登录的请求（注册申请、公开报名页）写 `0`；`panel.audit()` 负责归一化
-  （`panel.actor_key`），界面显示时才转回「名字 (编号)」（`panel.with_actor_labels`）
-- `detail` 如果存在，必须是 `key: value, key2: value2`（`panel.audit_note`）：
-  键用英文小写，值可以是中文（人名、活动名这类必须照原样放进去的），但不写整句话
-- 例：`sudo_on` → `ip: 127.0.0.1`，`sudo_off` → `reason: manual` / `reason: timeout`，
-  `enter_safe_mode` → `reason: manual` / `reason: multiple crash detected`，
-  `exit_safe_mode` → `reason: manual`，`event_member_cancel` → `event_id: 9`，
-  `roster_grant` → `granted: 2`
-- 账号对外只有一个标识：**uid**（`panel.next_uid`，站长 10000 起，uint32）。编号一次发放、
-  不再回收，`settings.uid_seq` 记账；`id` 是进程内部的自增主键，`username` 只是可以改的登录名，
-  两者都不进对外载荷。`panel.public_name()` 是"给别人看的名字"的唯一出口：显示名优先，其次编号
-- **选人**只有一份实现：`assets/js/people.js`（弹窗）配 `assets/css/people.css`（样子），
-  面板与活动后台都加载它，单选多选由 `mode` 决定。数据来自 `panel.person_view()` 的载荷
-  （`id / uid / name / label / avatar`），面板走 `/api/panel/people`、活动后台走
-  `/api/admin/people`。面板那个接口用 `scene` 分权限：`transfer`（这场活动的负责人或超管）、
-  `roster`（名单拥有者）、不带 `scene`（账号清单那套口令）。载荷里没有登录名，永远没有
+平台审计字段为 `ts`、`actor`、`action`、`target`、`detail`。`panel.audit()` 通过 `panel.actor_key()` 统一操作人标识。账号操作以 `uid` 记录，界面显示通过 `panel.with_actor_labels()` 生成。使用 `panel.audit_note()` 生成结构化说明，格式为 `key: value`，多个字段以逗号分隔。
+
+账号编号 `uid` 用于标识对外显示的账号，分配后不重复使用。`id` 是数据库主键，`username` 是登录凭据。需要公开显示账号名称时，使用 `panel.public_name()`。
+
+### 账号选择
+
+面板和活动后台复用 `assets/js/people.js` 及 `assets/css/people.css`。候选载荷由 `panel.person_view()` 生成，包括 `id`、`uid`、`name`、`label` 和 `avatar`。面板的 `/api/panel/people` 按 `scene` 校验当前操作权限。活动侧使用 `/<token>/api/admin/people`。
 
 ## 实时同步
 
-同一份数据可能同时开着好几个会话（两名管理员、同一人的两台设备、现场多部手机）。
+`core/bus.py` 以对象为单位维护版本，例如 `account:7`、`event:3` 和 `event:1:members`。写入完成后发布版本变化。客户端订阅[事件流](../reference/api.md#事件流)，按受影响对象更新数据。
 
-- 版本号按对象记（`account:7`、`event:3`、`preset:x.y`、`event:1:members`），不是整块一个号
-- 每次成功的写入把相关对象的版本号加一，通过事件流推送（面板 `/api/panel/stream`、
-  活动 `/<token>/api/stream`）
-- 写入请求带上自己看到的版本号（`X-Rev-Map`）。只有当**同一个对象**被别人先改过、
-  而本次要落地的状态与当前不同时才算冲突（409）：先到的写入生效
-- 想要的状态已经是事实时不算冲突——两人先后把同一账号设成同一状态，第二个不报错
-
-连接断开不会造成不一致：重连后收到完整版本号，落后的会话一次性对齐。
-
-## 长列表
-
-可能很长的列表一律分页读取，搜索在服务端完成：账号、审计日志、归档活动都是「一次取一页，
-按需再取」，页头显示总数。活动自己的名单、奖票、抽奖记录不分页，现场需要一次看全。
+并发写入通过 `X-Rev-Map` 传递客户端已知版本。服务端检测相关对象是否已更新。对支持幂等检查的接口，目标状态已经满足时可成功返回；发生冲突时返回 HTTP 409。
 
 ## 前端
 
-- `assets/`：全部静态资源，按类型分（`css/`、`js/`、`img/`），面板与活动族共用同一份；
-  两份运行时库是 `js/common.js`（主站）与 `js/event.js`（活动族）；`js/markdown.js` 是
-  两边共用的 Markdown 渲染（`window.MD`），`js/docs.js` 只给使用文档页用
-- `pages/`：页面骨架，服务端只做 `{{VERSION}}`、`{{FOOTER}}`、`{{SAFE_MODE}}` 这类替换
-- `theme/`：外观包（默认 `classic`），活动配置里挑一份
-- 没有框架：`PX` 提供 `api` / `toast` / `esc` / `md` / `when` 这几个常用件，其余按页面写
-- 版本号贯穿到底：每个回答都带着它，页面据此决定要不要换新脚本
+- `assets/js/common.js` 提供面板共用函数，`assets/js/event.js` 提供活动侧共用函数。
+- `assets/js/markdown.js` 提供共用 Markdown 渲染。`assets/js/docs.js` 管理文档查看器。
+- `pages/` 包含服务端页面模板。`theme/` 提供展示屏幕外观包。
+- 账号、审计日志等较长列表由服务端分页及搜索。页面布局和状态文案参见[界面规范](ui-spec.md)。
 
-## 可替换的部件
-
-- **展示屏幕**：`theme/<标识>/screen.html`，活动配置里写 `screen_pack` 就切换；
-  随发布走的 `classic` 与实例导入的包放在同一个目录里
-- **活动模块**：`modules/<id>/module.json` + `schema.json`；创建表单由 schema 生成，
-  兼容约束按版本号判定
-- **预设**：`templates/*.json`，模块之上的一份配置快照
-
-## 模块能申请什么（能力声明）
-
-`module.json` 里有一段 `features`，写法照安卓的 manifest：**名字 + 自己的定义**。
-站上跟玩法无关的能力（版本号热更新、事件流、导出打包）平台一直给，不用申请；
-用得着的功能才要声明，没声明的模块在接口里根本看不到那一段。
-
-```json
-"features": {
-  "search": {
-    "records": "students",          // state 里那份清单的键名
-    "name": "name",                 // 姓名字段（汉字那个，平台据此建拼音索引）
-    "key": "sid",                   // 学号/编号：片段匹配用
-    "fields": ["grp", "note"],      // 其余字段：只做"直接包含"
-    "tags": [                       // 标签词 → 字段条件
-      {"keys": ["w", "worker", "工作人员"], "label": "#w 工作人员",
-       "field": "role", "eq": "staff"},
-      {"keys": ["未签到"], "label": "#未签到", "field": "marks.checkin", "filled": false}
-    ]
-  }
-}
-```
-
-- **平台出算法，模块出词表**：搜索的解析、拼音音节匹配、条件求交都在 `assets/js/event.js`；
-  哪些字段、哪些标签、叫什么名字，是模块自己的事
-- **没申请就不发**：`/api/admin/state` 里没有 `features.search` 时，学生记录连 `pys`
-  （逐字音节）都不带——不给用不上的数据，也省得模块以为"这功能本来就有"
-- **写错只丢那一项**：认识不了的能力名或声明类型不对，解析时丢掉并记原因，不影响模块其余部分
-- 关键字：`records` / `name` / `key` / `fields` / `tags`（见 `modules.py` 的 `CAPABILITIES`）
-
-## 明确不做的事
-
-- 不做多租户：一套服务属于一个组织
-- 不做活动删除：只有存档
-- 不引入第三方运行时依赖：能在标准库里写完的就写完
-- 助手的写动作一律**问人**，不做"自动审计引擎"：要改数据时先停下来，把握把存在内存里，
-  由界面在输入框上方问一句 [拒绝] [批准]（`core/assistant.py` 的 run → pending → approve）。
-  需要 sudo 的动作永远不开放；助手只走平台接口，不碰服务器文件，文档只按清单读
+模块业务逻辑、能力和页面资源参见[模块接口](module-interface.md)。
 
 ## 提交信息
 
-- 写改了什么、改在哪。理由与取舍写在文档里，不进提交信息
-- 不写作者与协作信息（`Co-Authored-By` 之类）：git 已经记了作者，项目声明里也写了
-- 不写要求与过程（"按讨论"、"照要求"、"如你所说"），只写结果
-- 书面语，不用口语；一行标题，下面按改动分组列要点
+标题概括变更内容，正文可按变更项列出要点。使用书面语，省略理由、过程、测试结果及作者信息。提交范围与验证要求参见[仓库协作约定](../../AGENTS.md)。
 
 ## 相关文档
 

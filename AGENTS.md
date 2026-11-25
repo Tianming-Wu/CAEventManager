@@ -1,72 +1,53 @@
-# AGENTS.md
+# 仓库协作约定 - CAEventManager 的修改、验证与提交
 
-在 CAEventManager 仓库里工作的约定。产品说明见 [README.md](README.md)，文档目录见
-[doc/README.md](doc/README.md)。
+产品说明和本机启动方法见 [README](README.md)。文档分类及写作规范见[文档目录](doc/README.md)。
 
-## 文档
+## 项目结构
 
-- 根目录只有入口 `app.py`、文档与许可证；程序模块在 `core/`，脚本在 `bin/`，开发工具在 `tools/`，
-  静态资源在 `assets/`，页面外壳在 `pages/`，外观包在 `theme/`，内建模块与预设的模板在 `builtin/`
-- 用户文档在 `doc/usage/`、`doc/reference/`，以及各模块的 `doc.md`。运维助手只读这三处
-- 开发与运维文档在 `doc/dev/`、`doc/ops/`
-- 一份文件只讲一件事；标题写成 `# 名称 - 一句话`；末节是「相关文档」
-- 改代码与改它对应的文档放在同一次提交里
-- **新增、修改或移除功能时，必须同步改助手读得到的文档**：`doc/usage/`、`doc/reference/`、
-  对应模块的 `doc.md`。写清入口在哪一页、页面上有什么、按钮叫什么。运维助手看不到界面，
-  只能照文档回答；漏改的后果是它给出一个错误的位置
+入口为根目录的 `app.py`。程序模块位于 `core/`，运行脚本位于 `bin/`，开发工具位于 `tools/`。静态资源位于 `assets/`，页面模板位于 `pages/`，外观包位于 `theme/`，内置模块及预设模板位于 `builtin/`。
 
-## 改动之后
+## 文档同步
+
+新增、修改或移除功能时，同步更新运维助手可读取的对应文档，范围包括 `doc/usage/`、`doc/reference/` 和模块的 `doc.md`。核对页面入口、界面内容和按钮名称。代码及对应文档应纳入同一提交。
+
+## 验证
+
+开发过程中运行 `changed`，由脚本按工作区改动选择测试。修改共享组件（包括 `assets/js/panel.js`、`assets/css/panel.css`、`pages/`、`app.py` 和 `tools/`）或影响范围不明确时，运行完整套件。提交前运行完整套件，并将源文件行尾统一为 LF。
 
 ```powershell
-python tools/run_suites.py changed                                   # 按改动挑最小的那几套
-python tools/run_suites.py unit panel_test panel_ui_test smoke ui safemode modules   # 全套件
-python tools/normalize_eol.py                                        # 行尾统一为 LF
-python tools/bump_version.py                                         # 推进版本号
+python tools/run_suites.py changed
+python tools/run_suites.py unit panel_test panel_ui_test smoke ui safemode modules
+python tools/normalize_eol.py
 ```
 
-**开发中间用 `changed`，提交之前跑一次全套。** 它会看 `git status` 里改过的文件：
-
-- 只动了某个区域（`core/assistant.py` / 名单数据层 / 模块 / 文档……）→ 只跑那几套，
-  页面测试也只跑对应那一组
-- 动了共用件（`assets/js/panel.js`、`assets/css/panel.css`、`pages/`、`app.py`、`tools/`），
-  或者说不清影响范围 → 退回全套。**这些文件是真共用的，别拿"应该没事"去赌**
-
-页面测试可以自己指定分组，省掉整套 `panel_ui_test`（一次全套约三分钟，单组二十几秒）：
+范围明确时，可用 `--only` 选择面板页面测试分组。
 
 ```powershell
-python tools/run_suites.py panel_ui_test --only=assistant     # 运维助手：对话、批准条、抽屉、Markdown
-python tools/run_suites.py panel_ui_test --only=shell         # 侧栏、路由、导航键、面包屑、布局档
-python tools/run_suites.py panel_ui_test --only=data,ops      # 名单报名 + 服务器/审计/主题/弹窗
-python tools/run_suites.py panel_ui_test --only=docs          # 使用文档那一页（独立骨架）
+python tools/run_suites.py panel_ui_test --only=assistant
+python tools/run_suites.py panel_ui_test --only=shell
+python tools/run_suites.py panel_ui_test --only=data,ops
+python tools/run_suites.py panel_ui_test --only=docs
 ```
 
-分组是 `assistant` / `docs` / `shell` / `data` / `mods` / `admin` / `ops`；不写或写 `all` 就是全套。
-每组打印自己的用时，`run_suites.py` 最后再报一遍合计，慢在哪儿一眼能看出来。
+分组为 `assistant`、`docs`、`shell`、`data`、`mods`、`admin`、`ops`。省略 `--only` 或指定 `all` 时运行全部分组。
 
 ## 版本号
 
-四段 `主.次.修.构`（`python tools/bump_version.py [major|minor|patch]`）：
+版本号采用「主.次.修.构」四段格式，使用 `python tools/bump_version.py [major|minor|patch]` 更新。
 
-- **主**：要用户确认才能动——架构或兼容性变了才动
-- **次**：一批新功能落地，自行决定
-- **修**：行为变化或一批修复，开发过程中该动就动，自行决定
-- **构**：每次提交并上线都 +1，**只增不减、永不清零**（工具已经保证，不要手工清零）
+- **主版本**用于架构或兼容性变更，更新前须获得用户确认。
+- **次版本**用于一组新功能发布。
+- **修订版本**用于行为调整或缺陷修复。
+- **构建号**在提交并上线时递增，始终保留累计值。
 
-## 提交
+## 提交与运行数据
 
-- 消息只写改了什么。不写理由、过程、测试结果与作者信息，规则见
-  [doc/dev/architecture.md](doc/dev/architecture.md) 的「提交信息」
-- 一个提交一件事；只 add 该提交涉及的路径
+每个提交聚焦一项变更，仅暂存相关路径。提交信息概述变更内容，省略理由、过程、测试结果及作者信息。参见[提交信息](doc/dev/architecture.md#提交信息)。
 
-## 不要动
+仓库修改应避开实例的 `data/`、`config.json` 和自定义外观包。修改已部署实例的数据前须先备份。
 
-- `data/`、`config.json`、`theme/<自己装的>`：运行时数据，已在 `.gitignore` 中排除
-- 已部署实例里的活动、名单与账号都在 `data/` 里，改动前先备份
+## 相关文档
 
-## 本机运行
-
-```sh
-python3 app.py
-```
-
-首次启动会生成 `config.json` 与 `data/owner_password.txt`，不需要部署即可在仓库里直接运行。
+- [项目说明](README.md)
+- [文档目录及写作规范](doc/README.md)
+- [项目架构](doc/dev/architecture.md)

@@ -1468,25 +1468,28 @@ def docs_page(browser):
 
         # 地址里的 ~锚点真的会滚到那一节，而且同一篇里换锚点不重取正文
         page.goto(BASE + "/docs#/usage/assistant.md~" +
-                  urllib.request.quote("它会查文档"), wait_until="domcontentloaded")
+                  urllib.request.quote("文档查询"), wait_until="domcontentloaded")
         page.wait_for_selector("#docsArticle h1", timeout=8000)
         page.wait_for_timeout(700)
         jump = page.evaluate("""() => {
-            const want = document.getElementById('它会查文档');
+            const want = document.getElementById('文档查询');
             window.__keepNode = document.getElementById('docsArticle').firstChild;
-            return want ? {top: Math.round(want.getBoundingClientRect().top),
-                           scrolled: Math.round(window.scrollY)} : null;
+            if (!want) return null;
+            const scrolled = Math.round(window.scrollY);
+            const target = want.getBoundingClientRect().top + window.scrollY - 64;
+            const limit = document.documentElement.scrollHeight - window.innerHeight;
+            return {scrolled, expected: Math.round(Math.min(Math.max(0, target), limit))};
         }""")
         check("地址里的锚点会滚到那一节",
-              jump is not None and jump["scrolled"] > 1000
-              and 0 <= jump["top"] <= 120, jump)
+              jump is not None and jump["scrolled"] > 0
+              and abs(jump["scrolled"] - jump["expected"]) <= 1, jump)
         page.evaluate("""() => {
             location.hash = '#/usage/assistant.md~' +
-                            encodeURIComponent('它也能替你改但要你点头');
+                            encodeURIComponent('模型设置');
         }""")
         page.wait_for_timeout(500)
         again = page.evaluate("""() => {
-            const el = document.getElementById('它也能替你改但要你点头');
+            const el = document.getElementById('模型设置');
             return {top: el ? Math.round(el.getBoundingClientRect().top) : -1,
                     scrolled: Math.round(window.scrollY),
                     kept: document.getElementById('docsArticle').firstChild ===
@@ -1551,7 +1554,7 @@ def assistant_page(page):
     page.wait_for_timeout(900)
     check("总览下面有这一页", page.locator('[data-page="assistant"]').is_visible())
     check("没配端点时说清楚该去配什么",
-          "模型端点未配置" in page.inner_text("#assistantSub"),
+          "尚未配置模型" in page.inner_text("#assistantSub"),
           page.inner_text("#assistantSub"))
 
     # 新会话那一页：两行欢迎语 + 一行存档说明，不放示例问题；导出键灰着
@@ -1570,7 +1573,7 @@ def assistant_page(page):
     check("新会话写着两行欢迎语",
           empty["shown"] and empty["lead"] == "你好，我是 CAEventManager 运维助手。"
           and empty["sub"] == "我可以帮你查数据和执行操作。关于平台的问题也可以问我。", empty)
-    check("下面那行说明不带句号，讲的是存档与漫游",
+    check("说明同一账号可在不同设备查看存档",
           empty["note"] == "对话会存档在账户上，可在设备间漫游", empty)
     check("新会话不放示例问题", empty["asks"] == 0, empty)
     check("新会话的导出键灰着，title 说明原因",
@@ -2306,7 +2309,7 @@ def assistant_page(page):
     page.click("#confirmGo")
     page.wait_for_timeout(700)
     check("清除密钥后回到未配置",
-          "模型端点未配置" in page.inner_text("#assistantSub"),
+          "尚未配置模型" in page.inner_text("#assistantSub"),
           page.inner_text("#assistantSub"))
     page.evaluate("() => document.getElementById('overlayClose').click()")
     page.wait_for_timeout(300)
@@ -2365,7 +2368,7 @@ def assistant_page(page):
                       "messages": [
                           {"role": "user", "content": "看文档", "ts": now},
                           {"role": "assistant", "ts": now,
-                           "content": "见 [它会查文档](usage/assistant.md#它会查文档)、"
+                           "content": "见 [文档查询](usage/assistant.md#文档查询)、"
                                       "[仓库](https://github.com/Tianming-Wu/CAEventManager)、"
                                       "[别处](https://example.com)、[断链](nope.md)"}]})
                 or {}).get("id")
@@ -2393,7 +2396,7 @@ def assistant_page(page):
         }""")
         check("站内文档链接在新标签页打开，还带着那一节",
               bool(got["hrefs"]) and got["hrefs"][0].endswith(
-                  "/docs#/usage/assistant.md~它会查文档")
+                  "/docs#/usage/assistant.md~文档查询")
               and got["targets"][0] == "_blank", got)
         check("文档链接带文件图标",
               got["icons"] == 1, got)

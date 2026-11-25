@@ -3518,8 +3518,8 @@
 
   function askImportLeave(into) {
     openOverlay("import-leave", "离开导入账号？",
-      '<p class="page-sub">这一批还没有导入。初始密码只在这一页看得到，' +
-      "离开之后就取不回来了</p>" +
+      '<p class="page-sub">账号尚未导入。' +
+      "离开页面将清除导入表及其中的初始密码。</p>" +
       '<div class="row" style="margin-top:18px;justify-content:flex-end">' +
       '<button class="btn" type="button" data-close-overlay="1">继续编辑</button>' +
       '<button class="btn danger" type="button" id="importLeaveGo">离开</button></div>');
@@ -4158,11 +4158,11 @@
     var why = "";
     if (counts.blocked) why = "有 " + counts.blocked + " 行无法导入";
     else if (S.import.cap && S.import.cap.max > 0 && counts.ready > S.import.cap.left) {
-      why = "超出账号上限：这个实例还能建 " + S.import.cap.left + " 个";
+      why = "超出账号上限：当前可再创建 " + S.import.cap.left + " 个";
     }
     if ($("#importGo")) {
       $("#importGo").disabled = !!why || !state.rows.length || state.busy;
-      $("#importGo").title = why || "把这份预览建出来";
+      $("#importGo").title = why || "创建导入表中的账号";
     }
     if ($("#importFillBtn")) {
       // 只有真的还有空格子时这颗键才有意义
@@ -4171,7 +4171,7 @@
       }).length;
       $("#importFillBtn").disabled = !blanks || state.busy;
       $("#importFillBtn").title = blanks ? "有 " + blanks + " 行缺登录名或初始密码"
-                                         : "每一行都填满了";
+                                         : "所有行均已填写登录名和初始密码";
     }
     if ($("#importState")) $("#importState").textContent = why;
     if ($("#importWarn")) {
@@ -4310,7 +4310,7 @@
         (r.id === rule.id ? " selected" : "") + ">" + PX.esc(r.label) + "</option>";
     }).join("");
     openOverlay("import-autofill", "自动填充",
-      '<p class="page-sub">只填空着的格子，已经填了的不动</p>' +
+      '<p class="page-sub">仅填充空白的登录名或初始密码</p>' +
       '<div class="as-form-grid" style="margin-top:12px">' +
       '<div class="field"><label for="afUser">补齐登录名（按姓名拼音）</label>' +
       '<label class="switch" style="margin-top:6px"><input type="checkbox" id="afUser"' +
@@ -4367,8 +4367,8 @@
         .catch(function (e) { PX.toast(PX.esc(e.message), true); });
     };
     if (state.downloaded !== state.revision) {
-      confirmHighRisk("账号表还没下载", "改过之后也没重新下载。初始密码只在那一份文件里，" +
-                      "关掉这一页就取不回来了", "仍然导入", false, go, { noSudo: true });
+      confirmHighRisk("尚未下载账号表", "请先下载当前账号表。" +
+                      "导入后将无法再次查看未下载的更改", "仍然导入", false, go, { noSudo: true });
       return;
     }
     go();
@@ -5807,7 +5807,7 @@
     if (!sub) return;
     var cfg = S.assistantCfg || {};
     if (!cfg.ready) {
-      sub.textContent = "模型端点未配置，点页面右上角的模型设置按钮填写";
+      sub.textContent = "尚未配置模型，请在右上角打开「模型设置」";
       return;
     }
     var bits = ["当前模型：" + (cfg.model || "—")];
@@ -6038,7 +6038,7 @@
         var wait = hasSessionPendingOf(s.id);
         return '<div class="as-srow' +
           (s.id === S.assistantSessionId ? " on" : "") + '" data-sid="' + s.id + '">' +
-          (wait ? '<span class="as-wait" title="有一个等你批准的动作"></span>' : "") +
+          (wait ? '<span class="as-wait" title="有待批准的操作"></span>' : "") +
           '<button class="as-sopen" type="button" data-as-open="' + s.id + '">' +
           PX.esc(s.title) + '<span>' + PX.when(s.updatedAt) + " · " +
           Math.max(1, Math.round(s.size / 1024)) + " KB</span></button>" +
@@ -6162,7 +6162,7 @@
     drawAssistantQuota();
     var sub = $("#assistantSub");
     if (sub && !S.assistantQuota && !cfg.ready) {
-      sub.textContent = "模型端点未配置，点页面右上角的模型设置按钮填写";
+      sub.textContent = "尚未配置模型，请在右上角打开「模型设置」";
     }
     // 新会话没有存档可导：按钮灰掉，说明写在 title 上
     var exp = $("#asExport");

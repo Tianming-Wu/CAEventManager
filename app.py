@@ -53,6 +53,7 @@ import expr
 import exporter
 import health
 import modules
+import orgs
 import pinyintable
 import policy
 import rng
@@ -73,7 +74,7 @@ PAGES_DIR = os.path.join(BASE_DIR, "pages")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.13.32.158"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.13.33.159"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -2336,6 +2337,161 @@ class Handler(BaseHTTPRequestHandler):
             with panel.tx() as tx:
                 panel.audit(tx, actor["username"], "account_import_export", "accounts",
                             panel.audit_note(rows=int(data.get("rows") or 0)))
+            return self._json({"ok": True})
+
+        # ---- 组织 ----
+        if path == "/orgs" and method == "GET":
+            actor = need("superadmin", "owner")
+            return self._json({"ok": True,
+                               "orgs": orgs.listing(conn, actor["id"], include_archived=True)})
+
+        if path == "/org/mine" and method == "GET":
+            # 用户段那一页：我属于哪些组织、各自身份
+            actor = need("admin", "superadmin", "owner")
+            mine = [o for o in orgs.listing(conn, actor["id"], include_archived=False)
+                    if o["myRole"]]
+            return self._json({"ok": True, "orgs": mine})
+
+        if path == "/org" and method == "GET":
+            actor = need("admin", "superadmin", "owner")
+            org = orgs.row(conn, (query.get("id") or [""])[0])
+            if org is None:
+                raise model.ApiError("组织不存在", 404)
+            mine = orgs.my_role(conn, org["id"], actor["id"])
+            if acc["role"] not in ("superadmin", "owner") and not mine:
+                raise model.ApiError("组织不存在", 404)
+            members = (orgs.archived_members(org) if org["archived_at"]
+                       else orgs._members(conn, org["id"]))
+            return self._json({"ok": True,
+                               "org": {"id": org["id"], "name": org["name"],
+                                       "note": org["note"],
+                                       "archived": bool(org["archived_at"]),
+                                       "createdAt": org["created_at"],
+                                       "myRole": mine,
+                                       "myRoleLabel": orgs.ROLE_LABEL.get(mine, "")},
+                               "members": members})
+
+        if path == "/org/create" and method == "POST":
+            actor = need("superadmin", "owner")
+            data = body()
+            org_id = (data.get("id") or "").strip().lower()
+            name = (data.get("name") or "").strip()
+            heads = [int(x) for x in (data.get("heads") or []) if str(x).isdigit()]
+            admin_ids = [int(x) for x in (data.get("admins") or []) if str(x).isdigit()]
+            members = [int(x) for x in (data.get("members") or []) if str(x).isdigit()]
+            problem = orgs.id_problem(org_id)
+            if problem:
+                raise model.ApiError(problem)
+            if not name:
+                raise model.ApiError("请填写组织名称")
+            if len(name) > 40:
+                raise model.ApiError("组织名称最长 40 个字")
+            if not heads:
+                raise model.ApiError("至少要指定一位负责人")
+            if orgs.id_taken(conn, org_id):
+                raise model.ApiError("这个组织标识已被占用", 409)
+            with panel.tx() as tx:
+                orgs.create(tx, org_id, name, (data.get("note") or "").strip(),
+                            heads=heads, members=members, admin_ids=admin_ids,
+                            actor=actor["username"])
+            return self._json({"ok": True, "id": org_id})
+
+        if path == "/org/update" and method == "POST":
+            actor = need("admin", "superadmin", "owner")
+            data = body()
+            org = orgs.row(conn, (data.get("id") or "").strip())
+            if org is None:
+                raise model.ApiError("组织不存在", 404)
+            mine = orgs.my_role(conn, org["id"], actor["id"])
+            if acc["role"] not in ("superadmin", "owner") and mine != "head":
+                raise model.ApiError("只有组织负责人能改这个组织", 403)
+            if org["archived_at"]:
+                raise model.ApiError("组织已归档，先恢复再改", 409)
+            name = data.get("name")
+            note = data.get("note")
+            if name is not None:
+                name = name.strip()
+                if not name:
+                    raise model.ApiError("请填写组织名称")
+            with panel.tx() as tx:
+                orgs.update(tx, org["id"], name=name, note=note, actor=actor["username"])
+            return self._json({"ok": True})
+
+        if path == "/org/member" and method == "POST":
+            actor = need("admin", "superadmin", "owner")
+            data = body()
+            org = orgs.row(conn, (data.get("org") or "").strip())
+            if org is None:
+                raise model.ApiError("组织不存在", 404)
+            mine = orgs.my_role(conn, org["id"], actor["id"])
+            if acc["role"] not in ("superadmin", "owner") and mine != "head":
+                raise model.ApiError("只有组织负责人能改成员", 403)
+            if org["archived_at"]:
+                raise model.ApiError("组织已归档，先恢复再改", 409)
+            account_id = int(data.get("account") or 0)
+            target = conn.execute("SELECT * FROM accounts WHERE id=?",
+                                  (account_id,)).fetchone()
+            if target is None:
+                raise model.ApiError("账号不存在", 404)
+            action = (data.get("action") or "add").strip()
+            role = (data.get("role") or "member").strip()
+            if role not in orgs.ROLES:
+                raise model.ApiError("组织内身份只有总负责人、组织管理、组织成员")
+            if role == "head" and not (acc["role"] in ("superadmin", "owner")
+                                         or mine == "head"):
+                raise model.ApiError("只有负责人能指定负责人", 403)
+            before = orgs.my_role(conn, org["id"], account_id)
+            with panel.tx() as tx:
+                if action == "remove":
+                    if before == "head" and orgs.heads_count(tx, org["id"]) <= 1:
+                        raise model.ApiError("至少要留一位负责人", 409)
+                    orgs.drop_member(tx, org["id"], account_id, actor=actor["username"])
+                else:
+                    if before != "head" and role == "head":
+                        pass
+                    orgs.set_member(tx, org["id"], account_id, role,
+                                    actor=actor["username"])
+                if before and before != role and action != "remove" and before == "head":
+                    if orgs.heads_count(tx, org["id"]) < 1:
+                        raise model.ApiError("至少要留一位负责人", 409)
+            return self._json({"ok": True})
+
+        if path == "/org/archive" and method == "POST":
+            actor = need("superadmin", "owner")
+            data = body()
+            org = orgs.row(conn, (data.get("id") or "").strip())
+            if org is None:
+                raise model.ApiError("组织不存在", 404)
+            if org["archived_at"]:
+                raise model.ApiError("这个组织已经归档了", 409)
+            with panel.tx() as tx:
+                orgs.archive(tx, org["id"], actor=actor["username"])
+            return self._json({"ok": True})
+
+        if path == "/org/restore" and method == "POST":
+            actor = need("superadmin", "owner")
+            data = body()
+            org = orgs.row(conn, (data.get("id") or "").strip())
+            if org is None:
+                raise model.ApiError("组织不存在", 404)
+            if not org["archived_at"]:
+                raise model.ApiError("这个组织没有归档", 409)
+            with panel.tx() as tx:
+                orgs.restore(tx, org["id"], actor=actor["username"])
+            return self._json({"ok": True})
+
+        if path == "/org/delete" and method == "POST":
+            # 彻底删除：只在已归档的组织上，站长加提权
+            actor = need("owner")
+            need_sudo()
+            data = body()
+            org = orgs.row(conn, (data.get("id") or "").strip())
+            if org is None:
+                raise model.ApiError("组织不存在", 404)
+            if not org["archived_at"]:
+                raise model.ApiError("先归档，再彻底删除", 409)
+            with panel.tx() as tx:
+                orgs.drop(tx, org["id"], actor=actor["username"])
             return self._json({"ok": True})
 
         if path == "/account/role" and method == "POST":
@@ -5325,6 +5481,7 @@ def main():
 
     panel.init_db()
     panel.bootstrap(LOCAL_CFG, log=log)
+    orgs.ensure(panel.connect())
     lists.init_db()
     # 每个活动有自己的库：启动时逐个建表、补默认配置、给公示页写好地址。
     # 已归档的活动业务库被压进包里了，不能在这里凭空再造一个空的出来——

@@ -2391,6 +2391,76 @@ def main():
     check("导入与下载都进了审计",
           "account_import" in actions and "account_import_export" in actions, actions)
 
+    print("== 组织：建、成员、归档、彻底删除 ==")
+    post(owner, "/api/panel/sudo/exit", {})
+    bad = call(owner, "/api/panel/org/create",
+               {"id": "Bad Org!", "name": "非法标识", "heads": [1]}, expect=400)
+    check("组织标识不合法就拒", bad and "标识" in (bad.get("error") or ""), bad)
+    nohead = call(owner, "/api/panel/org/create",
+                  {"id": "nohead", "name": "没有负责人", "heads": []}, expect=400)
+    check("没有负责人建不出来", nohead and "负责人" in (nohead.get("error") or ""), nohead)
+    accounts = call(owner, "/api/panel/accounts?limit=200")["accounts"]
+    owner_id = [a["id"] for a in accounts if a["role"] == "owner"][0]
+    others = [a["id"] for a in accounts if a["role"] != "owner"]
+    mate = others[0] if others else owner_id
+    made = post(owner, "/api/panel/org/create",
+                {"id": "cs-club", "name": "计算机社", "note": "测试用",
+                 "heads": [owner_id], "admins": [mate], "members": []})
+    check("组织建出来了", made and made.get("ok"), made)
+    dup = call(owner, "/api/panel/org/create",
+               {"id": "cs-club", "name": "重名", "heads": [owner_id]}, expect=409)
+    check("标识重复就拒", dup and "占用" in (dup.get("error") or ""), dup)
+
+    listed = call(owner, "/api/panel/orgs")["orgs"]
+    row = [o for o in listed if o["id"] == "cs-club"]
+    check("清单里有这个组织", bool(row), listed)
+    check("成员数与我的身份都在", row and row[0]["members"] == 2
+          and row[0]["myRole"] == "head", row[0] if row else None)
+
+    detail = call(owner, "/api/panel/org?id=cs-club")
+    check("详情里有成员与身份",
+          [m["role"] for m in detail["members"]] == ["head", "admin"],
+          detail.get("members"))
+
+    post(owner, "/api/panel/org/member",
+         {"org": "cs-club", "account": mate, "action": "remove"})
+    check("可以踢人",
+          len(call(owner, "/api/panel/org?id=cs-club")["members"]) == 1)
+    post(owner, "/api/panel/org/member",
+         {"org": "cs-club", "account": mate, "action": "add", "role": "member"})
+    check("可以再加回来",
+          [m["role"] for m in call(owner, "/api/panel/org?id=cs-club")["members"]]
+          == ["head", "member"])
+    keep = call(owner, "/api/panel/org/member",
+                {"org": "cs-club", "account": owner_id, "action": "remove"}, expect=409)
+    check("最后一个负责人不能被踢掉", keep and "负责人" in (keep.get("error") or ""), keep)
+
+    mine = call(owner, "/api/panel/org/mine")["orgs"]
+    check("我的组织里看得到", any(o["id"] == "cs-club" for o in mine), mine)
+
+    post(owner, "/api/panel/org/archive", {"id": "cs-club"})
+    archived = [o for o in call(owner, "/api/panel/orgs")["orgs"] if o["id"] == "cs-club"]
+    check("归档之后成员数还在（折进组织行）",
+          archived and archived[0]["archived"] is True and archived[0]["members"] == 2,
+          archived[0] if archived else None)
+    frozen = call(owner, "/api/panel/org/member",
+                  {"org": "cs-club", "account": mate, "action": "remove"}, expect=409)
+    check("归档之后不能再改成员", frozen and "归档" in (frozen.get("error") or ""), frozen)
+    post(owner, "/api/panel/org/restore", {"id": "cs-club"})
+    back = [o for o in call(owner, "/api/panel/orgs")["orgs"] if o["id"] == "cs-club"]
+    check("恢复之后明细回来了",
+          back and back[0]["archived"] is False and back[0]["members"] == 2,
+          back[0] if back else None)
+
+    post(owner, "/api/panel/org/archive", {"id": "cs-club"})
+    refused = call(owner, "/api/panel/org/delete", {"id": "cs-club"}, expect=403)
+    check("彻底删除要提权", refused and refused.get("sudoRequired") is True, refused)
+    post(owner, "/api/panel/sudo", {"password": owner_password()})
+    gone = post(owner, "/api/panel/org/delete", {"id": "cs-club"})
+    check("提权之后能彻底删掉", gone and gone.get("ok"), gone)
+    check("删完之后清单里没有了",
+          not any(o["id"] == "cs-club" for o in call(owner, "/api/panel/orgs")["orgs"]))
+
     print("== event pages still reachable ==")
     token = events[0]["id"]
     board = call(anon, "/%s/api/board" % token)

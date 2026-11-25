@@ -3943,6 +3943,26 @@ def create_page(browser):
     ctx, page = new_page(browser, 1440, 900)
     try:
         ui_login(page)
+        # 收藏的预设排在最前，星标只读
+        owner = owner_opener()
+        call(owner, "/api/panel/preset/favorite", {"id": "nwuca.salon", "on": True})
+        page.goto(BASE + "/panel#/events")
+        page.wait_for_timeout(500)
+        page.click("#newEventBtn")
+        page.wait_for_timeout(900)
+        fav = page.evaluate("""() => {
+            const tiles = Array.from(document.querySelectorAll('#kindGrid .kind-tile'));
+            const starred = tiles.map(t => !!t.querySelector('.kind-fav'));
+            const dot = document.querySelector('#kindGrid .kind-tile .kind-fav');
+            return {count: tiles.length,
+                    firstStarred: starred[0] === true,
+                    oneOnly: starred.filter(Boolean).length === 1,
+                    pointer: dot ? getComputedStyle(dot).pointerEvents : '',
+                    inside: dot ? !!dot.closest('button.kind-tile') : false};
+        }""")
+        check("收藏的预设排在最前", fav["firstStarred"] and fav["oneOnly"], fav)
+        check("星标只读（不接收点击）", fav["pointer"] == "none" and fav["inside"], fav)
+        call(owner, "/api/panel/preset/favorite", {"id": "nwuca.salon", "on": False})
         page.goto(BASE + "/panel#/events")
         page.wait_for_timeout(420)
         check("the button says 创建活动",

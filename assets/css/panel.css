@@ -1349,6 +1349,20 @@ table.tbl.warn-off td.import-warn { display: none; }
 .crumb-sep { color: var(--dim); font-weight: 400; }
 
 /* ---------- create an activity ---------- */
+/* 收藏过的预设：星标贴在卡片右上角，只读（收藏与否在「预设管理」里改） */
+.kind-tile { position: relative; }
+.kind-fav {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  color: var(--accent-strong);
+  pointer-events: none;
+}
+.kind-fav svg { width: 15px; height: 15px; fill: currentColor; stroke: currentColor; }
 .kind-tile {
   appearance: none;
   display: flex;

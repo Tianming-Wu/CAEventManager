@@ -3717,6 +3717,10 @@
       return (t.name + " " + t.id + " " + (t.description || "") + " " + t.moduleName)
         .toLowerCase().indexOf(q) >= 0;
     });
+    // 收藏的排前面（收藏本身在「预设管理」里改，这里只按它排序、只读显示那颗星）
+    rows = rows.slice().sort(function (a, b) {
+      return (b.fav ? 1 : 0) - (a.fav ? 1 : 0);
+    });
     if (!rows.length) {
       return '<div class="empty">' + (S.templates.length
         ? "\u6ca1\u6709\u5339\u914d\u7684\u6a21\u677f"
@@ -3727,6 +3731,8 @@
         .filter(Boolean).join(" \u00b7 ");
       return '<button class="kind-tile' + (t.ok ? "" : " is-off") + '" type="button" ' +
         (t.ok ? 'data-template="' + PX.esc(t.id) + '"' : "disabled") + ">" +
+        (t.fav ? '<span class="kind-fav" aria-label="已收藏" title="已收藏">' +
+                 ICON_STAR + "</span>" : "") +
         '<span class="kind-name">' + PX.esc(t.name) + "</span>" +
         '<span class="kind-meta">' + PX.esc(meta) + "</span>" +
         (t.description ? '<span class="kind-desc">' + PX.esc(t.description) + "</span>" : "") +

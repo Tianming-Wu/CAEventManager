@@ -1352,9 +1352,37 @@
         markLoaded("notices");
         drawBell();
         drawNoticeList();
+        popVersionNotice();
         maybeShowAlert();
       })
       .catch(function () { /* 通知读不到不该影响主流程 */ });
+  }
+
+  /* 版本更新那条：第一次看到时弹一条，几秒后自己收起；
+     通知本身留在通知中心里，之后再打开页面不会再弹。 */
+  var NOTICE_SEEN = "xl.notices.popped";
+
+  function seenNotices() {
+    try {
+      return JSON.parse(localStorage.getItem(NOTICE_SEEN) || "[]") || [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function popVersionNotice() {
+    var seen = seenNotices();
+    var fresh = (S.notices || []).filter(function (n) {
+      return n.object === "version" && seen.indexOf(n.id) < 0;
+    });
+    if (!fresh.length) return;
+    fresh.forEach(function (n) {
+      PX.toast(PX.esc(n.title));
+      seen.push(n.id);
+    });
+    try {
+      localStorage.setItem(NOTICE_SEEN, JSON.stringify(seen.slice(-50)));
+    } catch (e) { /* 存不下就下次再弹，不影响别的 */ }
   }
 
   function drawBell() {

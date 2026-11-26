@@ -206,7 +206,7 @@ svg {
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
-.hoststat { display: flex; align-items: center; gap: 6px; }
+.hoststat { display: flex; align-items: center; gap: 4px; }
 .hoststat-label { color: var(--dim); letter-spacing: .04em; }
 .hoststat-bar {
   display: block;
@@ -224,7 +224,15 @@ svg {
   border-radius: inherit;
   transition: width .4s ease;
 }
-.hoststat-num { text-align: right; }          /* 不再留固定宽度：数字紧跟着进度条 */
+/* 两位数字的定宽：等宽数字 + tabular-nums，1 与 7 占同样宽度，百分比不左右跳。
+   100% 很少见，真出现时任它往进度条那边挤一点，不为此常留一整位空间 */
+.hoststat-num {
+  width: 3.2ch;                 /* 固定宽度：一位两位都不改变盒子，百分比不左右跳 */
+  flex: 0 0 auto;
+  overflow: visible;            /* 100% 这种四字符任它溢出，别撑开盒子 */
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
 
 /* ---------- navigation ---------- */
 .sidebar {
@@ -1516,23 +1524,33 @@ select:invalid { color: var(--dim); }
 .person-cell { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
 .person-cell .avatar { width: 26px; height: 26px; font-size: .72rem; }
 .person-cell .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* 卡片标题右边的圆圈问号：直接打开这一页的文档 */
-.card-help {
+/* 标题文字右边那颗圆圈 i：直接打开这一页的文档。
+   用 SVG 画，圆环与中间的 i 出自同一套笔画，不会像文字那样偏心、笔画粗细也不会有两种 */
+.card-head h2 .card-help {
   appearance: none;
-  flex: 0 0 auto;
-  width: 18px;
-  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-left: 6px;
   padding: 0;
-  border: 1px solid var(--line);
+  border: 0;
   border-radius: 999px;
   background: transparent;
   color: var(--dim);
-  font: inherit;
-  font-size: .72rem;
-  line-height: 1;
+  vertical-align: -2px;
   cursor: pointer;
 }
-.card-help:hover { border-color: var(--accent); color: var(--accent-strong); }
+.card-head h2 .card-help svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+.card-head h2 .card-help:hover { color: var(--accent-strong); }
 
 /* 顶栏性能计数与按钮里的图标：跟着文字的颜色与大小走 */
 .hoststat-icon {
@@ -3621,8 +3639,9 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
 .as-text.md .md-doc {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 0 5px 0 4px;
+  gap: .24em;
+  margin-inline: .2em;
+  padding-inline: .32em;
   border-radius: 5px;
   background: var(--surface-2);
   color: var(--accent-strong);
@@ -3631,11 +3650,9 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
 }
 .as-text.md .md-doc:hover { text-decoration: underline; }
 .as-text.md .md-doc-ico {
-  width: 12px;
-  height: 12px;
+  width: .88em;
+  height: .88em;
   flex: none;
-  position: relative;
-  top: -.5px;
 }
 .as-text.md .md-broken {
   display: inline;

@@ -527,12 +527,16 @@ def doc_updated(rel):
         return 0
 
 
-def read_doc(rel):
-    """按清单里的路径读一份文档。只认清单里出现过的那些路径，别的都拒。"""
+def read_doc(rel, include_ops=False):
+    """按清单里的路径读一份文档。只认清单里出现过的那些路径，别的都拒。
+
+    ``include_ops=True`` 时才认运维那一类（``DOC_OWNER_ONLY``）：文档页在站长
+    登录时会这么要，助手读的清单里本来就没有它们。
+    """
     want = (rel or "").strip().replace("\\", "/").lstrip("./")
     if not want:
         return None, "需要 path，可以先用 list_docs 看有哪些"
-    for item in doc_entries():
+    for item in doc_entries(include_ops=include_ops):
         if item["path"] != want:
             continue
         full = os.path.join(_docs_base(), want)
@@ -544,7 +548,7 @@ def read_doc(rel):
         if len(text) > DOC_MAX_CHARS:
             text = text[:DOC_MAX_CHARS] + "\n\n（后面还有，一次只回这么多字；需要的话换个更具体的问法）"
         return text, ""
-    return None, "没有这份文档：" + want
+    return None, "文件不存在：" + want
 
 
 # --------------------------------------------------------------------------- #

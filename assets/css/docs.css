@@ -443,8 +443,9 @@ html[data-theme="dark"] .docs-act .i-sun { display: block; }
 .md .md-doc {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 0 5px 0 4px;
+  gap: .24em;
+  margin-inline: .2em;
+  padding-inline: .32em;
   border-radius: 5px;
   background: var(--link-soft);
   color: var(--link);
@@ -455,11 +456,9 @@ html[data-theme="dark"] .docs-act .i-sun { display: block; }
 .md .md-doc:hover { text-decoration: underline; }
 
 .md .md-doc-ico {
-  width: 12px;
-  height: 12px;
+  width: .88em;
+  height: .88em;
   flex: none;
-  position: relative;
-  top: -.5px;
 }
 
 .md .md-broken {

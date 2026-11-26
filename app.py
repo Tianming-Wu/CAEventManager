@@ -75,7 +75,7 @@ PAGES_DIR = os.path.join(BASE_DIR, "pages")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.13.45.171"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.13.46.172"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -1506,7 +1506,11 @@ class Handler(BaseHTTPRequestHandler):
                         want = "builtin/" + want
                     else:
                         want = "doc/" + want
-                text, err = assistant.read_doc(want)
+                # 运维文档只给站长：其余人即使知道地址也读不到
+                owner = acc["role"] == "owner"
+                if want.startswith(assistant.DOC_OWNER_ONLY) and not owner:
+                    return self._err("文件不存在：" + want, 404)
+                text, err = assistant.read_doc(want, include_ops=owner)
                 if err:
                     return self._err(err, 404)
                 title = ""
@@ -4624,13 +4628,19 @@ class Handler(BaseHTTPRequestHandler):
             offset = _int_arg(query, "offset", 0, 0, 1000000)
             limit = _int_arg(query, "limit", 60, 1, 200)
             where, args = [], []
-            if q:
-                # 操作人存的是编号：拿名字搜也能搜到，所以再按账号名对一次
+            # 空格分开的几个词按"都要命中"来搜；整串当一个词是另一种用法
+            for word in (q.split() if q else []):
+                like = "%" + word + "%"
+                # 操作人存的是编号。平台自己的两个操作人没有账号行：
+                # 按页面上显示的名字（system / service）直接对编号
+                pseudo = {"system": "0", "service": "1"}.get(word.lower(), "")
+                extra = (" OR actor = '" + pseudo + "'") if pseudo else ""
                 where.append("(actor LIKE ? OR action LIKE ? OR target LIKE ?"
                              " OR detail LIKE ?"
                              " OR actor IN (SELECT CAST(uid AS TEXT) FROM accounts"
-                             "              WHERE name LIKE ? OR username LIKE ?))")
-                args += ["%" + q + "%"] * 6
+                             "              WHERE name LIKE ? OR username LIKE ?)" +
+                             extra + ")")
+                args += [like] * 6
             clause = (" WHERE " + " AND ".join(where)) if where else ""
             total = conn.execute("SELECT COUNT(*) AS n FROM audit" + clause,   # sql-ok 只拼列名/表名/SET 片段，值都走 ?
                                  args).fetchone()["n"]
@@ -5581,6 +5591,41 @@ def bootstrap_secrets():
 
 
 
+def _notify_version_bump(log=None):
+    """版本换了就给所有人排一条驻留通知。
+
+    记在 data/last_version.txt 里：只有"从一个已知版本换到另一个版本"才通知，
+    全新安装（此前没有记录）不通知。
+    """
+    try:
+        path = os.path.join(db.data_dir(), "last_version.txt")
+        previous = ""
+        if os.path.isfile(path):
+            with open(path, "r", encoding="utf-8") as fh:
+                previous = fh.read().strip()
+        if previous == VERSION:
+            return
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(VERSION)
+        if not previous:
+            return
+        with panel.tx() as tx:
+            # 旧的版本通知先撤掉：通知中心里永远只有最近这一次更新
+            tx.execute("DELETE FROM notices WHERE object='version'")
+            # 只发给此刻已经存在的账号：更新之后才注册的人不该收到
+            rows = tx.execute(
+                "SELECT id FROM accounts WHERE status='active'").fetchall()
+            for row in rows:
+                panel.notice(tx, "info", "服务已更新：" + VERSION,
+                             "上一版是 %s。" % previous, account_id=row["id"],
+                             actor="system", obj="version")
+        if log:
+            log("版本更新通知：%s -> %s" % (previous, VERSION))
+    except Exception as exc:                            # noqa: BLE001 - 通知失败不该拦启动
+        if log:
+            log("版本更新通知没发出去：%s" % exc)
+
+
 def main():
     global LOCAL_CFG
     LOCAL_CFG = localconfig.load()
@@ -5607,6 +5652,7 @@ def main():
 
     panel.init_db()
     panel.bootstrap(LOCAL_CFG, log=log)
+    _notify_version_bump(log)
     orgs.ensure(panel.connect())
     lists.init_db()
     # 每个活动有自己的库：启动时逐个建表、补默认配置、给公示页写好地址。

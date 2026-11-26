@@ -275,11 +275,11 @@ function mdBlocks(lines) {
    以及"这一篇的地址怎么拼"。没有清单就把 @ 链接当普通文字，不硬造链接。 */
 var OPTS = null;
 
-var MD_DOC_ICON = '<svg class="md-doc-ico" viewBox="0 0 20 20" aria-hidden="true" ' +
-  'fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" ' +
-  'stroke-linejoin="round"><path d="M4.6 3.4h6.2a1.6 1.6 0 0 1 1.6 1.6v10.4a1.2 1.2 0 0 1-1.2 ' +
-  '1.2H4.6a1.2 1.2 0 0 1-1.2-1.2V4.6a1.2 1.2 0 0 1 1.2-1.2Z"/><path d="M7 7.2h3.2M7 10h3.2' +
-  'M7 12.8h2"/></svg>';
+var MD_DOC_ICON = '<svg class="md-doc-ico" viewBox="0 0 16 16" aria-hidden="true" ' +
+  'focusable="false" fill="none" stroke="currentColor" stroke-width="1.35" ' +
+  'stroke-linecap="round" stroke-linejoin="round">' +
+  '<path d="M4 1.75h5l3.75 3.75v7.75a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2.75a1 1 0 0 1 1-1Z"/>' +
+  '<path d="M9 1.75V5.5h3.75M5.75 9.5h4.5"/></svg>';
 
 /* 站外地址：开新标签页，所以带上那枚"开新窗口"的小箭头（与侧栏的「使用文档」同一形状） */
 var MD_EXT_ICON = '<svg class="md-ext-ico" viewBox="0 0 20 20" aria-hidden="true" ' +

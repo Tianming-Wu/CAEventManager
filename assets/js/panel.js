@@ -5925,6 +5925,8 @@ function archiveOrg(id) {
   }
 
   var BACKUP_KIND = { manual: "手动", auto: "自动", "pre-restore": "恢复前" };
+  // 备份列表只摆最近几份：这里不操作备份数据，摆一长串只是占高度
+  var BACKUP_ROWS = 5;
 
   function drawBackup() {
     var d = S.backup;
@@ -5934,7 +5936,14 @@ function archiveOrg(id) {
     var ret = cfg.retention || {};
     var dav = cfg.webdav || {};
     if ($("#bkEnabled")) $("#bkEnabled").checked = !!cfg.enabled;
-    if ($("#bkMode")) $("#bkMode").value = schedule.mode || "daily";
+    var modeSel = $("#bkMode");
+    if (modeSel) {
+      var wantMode = schedule.mode || "daily";
+      modeSel.value = wantMode;
+      Array.prototype.forEach.call(modeSel.options, function (opt) {
+        opt.selected = opt.value === wantMode;
+      });
+    }
     if ($("#bkAt")) $("#bkAt").value = schedule.at || "03:30";
     if ($("#bkDaily")) $("#bkDaily").value = ret.daily === undefined ? 7 : ret.daily;
     if ($("#bkWeekly")) $("#bkWeekly").value = ret.weekly === undefined ? 4 : ret.weekly;
@@ -5970,9 +5979,28 @@ function archiveOrg(id) {
         return "<dt>" + PX.esc(h.level) + "</dt><dd>" + PX.esc(h.text) + "</dd>";
       }).join("");
     }
+    var dot = $("#backupDot");
+    var dotNote = $("#backupDotNote");
+    if (dot) {
+      var levels = (d.hints || []).map(function (h) { return h.level; });
+      var tone = "ok";
+      var why = "最近一次备份正常";
+      if (levels.indexOf("问题") >= 0) {
+        tone = "bad";
+        why = "最近一次备份有问题";
+      } else if (levels.indexOf("注意") >= 0) {
+        tone = "warn";
+        why = "有需要注意的地方";
+      } else if (!(d.backups || []).length) {
+        tone = "warn";
+        why = "还没有备份";
+      }
+      dot.className = "dot " + tone;
+      if (dotNote) dotNote.textContent = why;
+    }
     var body = $("#backupTable tbody");
     if (body) {
-      var rows = d.backups || [];
+      var rows = (d.backups || []).slice(0, BACKUP_ROWS);
       body.innerHTML = rows.length ? rows.map(function (b) {
         return "<tr><td class=\"mono\">" + PX.esc(b.name) + "</td>" +
           "<td>" + PX.esc(PX.when(b.created)) + "</td>" +
@@ -8282,6 +8310,23 @@ function archiveOrg(id) {
     if (logoutBtn) return logout(logoutBtn.getAttribute("data-logout"));
 
     if (t.closest("[data-close-overlay]")) return closeOverlay();
+
+    var fold = t.closest("[data-fold-toggle]");
+    if (fold) {
+      var card = fold.closest(".card");
+      if (card) {
+        var open = !card.classList.contains("fold-open");
+        card.classList.toggle("fold-open", open);
+        fold.setAttribute("aria-expanded", open ? "true" : "false");
+        if (fold.getAttribute("data-fold-toggle") === "1" ||
+            fold.hasAttribute("data-fold-label")) {
+          var label = fold.getAttribute("data-fold-label") || fold.textContent;
+          fold.setAttribute("data-fold-label", label);
+          fold.textContent = open ? "收起" : label;
+        }
+      }
+      return;
+    }
 
     var goEl = t.closest("[data-go]");
     if (goEl) return go(goEl.getAttribute("data-go"));

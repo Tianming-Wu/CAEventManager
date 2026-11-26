@@ -526,7 +526,11 @@ def auto(version="", now=None):
     state = due_state(now)
     if not state["due"]:
         return None
-    path, manifest = make(version=version, kind="auto", reason="routine")
+    try:
+        path, manifest = make(version=version, kind="auto", reason="routine")
+    except Exception as exc:                            # noqa: BLE001 - 失败要留痕再抛
+        notify_owner("bad", "自动备份失败", str(exc)[:200])
+        raise
     kept, drop = prune(apply=True)
     print("自动备份：%s（%s），留存 %d 份，清掉 %d 份"
           % (path, _human(os.path.getsize(path)), len(kept), len(drop)))
@@ -555,7 +559,27 @@ def mirror_remote(path, kept=None):
     except BackupError as exc:
         print("WebDAV 这一步没成（本地备份照旧留着）：%s" % exc)
         _audit_failure("backup_upload_failed", str(exc)[:200])
+        notify_owner("warn", "异地副本没有传上去",
+                     "本地备份照旧留着。WebDAV：%s" % str(exc)[:200])
         return None
+
+
+def notify_owner(level, title, body=""):
+    """失败与警告给站长留一条通知。
+
+    通知是排队的：站长不在线也留着，下次打开面板就能看到，不会自己消失。
+    """
+    try:
+        import panel
+        with panel.tx() as tx:
+            rows = tx.execute(
+                "SELECT id FROM accounts WHERE role='owner' AND status='active'"
+            ).fetchall()
+            for row in rows:
+                panel.notice(tx, level, title, body, account_id=row["id"],
+                             actor="system", obj="backup")
+    except Exception:                                   # noqa: BLE001 - 通知失败不该影响备份
+        pass
 
 
 def _audit_failure(action, reason):
@@ -839,10 +863,8 @@ def doctor():
             out.append(("问题", "活动 #%d 既无业务库也无归档包" % seq))
         elif packed and live:
             out.append(("问题", "活动 #%d 归档包与业务库同时存在" % seq))
-        counts = _row_counts(os.path.join(folder, "data.sqlite3")) if live else {}
-        if live and counts and not any(counts.get(k) for k in ("students", "marks", "tickets")):
-            out.append(("提示", "活动 #%d「%s」无人员数据，可能为空活动"
-                        % (seq, row["title"] or "")))
+        # 活动没有人员数据是正常状态（讲座、纯展示的活动都这样），
+        # 这一项不报：报了只会教人忽略检查结果。
     if not out:
         out.append(("正常", "未发现问题"))
     return out

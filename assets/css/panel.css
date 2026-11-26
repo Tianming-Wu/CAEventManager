@@ -1521,7 +1521,39 @@ select:invalid { color: var(--dim); }
   vertical-align: 1px;
 }
 .dot.ok { background: #2f7d4f; }
+.dot.warn { background: #c08a1e; }
 .dot.bad { background: var(--danger); }
+
+/* 卡片里可折叠的一段：0fr ↔ 1fr 的过渡，内容多高都不用先量一遍 */
+.fold-body {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows .26s ease, opacity .2s ease;
+}
+.fold-body > div { overflow: hidden; min-height: 0; }
+.card.fold-open > .fold-body { grid-template-rows: 1fr; opacity: 1; }
+
+/* 表单里的下拉框：跟输入框同一套外观，右边一个箭头 */
+.field select {
+  appearance: none;
+  padding: 8px 30px 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background-color: var(--surface);
+  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+                    linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position: right 15px center, right 10px center;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  color: var(--text);
+  font: inherit;
+  line-height: 1.3;
+}
+.field select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
 
 /* 表格里当链接用的名字：点进详情 */
 .link-btn {

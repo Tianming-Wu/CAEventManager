@@ -1839,30 +1839,40 @@
         </div>
       </div>
 
-      <div class="card">
-        <div class="card-head"><h2>服务信息</h2></div>
-        <dl class="kv" id="srvInfo"></dl>
-      </div>
-
-      <div class="card">
-        <div class="card-head"><h2>操作</h2></div>
-        <div class="row">
-          <button class="btn" id="serviceRestartBtn" type="button">重启服务</button>
-          <button class="btn danger" id="safeModeBtn" type="button">进入安全模式</button>
-          <span class="note" id="safeModeNote"></span>
+      <div class="cols-2">
+        <div class="col">
+          <div class="card">
+            <div class="card-head"><h2>服务信息</h2></div>
+            <dl class="kv" id="srvInfo"></dl>
+          </div>
+        </div>
+        <div class="col">
+          <div class="card">
+            <div class="card-head"><h2>操作</h2></div>
+            <div class="row">
+              <button class="btn" id="serviceRestartBtn" type="button">重启服务</button>
+              <button class="btn danger" id="safeModeBtn" type="button">进入安全模式</button>
+            </div>
+            <p class="note" id="safeModeNote"></p>
+          </div>
         </div>
       </div>
 
       <!-- 备份：设置写 data/backup_settings.json，包放 backups/ -->
-      <div class="card">
+      <div class="card" id="backupCard">
         <div class="card-head">
-          <h2>备份</h2>
+          <h2><span class="dot" id="backupDot" aria-hidden="true"></span>备份</h2>
+          <span class="note" id="backupDotNote"></span>
           <div class="spacer"></div>
+          <button class="btn sm" id="backupFold" type="button"
+                  data-fold-toggle="1" aria-expanded="false">设置</button>
           <button class="btn sm" id="backupRun" type="button">立即备份</button>
         </div>
         <p class="note" id="backupState">正在读取…</p>
         <dl class="kv" id="backupHints" hidden></dl>
 
+        <div class="fold-body" id="backupSettings">
+          <div>
         <div class="as-form-grid">
           <div class="field">
             <label for="bkEnabled">自动备份</label>
@@ -1948,6 +1958,8 @@
         <div class="row" style="margin-top:12px">
           <button class="btn primary" id="backupSave" type="button">保存设置</button>
           <span class="note">备份目录 <code id="backupDir">backups/</code>，恢复需停止服务后从命令行执行</span>
+        </div>
+          </div>
         </div>
 
         <div class="tblwrap" style="margin-top:14px">

@@ -5230,6 +5230,47 @@ def server_page(page):
     labels = page.evaluate("""() => Array.from(
         document.querySelectorAll('[data-page="server"] .as-form-grid label'))
         .map(l => l.innerText.trim()).filter(t => t)""")
+    print("== 备份卡片：折叠、状态点、只留几行 ==")
+    folded = page.evaluate("""() => {
+        const card = document.getElementById('backupCard');
+        const box = document.getElementById('backupSettings');
+        return {
+            open: card.classList.contains('fold-open'),
+            rows: box.getBoundingClientRect().height,
+            toggleText: document.getElementById('backupFold').textContent.trim(),
+        };
+    }""")
+    check("设置一开始是收起来的", not folded["open"] and folded["rows"] < 4, folded)
+    check("收起来时那颗键写着设置", folded["toggleText"] == "设置", folded["toggleText"])
+    page.click("#backupFold")
+    page.wait_for_timeout(500)          # 等过渡走完
+    opened = page.evaluate("""() => {
+        const card = document.getElementById('backupCard');
+        const box = document.getElementById('backupSettings');
+        return {
+            open: card.classList.contains('fold-open'),
+            rows: box.getBoundingClientRect().height,
+            toggleText: document.getElementById('backupFold').textContent.trim(),
+        };
+    }""")
+    check("点一下展开，而且是长出来的",
+          opened["open"] and opened["rows"] > 60, opened)
+    check("展开后那颗键写着收起", opened["toggleText"] == "收起", opened["toggleText"])
+    page.click("#backupFold")
+    page.wait_for_timeout(500)
+    check("再点一下收回去",
+          page.evaluate("() => !document.getElementById('backupCard')"
+                        ".classList.contains('fold-open')"))
+
+    dot = page.evaluate("""() => {
+        const el = document.getElementById('backupDot');
+        return el ? el.className : '';
+    }""")
+    check("备份标题上有一颗状态点",
+          any(t in dot for t in ("dot ok", "dot warn", "dot bad")), dot)
+    rows_shown = page.locator("#backupTable tbody tr").count()
+    check("备份列表最多五行", rows_shown <= 5, rows_shown)
+
     check("备份设置的字段名挨个对得上",
           all(t in labels for t in ("自动备份", "调度方式", "触发时刻",
                                     "留存天数", "留存周数", "留存月数", "总字节上限")),

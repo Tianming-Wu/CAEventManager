@@ -214,6 +214,24 @@ def keepalive_desync():
     return first
 
 
+def _make_cover_png(width=1200, height=675):
+    """一张纯色 PNG：给缩图那条路一个比 320 宽得多的原图。"""
+    import struct
+    import zlib
+
+    rows = b""
+    for y in range(height):
+        rows += b"\x00" + bytes([(x * 7 + y * 3) % 256 for x in range(width * 3)])
+
+    def chunk(tag, body):
+        return (struct.pack(">I", len(body)) + tag + body +
+                struct.pack(">I", zlib.crc32(tag + body) & 0xFFFFFFFF))
+
+    head = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", head) +
+            chunk(b"IDAT", zlib.compress(rows, 6)) + chunk(b"IEND", b""))
+
+
 def main():
     print("== pages at the service root ==")
     anon = session()
@@ -2471,6 +2489,36 @@ def main():
     with owner.open(served, timeout=20) as res:
         blob = res.read()
     check("站内那张图能取回来", blob[:4] == b"\x89PNG", blob[:8])
+    # 服务端缩图是可选的：有 Pillow 时 ?w= 现画一张 WebP 并缓存，没有就给原图
+    import imaging as _imaging
+    big = _make_cover_png() if _imaging.available() else None
+    if big:
+        post(owner, "/api/panel/org/cover",
+             {"id": "cs-club", "scope": "self",
+              "data": "data:image/png;base64," + base64.b64encode(big).decode()})
+        small_req = urllib.request.Request(
+            ROOT + "/api/panel/org_cover/cs-club?w=320", headers=dict(HEADER))
+        with owner.open(small_req, timeout=30) as res:
+            small = res.read()
+        from PIL import Image as _Image
+        with _Image.open(io.BytesIO(small)) as probe:
+            got_w = probe.width
+        check("装了 Pillow 就按宽度现画一张",
+              small[:4] == b"RIFF" and small[8:12] == b"WEBP" and got_w == 320,
+              (len(small), len(big), got_w))
+        again = urllib.request.Request(
+            ROOT + "/api/panel/org_cover/cs-club?w=320", headers=dict(HEADER))
+        with owner.open(again, timeout=30) as res:
+            cached = res.read()
+        check("第二次数出来的还是同一张", cached == small, (len(cached), len(small)))
+        full_req = urllib.request.Request(
+            ROOT + "/api/panel/org_cover/cs-club", headers=dict(HEADER))
+        with owner.open(full_req, timeout=30) as res:
+            full_blob = res.read()
+        check("不带宽度时仍然是原图", full_blob == big, (len(full_blob), len(big)))
+    else:
+        check("没有 Pillow 时 ?w= 退回原图", True)
+
     linked = post(owner, "/api/panel/org/cover",
                   {"id": "cs-club", "scope": "self",
                    "url": "https://img.example.com/a.png"})

@@ -1,0 +1,9 @@
+# 可选依赖：装上有这些能力，不装就按"没有"处理，服务照常跑。
+#
+#   python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+#
+# 装上之后 bin/run.sh 会用 .venv 里的解释器；没装就用系统的 python3。
+# 详见 doc/ops/install.md。
+
+# 服务端缩图：组织外观的 ?w= 现画现缓存（没装则一律给原图）
+Pillow>=10,<12

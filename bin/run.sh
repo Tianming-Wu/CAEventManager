@@ -12,5 +12,9 @@ cd "$HERE/.."
 umask 077
 mkdir -p data
 # host/port come from config.json (LOTTERY_HOST / LOTTERY_PORT still win).
+# 可选依赖装在 .venv 里（bin/deploy.ps1 会装，见 requirements.txt）：
+# 有就用它，没有就用系统的 python3 —— 缺 Pillow 只影响服务端缩图。
+PY=python3
+[ -x ./.venv/bin/python3 ] && PY=./.venv/bin/python3
 exec flock --nonblock --no-fork ./data/service.lock \
-    python3 -u app.py >>data/service.log 2>&1
+    "$PY" -u app.py >>data/service.log 2>&1

@@ -2,6 +2,21 @@
 
 应用运行需要 Python 3。远程部署脚本通过 SSH 向 Linux 系统上传文件，目标系统须提供 `tar`。使用服务脚本还需要 `flock`。
 
+## 可选依赖
+
+组织外观需要服务端按请求宽度缩图，这一步依赖 [Pillow](https://python-pillow.org/)（`requirements.txt`）。部署脚本会在部署目录里建一个 `.venv` 并装好它，`bin/run.sh` 检测到 `.venv/bin/python3` 就用它，没有就用系统的 `python3`。
+
+没装上（例如目标机访问不了软件源）不影响服务启动，只是服务器端不再缩图：外观接口一律返回原图，浏览器上传时预生成的那几档小图仍然可用。手动安装：
+
+```sh
+cd ~/apps/eventmanager
+python3 -m venv .venv
+./.venv/bin/pip install -r requirements.txt
+./bin/service.sh restart
+```
+
+`./.venv/bin/python3 -c "import PIL; print(PIL.__version__)"` 有输出即视为可用。缩出来的图缓存在 `data/org_covers/.cache/`，累计超过 96 MB 时先丢最旧的；改动外观图会让缓存的键随之失效。
+
 ## 首次部署
 
 1. 将应用文件放入部署目录。使用远程部署脚本时，指定 `-NoRestart`，完成配置后再启动。

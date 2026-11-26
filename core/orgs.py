@@ -12,6 +12,7 @@ import json
 import os
 import time
 
+import imaging
 import panel
 
 ROLES = ("head", "admin", "member")
@@ -147,6 +148,66 @@ def cover_widths(org_id):
         if os.path.exists(cover_path("%s-%d.webp" % (org_id, width))):
             out.append(width)
     return out
+
+
+CACHE_CAP = 96 * 1024 * 1024        # 现场生成的小图缓存：超了先丢最旧的
+
+
+def cover_cache_dir():
+    path = os.path.join(cover_dir(), ".cache")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def cover_original(org_id):
+    """原图：任何一档小图都是从它画出来的。"""
+    for ext in ("webp", "jpg", "png"):
+        full = cover_path("%s.%s" % (org_id, ext))
+        if full and os.path.exists(full):
+            return full
+    return None
+
+
+def cover_scaled(org_id, want_w, cover_at=0):
+    """按宽度取一张图，返回 (路径, 实际宽度, 是否是现场画的)。
+
+    顺序：请求没给宽度就原图；手上有现成的一档且够宽就用它；装了 Pillow 就
+    从原图现画一张并缓存；都没有就交出最大的那一档（或原图）。
+    """
+    try:
+        want = int(want_w or 0)
+    except (TypeError, ValueError):
+        want = 0
+    if want <= 0:
+        return cover_original(org_id), 0, False
+    full, got = pick_cover(org_id, want)
+    if got and got >= want:
+        return full, got, False
+    if not imaging.available():
+        return full, got, False          # 没装图像库：照旧给手上这一档
+    src = cover_original(org_id)
+    if not src:
+        return full, got, False
+    name = "%s-%d-%d.webp" % (org_id, min(want, imaging.MAX_WIDTH),
+                              int(cover_at or 0))
+    cache = os.path.join(cover_cache_dir(), name)
+    if os.path.exists(cache):
+        return cache, want, True
+    try:
+        with open(src, "rb") as fh:
+            data = fh.read()
+    except OSError:
+        return full, got, False
+    blob = imaging.resize_webp(data, want)
+    if not blob:
+        return full, got, False
+    try:
+        with open(cache, "wb") as fh:
+            fh.write(blob)
+        imaging.trim_cache(cover_cache_dir(), CACHE_CAP, keep=name)
+    except OSError:
+        pass
+    return cache, want, True
 
 
 def pick_cover(org_id, want_w):

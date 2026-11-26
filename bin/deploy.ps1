@@ -27,7 +27,7 @@ $root = Split-Path -Parent $PSScriptRoot
 $files = @(
     (Get-ChildItem -File -Filter *.py | Select-Object -ExpandProperty Name)
     (Get-ChildItem -File -Filter *.md | Select-Object -ExpandProperty Name)
-    "bin/run.sh", "bin/service.sh"
+    "bin/run.sh", "bin/service.sh", "requirements.txt"
 )
 # Collected too: pages / assets / theme / tools - a hand-written list here
 # silently skipped a new asset directory once already.
@@ -77,7 +77,8 @@ tar -tzf __TAR__ | sed -e 's|^\./||' -e '/\/$/d' | sort > /tmp/lottery-incoming.
 find . -type f \
     -not -path './data/*' -not -path './backups/*' \
     -not -path './modules/*' -not -path './templates/*' \
-    -not -path './theme/*' -not -path './packs/*' -not -name 'config.json' \
+    -not -path './theme/*' -not -path './packs/*' \
+    -not -path './.venv/*' -not -name 'config.json' \
     | sed 's|^\./||' | sort > /tmp/lottery-present.txt
 comm -23 /tmp/lottery-present.txt /tmp/lottery-incoming.txt > /tmp/lottery-stale.txt || true
 while IFS= read -r stale; do
@@ -111,6 +112,33 @@ echo "ok: all files present, imports clean"
         if ($LASTEXITCODE -ne 0) { throw "remote extract/preflight failed" }
     } finally {
         Remove-Item $scriptPath -Force -ErrorAction SilentlyContinue
+    }
+
+    Write-Host "== optional deps (.venv) =="
+    $venv = @'
+set -u
+cd ~/__DEST__
+if [ -x ./.venv/bin/python3 ] && ./.venv/bin/python3 -c "import PIL" 2>/dev/null; then
+    echo "   .venv ready"
+    exit 0
+fi
+echo "   installing Pillow into .venv ..."
+python3 -m venv .venv >/dev/null 2>&1 || { echo "   WARN: venv 建不起来，服务端缩图不可用" >&2; exit 0; }
+./.venv/bin/pip install --quiet --disable-pip-version-check -r requirements.txt \
+    || { echo "   WARN: 依赖没装上（可能是没网），服务端缩图不可用" >&2; exit 0; }
+./.venv/bin/python3 -c "import PIL; print('   Pillow', PIL.__version__)" 2>/dev/null \
+    || echo "   WARN: Pillow 装了但导入失败"
+exit 0
+'@
+    $venvScript = $venv.Replace("__DEST__", $Dest)
+    $venvPath = Join-Path $env:TEMP "lottery-$stamp-venv.sh"
+    [IO.File]::WriteAllText($venvPath, $venvScript.Replace("`r`n", "`n"),
+        (New-Object System.Text.UTF8Encoding $false))
+    try {
+        $out = & cmd /c "type `"$venvPath`" | ssh $Remote `"sh -s`" 2>&1"
+        $out | ForEach-Object { Write-Host "   remote: $_" }
+    } finally {
+        Remove-Item $venvPath -Force -ErrorAction SilentlyContinue
     }
 
     if (-not $NoRestart) {

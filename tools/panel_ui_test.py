@@ -69,6 +69,13 @@ def check(name, cond, detail=""):
     print("  %-5s %s %s" % ("PASS" if cond else "FAIL", name, "" if cond else detail))
     if not cond:
         problems.append(name)
+        # 控制台经 Windows 编码一转，中文细节就看不清了：失败项另存一份 UTF-8
+        try:
+            with open(os.path.join(ROOT_DIR, "tmp", "ui-failures.log"), "a",
+                      encoding="utf-8") as fh:
+                fh.write("%s | %s\n" % (name, detail))
+        except OSError:
+            pass
 
 
 # --------------------------------------------------------------------------- #
@@ -5169,6 +5176,20 @@ def server_page(page):
     check("服务卡片上有重启与安全模式两个按钮",
           page.locator("#serviceRestartBtn").count() == 1
           and page.locator("#safeModeBtn").count() == 1)
+    page.wait_for_selector("#featureTable tbody tr", timeout=15000)
+    feat = page.evaluate("""() => {
+        const rows = Array.from(document.querySelectorAll('#featureTable tbody tr'));
+        return rows.map(tr => ({
+            text: tr.innerText.trim(),
+            tone: tr.querySelector('.dot')
+                ? (tr.querySelector('.dot').classList.contains('ok') ? 'ok' : 'bad')
+                : 'none',
+        }));
+    }""")
+    check("服务器特性卡片列出了自动图片缩放",
+          any("自动图片缩放" in r["text"] for r in feat), feat)
+    check("每条特性前面都有绿点或红点",
+          bool(feat) and all(r["tone"] in ("ok", "bad") for r in feat), feat)
     check("放重启与安全模式的那张卡片叫操作",
           page.locator('[data-page="server"] .card', has_text="重启服务")
               .locator("h2").first.inner_text().strip() == "操作",
@@ -5227,7 +5248,14 @@ def server_page(page):
     })""")
     check("接口层面能立刻做一份", made.get("ok"), made)
     page.reload(wait_until="domcontentloaded")
-    page.wait_for_timeout(1500)
+    # 备份清单是页面加载后再取的：等它出来，别用固定睡眠赌时间
+    try:
+        page.wait_for_function(
+            "() => document.querySelectorAll('#backupTable tbody tr').length > 0",
+            timeout=15000)
+    except Exception:
+        pass
+    page.wait_for_timeout(300)
     rows = page.evaluate("""() => Array.from(
         document.querySelectorAll('#backupTable tbody tr')).map(tr => tr.innerText)""")
     check("列表里能看到刚做的那一份",

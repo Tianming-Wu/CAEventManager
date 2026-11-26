@@ -2559,6 +2559,14 @@ def main():
     check("删完之后清单里没有了",
           not any(o["id"] == "cs-club" for o in call(owner, "/api/panel/orgs")["orgs"]))
 
+    host = call(owner, "/api/panel/host")
+    feats = host.get("features") or []
+    check("服务器特性清单里有自动图片缩放",
+          any(f.get("id") == "imaging" and f.get("name") == "自动图片缩放"
+              for f in feats), feats)
+    check("每条特性都带状态与说明",
+          all(isinstance(f.get("ok"), bool) and f.get("detail") for f in feats), feats)
+
     print("== event pages still reachable ==")
     token = events[0]["id"]
     board = call(anon, "/%s/api/board" % token)

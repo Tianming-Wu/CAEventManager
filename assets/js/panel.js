@@ -5876,7 +5876,8 @@ function archiveOrg(id) {
 
   function drawServer() {
     var h = S.host;
-    drawSafeMode();
+  drawFeatures();
+  drawSafeMode();
     $("#srvCpu").textContent = h ? pct(h.cpu) : "–";
     $("#srvMem").textContent = h ? pct(h.mem) : "–";
     $("#srvUptime").textContent = h && h.uptime ? humanUptime(h.uptime) : "–";
@@ -7674,10 +7675,35 @@ function archiveOrg(id) {
     PX.api("/host")
       .then(function (d) {
         S.users = (d && d.users) || null;
+        S.features = (d && d.features) || null;
         S.hostMeta = { safeMode: !!(d && d.safeMode), supervised: d && d.supervised };
         applyHost(d && d.host ? d.host : null);
+        drawFeatures();
       })
       .catch(function () { applyHost(null); });
+  }
+
+  /* 服务器特性：额外依赖装上了才有的能力。绿点可用，红点不可用，
+     第二列说清是哪一个版本，或者缺了什么、缺了会怎样。 */
+  function drawFeatures() {
+    var body = $("#featureTable tbody");
+    if (!body) return;
+    var rows = S.features;
+    if (!rows) {
+      body.innerHTML = rowsOrEmpty(2, "features", "没有可选特性");
+      return;
+    }
+    var sig = JSON.stringify(rows);
+    if (sig === S.featureSig) return;          // 每五秒问一次，没变就不动 DOM
+    S.featureSig = sig;
+    markLoaded("features");
+    body.innerHTML = rows.length ? rows.map(function (f) {
+      return "<tr>" +
+        '<td><span class="dot ' + (f.ok ? "ok" : "bad") + '" aria-hidden="true"></span>' +
+        PX.esc(f.name || "") + "</td>" +
+        '<td class="note">' + (f.ok ? "" : "不可用 · ") +
+        PX.esc(f.detail || "") + "</td></tr>";
+    }).join("") : rowsOrEmpty(2, "features", "没有可选特性");
   }
 
   function startHostPolling() {

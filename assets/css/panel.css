@@ -1511,6 +1511,18 @@ select:invalid { color: var(--dim); }
 .person-cell { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
 .person-cell .avatar { width: 26px; height: 26px; font-size: .72rem; }
 .person-cell .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 「服务器特性」里的小圆点：绿的是可用，红的是缺依赖 */
+.dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 8px;
+  border-radius: 999px;
+  vertical-align: 1px;
+}
+.dot.ok { background: #2f7d4f; }
+.dot.bad { background: var(--danger); }
+
 /* 表格里当链接用的名字：点进详情 */
 .link-btn {
   padding: 0;

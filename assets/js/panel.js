@@ -3060,6 +3060,8 @@
     loadService();
     syncSudo();
     if (wanted === "server" || wanted === "overview") refreshHost();
+    // 备份那一段只在进页面时问一次：放在重画里问，回答落地又会触发重画
+    if (wanted === "server") loadBackup();
     /* 进页就问一次服务端。实时通知只负责"快"，长连接的可靠性不足以当真相：
        流要是断过一段，页面上的数字与列表就会停在旧的那一版，而人看不出来。
        所以每一页进来都重新取一遍自己要显示的东西——代价是一次小请求。 */
@@ -5800,7 +5802,10 @@ function archiveOrg(id) {
     var note = $("#safeModeNote");
     if (!btn) return;
     var on = safeModeOn();
-    btn.textContent = on ? "退出安全模式" : "进入安全模式";
+    // 只改文字那一截：整颗按钮的 textContent 会把图标一起抹掉
+    var label = btn.querySelector(".btn-label");
+    if (label) label.textContent = on ? "退出安全模式" : "进入安全模式";
+    else btn.textContent = on ? "退出安全模式" : "进入安全模式";
     btn.className = "btn " + (on ? "" : "danger");
     if (note) {
       note.textContent = (S.hostMeta && S.hostMeta.supervised === false)
@@ -5904,7 +5909,6 @@ function archiveOrg(id) {
     $("#srvInfo").innerHTML = rows.map(function (r) {
       return "<dt>" + PX.esc(r[0]) + "</dt><dd>" + PX.esc(r[1]) + "</dd>";
     }).join("");
-    loadBackup();
   }
 
   /* ---------------------------------------------------------------- 备份 --- */
@@ -5931,6 +5935,14 @@ function archiveOrg(id) {
   function drawBackup() {
     var d = S.backup;
     if (!d) return;
+    /* 后台每隔一会儿就会问一次服务端，回来的多半跟手上这份一模一样。
+       一模一样就别再写一遍 DOM：写一遍会把正在展开的那段收回去、把滚到一半的
+       列表顶回顶部，下拉框也会在弹出的一瞬被重设一次。 */
+    var sig = JSON.stringify([d.settings, d.dir, d.due,
+                              (d.backups || []).map(function (b) { return b.name; }),
+                              d.hints]);
+    if (sig === S.backupSig) return;
+    S.backupSig = sig;
     var cfg = d.settings || {};
     var schedule = cfg.schedule || {};
     var ret = cfg.retention || {};
@@ -6012,6 +6024,7 @@ function archiveOrg(id) {
   }
 
   function saveBackup() {
+    S.backupSig = null;          // 存完要让下一次 draw 重新套一遍
     var wear = function (sel) { return ($(sel) && $(sel).value || "").trim(); };
     var body = {
       enabled: !!($("#bkEnabled") && $("#bkEnabled").checked),

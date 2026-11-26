@@ -5226,7 +5226,7 @@ def server_page(page):
     check("写明了备份放在哪", card["dir"].endswith("backups"), card["dir"])
     check("WebDAV 那一段折在里面", card["dav"])
     check("状态行说得出最近一次备份是什么时候",
-          "最近一次备份" in card["state"] or "尚无备份" in card["state"], card["state"])
+          "最近一次备份" in card["state"] or "还没有备份" in card["state"], card["state"])
     labels = page.evaluate("""() => Array.from(
         document.querySelectorAll('[data-page="server"] .as-form-grid label'))
         .map(l => l.innerText.trim()).filter(t => t)""")
@@ -5262,12 +5262,14 @@ def server_page(page):
           page.evaluate("() => !document.getElementById('backupCard')"
                         ".classList.contains('fold-open')"))
 
-    dot = page.evaluate("""() => {
-        const el = document.getElementById('backupDot');
-        return el ? el.className : '';
-    }""")
-    check("备份标题上有一颗状态点",
-          any(t in dot for t in ("dot ok", "dot warn", "dot bad")), dot)
+    dots = page.evaluate("""() => Array.from(
+        document.querySelectorAll('#backupTable tbody tr .dot'))
+        .map(el => el.className)""")
+    check("每一份备份前面有一颗状态点",
+          bool(dots) and all((" ok" in (" " + d) or " bad" in (" " + d)) for d in dots),
+          dots)
+    check("标题旁边有打开文档的圆圈问号",
+          page.locator('#backupCard .card-help[data-doc="ops/backup.md"]').count() == 1)
     rows_shown = page.locator("#backupTable tbody tr").count()
     check("备份列表最多五行", rows_shown <= 5, rows_shown)
 
@@ -5297,10 +5299,11 @@ def server_page(page):
     except Exception:
         pass
     page.wait_for_timeout(300)
-    rows = page.evaluate("""() => Array.from(
-        document.querySelectorAll('#backupTable tbody tr')).map(tr => tr.innerText)""")
-    check("列表里能看到刚做的那一份",
-          any((made.get("name") or "") in row for row in rows), rows[:2])
+    backup_name = made.get("name") or ""
+    new_row = page.locator("#backupTable tbody tr").filter(has_text=backup_name)
+    check("列表中刚创建的备份显示清单可读",
+          bool(backup_name) and new_row.locator(
+              '.dot.ok[aria-label="备份清单可读取"]').count() == 1, made)
 
     print("== 备份进审计日志 ==")
     page.goto(BASE + "/panel#/audit")

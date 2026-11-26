@@ -1,6 +1,6 @@
 # 文档目录 - 按读者和任务查阅文档
 
-使用文档查看器和运维助手可访问使用说明、参考资料及模块说明。
+使用文档查看器和运维助手可访问使用说明、参考资料及模块说明。站长还可在文档查看器中查阅部署与运维文档。
 
 | 分类 | 读者 | 内容 |
 | --- | --- | --- |
@@ -27,6 +27,7 @@
 ## 部署与开发
 
 - [部署与运维](ops/deploy.md)
+- [备份](ops/backup.md)与[服务器特性](ops/features.md)
 - [项目架构](dev/architecture.md)、[运维助手设计](dev/assistant.md)、[界面规范](dev/ui-spec.md)
 - [模块开发指南](dev/modules.md)、[模块接口](dev/module-interface.md)
 

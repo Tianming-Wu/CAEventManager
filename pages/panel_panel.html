@@ -1860,7 +1860,8 @@
       <div class="card">
         <div class="card-head">
           <h2>服务器特性</h2>
-          <span class="note">额外依赖装上了才可用的能力</span>
+          <button class="card-help" type="button" data-doc="ops/features.md"
+                  aria-label="查看服务器特性的文档" title="查看文档">?</button>
         </div>
         <div class="tblwrap">
           <table class="tbl fixed" id="featureTable">
@@ -1875,8 +1876,9 @@
       <!-- 备份：设置写 data/backup_settings.json，包放 backups/ -->
       <div class="card" id="backupCard">
         <div class="card-head">
-          <h2><span class="dot" id="backupDot" aria-hidden="true"></span>备份</h2>
-          <span class="note" id="backupDotNote"></span>
+          <h2>备份</h2>
+          <button class="card-help" type="button" data-doc="ops/backup.md"
+                  aria-label="查看备份的文档" title="查看文档">?</button>
           <div class="spacer"></div>
           <button class="btn sm" id="backupFold" type="button"
                   data-fold-toggle="1" aria-expanded="false">设置</button>
@@ -1979,7 +1981,7 @@
         <div class="tblwrap" style="margin-top:14px">
           <table class="tbl fixed" id="backupTable">
             <thead><tr>
-              <th>备份</th><th>时间</th><th>大小</th><th>种类</th><th>活动</th>
+              <th>备份</th><th>时间</th><th>大小</th><th>种类</th>
             </tr></thead>
             <tbody></tbody>
           </table>

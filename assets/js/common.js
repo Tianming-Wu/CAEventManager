@@ -236,9 +236,16 @@
     watchers.push(handler);
     if (typeof window.EventSource !== "function") return;
     var source = null;
+    var retry = 4000;
+    var recycle = null;
+    /* 长连接开久了会被中间那层代理重置（控制台里一串
+       ERR_HTTP2_PROTOCOL_ERROR 200）。主动隔一阵干净地关一次再连，
+       就撞不上代理的空闲上限；标签页收起来时干脆断开，回来再接上。 */
+    var RECYCLE_MS = 4 * 60 * 1000;
     var open = function () {
       if (source) return;
       source = new EventSource(PREFIX + "/api/panel/stream");
+      retry = 4000;                      // 连上了就把退避重置
       source.onmessage = function (event) {
         var data;
         try { data = JSON.parse(event.data); } catch (e) { return; }
@@ -254,11 +261,30 @@
         // the browser retries by itself; reconnect with a clean slate
         if (source && source.readyState === 2) {
           source = null;
-          setTimeout(open, 4000);
+          setTimeout(open, retry);
+          retry = Math.min(retry * 2, 60000);
         }
       };
     };
+    var close = function () {
+      if (!source) return;
+      source.close();                    // 干净地关：控制台不会留错误
+      source = null;
+    };
+    var rearm = function () {
+      clearTimeout(recycle);
+      recycle = setTimeout(function () {
+        close();
+        if (!document.hidden) open();
+        rearm();
+      }, RECYCLE_MS);
+    };
+    document.addEventListener("visibilitychange", function () {
+      if (document.hidden) close();
+      else open();
+    });
     open();
+    rearm();
   }
 
   /* 通知从右上角落下：底部弹一条颜色接近页面的条，人一低头就错过了。

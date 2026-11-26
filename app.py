@@ -75,7 +75,7 @@ PAGES_DIR = os.path.join(BASE_DIR, "pages")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.13.44.170"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.13.45.171"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -1477,7 +1477,10 @@ class Handler(BaseHTTPRequestHandler):
             if acc is None:
                 raise model.ApiError("未登录或登录已过期", 401)
             if route == "/api/docs/tree":
-                return self._json({"ok": True, "groups": assistant.doc_tree()})
+                # 运维文档只给站长：其余人拿到的树里没有这一类
+                return self._json({"ok": True,
+                                   "groups": assistant.doc_tree(
+                                       include_ops=acc["role"] == "owner")})
             if route == "/api/docs/img":
                 # 文档里的图：只认 doc/ 与模块目录下的图片文件，防穿越
                 want = (query.get("path") or [""])[0].strip().lstrip("/")
@@ -3536,6 +3539,7 @@ class Handler(BaseHTTPRequestHandler):
                 manifest = item.get("manifest") or {}
                 items.append({"name": item["name"], "bytes": item["bytes"],
                               "created": manifest.get("created") or 0,
+                              "manifestReadable": item["manifest"] is not None,
                               "kind": manifest.get("kind") or "",
                               "version": manifest.get("version") or "",
                               "events": len(manifest.get("events") or [])})

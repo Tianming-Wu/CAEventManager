@@ -1158,6 +1158,9 @@
   }
 
   // The rail shows icons only, so every entry needs a hover title.
+  /* 卡片标题右边的圆圈问号：新标签页打开对应的文档 */
+  var DOCS_HREF = PX.PREFIX + "/docs#/";
+
   function labelNav() {
     $$(".nav-item").forEach(function (a) {
       var t = a.querySelector(".nav-text");
@@ -5897,10 +5900,10 @@ function archiveOrg(id) {
         ? Math.round(h.mem) + "%" +
           (h.memTotalMB ? "（共 " + Math.round(h.memTotalMB) + " MB）" : "")
         : "—"]);
-      rows.push(["进程", "pid " + (h.pid || "—")]);
-      rows.push(["Python", h.python || "—"]);
+      // 进程与解释器并成一行：这里只回答"现在跑的是什么"
+      rows.push(["进程", "pid " + (h.pid || "—") +
+        (h.python ? "（Python " + h.python + "）" : "")]);
       rows.push(["数据目录", h.dataDir || "—"]);
-      rows.push(["活动数", String(S.events.length)]);
       rows.push(["账号数", String(S.accounts.length)]);
     } else {
       rows.push(["状态", "这台机器读不到设备占用（非 Linux 或 /proc 不可用）"
@@ -5938,9 +5941,8 @@ function archiveOrg(id) {
     /* 后台每隔一会儿就会问一次服务端，回来的多半跟手上这份一模一样。
        一模一样就别再写一遍 DOM：写一遍会把正在展开的那段收回去、把滚到一半的
        列表顶回顶部，下拉框也会在弹出的一瞬被重设一次。 */
-    var sig = JSON.stringify([d.settings, d.dir, d.due,
-                              (d.backups || []).map(function (b) { return b.name; }),
-                              d.hints]);
+    var rows = (d.backups || []).slice(0, BACKUP_ROWS);
+    var sig = JSON.stringify([d.settings, d.dir, d.due, rows, d.hints]);
     if (sig === S.backupSig) return;
     S.backupSig = sig;
     var cfg = d.settings || {};
@@ -5976,11 +5978,9 @@ function archiveOrg(id) {
     var due = d.due || {};
     var last = due.last ? PX.when(due.last) : "";
     if ($("#backupState")) {
-      var line = last ? "最近一次备份：" + last : "尚无备份";
-      if (cfg.enabled) {
-        var at = "计划时间 " + (schedule.at || "") + " 的备份";
-        line = (due.due ? at + "尚未执行。" : at + "已完成。") + line;
-      }
+      var line = last ? "最近一次备份：" + last : "还没有备份";
+      if (!cfg.enabled) line = "自动备份已关闭；" + line;
+      else if (due.reason) line = due.reason + "；" + line;
       $("#backupState").textContent = line;
     }
     var hints = $("#backupHints");
@@ -5991,35 +5991,18 @@ function archiveOrg(id) {
         return "<dt>" + PX.esc(h.level) + "</dt><dd>" + PX.esc(h.text) + "</dd>";
       }).join("");
     }
-    var dot = $("#backupDot");
-    var dotNote = $("#backupDotNote");
-    if (dot) {
-      var levels = (d.hints || []).map(function (h) { return h.level; });
-      var tone = "ok";
-      var why = "最近一次备份正常";
-      if (levels.indexOf("问题") >= 0) {
-        tone = "bad";
-        why = "最近一次备份有问题";
-      } else if (levels.indexOf("注意") >= 0) {
-        tone = "warn";
-        why = "有需要注意的地方";
-      } else if (!(d.backups || []).length) {
-        tone = "warn";
-        why = "还没有备份";
-      }
-      dot.className = "dot " + tone;
-      if (dotNote) dotNote.textContent = why;
-    }
     var body = $("#backupTable tbody");
     if (body) {
-      var rows = (d.backups || []).slice(0, BACKUP_ROWS);
       body.innerHTML = rows.length ? rows.map(function (b) {
-        return "<tr><td class=\"mono\">" + PX.esc(b.name) + "</td>" +
+        var tone = b.manifestReadable ? "ok" : "bad";
+        var why = b.manifestReadable ? "备份清单可读取" : "无法读取备份清单";
+        return "<tr><td><span class=\"dot " + tone + "\" data-tip=\"" +
+          PX.esc(why) + "\" aria-label=\"" + PX.esc(why) + "\"></span>" +
+          '<span class="mono">' + PX.esc(b.name) + "</span></td>" +
           "<td>" + PX.esc(PX.when(b.created)) + "</td>" +
           "<td class=\"mono\">" + PX.esc(fmtBytes(b.bytes)) + "</td>" +
-          "<td>" + PX.esc(BACKUP_KIND[b.kind] || b.kind || "—") + "</td>" +
-          "<td class=\"mono\">" + PX.esc(String(b.events)) + "</td></tr>";
-      }).join("") : rowsOrEmpty(5, "backup", "无备份");
+          "<td>" + PX.esc(BACKUP_KIND[b.kind] || b.kind || "—") + "</td></tr>";
+      }).join("") : rowsOrEmpty(4, "backup", "还没有备份");
     }
   }
 
@@ -8323,6 +8306,13 @@ function archiveOrg(id) {
     if (logoutBtn) return logout(logoutBtn.getAttribute("data-logout"));
 
     if (t.closest("[data-close-overlay]")) return closeOverlay();
+
+    var help = t.closest("[data-doc]");
+    if (help) {
+      window.open(DOCS_HREF + help.getAttribute("data-doc"), "_blank",
+                  "noopener");
+      return;
+    }
 
     var fold = t.closest("[data-fold-toggle]");
     if (fold) {

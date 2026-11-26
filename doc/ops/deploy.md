@@ -4,18 +4,17 @@
 
 ## 可选依赖
 
-组织外观需要服务端按请求宽度缩图，这一步依赖 [Pillow](https://python-pillow.org/)（`requirements.txt`）。部署脚本会在部署目录里建一个 `.venv` 并装好它，`bin/run.sh` 检测到 `.venv/bin/python3` 就用它，没有就用系统的 `python3`。
+Pillow 用于组织外观图的自动缩放。远程部署脚本会尝试在部署目录的 `.venv` 中安装依赖。安装失败时服务仍可启动。
 
-没装上（例如目标机访问不了软件源）不影响服务启动，只是服务器端不再缩图：外观接口一律返回原图，浏览器上传时预生成的那几档小图仍然可用。手动安装：
+在 Linux 上手动安装时，从应用根目录运行下列命令。通过服务脚本启动时，启动脚本会优先使用 `.venv` 中的 Python。
 
 ```sh
-cd ~/apps/eventmanager
 python3 -m venv .venv
 ./.venv/bin/pip install -r requirements.txt
-./bin/service.sh restart
+./.venv/bin/python3 -c "import PIL; print(PIL.__version__)"
 ```
 
-`./.venv/bin/python3 -c "import PIL; print(PIL.__version__)"` 有输出即视为可用。缩出来的图缓存在 `data/org_covers/.cache/`，累计超过 96 MB 时先丢最旧的；改动外观图会让缓存的键随之失效。
+通过服务脚本启动的实例，安装后执行 `./bin/service.sh restart`。直接启动的实例，停止应用后用 `./.venv/bin/python3 app.py` 重新启动。
 
 ## 首次部署
 
@@ -97,14 +96,13 @@ python3 bin/backup.py doctor
 | `identity/` | 实例配置及助手附加提示词 |
 | `manifest.json` | 格式和应用版本、创建时间及文件校验值 |
 
-恢复前先校验目标备份并停止服务。
+恢复前先校验目标备份，再停止应用。通过服务脚本启动的实例须使用 `./bin/service.sh stop` 停止服务。
 
 ```sh
-./bin/service.sh stop
 python3 bin/backup.py restore 最新 --yes
 ```
 
-可用实际备份文件名替换「最新」。确认备份选择后添加 `--yes` 执行恢复。恢复成功后，使用 `./bin/service.sh start` 启动服务。恢复前会自动保存当前状态，类型标记为 `pre-restore`。默认恢复应用数据，需同时恢复实例配置和助手附加提示词时，指定 `--with-identity`。恢复完成后，各账号须重新登录。备份和恢复结果均记录在审计日志中。
+可用实际备份文件名替换「最新」。确认备份选择后添加 `--yes` 执行恢复。恢复成功后，按原启动方式启动应用。恢复前会自动保存当前状态，类型标记为 `pre-restore`。默认恢复应用数据，需同时恢复实例配置和助手附加提示词时，指定 `--with-identity`。恢复完成后，各账号须重新登录。备份和恢复结果均记录在审计日志中。
 
 ### 自动备份
 
@@ -114,17 +112,17 @@ python3 bin/backup.py restore 最新 --yes
 | --- | --- | --- |
 | `enabled` | `true` | 启用自动备份 |
 | `schedule.mode` | `daily` | `daily` 每日执行，`manual` 仅手动执行 |
-| `schedule.at` | `03:30` | 每日触发时刻，格式为 `HH:MM` |
-| `retention.daily` | `7` | 最近 7 天，每天保留最新一份 |
-| `retention.weekly` | `4` | 最近 4 周，每周保留最新一份 |
-| `retention.monthly` | `6` | 最近 6 个月，每月保留最新一份 |
+| `schedule.at` | `03:30` | 服务器本地时间，格式为 `HH:MM` |
+| `retention.daily` | `7` | 最近 7 个有备份的日期，每个日期保留最新一份 |
+| `retention.weekly` | `4` | 最近 4 个有备份的周，每周保留最新一份 |
+| `retention.monthly` | `6` | 最近 6 个有备份的月，每月保留最新一份 |
 | `retention.maxBytes` | `0` | 总字节上限，`0` 表示不限 |
 
-日、周、月留存规则取并集。最近 24 小时内的备份及恢复前备份不参与清理。使用 `python3 bin/backup.py prune` 预览，添加 `--yes` 执行清理。若调度任务连续三次异常，平台会停止该任务，发送站内通知并记录审计。
+日、周、月留存规则取并集。超过总字节上限时，优先清理较早的备份。最近 24 小时内的备份及恢复前备份不参与清理。使用 `python3 bin/backup.py prune` 预览，添加 `--yes` 执行清理。若调度任务连续三次异常，平台会停止该任务，发送站内通知并记录审计。
 
 ### WebDAV 副本
 
-在「备份」卡片的「WebDAV（异地副本）」中填写连接信息，通过 [测试 WebDAV] 验证访问及读写权限。
+在「备份」卡片的「WebDAV（异地副本）」中填写并保存连接信息，通过 [测试 WebDAV] 验证连接和写入权限。
 
 | 设置 | 默认值 | 说明 |
 | --- | --- | --- |

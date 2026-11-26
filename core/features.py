@@ -11,7 +11,7 @@ import imaging
 def _imaging():
     if not imaging.available():
         return {"id": "imaging", "name": "自动图片缩放", "ok": False,
-                "detail": "未安装 Pillow，外观图按原图下发"}
+                "detail": "未安装 Pillow，使用已有尺寸的外观图"}
     try:
         from PIL import __version__ as pil_version
     except Exception:

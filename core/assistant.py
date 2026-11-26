@@ -358,6 +358,8 @@ DOC_EXTS = (".md",)
 # 开发指南（doc/dev、doc/ops）不给：让 web agent 具备开发/写入能力是另一回事，
 # 二开是开发者自己在他的环境里做，他本来就能读仓库。少给一份就少烧一份 token。
 DOC_ALLOWED = ("doc/usage/", "doc/reference/")
+# 运维文档（装什么、备份怎么做）只给站长看：文档页按需带上，助手读的清单里没有
+DOC_OWNER_ONLY = ("doc/ops/",)
 DOC_LIST_MAX = 60
 DOC_MAX_CHARS = 12000          # 一份文档一次最多回这么多字，太长就截断并说明
 DOC_ROOTS = ("builtin/modules", "modules")
@@ -383,8 +385,12 @@ def _doc_title(path):
     return os.path.basename(path)
 
 
-def doc_entries():
-    """所有可读文档：``doc/`` 下的 markdown，加上每个模块自己那份 ``doc.md``。"""
+def doc_entries(include_ops=False):
+    """所有可读文档：``doc/`` 下的 markdown，加上每个模块自己那份 ``doc.md``。
+
+    运维那一类（``DOC_OWNER_ONLY``）默认不收：助手读的清单里一直没有它们，
+    只有文档页在站长登录时显式要。
+    """
     base = _docs_base()
     out = []
 
@@ -403,7 +409,9 @@ def doc_entries():
                 continue
             full = os.path.join(here, name)
             rel = os.path.relpath(full, base).replace(os.sep, "/")
-            if not rel.startswith(DOC_ALLOWED):
+            keep = rel.startswith(DOC_ALLOWED) or (
+                include_ops and rel.startswith(DOC_OWNER_ONLY))
+            if not keep:
                 continue
             add(full, rel)
     for kind in DOC_ROOTS:
@@ -450,10 +458,10 @@ def outbound_links():
     return list(OUTBOUND_LINKS)
 
 
-def doc_tree():
+def doc_tree(include_ops=False):
     """把 doc_entries() 那份清单按目录分好组。"""
     groups, order = {}, []
-    for item in doc_entries():
+    for item in doc_entries(include_ops=include_ops):
         path = item["path"]
         key, label = "other", "其它文档"
         for prefix, name in DOC_GROUPS:

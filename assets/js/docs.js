@@ -343,6 +343,17 @@
     document.addEventListener("keydown", function (e) {
       if (e.key === "Escape") closeNav();
     });
+    // 返回键：站内还有上一页就真的退回那一页（用户在那儿切过页面也照旧），
+    // 直接从地址栏进来的（背后是别的站点）才回控制台。
+    var back = $("#docsBack");
+    if (back) {
+      back.addEventListener("click", function (ev) {
+        if (history.length > 1) {
+          ev.preventDefault();
+          history.back();
+        }
+      });
+    }
     var menu = $("#docsMenu");
     if (menu) menu.addEventListener("click", openNav);
     var theme = $("#docsTheme");

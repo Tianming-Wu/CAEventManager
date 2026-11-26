@@ -74,7 +74,7 @@ PAGES_DIR = os.path.join(BASE_DIR, "pages")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 # 四段：主.次.修.构。构只增不减，是这台机器的发布序号；每次上线都要推进——见 tools/bump_version.py
 # （LOTTERY_VERSION 只给测试与预发用：起两个版本号不同的实例，验证页面的热更新提示）
-VERSION = os.environ.get("LOTTERY_VERSION") or "1.13.39.165"
+VERSION = os.environ.get("LOTTERY_VERSION") or "1.13.40.166"
 START_TIME = time.time()
 MAX_BODY = 4 * 1024 * 1024
 XLSX_MAX = 4 * 1024 * 1024          # 导入的 xlsx 上限：再大就不像一份名单了
@@ -2476,8 +2476,22 @@ class Handler(BaseHTTPRequestHandler):
                 raise model.ApiError("图片内容无法识别", 400)
             if len(blob) > orgs.COVER_MAX:
                 raise model.ApiError("图片超过 2 MB", 413)
+            variants = []
+            for item in (data.get("variants") or []):
+                if not isinstance(item, dict):
+                    continue
+                raw_var = item.get("data") or ""
+                if not isinstance(raw_var, str) or not raw_var:
+                    continue
+                if "," in raw_var and raw_var.strip().lower().startswith("data:"):
+                    raw_var = raw_var.split(",", 1)[1]
+                try:
+                    variants.append((item.get("w"), base64.b64decode(raw_var,
+                                                                    validate=True)))
+                except (ValueError, TypeError):
+                    continue
             try:
-                name, size = orgs.save_cover(org["id"], blob)
+                name, size, widths = orgs.save_cover(org["id"], blob, variants)
             except ValueError as exc:
                 raise model.ApiError("只收 PNG、JPEG 或 WebP 图片", 400) \
                     if "unsupported" in str(exc) else model.ApiError("图片太大", 413)
@@ -2486,7 +2500,8 @@ class Handler(BaseHTTPRequestHandler):
                            " WHERE id=?", (name, time.time(), size, org["id"]))
                 panel.audit(tx, actor["username"], "org_cover_upload", org["id"],
                             panel.audit_note(bytes=size))
-            return self._json({"ok": True, "cover": name, "coverBytes": size})
+            return self._json({"ok": True, "cover": name, "coverBytes": size,
+                               "coverWidths": widths})
 
         if path.startswith("/org_cover/") and method == "GET":
             # 站内那张图：外链不走这里
@@ -2495,10 +2510,13 @@ class Handler(BaseHTTPRequestHandler):
             row = orgs.row(conn, want)
             if row is None:
                 return self._err("not found", 404)
-            name = row["cover"] or ""
-            if orgs.clean_cover_url(name):
+            if orgs.clean_cover_url(row["cover"] or ""):
                 return self._err("not found", 404)
-            full = orgs.cover_path(name)
+            try:
+                want_w = int((query.get("w") or ["0"])[0] or 0)
+            except ValueError:
+                want_w = 0
+            full, _got = orgs.pick_cover(row["id"], max(0, want_w))
             if not full or not os.path.exists(full):
                 return self._err("not found", 404)
             with open(full, "rb") as fh:

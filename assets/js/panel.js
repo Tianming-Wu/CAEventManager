@@ -2905,6 +2905,7 @@
     $$(".page").forEach(function (p) { p.hidden = true; });
     $("#missing").hidden = true;
     $("#denied").hidden = false;
+    $("#deniedBack").hidden = !canGoBack();
     $("#siteFoot").hidden = true;
     $$("[data-nav]").forEach(function (a) {
       a.removeAttribute("aria-current");
@@ -2917,6 +2918,13 @@
   }
 
   var guardBypass = false;
+
+  /* 这一页背后还有没有"上一个页面"：数的是自己切换过几次页。
+     直接打开一个地址（哪怕地址是错的）时这里是 0——浏览器历史里确实有上一站，
+     但那多半是别的站点，退回去就离开了面板，所以只给"回到首页"。 */
+  var navDepth = 0;
+
+  function canGoBack() { return navDepth > 0; }
 
   /* 地址里那一串（#/ 之后、? 之前）是什么 */
   function hashRoute() {
@@ -2935,6 +2943,7 @@
     $$(".page").forEach(function (p) { p.hidden = true; });
     $("#denied").hidden = true;
     $("#missing").hidden = false;
+    $("#missingPrev").hidden = !canGoBack();
     $("#siteFoot").hidden = true;
     $$("[data-nav]").forEach(function (a) {
       a.removeAttribute("aria-current");
@@ -2991,6 +3000,9 @@
     }
     // 走了就把这张表单忘掉：下次进来该是干净的一张（草稿另存，回来时再填）
     if (prevRoute === "new-event" && wanted !== "new-event") forgetKindForm();
+    // 换过页了：历史里就有了上一层，404 那边才敢给 [返回上一页]。
+    // 第一次落笔不算——刚从地址栏进来时，背后没有属于自己的页面。
+    if (prevRoute && wanted !== prevRoute) navDepth += 1;
     S.route = wanted;
     S.typed = false;         // 换了一页，"这一页敲过字"重新算
     // 助手页把输入框钉在底部，页脚就不跟它抢这点高度了
@@ -4251,8 +4263,11 @@
       return '<article class="org-card" role="listitem">' +
         '<button class="org-card-open" type="button" data-org-self="' + PX.esc(o.id) +
         '" aria-label="打开 ' + PX.esc(o.name) + '">' +
-        '<span class="org-card-cover' + (src ? "" : " no-cover") + '"' +
-        (src ? ' style="background-image:url(' + PX.esc(src) + ')"' : "") + ">" +
+        '<span class="org-card-cover' + (src ? "" : " no-cover") + '">' +
+        (src ? '<img alt="" loading="lazy" src="' + PX.esc(src) + '"' +
+          (orgCoverSrcset(o) ? ' srcset="' + PX.esc(orgCoverSrcset(o)) + '"' +
+            ' sizes="(max-width: 560px) 100vw, (max-width: 980px) 50vw, 33vw"' : "") +
+          ">" : "") +
         (o.myRoleLabel
           ? '<span class="org-card-role"><span class="tag">' + PX.esc(o.myRoleLabel) +
             "</span></span>"
@@ -4271,11 +4286,69 @@
   }
 
   /* 外观那张图：外链直接用，站内那份按账号去取 */
-  function orgCoverSrc(o) {
+  function orgCoverSrc(o, width) {
     if (!o || !o.cover) return "";
     if (/^https?:\/\//i.test(o.cover)) return o.cover;
     return PX.PREFIX + "/api/panel/org_cover/" + encodeURIComponent(o.id) + "?v=" +
-      Math.round(o.coverAt || 0);
+      Math.round(o.coverAt || 0) + (width ? "&w=" + width : "");
+  }
+
+  /* 卡片上的图按屏宽挑一档：小图不必等整张原图下来 */
+  function orgCoverSrcset(o) {
+    if (!o || !o.cover || /^https?:\/\//i.test(o.cover)) return "";
+    var widths = o.coverWidths || [];
+    if (!widths.length) return "";
+    return widths.map(function (w) {
+      return orgCoverSrc(o, w) + " " + w + "w";
+    }).join(", ");
+  }
+
+  /* 上传前在浏览器里画几档小图：这台机器只有标准库，解不了 JPEG/WebP，
+     缩图这件事只能由上传方做。原图照旧整张留着，需要时能取到全分辨率。 */
+  var COVER_WIDTHS = [480, 960, 1600];
+
+  function coverVariants(file, done) {
+    var img = new Image();
+    var url = URL.createObjectURL(file);
+    var finished = false;
+
+    function end(list) {
+      if (finished) return;
+      finished = true;
+      URL.revokeObjectURL(url);
+      done(list);
+    }
+
+    img.onload = function () {
+      var jobs = COVER_WIDTHS.filter(function (w) { return w < img.naturalWidth; });
+      if (!jobs.length || !window.HTMLCanvasElement) {
+        end([]);
+        return;
+      }
+      var out = [];
+      var left = jobs.length;
+      jobs.forEach(function (w) {
+        var canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = Math.max(1, Math.round(img.naturalHeight * w / img.naturalWidth));
+        canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob(function (blob) {
+          if (!blob) {
+            if (--left === 0) end(out);
+            return;
+          }
+          var reader = new FileReader();
+          reader.onload = function () {
+            out.push({ w: w, data: String(reader.result || "") });
+            if (--left === 0) end(out);
+          };
+          reader.onerror = function () { if (--left === 0) end(out); };
+          reader.readAsDataURL(blob);
+        }, "image/webp", 0.82);
+      });
+    };
+    img.onerror = function () { end([]); };
+    img.src = url;
   }
 
   function coverSizeText(bytes) {
@@ -4339,12 +4412,14 @@
     }
     var reader = new FileReader();
     reader.onload = function () {
-      orgWrite(scope, "/org/cover",
-        { id: d.org.id, data: String(reader.result || ""), scope: scope },
-        "上传组织图片").then(function () {
-        PX.toast("已上传");
-        return afterOrgChange();
-      }).catch(fail);
+      coverVariants(file, function (variants) {
+        orgWrite(scope, "/org/cover",
+          { id: d.org.id, data: String(reader.result || ""), variants: variants,
+            scope: scope }, "上传组织图片").then(function () {
+          PX.toast("已上传");
+          return afterOrgChange();
+        }).catch(fail);
+      });
     };
     reader.onerror = function () { PX.toast("无法读取该文件", true); };
     reader.readAsDataURL(file);
@@ -4774,10 +4849,11 @@
     $("#myOrgSub").textContent = (o.myRoleLabel ? "我的身份 " + o.myRoleLabel + " · " : "") +
       d.members.length + " 位成员";
     $("#myOrgCardTitle").textContent = o.name;
+    $("#myOrgCount").textContent = d.members.length + " 位成员";
     $("#myOrgCardId").textContent = o.id;
     $("#myOrgNote").textContent = o.note || "还没有简介";
     // 没有图就什么都不摆：不留一个空框
-    var src = orgCoverSrc(o);
+    var src = orgCoverSrc(o, 960);
     var col = $("#myOrgCoverCol");
     col.hidden = !src;
     $("#myOrgCover").innerHTML = src
@@ -8375,11 +8451,11 @@ function archiveOrg(id) {
     if (clear) clear.addEventListener("click", function () { clearCover(scope); });
   });
   $("#missingPrev").addEventListener("click", function () {
-    if (window.history.length > 1) window.history.back();
+    if (canGoBack()) window.history.back();
     else go(FALLBACK_ROUTE);
   });
   $("#deniedBack").addEventListener("click", function () {
-    if (window.history.length > 1) window.history.back();
+    if (canGoBack()) window.history.back();
     else go(FALLBACK_ROUTE);
   });
   $("#orgSelfHintClose").addEventListener("click", function () {

@@ -74,8 +74,7 @@
     <button class="bell" id="bellBtn" type="button" aria-label="通知"
             aria-expanded="false" title="通知">
       <svg viewBox="0 0 20 20" aria-hidden="true">
-        <path d="M10 3.2a4.4 4.4 0 0 0-4.4 4.4c0 3.2-1.2 4.3-1.2 4.3h11.2s-1.2-1.1-1.2-4.3A4.4 4.4 0 0 0 10 3.2Z"/>
-        <path d="M8.4 15.1a1.7 1.7 0 0 0 3.2 0"/>
+        <path d="M4.2 12.6c1.2-1.5 1.3-2.8 1.3-5a4.5 4.5 0 0 1 9 0c0 2.2.1 3.5 1.3 5l.8 1a.6.6 0 0 1-.5 1H3.9a.6.6 0 0 1-.5-1zM8.4 16.9q1.6 1.9 3.2 0"/>
       </svg>
       <span class="bell-dot" id="bellDot" hidden></span>
     </button>
@@ -118,8 +117,9 @@
       </a>
       <a class="nav-item" data-href="#/templates" role="link" tabindex="0" data-nav="templates">
         <svg viewBox="0 0 20 20" aria-hidden="true">
-          <rect x="2.7" y="2.7" width="9.2" height="9.2" rx="1.6"/>
-          <path d="M8.1 17.3h7.6a1.6 1.6 0 0 0 1.6-1.6V8.1"/>
+          <path d="M6 2.3h10a1.5 1.5 0 0 1 1.5 1.5v9.3"/>
+          <rect x="2.6" y="5.6" width="11.7" height="11.5" rx="1.5"/>
+          <path d="M3 9.6h10.9M7.1 9.8v6.8"/>
         </svg>
         <span class="nav-text">预设管理</span>
       </a>
@@ -1429,13 +1429,16 @@
       <div class="cols-2" id="myOrgTop">
         <div class="col">
           <div class="card">
-            <div class="card-head"><h2 id="myOrgCardTitle">—</h2></div>
+            <div class="org-head">
+              <h2 class="org-name" id="myOrgCardTitle">—</h2>
+              <span class="org-count" id="myOrgCount"></span>
+            </div>
             <p class="org-id-line">id: <span class="mono" id="myOrgCardId">—</span></p>
             <p class="page-sub" id="myOrgNote">—</p>
           </div>
         </div>
         <div class="col" id="myOrgCoverCol" hidden>
-          <div class="card">
+          <div class="card card-flush">
             <div class="org-cover-img" id="myOrgCover"></div>
           </div>
         </div>
@@ -1478,17 +1481,36 @@
         </div>
       </header>
 
-      <div class="card">
-        <div class="card-head"><h2>基本信息</h2></div>
-        <p class="org-id-line">id: <span class="mono" id="orgManageId">—</span></p>
-        <div class="field">
-          <label for="orgManageName">名称 <span class="req">必填</span></label>
-          <input id="orgManageName" type="text" maxlength="40" autocomplete="off">
-          <p class="err" id="orgManageNameErr" hidden></p>
+      <div class="cols-2">
+        <div class="col">
+          <div class="card">
+            <div class="card-head"><h2>基本信息</h2></div>
+            <p class="org-id-line">id: <span class="mono" id="orgManageId">—</span></p>
+            <div class="field">
+              <label for="orgManageName">名称 <span class="req">必填</span></label>
+              <input id="orgManageName" type="text" maxlength="40" autocomplete="off">
+              <p class="err" id="orgManageNameErr" hidden></p>
+            </div>
+            <div class="field">
+              <label for="orgManageNote">简介</label>
+              <input id="orgManageNote" type="text" maxlength="200" autocomplete="off">
+            </div>
+          </div>
         </div>
-        <div class="field">
-          <label for="orgManageNote">简介</label>
-          <input id="orgManageNote" type="text" maxlength="200" autocomplete="off">
+        <div class="col">
+          <div class="card">
+            <div class="card-head">
+              <h2>外观</h2>
+              <span class="note" id="manCoverSize"></span>
+              <div class="spacer"></div>
+              <button class="btn sm" id="manCoverLink" type="button">使用链接</button>
+              <button class="btn sm" id="manCoverPick" type="button">上传图片</button>
+              <button class="btn sm" id="manCoverClear" type="button" hidden>清除</button>
+              <input type="file" id="manCoverFile" accept="image/png,image/jpeg,image/webp" hidden>
+            </div>
+            <div class="org-cover-img" id="manCoverPreview"></div>
+            <p class="hint">显示在「我的组织」的卡片上，比例 16:9 最合适；也可以填写图床地址</p>
+          </div>
         </div>
       </div>
 
@@ -1509,19 +1531,6 @@
         </div>
       </div>
 
-      <div class="card">
-        <div class="card-head">
-          <h2>外观</h2>
-          <span class="note" id="manCoverSize"></span>
-          <div class="spacer"></div>
-          <button class="btn sm" id="manCoverLink" type="button">使用链接</button>
-          <button class="btn sm" id="manCoverPick" type="button">上传图片</button>
-          <button class="btn sm" id="manCoverClear" type="button" hidden>清除</button>
-          <input type="file" id="manCoverFile" accept="image/png,image/jpeg,image/webp" hidden>
-        </div>
-        <div class="org-cover-img" id="manCoverPreview"></div>
-        <p class="hint">图片显示在「我的组织」的卡片上，比例 16:9 最合适；也可以填写图床地址</p>
-      </div>
     </section>
 
     <!-- =================================================== 组织详情（子页） -->

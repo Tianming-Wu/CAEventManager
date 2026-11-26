@@ -3581,6 +3581,21 @@ def org_page(page):
     page.wait_for_timeout(900)
     check("回到首页", page.url.endswith("#/overview"), page.url)
 
+    print("== 直接打开坏地址：没有上一页就不给返回键 ==")
+    page.goto(BASE + "/panel#/org/nope/x")
+    page.wait_for_timeout(400)
+    page.reload(wait_until="domcontentloaded")
+    page.wait_for_timeout(1600)
+    check("说的还是页面不存在", page.locator("#missing").is_visible(), page.url)
+    check("没有上一页时只有回到首页",
+          page.locator("#missingPrev").is_hidden()
+          and page.locator("#missingBack").is_visible(),
+          page.evaluate(
+              "() => ({prev: !document.getElementById('missingPrev').hidden,"
+              " back: !document.getElementById('missingBack').hidden})"))
+    page.evaluate("() => document.getElementById('missingBack').click()")
+    page.wait_for_timeout(800)
+
     print("== 新建活动这类向导也淡高亮上一层 ==")
     page.goto(BASE + "/panel#/new-event")
     page.wait_for_timeout(800)
@@ -5896,12 +5911,14 @@ def role_page(browser):
             check("%-10s sees no normal page content" % role, page.evaluate(
                 """() => Array.from(document.querySelectorAll('.page'))
                          .every(p => p.hidden)"""))
-            check("%-10s: 标题加两个按钮，没有别的" % role, page.evaluate(
+            # 只有标题与按钮，没有别的内容；[返回上一页] 有没有取决于背后有没有页面
+            check("%-10s: 只有标题与按钮" % role, page.evaluate(
                 """() => {
                     const box = document.getElementById('denied');
                     const lines = box.innerText.trim().split('\\n')
                         .filter(l => l.trim());
-                    return lines.length === 3 && !!document.getElementById('deniedBack');
+                    const back = document.getElementById('deniedBack');
+                    return lines.length === (back.hidden ? 2 : 3);
                 }"""),
                   page.evaluate(
                       "() => document.getElementById('denied').innerText"))

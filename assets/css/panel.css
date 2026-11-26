@@ -38,6 +38,7 @@
   --danger-line: #e9b9b9;
 
   --radius: 12px;
+  --radius-card: 18px;
   --radius-sm: 7px;
   --shadow: 0 10px 30px rgba(40, 28, 12, .10);
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -727,10 +728,13 @@ button.nav-item {
 .card {
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--radius-card);
   padding: 14px 16px 16px;
   margin-bottom: 14px;
 }
+/* 卡片里只放一张图时不留白边：图自己贴到卡片边缘，圆角由卡片裁出来 */
+.card-flush { padding: 0; overflow: hidden; }
+.card-flush > * { border-radius: inherit; }
 .card-head {
   display: flex;
   align-items: center;
@@ -1535,6 +1539,25 @@ select:invalid { color: var(--dim); }
 .org-cover-hint { font-size: .8rem; color: var(--dim); }
 /* 标识写成一行说明，不占一个输入框 */
 .org-id-line { margin: 0 0 10px; font-size: .78rem; color: var(--muted); }
+/* 组织页的标题不是"卡片标题"：字号自己定，右边挂一枚没有外框的人数 */
+.org-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.org-name {
+  margin: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 1.42rem;
+  font-weight: 650;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.org-count { flex: 0 0 auto; font-size: .82rem; color: var(--dim); }
 /* 组织页顶上那条"你可以去另一页做"的提示 */
 .org-self-hint {
   display: flex;
@@ -1590,12 +1613,16 @@ select:invalid { color: var(--dim); }
   position: relative;
   display: block;
   aspect-ratio: 16 / 9;
-  background: var(--surface-2) center / cover no-repeat;
+  background: var(--surface-2);
+  overflow: hidden;
 }
-.org-card-cover.no-cover {
-  background-image: none;
-  border-bottom: 1px solid var(--line);
+.org-card-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
+.org-card-cover.no-cover { border-bottom: 1px solid var(--line); }
 .org-card-role { position: absolute; top: 8px; left: 8px; }
 .org-card-people {
   position: absolute;

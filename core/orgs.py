@@ -67,6 +67,7 @@ def ensure(conn):
 # 外观：一张图，可以是外链，也可以是我们替他存下来的
 # --------------------------------------------------------------------------- #
 COVER_MAX = 2 * 1024 * 1024          # 单张 2 MB 封顶
+COVER_WIDTHS = (480, 960, 1600)      # 预生成的几档宽度（客户端画，服务端只存）
 COVER_DIR = "org_covers"
 
 
@@ -93,8 +94,12 @@ def clean_cover_url(value):
     return url
 
 
-def save_cover(org_id, data):
-    """存下这张图，返回 (文件名, 字节数)。"""
+def save_cover(org_id, data, variants=()):
+    """存下这张图与它的几档小图，返回 (文件名, 总字节数, 有哪几档宽度)。
+
+    variants 是 [(宽, 字节), ...]：由浏览器按 canvas 画好再传上来——这台机器只有
+    标准库，解不了 JPEG/WebP，所以缩图这一步交给上传方做。
+    """
     found = panel.sniff_image(data)
     if found is None:
         raise ValueError("unsupported image")
@@ -102,25 +107,73 @@ def save_cover(org_id, data):
         raise ValueError("too large")
     drop_cover(org_id)
     name = "%s.%s" % (org_id, found[0])
-    path = cover_path(name)
-    with open(path, "wb") as fh:
+    with open(cover_path(name), "wb") as fh:
         fh.write(data)
-    return name, len(data)
+    total = len(data)
+    widths = []
+    for width, blob in variants:
+        try:
+            width = int(width)
+        except (TypeError, ValueError):
+            continue
+        if width not in COVER_WIDTHS or not blob or len(blob) > COVER_MAX:
+            continue
+        if panel.sniff_image(blob) is None:
+            continue
+        with open(cover_path("%s-%d.webp" % (org_id, width)), "wb") as fh:
+            fh.write(blob)
+        total += len(blob)
+        widths.append(width)
+    return name, total, sorted(widths)
 
 
 def drop_cover(org_id):
-    for ext in ("png", "jpg", "webp"):
-        stale = cover_path("%s.%s" % (org_id, ext))
-        if stale and os.path.exists(stale):
-            os.unlink(stale)
+    try:
+        names = os.listdir(cover_dir())
+    except OSError:
+        return
+    for item in names:
+        if item == org_id or item.startswith(org_id + ".") \
+                or item.startswith(org_id + "-"):
+            full = cover_path(item)
+            if full and os.path.exists(full):
+                os.unlink(full)
+
+
+def cover_widths(org_id):
+    """已经生成了哪几档小图（按文件名认，不额外记表）。"""
+    out = []
+    for width in COVER_WIDTHS:
+        if os.path.exists(cover_path("%s-%d.webp" % (org_id, width))):
+            out.append(width)
+    return out
+
+
+def pick_cover(org_id, want_w):
+    """取最接近请求宽度的那一张：够用就好，不够就用最大的。
+
+    返回 (路径, 宽度)；宽度 0 表示这是原图（没有预生成的小图）。
+    """
+    widths = cover_widths(org_id)
+    if widths:
+        fits = [w for w in widths if w >= want_w]
+        pick = min(fits) if fits else max(widths)
+        return cover_path("%s-%d.webp" % (org_id, pick)), pick
+    for ext in ("webp", "jpg", "png"):
+        full = cover_path("%s.%s" % (org_id, ext))
+        if full and os.path.exists(full):
+            return full, 0
+    return None, 0
 
 
 def cover_view(row):
     """给界面用的两件东西：图片地址怎么来、站内那份有多大。"""
     raw = (row["cover"] or "") if "cover" in row.keys() else ""
+    widths = [] if clean_cover_url(raw) else cover_widths(row["id"])
     return {"cover": raw,
             "coverAt": float(row["cover_at"] or 0) if "cover_at" in row.keys() else 0,
-            "coverBytes": int(row["cover_bytes"] or 0) if "cover_bytes" in row.keys() else 0}
+            "coverBytes": int(row["cover_bytes"] or 0) if "cover_bytes" in row.keys() else 0,
+            "coverWidths": widths}
 
 
 # --------------------------------------------------------------------------- #
@@ -329,6 +382,7 @@ def listing(conn, account_id=None, include_archived=False):
         out.append({"id": r["id"], "name": r["name"], "note": r["note"],
                     "cover": cover["cover"], "coverAt": cover["coverAt"],
                     "coverBytes": cover["coverBytes"],
+                    "coverWidths": cover["coverWidths"],
                     "createdAt": r["created_at"], "createdBy": r["created_by"],
                     "members": count, "heads": heads, "archived": archived,
                     "archivedAt": r["archived_at"],

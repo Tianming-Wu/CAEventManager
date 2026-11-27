@@ -5592,6 +5592,21 @@ def theme_page(page):
           page.evaluate("() => document.documentElement.dataset.theme") == "dark")
     check("dark really repaints", page.evaluate(
         "() => getComputedStyle(document.body).backgroundColor") != "rgb(245, 242, 238)")
+    # 选中态是一块会滑的底，不是格子自己变色：块必须正好压在被选中的那一格上，
+    # 三格等宽；换主题时位移交给转场搬，所以块自己的过渡要在散场后恢复
+    geo = page.evaluate("""() => {
+        const seg = document.querySelector('#themeSeg');
+        const th = seg.querySelector('.seg-thumb').getBoundingClientRect();
+        const on = seg.querySelector('button[aria-checked="true"]').getBoundingClientRect();
+        const cells = [...seg.querySelectorAll('button')].map(b => b.getBoundingClientRect().width);
+        return {tl: th.left, tr: th.right, ol: on.left, or: on.right,
+                even: Math.max(...cells) - Math.min(...cells),
+                snap: seg.classList.contains('seg-snap')};
+    }""")
+    check("指示块压在被选中的那一格上",
+          abs(geo["tl"] - geo["ol"]) < 1 and abs(geo["tr"] - geo["or"]) < 1, geo)
+    check("三格等宽", geo["even"] < 1, geo)
+    check("转场散场后指示块自己还能滑", not geo["snap"], geo)
     page.click('#themeSeg button[data-theme-pref="light"]')
     page.wait_for_timeout(420)
     check("back to light",

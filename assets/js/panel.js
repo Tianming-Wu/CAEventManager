@@ -8159,13 +8159,29 @@ function archiveOrg(id) {
     // Cross-fade two snapshots rather than animating each property: measured
     // frame by frame, transitioning colour made headings jump back to a mid grey
     // and run twice, which reads as a flicker.
+    //
+    // 转场会把页面换成两张快照，快照里是"点下去之前"和"点下去之后"两张静止的图。
+    // 只把状态翻过来是不够的：指示块的位移会发生在快照底下，屏幕上只剩一次跳变。
+    // 所以拍新快照之前先关掉块自己的过渡，让它直接落在终点，位移由转场那一段负责搬。
+    var seg = $("#themeSeg");
     if (changed && !reducedMotion() && document.startViewTransition) {
+      var vt;
+      if (seg) seg.classList.add("seg-snap");
       try {
-        document.startViewTransition(apply);
-        return;
+        vt = document.startViewTransition(apply);
       } catch (err) {
         // fall through to the direct path
+        if (seg) seg.classList.remove("seg-snap");
+        apply();
+        return;
       }
+      if (vt.finished && vt.finished.then) {
+        var snapDone = function () { if (seg) seg.classList.remove("seg-snap"); };
+        vt.finished.then(snapDone, snapDone);
+      } else if (seg) {
+        seg.classList.remove("seg-snap");
+      }
+      return;
     }
     apply();
   }

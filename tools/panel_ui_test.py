@@ -5607,10 +5607,65 @@ def theme_page(page):
           abs(geo["tl"] - geo["ol"]) < 1 and abs(geo["tr"] - geo["or"]) < 1, geo)
     check("三格等宽", geo["even"] < 1, geo)
     check("转场散场后指示块自己还能滑", not geo["snap"], geo)
+    # 三个标签各自成一个转场分组（换主题时颜色比块先落地）；名字重了整段转场会失效
+    names = page.evaluate("""() => [...document.querySelectorAll('#themeSeg button')]
+        .map(b => getComputedStyle(b).viewTransitionName)""")
+    check("每格的转场名字互不相同", len(set(names)) == 3 and "none" not in names, names)
     page.click('#themeSeg button[data-theme-pref="light"]')
     page.wait_for_timeout(420)
     check("back to light",
           page.evaluate("() => document.documentElement.dataset.theme") == "light")
+
+    # 顶栏那枚按钮：图标就是当前取到的值，三档循环，第一下一定换到不一样的外观
+    print("== 顶栏主题按钮 ==")
+    page.click('#themeSeg button[data-theme-pref="auto"]')
+    page.wait_for_timeout(420)
+    sys_dark = page.evaluate(
+        "() => window.matchMedia('(prefers-color-scheme: dark)').matches")
+    other = "light" if sys_dark else "dark"     # 与系统相反的那一档
+    own = "dark" if sys_dark else "light"       # 系统当前那一档
+    auto_icon = "auto-dark" if sys_dark else "auto-light"
+
+    def bar_state():
+        return page.evaluate("""() => {
+            const btn = document.querySelector('#themeBtn');
+            const bell = document.querySelector('#bellBtn');
+            return {
+                pref: document.documentElement.getAttribute('data-theme-pref'),
+                theme: document.documentElement.getAttribute('data-theme'),
+                title: btn.getAttribute('title'),
+                shown: [...btn.querySelectorAll('svg')]
+                    .filter(s => getComputedStyle(s).display !== 'none')
+                    .map(s => s.getAttribute('data-mode-icon')),
+                beforeBell: !!(btn.compareDocumentPosition(bell) & 4),
+            };
+        }""")
+
+    first = bar_state()
+    check("顶栏按钮在铃铛左边", first["beforeBell"], first)
+    check("跟随系统时图标是显示器加日月", first["shown"] == [auto_icon], first)
+    check("说明写的是当前这一档", first["title"] == "主题：跟随系统", first["title"])
+    seen = []
+    for _ in range(3):
+        page.click("#themeBtn")
+        page.wait_for_timeout(360)
+        seen.append(bar_state())
+    check("第一下点击换到与系统相反的外观",
+          seen[0]["pref"] == other and seen[0]["theme"] == other, seen[0])
+    check("第二下点击换到系统当前的外观",
+          seen[1]["pref"] == own and seen[1]["theme"] == own, seen[1])
+    check("第三下回到跟随系统", seen[2]["pref"] == "auto", seen[2])
+    check("图标跟着当前取到的值走",
+          [s["shown"] for s in seen] == [[other], [own], [auto_icon]],
+          [s["shown"] for s in seen])
+    check("按钮说明跟着走", seen[1]["title"] == "主题：" + ("深色" if own == "dark" else "浅色"),
+          seen[1]["title"])
+    page.click("#themeBtn", modifiers=["Shift"])
+    page.wait_for_timeout(360)
+    check("Shift 反向走同一个环",
+          bar_state()["pref"] == own, bar_state())
+    page.click('#themeSeg button[data-theme-pref="light"]')
+    page.wait_for_timeout(360)
 
     print("== 滚动条：细滑块，槽透明 ==")
     bar = page.evaluate("""() => {

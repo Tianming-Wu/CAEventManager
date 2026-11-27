@@ -264,6 +264,40 @@ svg {
   font-variant-numeric: tabular-nums;
 }
 
+/* ---------- 主题按钮（顶栏） ---------- */
+/* 画哪一张图标由这两个属性直接决定，脚本不来也知道该显示什么：首帧就是对的，
+   跟随系统时 data-theme 已经是系统解析过的值。文字说明由 panel.js 补 */
+.modebtn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  cursor: pointer;
+  flex: none;
+  padding: 0;
+}
+.modebtn:hover { background: var(--surface-2); color: var(--text); }
+.modebtn svg {
+  display: none;
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.55;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+:root[data-theme-pref="auto"][data-theme="light"] .modebtn [data-mode-icon="auto-light"],
+:root[data-theme-pref="auto"][data-theme="dark"] .modebtn [data-mode-icon="auto-dark"],
+:root[data-theme-pref="light"] .modebtn [data-mode-icon="light"],
+:root[data-theme-pref="dark"] .modebtn [data-mode-icon="dark"] { display: block; }
+
 /* ---------- navigation ---------- */
 .sidebar {
   grid-area: side;
@@ -1854,8 +1888,9 @@ select:invalid { color: var(--dim); }
   border-radius: 999px;
   background: var(--accent);
   transform: translateX(calc(var(--seg-i, 0) * 100%));
-  /* 167ms 和「theme switch」里搬它的那一段是同一个数，改一处要改两处 */
-  transition: transform .167s cubic-bezier(0, 0, 0, 1);
+  /* 167ms，走的是"从轨道一头到另一头"的那条缓动（Fluent 的 ease in and out）。
+     不用快出慢收：那样前十几毫秒就滑掉大半格，标签的颜色还没跟上，字会先消失 */
+  transition: transform .167s cubic-bezier(.4, 0, .6, 1);
   view-transition-name: seg-thumb;
   z-index: -1;
 }
@@ -1882,9 +1917,16 @@ select:invalid { color: var(--dim); }
   min-height: 36px;
   border-radius: 999px;
   cursor: pointer;
-  transition: color .167s cubic-bezier(0, 0, 0, 1);
+  /* 83ms 线性：换色是一次笔刷变化，Fluent 的 BrushTransition 不带缓动 */
+  transition: color .083s linear;
 }
 .seg button[aria-checked="true"] { color: var(--accent-ink); }
+/* 换主题时整页换成两张快照，标签的颜色只能靠两张图互相淡。它单独成一组，按
+   Fluent 的 BrushTransition 走 83ms 线性 —— 块还没走到的格子，字已经换好了色，
+   不会出现"块还没盖上去，字先没了"。三个名字不能重名，重名会让整个转场失效。 */
+.seg button:nth-of-type(1) { view-transition-name: seg-lbl-1; }
+.seg button:nth-of-type(2) { view-transition-name: seg-lbl-2; }
+.seg button:nth-of-type(3) { view-transition-name: seg-lbl-3; }
 
 
 
@@ -2675,6 +2717,14 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
    own transition has to be that same 167ms: it is what moves the block when no
    view transition runs, and a different length leaves a tail of the move behind
    once the snapshot hands the page back.
+
+   The block's labels are the odd pair out and get their own grouping. Text cannot
+   move between snapshots -- only cross-fade in place -- and the block's own travel
+   is a matter of space while a cross-fade is a matter of time. So the block moves
+   on the ease that spends its first half barely moving (InOut) while the colour
+   changes on Fluent's brush duration (83ms, linear): by the time the block steps
+   off a label, that label has all but finished turning grey, rather than going
+   blank white on a light track for a fifth of a second.
    ========================================================================== */
 ::view-transition-old(root),
 ::view-transition-new(root) {
@@ -2683,10 +2733,16 @@ html[data-theme="dark"] .card.is-off { background: var(--surface-2); }
 }
 ::view-transition-group(seg-thumb) {
   animation-duration: .167s;
-  animation-timing-function: cubic-bezier(0, 0, 0, 1);
+  animation-timing-function: cubic-bezier(.4, 0, .6, 1);
 }
 ::view-transition-old(seg-thumb),
 ::view-transition-new(seg-thumb) { animation-duration: .167s; }
+::view-transition-old(seg-lbl-1), ::view-transition-new(seg-lbl-1),
+::view-transition-old(seg-lbl-2), ::view-transition-new(seg-lbl-2),
+::view-transition-old(seg-lbl-3), ::view-transition-new(seg-lbl-3) {
+  animation-duration: .083s;
+  animation-timing-function: linear;
+}
 
 /* ==========================================================================
    responsive

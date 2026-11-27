@@ -6498,6 +6498,22 @@ function archiveOrg(id) {
     if (box) box.focus();
   }
 
+  function systemDark() {
+    return !!(window.matchMedia &&
+              window.matchMedia("(prefers-color-scheme: dark)").matches);
+  }
+
+  /* 顶栏那枚按钮：图标由 panel.css 按 data-theme-pref / data-theme 直接给，
+     这里补的是说明文字，说明它现在是哪一档 */
+  function drawThemeBtn() {
+    var btn = $("#themeBtn");
+    if (!btn) return;
+    var pref = document.documentElement.getAttribute("data-theme-pref") || "auto";
+    var name = pref === "auto" ? "跟随系统" : (pref === "dark" ? "深色" : "浅色");
+    btn.setAttribute("title", "主题：" + name);
+    btn.setAttribute("aria-label", "主题：" + name);
+  }
+
   function drawAppearance() {
     var pref = document.documentElement.getAttribute("data-theme-pref") || "auto";
     $$("#themeSeg button").forEach(function (b) {
@@ -6505,6 +6521,7 @@ function archiveOrg(id) {
         b.getAttribute("data-theme-pref") === pref ? "true" : "false");
     });
     if ($("#themeSeg")) $("#themeSeg").setAttribute("data-active", pref);
+    drawThemeBtn();
   }
 
   /* ---------------------------------------------------------------- 运维助手 --- */
@@ -8141,9 +8158,7 @@ function archiveOrg(id) {
 
   function setTheme(pref) {
     try { localStorage.setItem("xl.panel.theme", pref); } catch (e) { /* private mode */ }
-    var dark = pref === "dark" ||
-      (pref === "auto" && window.matchMedia &&
-       window.matchMedia("(prefers-color-scheme: dark)").matches);
+    var dark = pref === "dark" || (pref === "auto" && systemDark());
     var root = document.documentElement;
     var next = dark ? "dark" : "light";
     var changed = root.getAttribute("data-theme") !== next;
@@ -8189,6 +8204,18 @@ function archiveOrg(id) {
   function reducedMotion() {
     return !!(window.matchMedia &&
               window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  }
+
+  /* 顶栏按钮按一个三格的环走：跟随系统 → 与系统相反的值 → 系统的值 → 跟随系统。
+     这么排是为了第一下点击一定换到一个不一样的外观；Shift 反向走同一个环。 */
+  function cycleTheme(back) {
+    var dark = systemDark();
+    var ring = ["auto", dark ? "light" : "dark", dark ? "dark" : "light"];
+    var pref = document.documentElement.getAttribute("data-theme-pref") || "auto";
+    var at = ring.indexOf(pref);
+    if (at < 0) at = 0;
+    var step = back ? -1 : 1;
+    setTheme(ring[(at + step + ring.length) % ring.length]);
   }
 
   /* -------------------------------------------------------------- listeners */
@@ -8450,6 +8477,8 @@ function archiveOrg(id) {
 
     var theme = t.closest("#themeSeg [data-theme-pref]");
     if (theme) return setTheme(theme.getAttribute("data-theme-pref"));
+
+    if (t.closest("#themeBtn")) return cycleTheme(!!e.shiftKey);
   });
 
   $("#menuBtn").addEventListener("click", function () {
@@ -9728,6 +9757,7 @@ function archiveOrg(id) {
 
   /* ------------------------------------------------------------------- boot */
   function boot() {
+    drawThemeBtn();
     bindUpdateBar();
     PX.api("/me").then(function (d) {
       if (!d.authed) {

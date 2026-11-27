@@ -1161,6 +1161,26 @@
   /* 卡片标题右边的圆圈问号：新标签页打开对应的文档 */
   var DOCS_HREF = PX.PREFIX + "/docs#/";
 
+  /* 侧栏还有没有"往上的内容 / 往下的内容"：靠它决定哪一侧加淡出 */
+  function syncNavFade() {
+    var box = $(".nav-scroll");
+    if (!box) return;
+    var room = box.scrollHeight - box.clientHeight;
+    box.classList.toggle("fade-top", box.scrollTop > 2);
+    box.classList.toggle("fade-bottom", room > 2 && box.scrollTop < room - 2);
+  }
+
+  function watchNavFade() {
+    var box = $(".nav-scroll");
+    if (!box) return;
+    box.addEventListener("scroll", syncNavFade, { passive: true });
+    window.addEventListener("resize", syncNavFade);
+    if (window.ResizeObserver) {
+      new ResizeObserver(syncNavFade).observe(box);
+    }
+    syncNavFade();
+  }
+
   function labelNav() {
     $$(".nav-item").forEach(function (a) {
       var t = a.querySelector(".nav-text");
@@ -3101,6 +3121,7 @@
 
     closePane();
     $("#content").scrollTop = 0;
+    syncNavFade();
     draw();
     syncCrumb(wanted);
     animateCrumb(wanted, prevHadBack);
@@ -8616,6 +8637,7 @@ function archiveOrg(id) {
   });
 
   bindUserSearch();
+  watchNavFade();
   bindLiveSearch("#auditSearch", "#auditSearchClear", function (value) {
     loadAudit(value).then(drawAudit);
   });

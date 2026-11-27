@@ -111,6 +111,23 @@
   border-radius: 999px;
   min-height: 32px;
 }
+/* 没有滚动条时，用边缘的一小段淡出来提示"这边还有内容"。
+   淡出只在真的还有内容的那一侧出现：滚到顶就没有上边的淡出。 */
+.nav-scroll {
+  --fade-top: 0px;
+  --fade-bottom: 0px;
+  mask-image: linear-gradient(to bottom,
+    transparent 0, #000 var(--fade-top),
+    #000 calc(100% - var(--fade-bottom)), transparent 100%);
+}
+.nav-scroll.fade-top { --fade-top: 16px; }
+.nav-scroll.fade-bottom { --fade-bottom: 16px; }
+
+/* 触屏设备不留滚动条：靠手势滚，条子只是白占宽度 */
+@media (pointer: coarse) {
+  :root { scrollbar-width: none; }
+  .nav-scroll, .content { scrollbar-width: none; }
+}
 ::-webkit-scrollbar-thumb:hover { background: var(--muted); background-clip: padding-box; }
 ::-webkit-scrollbar-thumb:active { background: var(--dim, var(--muted)); background-clip: padding-box; }
 
@@ -250,6 +267,10 @@ svg {
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
+  /* 不在两侧预留槽位：滚动条贴着侧栏右边，条目在滚与不滚之间也不左右挪 */
+  scrollbar-gutter: auto;
+  margin-right: -4px;              /* 把滚动条推到离右边 4px，与页面边缘一致 */
+  padding-right: 4px;
   display: flex;
   flex-direction: column;
   gap: 2px;

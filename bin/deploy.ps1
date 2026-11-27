@@ -123,9 +123,10 @@ if [ -x ./.venv/bin/python3 ] && ./.venv/bin/python3 -c "import PIL" 2>/dev/null
     exit 0
 fi
 echo "   installing Pillow into .venv ..."
-python3 -m venv .venv >/dev/null 2>&1 || { echo "   WARN: venv 建不起来，服务端缩图不可用" >&2; exit 0; }
+python3 -m venv .venv >/dev/null 2>&1 \
+    || { echo "   WARN: 无法建立 python venv，部分特性将无法使用" >&2; exit 0; }
 ./.venv/bin/pip install --quiet --disable-pip-version-check -r requirements.txt \
-    || { echo "   WARN: 依赖没装上（可能是没网），服务端缩图不可用" >&2; exit 0; }
+    || { echo "   WARN: 依赖未能安装（可能无法访问软件源），部分特性将无法使用" >&2; exit 0; }
 ./.venv/bin/python3 -c "import PIL; print('   Pillow', PIL.__version__)" 2>/dev/null \
     || echo "   WARN: Pillow 装了但导入失败"
 exit 0

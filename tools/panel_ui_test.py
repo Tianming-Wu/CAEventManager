@@ -1129,8 +1129,13 @@ def notice_page(page):
     check("the panel lists the notices",
           page.locator(".notice-item:not(.svc)").count() == 2,
           page.locator(".notice-item").count())
-    check("levels are marked", "重要" in page.inner_text("#noticeList") and
-          "紧急" in page.inner_text("#noticeList"), page.inner_text("#noticeList")[:80])
+    check("等级用图标表示",
+          page.locator(".notice-item .notice-ico").count() >= 2
+          and page.locator(".notice-level").count() == 0,
+          page.evaluate("""() => ({
+              icons: document.querySelectorAll('.notice-item .notice-ico').length,
+              pills: document.querySelectorAll('.notice-level').length,
+          })"""))
     page.click("#noticeReadAll")
     page.wait_for_timeout(700)
     check("全部已读 clears the dot", page.locator("#bellDot").is_hidden())

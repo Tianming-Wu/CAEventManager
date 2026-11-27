@@ -1336,8 +1336,8 @@
         '">不再提示</button>'
       : "";
     return '<div class="notice-item svc ' + PX.esc(it.level || "info") + '">' +
-      '<span class="notice-meta"><span class="notice-level">服务</span>' +
-      mute + "</span>" +
+      '<span class="notice-meta">' + noticeIcon(it.level) +
+      "<span>服务</span>" + mute + "</span>" +
       '<span class="notice-title">' + PX.esc(it.title) + "</span>" +
       (it.body ? '<span class="notice-body">' + PX.esc(it.body) + "</span>" : "") +
       "</div>";
@@ -1402,6 +1402,24 @@
     }
   }
 
+  /* 通知的等级：一枚小图标就够了，不必再写一枚"通知/提示"胶囊——谁都知道那是通知 */
+  var NOTICE_ICON = {
+    info: '<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.6"/>' +
+          '<path d="M10 9.2v4.4M10 6.6v.1"/></svg>',
+    warn: '<svg viewBox="0 0 20 20" aria-hidden="true">' +
+          '<path d="M10 3.2l7.4 12.8H2.6z"/><path d="M10 8.2v3.4M10 14v.1"/></svg>',
+    bad: '<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.6"/>' +
+         '<path d="M10 6.2v4.8M10 13.8v.1"/></svg>',
+    success: '<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.6"/>' +
+             '<path d="M6.6 10.2l2.4 2.3 4.4-4.6"/></svg>'
+  };
+
+  function noticeIcon(level) {
+    var svg = NOTICE_ICON[level] || NOTICE_ICON.info;
+    return '<span class="notice-ico ' + PX.esc(level || "info") +
+      '" aria-hidden="true">' + svg + "</span>";
+  }
+
   function drawNoticeList() {
     var box = $("#noticeList");
     if (!box) return;
@@ -1418,8 +1436,8 @@
       return '<button class="notice-item ' + PX.esc(n.level) +
         (n.unread ? " unread" : "") + '" type="button" data-notice="' + n.id +
         '" data-object="' + PX.esc(n.object || "") + '">' +
-        '<span class="notice-meta"><span class="notice-level">' +
-        PX.esc(n.levelLabel) + "</span>" + PX.esc(PX.whenExact(n.ts)) + "</span>" +
+        '<span class="notice-meta">' + noticeIcon(n.level) +
+        "<span>" + PX.esc(PX.whenExact(n.ts)) + "</span></span>" +
         '<span class="notice-title">' + PX.esc(n.title) + "</span>" +
         (n.body ? '<span class="notice-body">' + PX.esc(n.body) + "</span>" : "") +
         "</button>";

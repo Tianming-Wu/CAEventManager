@@ -1161,6 +1161,36 @@
   /* 卡片标题右边的圆圈问号：新标签页打开对应的文档 */
   var DOCS_HREF = PX.PREFIX + "/docs#/";
 
+  /* 滚动条只在指针靠近容器右边时浮现：进到右缘 28px 以内才算 */
+  var NEAR_BAND = 28;
+  var nearTimers = new WeakMap();
+
+  function watchNearScroll(el) {
+    if (!el || nearTimers.has(el)) return;
+    nearTimers.set(el, null);
+    el.addEventListener("pointermove", function (ev) {
+      if (ev.pointerType === "touch") return;
+      var rect = el.getBoundingClientRect();
+      var near = rect.right - ev.clientX <= NEAR_BAND;
+      el.classList.toggle("near-scroll", near);
+      clearTimeout(nearTimers.get(el));
+      if (near) {
+        nearTimers.set(el, setTimeout(function () {
+          el.classList.remove("near-scroll");
+        }, 1200));
+      }
+    }, { passive: true });
+    el.addEventListener("pointerleave", function () {
+      clearTimeout(nearTimers.get(el));
+      el.classList.remove("near-scroll");
+    }, { passive: true });
+  }
+
+  function watchScrollbars() {
+    [".content", ".nav-scroll"].forEach(function (sel) { watchNearScroll($(sel)); });
+    $$(".tblwrap").forEach(watchNearScroll);
+  }
+
   /* 侧栏还有没有"往上的内容 / 往下的内容"：靠它决定哪一侧加淡出 */
   function syncNavFade() {
     var box = $(".nav-scroll");
@@ -6474,6 +6504,7 @@ function archiveOrg(id) {
       b.setAttribute("aria-checked",
         b.getAttribute("data-theme-pref") === pref ? "true" : "false");
     });
+    if ($("#themeSeg")) $("#themeSeg").setAttribute("data-active", pref);
   }
 
   /* ---------------------------------------------------------------- 运维助手 --- */
@@ -8638,6 +8669,7 @@ function archiveOrg(id) {
 
   bindUserSearch();
   watchNavFade();
+  watchScrollbars();
   bindLiveSearch("#auditSearch", "#auditSearchClear", function (value) {
     loadAudit(value).then(drawAudit);
   });

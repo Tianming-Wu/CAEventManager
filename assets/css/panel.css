@@ -128,6 +128,19 @@
   :root { scrollbar-width: none; }
   .nav-scroll, .content { scrollbar-width: none; }
 }
+
+/* 指针设备：滚动条平时透明，鼠标靠近容器右边（28px 以内）才浮现 */
+@media (pointer: fine) {
+  .nav-scroll::-webkit-scrollbar-thumb,
+  .content::-webkit-scrollbar-thumb,
+  .tblwrap::-webkit-scrollbar-thumb { background: transparent; }
+  .near-scroll::-webkit-scrollbar-thumb,
+  .near-scroll:hover::-webkit-scrollbar-thumb {
+    background: var(--line);
+    background-clip: padding-box;
+  }
+  .near-scroll::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+}
 ::-webkit-scrollbar-thumb:hover { background: var(--muted); background-clip: padding-box; }
 ::-webkit-scrollbar-thumb:active { background: var(--dim, var(--muted)); background-clip: padding-box; }
 
@@ -1827,6 +1840,31 @@ select:invalid { color: var(--dim); }
   border-radius: 999px;
   flex-wrap: wrap;
 }
+/* 选中的那一格不是"自己变色"，而是滑过去的一块：位置由容器上的 data-active 决定，
+   两个方向的切换都是同一段过渡，所以不会出现"一半跳、一半渐变"的割裂感 */
+.seg {
+  position: relative;
+  isolation: isolate;
+}
+.seg::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: calc((100% - 6px - 4px) / 3);
+  border-radius: 999px;
+  background: var(--accent);
+  transform: translateX(0);
+  transition: transform .26s cubic-bezier(.32, .72, 0, 1);
+}
+.seg[data-active="light"]::before { transform: translateX(calc(100% + 2px)); }
+.seg[data-active="dark"]::before { transform: translateX(calc(200% + 4px)); }
+@media (prefers-reduced-motion: reduce) {
+  .seg::before { transition: none; }
+}
+
 .seg button {
   appearance: none;
   border: 0;
@@ -1840,7 +1878,7 @@ select:invalid { color: var(--dim); }
   cursor: pointer;
 }
 .seg button[aria-checked="true"] {
-  background: var(--accent);
+  background: transparent;      /* 底色由滑动的指示块负责 */
   color: var(--accent-ink);
   font-weight: 600;
 }
